@@ -73,10 +73,19 @@ export function groupItemsIntoLines(
 
   const lines: RawLine[] = [];
 
+  // Right-margin zone where revision stars live (Final Draft puts them at
+  // ~94% of page width). Star-only items there are production markup, not
+  // text — left in, a bare "*" line classifies as action and resets the
+  // active-character context, fragmenting revised dialogue.
+  const revisionMarginX = pageWidth * 0.8;
+
   for (const y of sortedYs) {
-    // Drop empty items (marked-content markers) — they carry no text and
-    // would break duplicate-adjacency detection below.
-    const lineItems = lineMap.get(y)!.filter((item) => item.str !== '');
+    // Drop empty items (marked-content markers) and right-margin revision
+    // stars — both would corrupt joining/classification below.
+    const lineItems = lineMap
+      .get(y)!
+      .filter((item) => item.str !== '')
+      .filter((item) => !(/^\*+$/.test(item.str) && item.transform[4] >= revisionMarginX));
     if (lineItems.length === 0) continue;
     // Sort items left-to-right by X position
     lineItems.sort((a, b) => a.transform[4] - b.transform[4]);

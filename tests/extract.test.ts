@@ -35,6 +35,32 @@ describe('groupItemsIntoLines', () => {
     expect(lines[0].text).toBe('(MORE)');
   });
 
+  test('right-margin revision stars on their own line are dropped', () => {
+    // Revised drafts mark changed lines with * in the right margin; a bare
+    // star line must not become an element (it would reset dialogue context).
+    const lines = groupItemsIntoLines(
+      [item('Hey! Careful with the counters,', 180, 700), item('*', 575, 688)],
+      612,
+      1,
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0].text).toBe('Hey! Careful with the counters,');
+  });
+
+  test('right-margin revision star on the same line as text is dropped', () => {
+    const lines = groupItemsIntoLines(
+      [item('He walks out.', 110, 700), item('*', 575, 700)],
+      612,
+      1,
+    );
+    expect(lines[0].text).toBe('He walks out.');
+  });
+
+  test('asterisk emphasis inside body text is kept', () => {
+    const lines = groupItemsIntoLines([item('***THIS SCENE IS FILMED***', 110, 700)], 612, 1);
+    expect(lines[0].text).toBe('***THIS SCENE IS FILMED***');
+  });
+
   test('legitimately repeated words at different positions are kept', () => {
     const lines = groupItemsIntoLines(
       [item('No.', 100, 700), item('No.', 140, 700)],
