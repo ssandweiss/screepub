@@ -20,7 +20,7 @@ describe.skipIf(!hasFixtures)('convertPdf on real scripts', () => {
     const result = await convertPdf(await fixture('final-draft.pdf'));
     expect(result.meta.title).toBe('Step Back, Doors Closing');
     expect(result.meta.author).toBe('Carter Ward');
-    expect(result.screenplay.scenes.length).toBeGreaterThan(50);
+    expect(result.screenplay!.scenes.length).toBeGreaterThan(50);
     expect(result.fountainText).toContain('INT. AIRLINER - NIGHT');
     // EPUB is a valid zip with one chapter per scene (+ Opening if any)
     const zip = await JSZip.loadAsync(result.epub);

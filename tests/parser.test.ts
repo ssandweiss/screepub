@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { classifyBlock, resetCounter, attachSceneNumbers } from '../src/parser/classify';
 import { groupBlocks } from '../src/parser/group';
 import { detectTitlePages } from '../src/parser/title-page';
-import type { ScreenplayElement } from '../src/parser/src/parser/types';
+import type { ScreenplayElement } from '../src/parser/types';
 import type { TextBlock, RawLine } from '../src/parser/types';
 
 // ── Helpers ──────────────────────────────────────────────
