@@ -60,5 +60,123 @@ if let tool = EbookConvert.toolURL() {
     print("  --  calibre not installed; AZW3 conversion untested here")
 }
 
+// — AZW3 conversion keeps the dialogue column (environment-dependent) —
+// Calibre's remove-fake-margins heuristic sees per-block side margins on
+// most of a screenplay's paragraphs and deletes them as "publisher page
+// margins" — collapsing the dialogue column to full width on device.
+@discardableResult
+func run(_ tool: URL, _ args: [String], cwd: URL? = nil) -> Int32 {
+    let p = Process()
+    p.executableURL = tool
+    p.arguments = args
+    p.currentDirectoryURL = cwd
+    p.standardOutput = Pipe()
+    p.standardError = Pipe()
+    try! p.run()
+    p.waitUntilExit()
+    return p.terminationStatus
+}
+
+func makeMiniScriptEpub() -> URL {
+    let root = tempDir("mini-epub")
+    let oebps = root.appendingPathComponent("OEBPS")
+    let metainf = root.appendingPathComponent("META-INF")
+    try! FileManager.default.createDirectory(at: oebps, withIntermediateDirectories: true)
+    try! FileManager.default.createDirectory(at: metainf, withIntermediateDirectories: true)
+
+    try! "application/epub+zip".write(to: root.appendingPathComponent("mimetype"), atomically: true, encoding: .utf8)
+    try! """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+      <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+    </container>
+    """.write(to: metainf.appendingPathComponent("container.xml"), atomically: true, encoding: .utf8)
+    try! """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+      <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <dc:identifier id="uid">urn:uuid:kitcheck-mini-script</dc:identifier>
+        <dc:title>KitCheck Mini Script</dc:title>
+        <dc:language>en</dc:language>
+        <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>
+      </metadata>
+      <manifest>
+        <item id="text" href="text.xhtml" media-type="application/xhtml+xml"/>
+        <item id="css" href="style.css" media-type="text/css"/>
+        <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+      </manifest>
+      <spine><itemref idref="text"/></spine>
+    </package>
+    """.write(to: oebps.appendingPathComponent("content.opf"), atomically: true, encoding: .utf8)
+    try! """
+    .dialogue-block { margin-top: 1em; margin-bottom: 1em; margin-left: 20%; margin-right: 20%; }
+    p.character { text-align: center; }
+    p { margin: 0; }
+    """.write(to: oebps.appendingPathComponent("style.css"), atomically: true, encoding: .utf8)
+    let speech = """
+    <div class="dialogue-block"><p class="character">ANNE</p>
+    <p class="dialogue">Enough dialogue that the fake-margin heuristic sees a screenplay.</p></div>
+    """
+    try! """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Mini</title>
+    <link rel="stylesheet" type="text/css" href="style.css"/></head><body>
+    <p class="action">A hallway.</p>
+    \(String(repeating: speech, count: 24))
+    </body></html>
+    """.write(to: oebps.appendingPathComponent("text.xhtml"), atomically: true, encoding: .utf8)
+    try! """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>nav</title></head>
+    <body><nav epub:type="toc"><ol><li><a href="text.xhtml">Script</a></li></ol></nav></body></html>
+    """.write(to: oebps.appendingPathComponent("nav.xhtml"), atomically: true, encoding: .utf8)
+
+    let epub = root.deletingLastPathComponent().appendingPathComponent("mini.epub")
+    let zip = URL(fileURLWithPath: "/usr/bin/zip")
+    run(zip, ["-X0", epub.path, "mimetype"], cwd: root)
+    run(zip, ["-Xr9", epub.path, "META-INF", "OEBPS"], cwd: root)
+    return epub
+}
+
+/// The `.dialogue-block { ... }` rule body from every stylesheet the given
+/// exploded-book HTML links, concatenated.
+func linkedDialogueRules(html: URL, stylesDir: URL) -> String {
+    guard let doc = try? String(contentsOf: html, encoding: .utf8) else { return "" }
+    var rules = ""
+    for cssFile in (try? FileManager.default.contentsOfDirectory(at: stylesDir, includingPropertiesForKeys: nil)) ?? [] {
+        guard doc.contains("styles/\(cssFile.lastPathComponent)"),
+              let css = try? String(contentsOf: cssFile, encoding: .utf8),
+              let start = css.range(of: ".dialogue-block") else { continue }
+        let after = css[start.upperBound...]
+        rules += after[..<(after.firstIndex(of: "}") ?? after.endIndex)]
+    }
+    return rules
+}
+
+if EbookConvert.isAvailable, let tool = EbookConvert.toolURL() {
+    let calibreDebug = tool.deletingLastPathComponent().appendingPathComponent("calibre-debug")
+    if FileManager.default.isExecutableFile(atPath: calibreDebug.path) {
+        let epub = makeMiniScriptEpub()
+        if let azw3 = try? EbookConvert.toAzw3(epub) {
+            let exploded = epub.deletingLastPathComponent().appendingPathComponent("exploded")
+            run(calibreDebug, ["-x", azw3.path, exploded.path])
+            let textDir = exploded.appendingPathComponent("text")
+            let stylesDir = exploded.appendingPathComponent("styles")
+            let bodyHtml = ((try? FileManager.default.contentsOfDirectory(at: textDir, includingPropertiesForKeys: nil)) ?? [])
+                .first { (try? String(contentsOf: $0, encoding: .utf8))?.contains("dialogue-block") == true }
+            if let bodyHtml {
+                let rule = linkedDialogueRules(html: bodyHtml, stylesDir: stylesDir)
+                check(rule.contains("20%"), "AZW3 keeps dialogue-block side margins (got: \(rule.replacingOccurrences(of: "\n", with: " ")))")
+            } else {
+                check(false, "exploded AZW3 contains a dialogue-block content file")
+            }
+        } else {
+            check(false, "EbookConvert.toAzw3 succeeds on minimal screenplay EPUB")
+        }
+    } else {
+        print("  --  calibre-debug not found beside ebook-convert; AZW3 geometry untested here")
+    }
+}
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

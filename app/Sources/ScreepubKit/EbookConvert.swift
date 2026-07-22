@@ -33,15 +33,13 @@ public enum EbookConvert {
     nonisolated public static var isAvailable: Bool { toolURL() != nil }
 
     /// Calibre would otherwise undo two Screepub decisions during EPUB→AZW3:
-    /// it inserts page-break-before on every h2 (scene-per-page again) and
-    /// strips percentage side margins from divs (dialogue column collapses
-    /// to full width). Flags disable the inserted breaks; em-based extra-css
-    /// restores the dialogue geometry (em survives Calibre's flattening and
-    /// renders reliably on older KF8 firmware).
-    private static let extraCss = """
-        .dialogue-block { margin-left: 4em; margin-right: 2em; }
-        h2.scene-heading { page-break-before: auto; }
-        """
+    /// it inserts page-break-before on every h2 (scene-per-page again), and
+    /// its remove-fake-margins heuristic sees side margins on most blocks —
+    /// which is what a screenplay's dialogue column looks like — and deletes
+    /// them as "publisher page margins", regardless of unit (% or em), so
+    /// dialogue collapses to full width on device. (--extra-css is no rescue:
+    /// on multi-file EPUBs Calibre attaches it only to its generated inline
+    /// ToC, never to the script body.)
 
     /// Convert an EPUB to AZW3 next to it (~1s; no caching — a stale cache
     /// would outlive conversion-recipe changes). Blocking — call from a
@@ -57,7 +55,7 @@ public enum EbookConvert {
             epub.path, azw3.path,
             "--page-breaks-before=/",
             "--chapter-mark=none",
-            "--extra-css", extraCss,
+            "--disable-remove-fake-margins",
         ]
         let stderr = Pipe()
         process.standardOutput = Pipe()

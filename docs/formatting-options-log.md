@@ -37,6 +37,17 @@ future work; everything else is live.
   see reference doc §4).
 - **Code:** `src/epub/css.ts` (`.dialogue-block`, `p.character`,
   `p.parenthetical`).
+- **AZW3 route (2026-07-22):** Calibre's remove-fake-margins heuristic
+  reads per-block side margins on most paragraphs — i.e. a screenplay's
+  dialogue column — as publisher page margins and deletes them (any
+  unit, % or em), collapsing dialogue to full width on device (user
+  report: "left justified, full horizontal space"). An `--extra-css`
+  em fallback was no fix: on multi-file EPUBs Calibre attaches extra
+  CSS only to its generated inline ToC. Cure is
+  `--disable-remove-fake-margins`, which lets the EPUB's own % geometry
+  (and the `dialogueSideMarginPct` knob) flow through to AZW3
+  unchanged. Guarded by the kit-check "AZW3 keeps dialogue-block side
+  margins" check. Code: `app/Sources/ScreepubKit/EbookConvert.swift`.
 
 ### 2b. Cue & parenthetical alignment (option, default centered)
 - **What:** print's fixed cue indent only *optically* centers names on
