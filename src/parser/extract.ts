@@ -124,7 +124,9 @@ function joinItems(items: TextItem[]): string {
     prevX = x;
     prevStr = item.str;
   }
-  return text.trim();
+  // Items carry their own padding (italic spans especially) — collapse
+  // runs so the fountain matches what HTML whitespace-collapsing renders.
+  return text.replace(/ {2,}/g, ' ').trim();
 }
 
 interface ClusterSplit {

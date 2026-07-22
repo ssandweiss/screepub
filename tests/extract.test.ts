@@ -168,3 +168,17 @@ describe('dual-margin scene numbers', () => {
     expect(lines[0].text).toBe('1 2');
   });
 });
+
+describe('whitespace normalization', () => {
+  test('padded italic spans and authored doubles collapse to single spaces', () => {
+    // Italicized words extract as separate items padded with spaces
+    // ("want some  insurance  that"); HTML collapses them anyway, so the
+    // fountain should match what the reader renders.
+    const lines = groupItemsIntoLines(
+      [item('want some ', 110, 700), item(' insurance ', 220, 700), item(' that', 340, 700)],
+      612,
+      1,
+    );
+    expect(lines[0].text).toBe('want some insurance that');
+  });
+});
