@@ -55,6 +55,7 @@ describe('resolveFormatOptions', () => {
 describe('screenplayCss with options', () => {
   test('dialogue geometry knobs land in the stylesheet', () => {
     const css = screenplayCss(resolveFormatOptions({
+      cueAlignment: 'indented',
       dialogueSideMarginPct: 25,
       cueIndentPct: 40,
       parentheticalIndentPct: 12,
@@ -86,11 +87,13 @@ describe('screenplayCss with options', () => {
 // ── tokensToBody(options) ────────────────────────────────
 
 describe('tokensToBody with options', () => {
-  test('keep-together wrapper can be disabled', () => {
+  test('scene-heading keep-together wrapper can be disabled', () => {
+    // Governs the HEADING wrapper only — the cue-keeps-dialogue wrapper
+    // inside dialogue blocks is always on.
     const off = tokensToBody(tokens(), { format: resolveFormatOptions({ keepSceneHeadingWithScene: false }) });
-    expect(off.files[0].xhtml).not.toContain('keep-together');
+    expect(off.files[0].xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
     const on = tokensToBody(tokens(), { format: resolveFormatOptions({}) });
-    expect(on.files[0].xhtml).toContain('keep-together');
+    expect(on.files[0].xhtml).toMatch(/<div class="keep-together">\s*<h2/);
   });
 
   test('scene numbers render in headings when enabled', () => {
@@ -153,5 +156,80 @@ describe('convertFountain carries format options into the EPUB', () => {
     const css = await zip.file('OEBPS/style.css')!.async('string');
     expect(css).toContain('margin-left: 28%');
     expect(css).toContain('section.scene { page-break-before: always; }');
+  });
+});
+
+// ── CONT'D modes (registry #8a) ──────────────────────────
+
+describe("contdMode", () => {
+  let id2 = 0;
+  const el2 = (over: Partial<ScreenplayElement> & { text: string; type: ScreenplayElement['type'] }): ScreenplayElement => ({
+    id: `c${id2++}`, pageNum: 1, isTitlePage: false, isReadable: true, ...over,
+  });
+  const sp2 = (elements: ScreenplayElement[]): ParsedScreenplay => ({ elements, characters: [], scenes: [], pageCount: 1 });
+
+  const INTERRUPTED = [
+    el2({ text: 'INT. LAB - DAY', type: 'scene' }),
+    el2({ text: 'JACK', type: 'character', character: 'JACK' }),
+    el2({ text: 'Look at this.', type: 'dialogue', character: 'JACK' }),
+    el2({ text: 'He points.', type: 'action' }),
+    el2({ text: 'JACK', type: 'character', character: 'JACK' }),
+    el2({ text: 'See?', type: 'dialogue', character: 'JACK' }),
+  ];
+
+  test('auto adds (CONT’D) when the same speaker continues through action', () => {
+    const out = toFountain(sp2(INTERRUPTED), undefined, resolveFormatOptions({ contdMode: 'auto' }));
+    expect(out).toContain("@JACK (CONT'D)\nSee?");
+  });
+
+  test('auto strips stale (CONT’D) after a different speaker', () => {
+    const out = toFountain(sp2([
+      el2({ text: 'ANNE', type: 'character', character: 'ANNE' }),
+      el2({ text: 'Hi.', type: 'dialogue', character: 'ANNE' }),
+      el2({ text: "JACK (CONT'D)", type: 'character', character: 'JACK' }),
+      el2({ text: 'Hello.', type: 'dialogue', character: 'JACK' }),
+    ]), undefined, resolveFormatOptions({ contdMode: 'auto' }));
+    expect(out).toContain('@JACK\nHello.');
+    expect(out).not.toContain("JACK (CONT'D)");
+  });
+
+  test('auto resets at scene boundaries', () => {
+    const out = toFountain(sp2([
+      el2({ text: 'JACK', type: 'character', character: 'JACK' }),
+      el2({ text: 'Bye.', type: 'dialogue', character: 'JACK' }),
+      el2({ text: 'INT. HALL - DAY', type: 'scene' }),
+      el2({ text: 'JACK', type: 'character', character: 'JACK' }),
+      el2({ text: 'New scene.', type: 'dialogue', character: 'JACK' }),
+    ]), undefined, resolveFormatOptions({ contdMode: 'auto' }));
+    expect(out).toContain('@JACK\nNew scene.');
+  });
+
+  test('strip removes all (CONT’D) and adds none', () => {
+    const withContd = [...INTERRUPTED];
+    withContd[4] = el2({ text: "JACK (CONT'D)", type: 'character', character: 'JACK' });
+    const out = toFountain(sp2(withContd), undefined, resolveFormatOptions({ contdMode: 'strip' }));
+    expect(out).not.toContain("CONT'D");
+  });
+
+  test('keep leaves source cues untouched', () => {
+    const out = toFountain(sp2(INTERRUPTED), undefined, resolveFormatOptions({ contdMode: 'keep' }));
+    expect(out).toContain('@JACK\nSee?');
+  });
+});
+
+// ── cue alignment (registry #2b) ─────────────────────────
+
+describe('cueAlignment', () => {
+  test('default centers cues and parentheticals in the column', () => {
+    const css = screenplayCss(resolveFormatOptions({}));
+    expect(css.match(/p\.character\s*{[^}]*}/)![0]).toContain('text-align: center');
+    expect(css.match(/p\.parenthetical\s*{[^}]*}/)![0]).toContain('text-align: center');
+  });
+
+  test('indented mode uses print-style % indents instead', () => {
+    const css = screenplayCss(resolveFormatOptions({ cueAlignment: 'indented', cueIndentPct: 40 }));
+    const cue = css.match(/p\.character\s*{[^}]*}/)![0];
+    expect(cue).toContain('margin-left: 40%');
+    expect(cue).not.toContain('text-align: center');
   });
 });

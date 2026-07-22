@@ -115,6 +115,9 @@ export function toFountain(
 
   // Blocks joined by blank lines; an open dialogue block accumulates
   // cue/parenthetical/dialogue lines until a non-dialogue element closes it.
+  // lastSpeaker powers contdMode 'auto': same speaker continuing through
+  // action gets (CONT'D); scene and transition boundaries reset it.
+  let lastSpeaker: string | null = null;
   let block: string[] | null = null;
   const closeBlock = () => {
     if (block && block.length > 0) out.push(block.join('\n'));
@@ -126,10 +129,19 @@ export function toFountain(
     if (!text) continue;
 
     switch (el.type) {
-      case 'character':
+      case 'character': {
         closeBlock();
-        block = [`@${text.replace(/\s+/g, ' ')}`];
+        let cueText = text.replace(/\s+/g, ' ');
+        if (format.contdMode !== 'keep') {
+          cueText = cueText.replace(CONTD, '').replace(/\s+/g, ' ').trim();
+          if (format.contdMode === 'auto' && el.character && el.character === lastSpeaker) {
+            cueText = `${cueText} (CONT'D)`;
+          }
+        }
+        block = [`@${cueText}`];
+        lastSpeaker = el.character ?? null;
         break;
+      }
       case 'parenthetical':
       case 'dialogue':
         if (block) {
@@ -140,10 +152,12 @@ export function toFountain(
         break;
       case 'scene':
         closeBlock();
+        lastSpeaker = null;
         out.push(el.sceneNumber ? `${text} #${el.sceneNumber}#` : text);
         break;
       case 'transition':
         closeBlock();
+        lastSpeaker = null;
         out.push(`> ${text}`);
         break;
       default: // action, mini-slug

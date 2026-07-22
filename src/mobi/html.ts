@@ -61,7 +61,7 @@ export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
         if (speech) speech.push(`<i>${esc(text)}</i>`);
         break;
       case 'dialogue':
-        if (speech) speech.push(esc(text));
+        if (speech) speech.push(esc(text).replace(/\n/g, '<br/>'));
         break;
       case 'dialogue_end':
         closeSpeech();

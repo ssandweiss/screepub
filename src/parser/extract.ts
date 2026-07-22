@@ -44,7 +44,12 @@ export async function extractDocument(
 interface TextItem {
   str: string;
   transform: number[];
+  /** actual rendered width from pdf.js — much more accurate than the
+   * len*6 estimate (which false-splits names like "Hoffman" → "Ho ffman") */
+  width?: number;
 }
+
+const endX = (item: TextItem) => item.transform[4] + (item.width ?? item.str.length * 6);
 
 export function groupItemsIntoLines(
   items: unknown[],
@@ -115,8 +120,7 @@ function joinItems(items: TextItem[]): string {
       text += ' ';
     }
     text += item.str;
-    // Approximate end X (rough, but works for gap detection)
-    prevEndX = x + item.str.length * 6;
+    prevEndX = endX(item);
     prevX = x;
     prevStr = item.str;
   }
@@ -138,8 +142,7 @@ function clusterSplit(items: TextItem[], pageWidth: number): ClusterSplit | null
   let gapIdx = -1;
   let gapSize = 0;
   for (let i = 1; i < items.length; i++) {
-    const prev = items[i - 1];
-    const gap = items[i].transform[4] - (prev.transform[4] + prev.str.length * 6);
+    const gap = items[i].transform[4] - endX(items[i - 1]);
     if (gap > gapSize) {
       gapSize = gap;
       gapIdx = i;
@@ -192,7 +195,10 @@ function deinterleaveDualDialogue(
     const isDualCue = split !== null && isCueShaped(split.leftText) && isCueShaped(split.rightText);
 
     if (!isDualCue) {
-      const text = joinItems(lines[i].items);
+      // Shooting scripts print the scene number in BOTH margins on the
+      // same row — collapse "2   2" / "12A.  12A." to a single token so
+      // it classifies and attaches as one scene number.
+      const text = joinItems(lines[i].items).replace(/^(\d+[A-Z]?\.?)\s+\1$/, '$1');
       if (text) {
         const indent = Math.round((lines[i].items[0].transform[4] / pageWidth) * 100);
         out.push({ text, indent, y: lines[i].y, pageNum });
@@ -218,7 +224,7 @@ function deinterleaveDualDialogue(
     while (i < lines.length) {
       const items = lines[i].items;
       const straddles = items.some(
-        (it) => it.transform[4] < boundary - 6 && it.transform[4] + it.str.length * 6 > boundary + 6,
+        (it) => it.transform[4] < boundary - 6 && endX(it) > boundary + 6,
       );
       if (straddles) break; // full-width line — region over
 

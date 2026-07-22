@@ -128,15 +128,15 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
     expect(SCREENPLAY_CSS).not.toContain('max-width');
   });
 
-  test('cue keeps with its dialogue and indents by % of the column (print +1.2" of 3.5")', () => {
+  test('cue keeps with its dialogue and centers in the column by default', () => {
     const cue = SCREENPLAY_CSS.match(/p\.character\s*{[^}]*}/)![0];
     expect(cue).toContain('break-after: avoid');
-    expect(cue).toMatch(/margin-left:\s*\d+%/);
+    expect(cue).toContain('text-align: center');
   });
 
-  test('parenthetical indents by % of the column', () => {
+  test('parenthetical centers in the column by default', () => {
     const paren = SCREENPLAY_CSS.match(/p\.parenthetical\s*{[^}]*}/)![0];
-    expect(paren).toMatch(/margin-left:\s*\d+%/);
+    expect(paren).toContain('text-align: center');
   });
 
   test('vertical rhythm is em-based: a full blank line between elements', () => {
@@ -216,5 +216,27 @@ describe('buildEpub', () => {
     expect(doc).toContain('<?xml version="1.0" encoding="UTF-8"?>');
     expect(doc).toContain('xmlns="http://www.w3.org/1999/xhtml"');
     expect(doc).toContain('<link rel="stylesheet"');
+  });
+});
+
+// ── cue keeps with its first dialogue line ───────────────
+
+describe('cue keep-with-dialogue wrapper', () => {
+  test('cue + parenthetical + first line share an unbreakable wrapper', () => {
+    const tokens = new Fountain().parse(
+      'INT. A - DAY\n\nHi.\n\n@JACK\n(tired)\nFirst line of speech.\nSecond line of speech.\n', true,
+    ).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toMatch(
+      /<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JACK<\/p>\s*<p class="parenthetical">\(tired\)<\/p>\s*<p class="dialogue">First line of speech\.<\/p>\s*<\/div>\s*<p class="dialogue">Second line of speech\.<\/p>\s*<\/div>/,
+    );
+  });
+
+  test('single-line speech wraps without leftovers', () => {
+    const tokens = new Fountain().parse('INT. A - DAY\n\nHi.\n\n@JACK\nOnly line.\n', true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toMatch(
+      /<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JACK<\/p>\s*<p class="dialogue">Only line\.<\/p>\s*<\/div>\s*<\/div>/,
+    );
   });
 });

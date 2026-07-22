@@ -713,3 +713,33 @@ describe('classify pipeline integration', () => {
     expect(elements[3].character).toBe('SARAH');
   });
 });
+
+describe('hybrid and non-standard character cues', () => {
+  test('shared cue with slash is a character', () => {
+    const block = makeBlock({ text: 'CLEO/PANNI', indent: 40 });
+    const result = classifyBlock(block, null);
+    expect(result.type).toBe('character');
+    expect(result.character).toBe('CLEO/PANNI');
+  });
+
+  test('numbered cue is a character', () => {
+    const block = makeBlock({ text: 'COP #2', indent: 40 });
+    const result = classifyBlock(block, null);
+    expect(result.type).toBe('character');
+  });
+
+  test('ampersand cue is a character', () => {
+    const block = makeBlock({ text: 'MOM & DAD', indent: 40 });
+    const result = classifyBlock(block, null);
+    expect(result.type).toBe('character');
+  });
+
+  test('shared cue carries dialogue context', () => {
+    const cue = classifyBlock(makeBlock({ text: 'CLEO/PANNI', indent: 40 }), null);
+    const paren = classifyBlock(makeBlock({ text: '(scream singing)', indent: 30 }), cue);
+    expect(paren.type).toBe('parenthetical');
+    const line = classifyBlock(makeBlock({ text: 'I want you so badly', indent: 30 }), paren);
+    expect(line.type).toBe('dialogue');
+    expect(line.character).toBe('CLEO/PANNI');
+  });
+});

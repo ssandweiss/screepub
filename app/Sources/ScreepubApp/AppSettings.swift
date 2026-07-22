@@ -37,6 +37,8 @@ enum AppSettings {
             keepSceneHeadingWithScene: bool("fmtKeepHeading", def.keepSceneHeadingWithScene),
             fontFamily: d.string(forKey: "fmtFont") ?? def.fontFamily,
             rejoinSplitDialogue: bool("fmtRejoin", def.rejoinSplitDialogue),
+            contdMode: d.string(forKey: "fmtContd") ?? def.contdMode,
+            cueAlignment: d.string(forKey: "fmtCueAlign") ?? def.cueAlignment,
             includeTitlePage: bool("fmtTitlePage", def.includeTitlePage),
             showSceneNumbers: bool("fmtSceneNumbers", def.showSceneNumbers)
         )
@@ -45,8 +47,8 @@ enum AppSettings {
     /// Reset all formatting keys so @AppStorage bindings fall back to defaults.
     static func resetFormatting() {
         for key in ["fmtScenePageBreaks", "fmtDialogueMargin", "fmtCueIndent", "fmtParenIndent",
-                    "fmtSpacing", "fmtKeepHeading", "fmtFont", "fmtRejoin", "fmtTitlePage",
-                    "fmtSceneNumbers"] {
+                    "fmtSpacing", "fmtKeepHeading", "fmtFont", "fmtRejoin", "fmtContd",
+                    "fmtCueAlign", "fmtTitlePage", "fmtSceneNumbers"] {
             UserDefaults.standard.removeObject(forKey: key)
         }
     }

@@ -86,16 +86,21 @@ p.mini-slug {
   margin-right: ${o.dialogueSideMarginPct}%;
 }
 
-/* A cue must never orphan from its dialogue at a page break. */
+/* A cue must never orphan from its dialogue at a page break. Centered
+   alignment reads naturally at any screen width; indented reproduces
+   print's fixed offsets (which only optically center on paper). */
 p.character {
-  margin-left: ${o.cueIndentPct}%;
+${o.cueAlignment === 'centered'
+    ? '  text-align: center;'
+    : `  margin-left: ${o.cueIndentPct}%;`}
   page-break-after: avoid;
   break-after: avoid;
 }
 
 p.parenthetical {
-  margin-left: ${o.parentheticalIndentPct}%;
-  margin-right: ${Math.round(o.parentheticalIndentPct / 2)}%;
+${o.cueAlignment === 'centered'
+    ? '  text-align: center;'
+    : `  margin-left: ${o.parentheticalIndentPct}%;\n  margin-right: ${Math.round(o.parentheticalIndentPct / 2)}%;`}
 }
 
 p.dialogue {

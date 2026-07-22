@@ -38,6 +38,15 @@ future work; everything else is live.
 - **Code:** `src/epub/css.ts` (`.dialogue-block`, `p.character`,
   `p.parenthetical`).
 
+### 2b. Cue & parenthetical alignment (option, default centered)
+- **What:** print's fixed cue indent only *optically* centers names on
+  paper; reflowed to arbitrary screen widths it drifts left (user report
+  2026-07-22: "centered items drooping left"). Default is now
+  `text-align: center` within the dialogue column; `cueAlignment:
+  'indented'` restores the % offsets (sliders apply only in that mode).
+- **Code:** `src/options.ts`, `src/epub/css.ts`; app picker in
+  Settings → Formatting.
+
 ### 3. Vertical rhythm between elements
 - **What:** a full blank line (`1em`) between action paragraphs, dialogue
   blocks, transitions, centered text; bumped from the original tighter
@@ -115,6 +124,22 @@ future work; everything else is live.
   possible extra: "strip all (CONT'D) extensions" (not built).
 - **Code:** `src/fountain/serialize.ts` (`prepare`, `MORE_PAREN`, `CONTD`).
 
+### 8a. (CONT'D) normalization (option, default auto)
+- **What:** page-break (MORE)/(CONT'D) pairs are meaningless in reflow
+  (rejoined by #8); mid-scene (CONT'D) marks a speaker continuing
+  through action — standard but taste-dependent. `contdMode`: **auto**
+  (default) strips source cues' (CONT'D) and re-adds it exactly where
+  the rule applies (same speaker continues, reset at scene/transition);
+  **strip** removes all; **keep** preserves the source.
+- **Code:** `src/fountain/serialize.ts` (`lastSpeaker` tracking).
+
+### 8b. Cue keeps its first dialogue line (always on)
+- **What:** inside each dialogue block, cue + parentheticals + the first
+  dialogue line share a `keep-together` wrapper (same KDP-documented
+  container form as scene headings) so a cue never strands at a page
+  bottom with its speech overleaf (user-requested 2026-07-22).
+- **Code:** `src/epub/html.ts` (`closeSpeech`).
+
 ### 9. Page furniture stripping
 - **What:** page numbers (bare/dashed/labeled), shooting-script scene
   numbers, revision slugs ("Blue Rev. (6/12/26)"), draft stamps, header
@@ -132,6 +157,25 @@ future work; everything else is live.
   duplicates deduped at extraction.
 - **Default:** always on; not an option (pure artifact fix). Log only.
 - **Code:** `src/parser/extract.ts` (dup check in item join).
+
+### 9a. Dual-margin scene numbers collapsed
+- **What:** shooting scripts print the scene number in BOTH margins of
+  the slugline row; joined they leaked as "2  2" action lines and never
+  attached (IntimacyParty). Duplicated tokens collapse to one, which
+  then classifies and attaches as the scene number.
+- **Code:** `src/parser/extract.ts` (normal-line emit).
+
+### 9b. Hybrid character cues
+- **What:** CLEO/PANNI (shared), COP #2, MOM & DAD — the name pattern
+  now allows / & # and digits; previously such cues fell to action and
+  their speeches collapsed (IntimacyParty lyrics block).
+- **Code:** `src/parser/classify.ts` (CHARACTER_NAME).
+
+### 9c. Width-aware item joining
+- **What:** gap detection now uses pdf.js's real item widths (falling
+  back to the len×6 estimate) — fixes phantom spaces in split names
+  ("Courtney Ho ffman") and sharpens dual-dialogue boundaries.
+- **Code:** `src/parser/extract.ts` (`endX`).
 
 ### 10a. Dual dialogue — de-interleaved to sequential speeches
 - **What:** simultaneous two-column speeches (Meteor Anne p48, Highland

@@ -95,6 +95,8 @@ struct FormattingSettings: View {
     @AppStorage("fmtKeepHeading") private var keepHeading = true
     @AppStorage("fmtFont") private var font = "courier"
     @AppStorage("fmtRejoin") private var rejoin = true
+    @AppStorage("fmtContd") private var contd = "auto"
+    @AppStorage("fmtCueAlign") private var cueAlign = "centered"
     @AppStorage("fmtTitlePage") private var titlePage = true
     @AppStorage("fmtSceneNumbers") private var sceneNumbers = false
 
@@ -102,8 +104,14 @@ struct FormattingSettings: View {
         Form {
             Section("Layout") {
                 slider("Dialogue column margins", value: $dialogueMargin, range: 0...30, unit: "%")
+                Picker("Cue & parenthetical alignment", selection: $cueAlign) {
+                    Text("Centered in column").tag("centered")
+                    Text("Print-style indent").tag("indented")
+                }
                 slider("Character cue indent", value: $cueIndent, range: 0...60, unit: "% of column")
+                    .disabled(cueAlign == "centered")
                 slider("Parenthetical indent", value: $parenIndent, range: 0...40, unit: "% of column")
+                    .disabled(cueAlign == "centered")
                 slider("Space between elements", value: $spacing, range: 0.4...1.6, unit: "em", step: 0.1)
                 Picker("Typeface", selection: $font) {
                     Text("Courier (screenplay)").tag("courier")
@@ -119,6 +127,11 @@ struct FormattingSettings: View {
                 Toggle("Generate a title page", isOn: $titlePage)
                 Toggle("Show shooting-script scene numbers", isOn: $sceneNumbers)
                 Toggle("Rejoin dialogue split by page breaks", isOn: $rejoin)
+                Picker("(CONT'D) on character cues", selection: $contd) {
+                    Text("Automatic (standard rule)").tag("auto")
+                    Text("Remove all").tag("strip")
+                    Text("Keep as written").tag("keep")
+                }
             }
             Section {
                 HStack {

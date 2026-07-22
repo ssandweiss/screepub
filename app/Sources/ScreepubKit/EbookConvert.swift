@@ -40,8 +40,6 @@ public enum EbookConvert {
     /// renders reliably on older KF8 firmware).
     private static let extraCss = """
         .dialogue-block { margin-left: 4em; margin-right: 2em; }
-        p.character { margin-left: 5em; }
-        p.parenthetical { margin-left: 2em; margin-right: 2em; }
         h2.scene-heading { page-break-before: auto; }
         """
 

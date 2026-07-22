@@ -144,3 +144,27 @@ describe('groupItemsIntoLines', () => {
     expect(lines[0].text).toBe('No. No.');
   });
 });
+
+describe('dual-margin scene numbers', () => {
+  test('duplicated margin numbers collapse to one token', () => {
+    // Shooting scripts print the scene number in BOTH margins on the
+    // slugline's row: "2        2" must become "2", which then attaches
+    // to the following scene heading.
+    const lines = groupItemsIntoLines(
+      [item('2', 54, 700), item('2', 576, 700), item('INT. FOYER - DAY', 108, 676)],
+      612,
+      1,
+    );
+    expect(lines.map((l) => l.text)).toEqual(['2', 'INT. FOYER - DAY']);
+  });
+
+  test('lettered scene numbers collapse too', () => {
+    const lines = groupItemsIntoLines([item('12A.', 54, 700), item('12A.', 570, 700)], 612, 1);
+    expect(lines[0].text).toBe('12A.');
+  });
+
+  test('distinct numbers on one line are left alone', () => {
+    const lines = groupItemsIntoLines([item('1', 54, 700), item('2', 576, 700)], 612, 1);
+    expect(lines[0].text).toBe('1 2');
+  });
+});

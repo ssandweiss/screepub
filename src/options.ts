@@ -19,6 +19,13 @@ export interface FormatOptions {
   fontFamily: 'courier' | 'serif' | 'sans';
   /** merge (MORE)/(CONT'D) page-break splits into one speech (registry #8) */
   rejoinSplitDialogue: boolean;
+  /** (CONT'D) handling: auto = strip stale + re-add per the standard rule
+   * (same speaker continues through action, reset each scene);
+   * strip = remove all; keep = leave as written (registry #8a) */
+  contdMode: 'auto' | 'strip' | 'keep';
+  /** cue/parenthetical alignment: centered reads naturally on reflowable
+   * screens; indented reproduces print's fixed offsets (registry #2b) */
+  cueAlignment: 'centered' | 'indented';
   /** generated title page (registry #11) */
   includeTitlePage: boolean;
   /** shooting-script scene numbers in headings (registry #13) */
@@ -34,6 +41,8 @@ export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
   keepSceneHeadingWithScene: true,
   fontFamily: 'courier',
   rejoinSplitDialogue: true,
+  contdMode: 'auto',
+  cueAlignment: 'centered',
   includeTitlePage: true,
   showSceneNumbers: false,
 };
@@ -53,6 +62,8 @@ export function resolveFormatOptions(partial?: Record<string, unknown>): FormatO
       : (d[key] as number);
 
   const font = p.fontFamily;
+  const contd = p.contdMode;
+  const align = p.cueAlignment;
   return {
     scenePageBreaks: bool('scenePageBreaks'),
     dialogueSideMarginPct: num('dialogueSideMarginPct', 0, 30),
@@ -62,6 +73,8 @@ export function resolveFormatOptions(partial?: Record<string, unknown>): FormatO
     keepSceneHeadingWithScene: bool('keepSceneHeadingWithScene'),
     fontFamily: font === 'serif' || font === 'sans' || font === 'courier' ? font : d.fontFamily,
     rejoinSplitDialogue: bool('rejoinSplitDialogue'),
+    contdMode: contd === 'strip' || contd === 'keep' || contd === 'auto' ? contd : d.contdMode,
+    cueAlignment: align === 'indented' || align === 'centered' ? align : d.cueAlignment,
     includeTitlePage: bool('includeTitlePage'),
     showSceneNumbers: bool('showSceneNumbers'),
   };

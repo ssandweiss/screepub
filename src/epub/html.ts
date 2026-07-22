@@ -56,10 +56,22 @@ ${body}</body>
  */
 function renderBlocks(tokens: Token[], format: FormatOptions): string[] {
   const blocks: string[] = [];
-  let dialogue: string[] | null = null;
-  const emit = (s: string) => {
-    if (dialogue) dialogue.push(s);
+  let speech: { kind: string; html: string }[] | null = null;
+  const emit = (s: string, kind = 'other') => {
+    if (speech) speech.push({ kind, html: s });
     else blocks.push(s);
+  };
+  // The cue (+ parentheticals) and the FIRST dialogue line share an
+  // unbreakable wrapper so a cue never strands at a page bottom with its
+  // speech on the next page — same mechanism as scene headings.
+  const closeSpeech = () => {
+    if (!speech) return;
+    const firstLine = speech.findIndex((c) => c.kind === 'dialogue');
+    const cut = firstLine === -1 ? speech.length : firstLine + 1;
+    const head = speech.slice(0, cut).map((c) => c.html).join('');
+    const tail = speech.slice(cut).map((c) => c.html).join('');
+    blocks.push(`<div class="dialogue-block">\n<div class="keep-together">\n${head}</div>\n${tail}</div>\n`);
+    speech = null;
   };
 
   for (const t of tokens) {
@@ -76,23 +88,23 @@ function renderBlocks(tokens: Token[], format: FormatOptions): string[] {
         emit(`<p class="action">${escapeXml(text)}</p>\n`);
         break;
       case 'dialogue_begin':
-        dialogue = ['<div class="dialogue-block">\n'];
+        speech = [];
         break;
       case 'dialogue_end':
-        if (dialogue) {
-          dialogue.push('</div>\n');
-          blocks.push(dialogue.join(''));
-          dialogue = null;
-        }
+        closeSpeech();
         break;
       case 'character':
-        emit(`<p class="character">${escapeXml(text)}</p>\n`);
+        emit(`<p class="character">${escapeXml(text)}</p>\n`, 'character');
         break;
       case 'parenthetical':
-        emit(`<p class="parenthetical">${escapeXml(text)}</p>\n`);
+        emit(`<p class="parenthetical">${escapeXml(text)}</p>\n`, 'parenthetical');
         break;
       case 'dialogue':
-        emit(`<p class="dialogue">${escapeXml(text)}</p>\n`);
+        // Multi-line speech arrives as one token with embedded newlines
+        // (lyrics, verse) — each line becomes its own paragraph.
+        for (const line of text.split('\n')) {
+          if (line.trim()) emit(`<p class="dialogue">${escapeXml(line)}</p>\n`, 'dialogue');
+        }
         break;
       case 'transition':
         emit(`<p class="transition">${escapeXml(text.replace(/^>\s*/, ''))}</p>\n`);
@@ -108,7 +120,7 @@ function renderBlocks(tokens: Token[], format: FormatOptions): string[] {
         break;
     }
   }
-  if (dialogue) blocks.push(dialogue.join('') + '</div>\n');
+  closeSpeech();
   return blocks;
 }
 
