@@ -40,7 +40,8 @@ enum AppSettings {
             contdMode: d.string(forKey: "fmtContd") ?? def.contdMode,
             cueAlignment: d.string(forKey: "fmtCueAlign") ?? def.cueAlignment,
             includeTitlePage: bool("fmtTitlePage", def.includeTitlePage),
-            showSceneNumbers: bool("fmtSceneNumbers", def.showSceneNumbers)
+            showSceneNumbers: bool("fmtSceneNumbers", def.showSceneNumbers),
+            showPageMarkers: bool("fmtPageMarkers", def.showPageMarkers)
         )
     }
 
@@ -48,7 +49,7 @@ enum AppSettings {
     static func resetFormatting() {
         for key in ["fmtScenePageBreaks", "fmtDialogueMargin", "fmtCueIndent", "fmtParenIndent",
                     "fmtSpacing", "fmtKeepHeading", "fmtFont", "fmtRejoin", "fmtContd",
-                    "fmtCueAlign", "fmtTitlePage", "fmtSceneNumbers"] {
+                    "fmtCueAlign", "fmtTitlePage", "fmtSceneNumbers", "fmtPageMarkers"] {
             UserDefaults.standard.removeObject(forKey: key)
         }
     }

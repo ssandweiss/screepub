@@ -83,6 +83,14 @@ export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
         closeSpeech();
         out.push(`<center>${esc(text)}</center>`);
         break;
+      case 'synopsis': {
+        const pg = /^pg\s+(\S+)$/.exec(text.trim());
+        if (pg) {
+          closeSpeech();
+          out.push(`<p align="right"><font size="-2">${esc(pg[1])}.</font></p>`);
+        }
+        break;
+      }
       default:
         break;
     }

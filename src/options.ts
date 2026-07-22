@@ -30,6 +30,8 @@ export interface FormatOptions {
   includeTitlePage: boolean;
   /** shooting-script scene numbers in headings (registry #13) */
   showSceneNumbers: boolean;
+  /** original PDF page-number markers at page boundaries (registry #13a) */
+  showPageMarkers: boolean;
 }
 
 export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
@@ -45,6 +47,7 @@ export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
   cueAlignment: 'centered',
   includeTitlePage: true,
   showSceneNumbers: false,
+  showPageMarkers: false,
 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -77,5 +80,6 @@ export function resolveFormatOptions(partial?: Record<string, unknown>): FormatO
     cueAlignment: align === 'indented' || align === 'centered' ? align : d.cueAlignment,
     includeTitlePage: bool('includeTitlePage'),
     showSceneNumbers: bool('showSceneNumbers'),
+    showPageMarkers: bool('showPageMarkers'),
   };
 }

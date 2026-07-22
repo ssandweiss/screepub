@@ -62,6 +62,14 @@ span.underline {
   text-decoration: underline;
 }
 
+/* Original PDF page numbers — small, right-flush, out of the way. */
+p.page-marker {
+  text-align: right;
+  font-size: 0.75em;
+  color: #777777;
+  margin: 1em 0 0 0;
+}
+
 p {
   margin: 0;
   text-indent: 0;

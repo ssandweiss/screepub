@@ -238,6 +238,20 @@ future work; everything else is live.
 - **App option:** "Show scene numbers in headings" — small change in
   `src/epub/html.ts` (`scene_heading` case, `t.scene_number`).
 
+### 13a. Original page-number markers (option, default off)
+- **What:** `showPageMarkers` emits the PDF's printed pagination as small
+  right-flush gray markers ("47.") at page boundaries — page count is how
+  scripts are evaluated (1 page ≈ 1 minute), and reflow otherwise erases
+  it. Numbering anchors to the stripped printed page-number furniture
+  (mode of printed−sheet offsets, so the title page never counts and
+  margin scene numbers can't pollute). Markers travel as fountain
+  synopsis lines (`= pg N` — invisible to other fountain tools) and land
+  only at block boundaries: a page turning mid-speech defers its marker
+  to the next block. PDF input only (fountain has no pages).
+- **Code:** `src/fountain/serialize.ts` (`printedPageOffset`),
+  `src/epub/html.ts` + `src/mobi/html.ts` (synopsis case),
+  `src/epub/css.ts` (`p.page-marker`).
+
 ## Guards (behavior, not formatting — app should surface as dialogs)
 
 ### 14. Scanned-PDF bail-out

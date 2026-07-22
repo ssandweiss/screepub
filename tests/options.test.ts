@@ -233,3 +233,48 @@ describe('cueAlignment', () => {
     expect(cue).not.toContain('text-align: center');
   });
 });
+
+// ── original page markers (registry #13a) ────────────────
+
+describe('showPageMarkers', () => {
+  let id3 = 0;
+  const el3 = (over: Partial<ScreenplayElement> & { text: string; type: ScreenplayElement['type']; pageNum: number }): ScreenplayElement => ({
+    id: `p${id3++}`, isTitlePage: false, isReadable: true, ...over,
+  });
+  const sp3 = (elements: ScreenplayElement[]): ParsedScreenplay => ({ elements, characters: [], scenes: [], pageCount: 3 });
+
+  // Sheets 1-3; printed page numbers "1."/"2." on sheets 2-3 (title page
+  // offsets the count by one, the standard screenplay situation).
+  const ELS = [
+    el3({ text: 'INT. LAB - DAY', type: 'scene', pageNum: 1 }),
+    el3({ text: 'Work happens.', type: 'action', pageNum: 1 }),
+    el3({ text: '1.', type: 'page-number', pageNum: 2 }),
+    el3({ text: 'More work.', type: 'action', pageNum: 2 }),
+    el3({ text: '2.', type: 'page-number', pageNum: 3 }),
+    el3({ text: 'Even more.', type: 'action', pageNum: 3 }),
+  ];
+
+  test('off by default — no markers', () => {
+    expect(toFountain(sp3(ELS))).not.toContain('= pg');
+  });
+
+  test('on: markers carry the PDF-printed numbering, not the sheet index', () => {
+    const out = toFountain(sp3(ELS), undefined, resolveFormatOptions({ showPageMarkers: true }));
+    expect(out).toContain('= pg 1\n\nMore work.');
+    expect(out).toContain('= pg 2\n\nEven more.');
+  });
+
+  test('a page starting mid-speech defers its marker to the next block', () => {
+    const els = [
+      el3({ text: '5.', type: 'page-number', pageNum: 5 }),
+      el3({ text: 'Setup.', type: 'action', pageNum: 5 }),
+      el3({ text: 'JACK', type: 'character', character: 'JACK', pageNum: 5 }),
+      el3({ text: 'Speech starts here', type: 'dialogue', character: 'JACK', pageNum: 5 }),
+      el3({ text: 'and continues overleaf.', type: 'dialogue', character: 'JACK', pageNum: 6 }),
+      el3({ text: 'He exits.', type: 'action', pageNum: 6 }),
+    ];
+    const out = toFountain(sp3(els), undefined, resolveFormatOptions({ showPageMarkers: true }));
+    expect(out).toContain('Speech starts here\nand continues overleaf.');
+    expect(out).toContain('= pg 6\n\nHe exits.');
+  });
+});

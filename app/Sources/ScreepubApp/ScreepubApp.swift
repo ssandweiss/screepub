@@ -99,6 +99,7 @@ struct FormattingSettings: View {
     @AppStorage("fmtCueAlign") private var cueAlign = "centered"
     @AppStorage("fmtTitlePage") private var titlePage = true
     @AppStorage("fmtSceneNumbers") private var sceneNumbers = false
+    @AppStorage("fmtPageMarkers") private var pageMarkers = false
 
     var body: some View {
         Form {
@@ -126,6 +127,7 @@ struct FormattingSettings: View {
             Section("Content") {
                 Toggle("Generate a title page", isOn: $titlePage)
                 Toggle("Show shooting-script scene numbers", isOn: $sceneNumbers)
+                Toggle("Show original page numbers", isOn: $pageMarkers)
                 Toggle("Rejoin dialogue split by page breaks", isOn: $rejoin)
                 Picker("(CONT'D) on character cues", selection: $contd) {
                     Text("Automatic (standard rule)").tag("auto")

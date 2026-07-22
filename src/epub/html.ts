@@ -124,6 +124,12 @@ function renderBlocks(tokens: Token[], format: FormatOptions): string[] {
       case 'lyrics':
         emit(`<p class="action">${inlineEmphasis(escapeXml(text))}</p>\n`);
         break;
+      case 'synopsis': {
+        // "= pg N" lines are our page markers; other synopses stay invisible.
+        const pg = /^pg\s+(\S+)$/.exec(text.trim());
+        if (pg) emit(`<p class="page-marker">${escapeXml(pg[1])}.</p>\n`);
+        break;
+      }
       default:
         // structural/no-render tokens: title page, page breaks, notes, etc.
         break;

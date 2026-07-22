@@ -95,6 +95,32 @@ function prepare(elements: ScreenplayElement[], rejoin: boolean): ScreenplayElem
   });
 }
 
+/**
+ * Sheet→printed-page offset: the PDF's own printed page numbers (stripped
+ * as furniture but still typed 'page-number') anchor the numbering, so
+ * markers match the script's pagination — the title page never counts.
+ * The mode wins because margin scene numbers pollute with random offsets.
+ */
+function printedPageOffset(elements: ScreenplayElement[]): number | null {
+  const counts = new Map<number, number>();
+  for (const el of elements) {
+    if (el.type !== 'page-number') continue;
+    const m = /^(\d{1,3})\.?$/.exec(el.text.trim());
+    if (!m) continue;
+    const offset = parseInt(m[1], 10) - el.pageNum;
+    counts.set(offset, (counts.get(offset) ?? 0) + 1);
+  }
+  let best: number | null = null;
+  let bestCount = 0;
+  for (const [offset, count] of counts) {
+    if (count > bestCount) {
+      best = offset;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
 /** Serialize a parsed screenplay to Fountain text. */
 export function toFountain(
   screenplay: ParsedScreenplay,
@@ -113,6 +139,9 @@ export function toFountain(
     out.push(head.join('\n'));
   }
 
+  const pageOffset = format.showPageMarkers ? printedPageOffset(screenplay.elements) ?? 0 : 0;
+  let lastMarkedPage = Number.NEGATIVE_INFINITY;
+
   // Blocks joined by blank lines; an open dialogue block accumulates
   // cue/parenthetical/dialogue lines until a non-dialogue element closes it.
   // lastSpeaker powers contdMode 'auto': same speaker continuing through
@@ -127,6 +156,22 @@ export function toFountain(
   for (const el of prepare(screenplay.elements, format.rejoinSplitDialogue)) {
     const text = el.text.trim();
     if (!text) continue;
+
+    // Page markers land only at block boundaries — never inside a speech
+    // (a page turning mid-speech defers its marker to the next block).
+    if (
+      format.showPageMarkers &&
+      el.type !== 'dialogue' &&
+      el.type !== 'parenthetical' &&
+      el.pageNum > lastMarkedPage
+    ) {
+      const label = el.pageNum + pageOffset;
+      if (label >= 1 && lastMarkedPage !== Number.NEGATIVE_INFINITY) {
+        closeBlock();
+        out.push(`= pg ${label}`);
+      }
+      lastMarkedPage = el.pageNum;
+    }
 
     switch (el.type) {
       case 'character': {

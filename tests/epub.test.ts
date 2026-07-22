@@ -267,3 +267,19 @@ describe('inline emphasis in XHTML', () => {
     expect(file.xhtml).toContain('Plain 2 * 3 math.');
   });
 });
+
+// ── page markers render ──────────────────────────────────
+
+describe('page markers in XHTML', () => {
+  test('pg synopsis lines become page-marker paragraphs', () => {
+    const tokens = new Fountain().parse('INT. A - DAY\n\nAction.\n\n= pg 47\n\nMore.\n', true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toContain('<p class="page-marker">47.</p>');
+  });
+
+  test('ordinary synopsis lines stay invisible', () => {
+    const tokens = new Fountain().parse('INT. A - DAY\n\n= Jack discovers the truth\n\nAction.\n', true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).not.toContain('discovers the truth');
+  });
+});
