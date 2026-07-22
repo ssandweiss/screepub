@@ -261,11 +261,28 @@ struct ContentView: View {
     }
 
     private func copyToDevice(_ epub: URL, volume: URL) {
-        do {
-            try KindleDevice.copy(epub, to: volume)
-            transferNote = "Copied to \(KindleDevice.name(of: volume)) — eject the device before unplugging."
-        } catch {
-            transferNote = "Copy failed: \(error.localizedDescription)"
+        // Kindles ignore sideloaded EPUBs — USB copies must be AZW3.
+        guard EbookConvert.isAvailable else {
+            transferNote = "Kindle can't index a sideloaded EPUB, and Calibre "
+                + "(whose ebook-convert makes the AZW3) isn't installed — "
+                + "use Email to Kindle instead, or install Calibre."
+            return
+        }
+        transferNote = "Converting to AZW3 for Kindle…"
+        let deviceName = KindleDevice.name(of: volume)
+        Task {
+            let outcome: Result<URL, Error> = await Task.detached {
+                Result {
+                    let azw3 = try EbookConvert.toAzw3(epub)
+                    return try KindleDevice.copy(azw3, to: volume)
+                }
+            }.value
+            switch outcome {
+            case .success:
+                transferNote = "Copied to \(deviceName) as AZW3 — eject before unplugging."
+            case .failure(let error):
+                transferNote = "Transfer failed: \(error.localizedDescription)"
+            }
         }
     }
 

@@ -51,5 +51,14 @@ try! Data("v2".utf8).write(to: src)
 try! KindleDevice.copy(src, to: kindle)
 check((try? String(contentsOf: dest, encoding: .utf8)) == "v2", "re-copy overwrites")
 
+// — ebook-convert discovery (environment-dependent: only consistency) —
+if let tool = EbookConvert.toolURL() {
+    check(FileManager.default.isExecutableFile(atPath: tool.path), "discovered ebook-convert is executable")
+    check(EbookConvert.isAvailable, "isAvailable agrees with toolURL")
+} else {
+    check(!EbookConvert.isAvailable, "isAvailable agrees with missing toolURL")
+    print("  --  calibre not installed; AZW3 conversion untested here")
+}
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

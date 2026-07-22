@@ -35,6 +35,13 @@ Kindle ecosystem first. Formatting toggles come after MVP (registry:
 - Send-to-device: recent Kindles use MTP over USB (not mountable on
   macOS), so the dependable path is Amazon Send-to-Kindle (app if
   installed — it is NOT on this machine — else web upload/email).
+- USB sideload requires AZW3: Kindle firmware does not index sideloaded
+  EPUBs at all (verified on the user's device 2026-07-22 — the file
+  copies but never appears in the library). Send-to-Kindle only accepts
+  EPUB because Amazon converts server-side; Calibre's "Send to Device"
+  converts to AZW3 locally first. Screepub's USB route does the same via
+  Calibre's `ebook-convert` (EPUB→AZW3, ~1s, cached next to the EPUB)
+  and refuses with a clear message when Calibre is absent.
 - Build tooling: Swift 6.3 CommandLineTools only (no full Xcode on this
   machine) → SwiftPM executable target + scripted .app bundle assembly
   + ad-hoc codesign. No Xcode project files.
