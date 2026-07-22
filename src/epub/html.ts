@@ -47,53 +47,77 @@ ${body}</body>
 `;
 }
 
-/** Render body tokens (no title-page tokens) of one scene section. */
-function renderTokens(tokens: Token[]): string {
-  const out: string[] = [];
-  let inDialogue = false;
+/**
+ * Render body tokens (no title-page tokens) as discrete blocks — one string
+ * per paragraph, with a complete dialogue block as a single string. Discrete
+ * blocks let the section assembler wrap heading + first block together.
+ */
+function renderBlocks(tokens: Token[]): string[] {
+  const blocks: string[] = [];
+  let dialogue: string[] | null = null;
+  const emit = (s: string) => {
+    if (dialogue) dialogue.push(s);
+    else blocks.push(s);
+  };
 
   for (const t of tokens) {
     const text = t.text ?? '';
     switch (t.type) {
       case 'scene_heading':
-        out.push(`<h2 class="scene-heading">${escapeXml(text)}</h2>\n`);
+        emit(`<h2 class="scene-heading">${escapeXml(text)}</h2>\n`);
         break;
       case 'action':
-        out.push(`<p class="action">${escapeXml(text)}</p>\n`);
+        emit(`<p class="action">${escapeXml(text)}</p>\n`);
         break;
       case 'dialogue_begin':
-        out.push('<div class="dialogue-block">\n');
-        inDialogue = true;
+        dialogue = ['<div class="dialogue-block">\n'];
         break;
       case 'dialogue_end':
-        out.push('</div>\n');
-        inDialogue = false;
+        if (dialogue) {
+          dialogue.push('</div>\n');
+          blocks.push(dialogue.join(''));
+          dialogue = null;
+        }
         break;
       case 'character':
-        out.push(`<p class="character">${escapeXml(text)}</p>\n`);
+        emit(`<p class="character">${escapeXml(text)}</p>\n`);
         break;
       case 'parenthetical':
-        out.push(`<p class="parenthetical">${escapeXml(text)}</p>\n`);
+        emit(`<p class="parenthetical">${escapeXml(text)}</p>\n`);
         break;
       case 'dialogue':
-        out.push(`<p class="dialogue">${escapeXml(text)}</p>\n`);
+        emit(`<p class="dialogue">${escapeXml(text)}</p>\n`);
         break;
       case 'transition':
-        out.push(`<p class="transition">${escapeXml(text.replace(/^>\s*/, ''))}</p>\n`);
+        emit(`<p class="transition">${escapeXml(text.replace(/^>\s*/, ''))}</p>\n`);
         break;
       case 'centered':
-        out.push(`<p class="centered">${escapeXml(text)}</p>\n`);
+        emit(`<p class="centered">${escapeXml(text)}</p>\n`);
         break;
       case 'lyrics':
-        out.push(`<p class="action">${escapeXml(text)}</p>\n`);
+        emit(`<p class="action">${escapeXml(text)}</p>\n`);
         break;
       default:
         // structural/no-render tokens: title page, page breaks, notes, etc.
         break;
     }
   }
-  if (inDialogue) out.push('</div>\n');
-  return out.join('');
+  if (dialogue) blocks.push(dialogue.join('') + '</div>\n');
+  return blocks;
+}
+
+/**
+ * A scene's heading and its first block share an unbreakable wrapper so a
+ * slugline never strands at a page bottom — the pair moves to the next page
+ * together. `page-break-inside: avoid` on a container is the form Amazon
+ * documents for exactly this ("headlines with paragraphs to keep together").
+ */
+function renderScene(tokens: Token[], startsWithHeading: boolean): string {
+  const blocks = renderBlocks(tokens);
+  if (!startsWithHeading || blocks.length === 0) return blocks.join('');
+  const kept = blocks.slice(0, 2).join('');
+  const rest = blocks.slice(2).join('');
+  return `<div class="keep-together">\n${kept}</div>\n${rest}`;
 }
 
 interface SceneSection {
@@ -132,10 +156,11 @@ export function tokensToBody(
 
   const sections: SceneSection[] = groups.map((g, i) => {
     const anchor = `sc-${String(i + 1).padStart(3, '0')}`;
+    const startsWithHeading = g.tokens[0]?.type === 'scene_heading';
     return {
       anchor,
       title: g.title,
-      html: `<section class="scene" id="${anchor}">\n${renderTokens(g.tokens)}</section>\n`,
+      html: `<section class="scene" id="${anchor}">\n${renderScene(g.tokens, startsWithHeading)}</section>\n`,
     };
   });
 

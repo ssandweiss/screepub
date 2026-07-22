@@ -19,6 +19,14 @@ body {
   font-family: "Courier Prime", "Courier New", Courier, monospace;
 }
 
+/* Slugline + the scene's first block ride together across page breaks —
+   if the pair doesn't fit at a page bottom, both move to the next page.
+   Container-level inside-avoid is the KDP-documented keep-together form. */
+.keep-together {
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
 h2.scene-heading {
   font-size: 1em;
   font-weight: bold;

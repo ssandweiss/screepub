@@ -55,6 +55,21 @@ currently hardcoded and needs surfacing when the app happens.
   consumer converters — never expose an option that reintroduces
   pt/px/inches.
 
+### 5a. Scene heading keeps its context (keep-together wrapper)
+- **What:** each slugline + the scene's first block share a
+  `<div class="keep-together">` with `page-break-inside: avoid` — the
+  KDP-documented container form ("headlines with paragraphs to keep
+  together"), more reliably honored than `break-after: avoid` on the
+  heading itself. A heading that would strand at a page bottom moves to
+  the next page with its first paragraph; the gap left behind is the
+  intended tradeoff (user-requested 2026-07-22).
+- **Default:** on, heading + first block only (never more — bigger
+  unbreakable chunks mean bigger gaps).
+- **App option:** "Keep scene headings with their scene" toggle; advanced:
+  blocks-to-keep count (1–2).
+- **Code:** `src/epub/html.ts` (`renderScene`), `src/epub/css.ts`
+  (`.keep-together`).
+
 ### 5. Keep-with-next — minimal chain (v2)
 - **What:** `break-after: avoid` on scene headings and character cues
   ONLY. v1 also chained parentheticals; every avoid link grows the

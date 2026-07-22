@@ -54,6 +54,37 @@ describe('tokensToBody', () => {
     expect(body.toc[1].href).toContain('body002.xhtml#sc-002');
   });
 
+  test('scene heading + first block are wrapped to keep together across page breaks', () => {
+    const [file] = tokensToBody(sampleTokens()).files;
+    // Heading and the scene's first paragraph share an unbreakable wrapper
+    // so a heading never strands at a page bottom.
+    expect(file.xhtml).toMatch(
+      /<div class="keep-together">\s*<h2 class="scene-heading">INT\. KITCHEN - DAY<\/h2>\s*<p class="action">Jack enters, exhausted\.<\/p>\s*<\/div>/,
+    );
+  });
+
+  test('a dialogue block directly after a heading keeps together as one unit', () => {
+    const tokens = new Fountain().parse('INT. CAR - DAY\n\n@ANNE\nDrive.\n\nThey drive.\n', true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toMatch(
+      /<div class="keep-together">\s*<h2 class="scene-heading">INT\. CAR - DAY<\/h2>\s*<div class="dialogue-block">[\s\S]*?<\/div>\s*<\/div>\s*<p class="action">They drive\.<\/p>/,
+    );
+  });
+
+  test('heading-only scene wraps without error', () => {
+    const tokens = new Fountain().parse('INT. VOID - DAY\n\nEXT. VOID - NIGHT\n\nStars.\n', true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toMatch(
+      /<div class="keep-together">\s*<h2 class="scene-heading">INT\. VOID - DAY<\/h2>\s*<\/div>/,
+    );
+  });
+
+  test('opening content without a heading gets no keep-together wrapper', () => {
+    const tokens = new Fountain().parse('Cold open action.\n\nINT. LAB - DAY\n\nWork.\n', true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toMatch(/<section class="scene" id="sc-001">\s*<p class="action">Cold open action\.<\/p>/);
+  });
+
   test('dialogue renders inside a dialogue block with cue/paren/line classes', () => {
     const [file] = tokensToBody(sampleTokens()).files;
     expect(file.xhtml).toContain('<div class="dialogue-block">');
@@ -125,6 +156,12 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
     expect(paren).not.toContain('break-after');
     const heading = SCREENPLAY_CSS.match(/h2\.scene-heading\s*{[^}]*}/)![0];
     expect(heading).toContain('break-after: avoid');
+  });
+
+  test('keep-together container uses break-inside avoid (the KDP-documented form)', () => {
+    const keep = SCREENPLAY_CSS.match(/\.keep-together\s*{[^}]*}/)![0];
+    expect(keep).toContain('page-break-inside: avoid');
+    expect(keep).toContain('break-inside: avoid');
   });
 });
 
