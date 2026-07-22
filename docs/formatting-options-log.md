@@ -48,10 +48,12 @@ currently hardcoded and needs surfacing when the app happens.
   possibly independent scene-heading spacing.
 - **Code:** `src/epub/css.ts`.
 
-### 4. Em-based scaling (principle, not an option)
-- **What:** every structural indent is in `em` so layout survives reader
-  font-size changes. This is the core fix over consumer converters —
-  never expose an option that reintroduces fixed units.
+### 4. Relative-unit scaling (principle, not an option)
+- **What:** no fixed units anywhere — **horizontal structure in `%`**
+  (scales with screen width; Kindle's prescription) and **vertical rhythm
+  in `em`** (scales with font size). This split is the core fix over
+  consumer converters — never expose an option that reintroduces
+  pt/px/inches.
 
 ### 5. Keep-with-next — minimal chain (v2)
 - **What:** `break-after: avoid` on scene headings and character cues
