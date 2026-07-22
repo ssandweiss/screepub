@@ -226,3 +226,20 @@ describe('inline style detection', () => {
     expect(lines[0].styled).toBeUndefined();
   });
 });
+
+describe('dual dialogue marking', () => {
+  test('the right column cue line carries the dualRight flag', () => {
+    const lines = groupItemsIntoLines(
+      [
+        item('MELVIN', 180, 700), item('ANNE', 400, 700),
+        item('try this again.', 150, 688), item('maybe if you got better', 380, 688),
+      ],
+      612,
+      1,
+    );
+    expect(lines[0].text).toBe('MELVIN');
+    expect(lines[0].dualRight).toBeUndefined();
+    expect(lines[2].text).toBe('ANNE');
+    expect(lines[2].dualRight).toBe(true);
+  });
+});

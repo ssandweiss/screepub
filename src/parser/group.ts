@@ -103,6 +103,7 @@ function buildBlock(lines: RawLine[]): TextBlock {
     lines,
     text,
     styledText,
+    dualRight: lines.some((l) => l.dualRight) || undefined,
     indent: lines[0].indent,
     minIndent: Math.min(...indents),
     maxIndent: Math.max(...indents),

@@ -202,12 +202,16 @@ future work; everything else is live.
   full-width (straddling) line, a cue-shaped left-only line, text left of
   the learned column edge, or a new dual-cue pair. Columns emit as left
   speech then right speech — the standard reflowable treatment.
-- **Default:** on (correctness fix, not optional).
-- **App option (future):** "Dual dialogue: sequential / side-by-side" —
-  side-by-side needs Fountain `^` marking plus a two-cell table or
-  inline-block rendering; KF8 tables make this feasible on Kindle but
-  it's unbuilt. Known limitation: a short action line immediately after a
-  dual block with no intervening cue can absorb into the left speech.
+- **Default:** de-interleaving always on (correctness); rendering mode
+  `dualDialogue: 'sideBySide'` (default) | `'sequential'`. Side-by-side:
+  the right cue serializes with Fountain's `^`, and the renderer emits a
+  full-width two-cell `table.dual-dialogue` (50/50, top-aligned,
+  page-break-inside avoid) — tables are the one column construct
+  Kindle's renderer honors. Wider than the dialogue column by design.
+  MOBI gets a plain width-50% table.
+- **App option:** Settings → Formatting → "Dual dialogue". Known
+  limitation: a short action line immediately after a dual block with no
+  intervening cue can absorb into the left speech.
 - **Code:** `src/parser/extract.ts` (`deinterleaveDualDialogue`).
 
 ## Metadata & navigation

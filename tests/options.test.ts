@@ -278,3 +278,30 @@ describe('showPageMarkers', () => {
     expect(out).toContain('= pg 6\n\nHe exits.');
   });
 });
+
+// ── dual dialogue rendering mode (registry #10a) ─────────
+
+describe('dualDialogue mode', () => {
+  let id4 = 0;
+  const el4 = (over: Partial<ScreenplayElement> & { text: string; type: ScreenplayElement['type'] }): ScreenplayElement => ({
+    id: `d${id4++}`, pageNum: 1, isTitlePage: false, isReadable: true, ...over,
+  });
+  const DUAL = [
+    el4({ text: 'VERA', type: 'character', character: 'VERA' }),
+    el4({ text: 'Read me the last page--', type: 'dialogue', character: 'VERA' }),
+    el4({ text: 'INFORMANT', type: 'character', character: 'INFORMANT', dualRight: true }),
+    el4({ text: '--the last page burned.', type: 'dialogue', character: 'INFORMANT' }),
+  ];
+  const sp4 = (): ParsedScreenplay => ({ elements: DUAL, characters: [], scenes: [], pageCount: 1 });
+
+  test('sideBySide (default) emits the fountain caret on the right cue', () => {
+    const out = toFountain(sp4());
+    expect(out).toContain('@INFORMANT ^');
+  });
+
+  test('sequential mode omits the caret', () => {
+    const out = toFountain(sp4(), undefined, resolveFormatOptions({ dualDialogue: 'sequential' }));
+    expect(out).toContain('@INFORMANT\n');
+    expect(out).not.toContain('^');
+  });
+});

@@ -32,6 +32,8 @@ export interface FormatOptions {
   showSceneNumbers: boolean;
   /** original PDF page-number markers at page boundaries (registry #13a) */
   showPageMarkers: boolean;
+  /** simultaneous speech: side-by-side table or sequential speeches (registry #10a) */
+  dualDialogue: 'sideBySide' | 'sequential';
 }
 
 export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
@@ -48,6 +50,7 @@ export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
   includeTitlePage: true,
   showSceneNumbers: false,
   showPageMarkers: false,
+  dualDialogue: 'sideBySide',
 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -81,5 +84,6 @@ export function resolveFormatOptions(partial?: Record<string, unknown>): FormatO
     includeTitlePage: bool('includeTitlePage'),
     showSceneNumbers: bool('showSceneNumbers'),
     showPageMarkers: bool('showPageMarkers'),
+    dualDialogue: p.dualDialogue === 'sequential' ? 'sequential' : d.dualDialogue,
   };
 }

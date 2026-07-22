@@ -119,6 +119,22 @@ p.dialogue {
   margin: 0;
 }
 
+/* Simultaneous speech: two half-width columns, kept on one page. The
+   table spans full width (wider than the dialogue column) by design. */
+table.dual-dialogue {
+  width: 100%;
+  border-collapse: collapse;
+  margin: ${em(gap)} 0;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+table.dual-dialogue td {
+  width: 50%;
+  vertical-align: top;
+  padding: 0 2%;
+}
+
 p.transition {
   text-align: right;
   text-transform: uppercase;

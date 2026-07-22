@@ -132,22 +132,36 @@ struct ContentView: View {
                 .foregroundStyle(Theme.inkFaint)
                 .padding(.top, 14)
 
-            Spacer(minLength: 36)
+            Spacer(minLength: 30)
 
-            VStack(spacing: 10) {
-                Text("written by")
-                    .font(Theme.courier(12))
-                    .foregroundStyle(Theme.inkFaint)
-                Text("dropping a screenplay PDF here")
-                    .font(Theme.courier(14))
+            // The drop well — an unmistakable target on the page.
+            VStack(spacing: 9) {
+                Image(systemName: "arrow.down.doc")
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundStyle(dropTargeted ? Theme.brass : Theme.inkFaint)
+                Text("DROP A SCREENPLAY PDF")
+                    .font(Theme.courier(13, .bold))
+                    .kerning(1.2)
                     .foregroundStyle(Theme.ink)
-                Button("CHOOSE PDF…") { choose() }
-                    .buttonStyle(MarginButtonStyle())
+                Text("or")
+                    .font(Theme.courier(10))
+                    .foregroundStyle(Theme.inkFaint)
+                Button("CHOOSE PDF…  ⌘O") { choose() }
+                    .buttonStyle(OutlineButtonStyle())
                     .keyboardShortcut("o")
-                    .padding(.top, 6)
+                    .frame(width: 190)
             }
+            .padding(.vertical, 24)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(
+                        dropTargeted ? Theme.brass : Theme.inkFaint,
+                        style: StrokeStyle(lineWidth: 1.5, dash: [7, 5])
+                    )
+            )
 
-            Spacer(minLength: 60)
+            Spacer(minLength: 40)
 
             HStack(alignment: .bottom) {
                 Text("also accepts\n.fountain files")

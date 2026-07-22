@@ -20,6 +20,8 @@ export interface ScreenplayElement {
   sceneNumber?: string;
   /** text with fountain emphasis markers from PDF font styles (*i*, **b**) */
   styledText?: string;
+  /** cue of the RIGHT column of a simultaneous (dual) exchange */
+  dualRight?: boolean;
 }
 
 export interface CharacterInfo {
@@ -51,6 +53,8 @@ export interface RawLine {
   pageNum: number;
   /** text with fountain emphasis markers, present only when styles differ */
   styled?: string;
+  /** cue line opening the right column of a dual-dialogue region */
+  dualRight?: boolean;
 }
 
 // Grouped text block
@@ -58,6 +62,7 @@ export interface TextBlock {
   lines: RawLine[];
   text: string;
   styledText?: string;
+  dualRight?: boolean;
   indent: number; // first line indent
   minIndent: number;
   maxIndent: number;

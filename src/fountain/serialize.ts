@@ -183,7 +183,8 @@ export function toFountain(
             cueText = `${cueText} (CONT'D)`;
           }
         }
-        block = [`@${cueText}`];
+        const caret = el.dualRight && format.dualDialogue === 'sideBySide' ? ' ^' : '';
+        block = [`@${cueText}${caret}`];
         lastSpeaker = el.character ?? null;
         break;
       }

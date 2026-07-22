@@ -66,6 +66,10 @@ ${body}</body>
 function renderBlocks(tokens: Token[], format: FormatOptions): string[] {
   const blocks: string[] = [];
   let speech: { kind: string; html: string }[] | null = null;
+  // Simultaneous speech renders as a two-cell table — the one column
+  // construct Kindle's renderer honors (floats/inline-block are not
+  // reliable under Enhanced Typesetting).
+  let dual: { left: string[]; right: string[]; side: 'left' | 'right' } | null = null;
   const emit = (s: string, kind = 'other') => {
     if (speech) speech.push({ kind, html: s });
     else blocks.push(s);
@@ -96,11 +100,28 @@ function renderBlocks(tokens: Token[], format: FormatOptions): string[] {
       case 'action':
         emit(`<p class="action">${inlineEmphasis(escapeXml(text))}</p>\n`);
         break;
+      case 'dual_dialogue_begin':
+        dual = { left: [], right: [], side: 'left' };
+        break;
+      case 'dual_dialogue_end':
+        if (dual) {
+          blocks.push(
+            `<table class="dual-dialogue">\n<tr>\n<td>\n${dual.left.join('')}</td>\n<td>\n${dual.right.join('')}</td>\n</tr>\n</table>\n`,
+          );
+          dual = null;
+        }
+        break;
       case 'dialogue_begin':
+        if (dual) dual.side = (t as { dual?: string }).dual === 'right' ? 'right' : 'left';
         speech = [];
         break;
       case 'dialogue_end':
-        closeSpeech();
+        if (dual && speech) {
+          dual[dual.side].push(...speech.map((c) => c.html));
+          speech = null;
+        } else {
+          closeSpeech();
+        }
         break;
       case 'character':
         emit(`<p class="character">${escapeXml(text)}</p>\n`, 'character');

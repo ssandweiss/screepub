@@ -366,6 +366,8 @@ function deinterleaveDualDialogue(
           indent: k === 0 ? DUAL_CUE_INDENT : DUAL_BODY_INDENT,
           y: ys[Math.min(k, ys.length - 1)],
           pageNum,
+          // the right column's cue marks the pair for fountain's ^ syntax
+          dualRight: column === right && k === 0 ? true : undefined,
         });
       });
     }

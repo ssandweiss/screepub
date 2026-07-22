@@ -101,6 +101,7 @@ struct FormattingSettings: View {
     @AppStorage("fmtTitlePage") private var titlePage = true
     @AppStorage("fmtSceneNumbers") private var sceneNumbers = false
     @AppStorage("fmtPageMarkers") private var pageMarkers = false
+    @AppStorage("fmtDual") private var dualDialogue = "sideBySide"
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -146,6 +147,10 @@ struct FormattingSettings: View {
                 Toggle("Show shooting-script scene numbers", isOn: $sceneNumbers)
                 Toggle("Show original page numbers", isOn: $pageMarkers)
                 Toggle("Rejoin dialogue split by page breaks", isOn: $rejoin)
+                Picker("Dual dialogue", selection: $dualDialogue) {
+                    Text("Side by side (full width)").tag("sideBySide")
+                    Text("Sequential speeches").tag("sequential")
+                }
                 Picker("(CONT'D) on character cues", selection: $contd) {
                     Text("Automatic (standard rule)").tag("auto")
                     Text("Remove all").tag("strip")

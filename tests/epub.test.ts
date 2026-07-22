@@ -283,3 +283,23 @@ describe('page markers in XHTML', () => {
     expect(file.xhtml).not.toContain('discovers the truth');
   });
 });
+
+// ── dual dialogue side-by-side ───────────────────────────
+
+describe('dual dialogue table rendering', () => {
+  const DUAL_SRC = 'INT. A - DAY\n\n@VERA\n(overlapping)\nRead me the last page--\n\n@INFORMANT ^\n--the last page burned.\n\nThey stare.\n';
+
+  test('dual speeches render as a two-cell table', () => {
+    const tokens = new Fountain().parse(DUAL_SRC, true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toMatch(
+      /<table class="dual-dialogue">\s*<tr>\s*<td>\s*<p class="character">VERA<\/p>\s*<p class="parenthetical">\(overlapping\)<\/p>\s*<p class="dialogue">Read me the last page--<\/p>\s*<\/td>\s*<td>\s*<p class="character">INFORMANT<\/p>\s*<p class="dialogue">--the last page burned\.<\/p>\s*<\/td>\s*<\/tr>\s*<\/table>/,
+    );
+    expect(file.xhtml).toContain('<p class="action">They stare.</p>');
+  });
+
+  test('table style keeps the pair together and splits width evenly', () => {
+    expect(SCREENPLAY_CSS.match(/table\.dual-dialogue\s*{[^}]*}/)![0]).toContain('page-break-inside: avoid');
+    expect(SCREENPLAY_CSS.match(/table\.dual-dialogue td\s*{[^}]*}/)![0]).toContain('width: 50%');
+  });
+});

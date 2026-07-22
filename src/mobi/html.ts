@@ -41,6 +41,7 @@ export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
 
   // Body: dialogue blocks accumulate into a single <blockquote>.
   let speech: string[] | null = null;
+  let dual: { left: string[]; right: string[]; side: 'left' | 'right' } | null = null;
   const closeSpeech = () => {
     if (speech) {
       out.push(`<blockquote>${speech.join('<br/>')}</blockquote>`);
@@ -60,7 +61,19 @@ export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
         closeSpeech();
         out.push(`<p>${inline(esc(text))}</p>`);
         break;
+      case 'dual_dialogue_begin':
+        dual = { left: [], right: [], side: 'left' };
+        break;
+      case 'dual_dialogue_end':
+        if (dual) {
+          out.push(
+            `<table width="100%"><tr><td width="50%">${dual.left.join('<br/>')}</td><td width="50%">${dual.right.join('<br/>')}</td></tr></table>`,
+          );
+          dual = null;
+        }
+        break;
       case 'dialogue_begin':
+        if (dual) dual.side = (t as { dual?: string }).dual === 'right' ? 'right' : 'left';
         speech = [];
         break;
       case 'character':
@@ -73,7 +86,12 @@ export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
         if (speech) speech.push(inline(esc(text)).replace(/\n/g, '<br/>'));
         break;
       case 'dialogue_end':
-        closeSpeech();
+        if (dual && speech) {
+          dual[dual.side].push(...speech);
+          speech = null;
+        } else {
+          closeSpeech();
+        }
         break;
       case 'transition':
         closeSpeech();

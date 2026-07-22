@@ -18,6 +18,7 @@ struct LayoutPreview: View {
     @AppStorage("fmtScenePageBreaks") private var scenePageBreaks = false
     @AppStorage("fmtSceneNumbers") private var sceneNumbers = false
     @AppStorage("fmtPageMarkers") private var pageMarkers = false
+    @AppStorage("fmtDual") private var dualDialogue = "sideBySide"
 
     private let base: CGFloat = 10.5 // preview "1em" in points
 
@@ -62,16 +63,23 @@ struct LayoutPreview: View {
 
                     action("The match gutters out. The INFORMANT leans in. They talk over each other.")
 
-                    // Dual dialogue — shown exactly as the books render it:
-                    // de-interleaved into sequential overlapping speeches.
-                    speech(cue: "DETECTIVE VERA",
-                           paren: "(overlapping)",
-                           lines: ["Read me the last page--"],
-                           blockW: blockW, sideMargin: sideMargin)
-                    speech(cue: "INFORMANT",
-                           paren: "(overlapping)",
-                           lines: ["--the last page burned."],
-                           blockW: blockW, sideMargin: sideMargin)
+                    // Dual dialogue — mirrors the chosen rendering mode.
+                    if dualDialogue == "sideBySide" {
+                        HStack(alignment: .top, spacing: 8) {
+                            dualCell(cue: "DETECTIVE VERA", line: "Read me the last page--", width: (W - 8) / 2)
+                            dualCell(cue: "INFORMANT", line: "--the last page burned.", width: (W - 8) / 2)
+                        }
+                        .padding(.vertical, gap / 2)
+                    } else {
+                        speech(cue: "DETECTIVE VERA",
+                               paren: "(overlapping)",
+                               lines: ["Read me the last page--"],
+                               blockW: blockW, sideMargin: sideMargin)
+                        speech(cue: "INFORMANT",
+                               paren: "(overlapping)",
+                               lines: ["--the last page burned."],
+                               blockW: blockW, sideMargin: sideMargin)
+                    }
 
                     if contd != "strip" {
                         speech(cue: "DETECTIVE VERA (CONT'D)",
@@ -143,6 +151,15 @@ struct LayoutPreview: View {
             .lineSpacing(2)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, gap / 2)
+    }
+
+    private func dualCell(cue: String, line: String, width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(cue).font(bodyFont(base, bold: true)).foregroundStyle(Theme.ink)
+                .frame(width: width, alignment: cueAlign == "centered" ? .center : .leading)
+            Text(line).font(bodyFont(base)).foregroundStyle(Theme.ink).lineSpacing(2)
+                .frame(width: width, alignment: .leading)
+        }
     }
 
     private func miniSlug(_ text: String) -> some View {
