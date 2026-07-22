@@ -4,10 +4,11 @@ Every formatting behavior Screepub applies, logged as it was tuned
 (2026-07-22, initial build + two Meteor Anne feedback rounds). The print
 geometry and Kindle CSS constraints behind these choices live in
 `docs/screenplay-format-reference.md` — read that first when adjusting. Each entry is
-written to become a **toggle or slider in the planned Mac app**: what it
-does, why the default is what it is, the knob it implies, and where it
-lives in code. CLI flags exist only where noted — everything else is
-currently hardcoded and needs surfacing when the app happens.
+written as a **toggle or slider in the Mac app** (Settings → Formatting;
+2026-07-22): the engine's FormatOptions (`src/options.ts`) is the single
+knob surface, reachable via `--options file.json` on the CLI and mirrored
+by `FormatSettings` in the app. Entries below marked "not built" remain
+future work; everything else is live.
 
 ## Layout & flow
 

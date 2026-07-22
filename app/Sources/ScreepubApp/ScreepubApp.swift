@@ -1,4 +1,5 @@
 import SwiftUI
+import ScreepubKit
 
 @main
 struct ScreepubApp: App {
@@ -22,22 +23,132 @@ struct ScreepubApp: App {
 }
 
 struct SettingsView: View {
+    var body: some View {
+        TabView {
+            GeneralSettings()
+                .tabItem { Label("General", systemImage: "gearshape") }
+            FormattingSettings()
+                .tabItem { Label("Formatting", systemImage: "text.alignleft") }
+        }
+        .frame(width: 480)
+        .padding(.bottom, 8)
+    }
+}
+
+struct GeneralSettings: View {
     @AppStorage("kindleEmail") private var kindleEmail = ""
+    @AppStorage(AppSettings.outputFolderKey) private var outputFolder = ""
 
     var body: some View {
         Form {
-            Section {
+            Section("Library") {
+                LabeledContent("Output folder") {
+                    HStack {
+                        Text(displayedFolder)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .foregroundStyle(.secondary)
+                        Button("Choose…") { choose() }
+                        if !outputFolder.isEmpty {
+                            Button("Reset") { outputFolder = "" }
+                        }
+                    }
+                }
+                Text("Converted EPUB, MOBI, and Fountain files are saved here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Kindle") {
                 TextField("Send-to-Kindle email", text: $kindleEmail, prompt: Text("yourname_123@kindle.com"))
                     .textContentType(.emailAddress)
                     .autocorrectionDisabled()
-            } footer: {
-                Text("Find it under Amazon → Manage Your Content and Devices → Devices → your Kindle. Your own email address must be on Amazon's approved sender list for delivery to work.")
+                Text("Find it under Amazon → Manage Your Content and Devices → Devices. Your own email address must be on Amazon's approved sender list.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 420)
-        .padding(.bottom, 8)
+    }
+
+    private var displayedFolder: String {
+        (AppSettings.outputFolder.path as NSString).abbreviatingWithTildeInPath
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.directoryURL = AppSettings.outputFolder
+        if panel.runModal() == .OK, let url = panel.url {
+            outputFolder = url.path
+        }
+    }
+}
+
+struct FormattingSettings: View {
+    @AppStorage("fmtScenePageBreaks") private var scenePageBreaks = false
+    @AppStorage("fmtDialogueMargin") private var dialogueMargin = 20.0
+    @AppStorage("fmtCueIndent") private var cueIndent = 33.0
+    @AppStorage("fmtParenIndent") private var parenIndent = 17.0
+    @AppStorage("fmtSpacing") private var spacing = 1.0
+    @AppStorage("fmtKeepHeading") private var keepHeading = true
+    @AppStorage("fmtFont") private var font = "courier"
+    @AppStorage("fmtRejoin") private var rejoin = true
+    @AppStorage("fmtTitlePage") private var titlePage = true
+    @AppStorage("fmtSceneNumbers") private var sceneNumbers = false
+
+    var body: some View {
+        Form {
+            Section("Layout") {
+                slider("Dialogue column margins", value: $dialogueMargin, range: 0...30, unit: "%")
+                slider("Character cue indent", value: $cueIndent, range: 0...60, unit: "% of column")
+                slider("Parenthetical indent", value: $parenIndent, range: 0...40, unit: "% of column")
+                slider("Space between elements", value: $spacing, range: 0.4...1.6, unit: "em", step: 0.1)
+                Picker("Typeface", selection: $font) {
+                    Text("Courier (screenplay)").tag("courier")
+                    Text("Serif (reader default)").tag("serif")
+                    Text("Sans-serif").tag("sans")
+                }
+            }
+            Section("Pages") {
+                Toggle("Start each scene on a new page", isOn: $scenePageBreaks)
+                Toggle("Keep scene headings with their scene", isOn: $keepHeading)
+            }
+            Section("Content") {
+                Toggle("Generate a title page", isOn: $titlePage)
+                Toggle("Show shooting-script scene numbers", isOn: $sceneNumbers)
+                Toggle("Rejoin dialogue split by page breaks", isOn: $rejoin)
+            }
+            Section {
+                HStack {
+                    Spacer()
+                    Button("Reset to Defaults") { AppSettings.resetFormatting() }
+                }
+                Text("Changes apply to the next conversion.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func slider(
+        _ label: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        unit: String,
+        step: Double = 1
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(label)
+                Spacer()
+                Text("\(value.wrappedValue, specifier: step < 1 ? "%.1f" : "%.0f") \(unit)")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(value: value, in: range, step: step)
+        }
     }
 }

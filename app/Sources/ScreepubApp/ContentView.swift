@@ -235,8 +235,10 @@ struct ContentView: View {
         transferNote = nil
         state = .converting(url.lastPathComponent)
         Task {
+            let outputDir = AppSettings.outputFolder
+            let format = AppSettings.formatSettings()
             let outcome: Result<EngineResult, Error> = await Task.detached {
-                Result { try Engine.convert(input: url, force: force) }
+                Result { try Engine.convert(input: url, force: force, outputDir: outputDir, format: format) }
             }.value
 
             switch outcome {

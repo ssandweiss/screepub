@@ -46,11 +46,26 @@ public enum Engine {
     }
 
     /// Run a conversion. Blocking — call from a background task.
-    nonisolated public static func convert(input: URL, force: Bool) throws -> EngineResult {
+    /// Outputs (.epub/.mobi/.fountain) land in `outputDir` (created on
+    /// demand); formatting knobs travel as a temp --options JSON.
+    nonisolated public static func convert(
+        input: URL,
+        force: Bool,
+        outputDir: URL,
+        format: FormatSettings = .defaults
+    ) throws -> EngineResult {
         guard let engine = binaryURL() else { throw EngineFailure.notFound }
 
-        let output = input.deletingPathExtension().appendingPathExtension("epub")
-        var args = [input.path, "-o", output.path, "--json", "--mobi"]
+        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        let stem = input.deletingPathExtension().lastPathComponent
+        let output = outputDir.appendingPathComponent(stem).appendingPathExtension("epub")
+
+        let optionsFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("screepub-options-\(UUID().uuidString).json")
+        try JSONEncoder().encode(format).write(to: optionsFile)
+        defer { try? FileManager.default.removeItem(at: optionsFile) }
+
+        var args = [input.path, "-o", output.path, "--json", "--mobi", "--options", optionsFile.path]
         if force { args.append("--force") }
 
         let process = Process()
