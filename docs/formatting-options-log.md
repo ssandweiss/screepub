@@ -1,7 +1,9 @@
 # Formatting decisions log — future Mac app options registry
 
 Every formatting behavior Screepub applies, logged as it was tuned
-(2026-07-22, initial build + Meteor Anne feedback round). Each entry is
+(2026-07-22, initial build + two Meteor Anne feedback rounds). The print
+geometry and Kindle CSS constraints behind these choices live in
+`docs/screenplay-format-reference.md` — read that first when adjusting. Each entry is
 written to become a **toggle or slider in the planned Mac app**: what it
 does, why the default is what it is, the knob it implies, and where it
 lives in code. CLI flags exist only where noted — everything else is
@@ -19,18 +21,19 @@ currently hardcoded and needs surfacing when the app happens.
   advanced: file-size budget.
 - **Code:** `src/epub/html.ts` (`tokensToBody`, `DEFAULT_MAX_FILE_BYTES`).
 
-### 2. Centered dialogue column
-- **What:** the dialogue block is a narrow centered column
-  (`margin: auto; max-width: 21em`), mirroring print geometry where
-  dialogue sits at 2.5" on an 8.5" page. Cue and parenthetical indent
-  *within* the column: cue **+7em** (print +1.2"), parenthetical **+3em**
-  (print +0.5"). Replaced the original left-hugging indents (second
-  Meteor Anne complaint).
-- **Default:** centered, 21em column, cue +7em, paren +3em.
-- **App options:** column width slider; cue indent; parenthetical indent;
-  toggle "center dialogue column" (fallback: left-indented layout).
-- **Caveat logged:** old Kindle renderers may ignore `margin: auto` —
-  fallback is padding-based centering if a device shows it left-hugging.
+### 2. Centered dialogue column — % geometry (v2)
+- **What:** dialogue is a narrow column with **percentage side margins**
+  (20%/20% → ~60% column, print is 58%); cue indents **+33%** of the
+  column and parenthetical **+17%** (print +1.2"/+0.6" of the 3.5" col).
+- **History:** v1 used em left-indents (hugged left — wrong); v1.5 used
+  `margin: auto` + `max-width: 21em` — looked right in browsers but
+  **Kindle strips `max-width`**, so dialogue ran full width on device
+  (the "runs the full width" bug). Amazon's own guidance: horizontal
+  margins in `%`, vertical in `em`. Never reintroduce max-width.
+- **Default:** 20% side margins; cue +33%; paren +17%/8%.
+- **App options:** column width (as side-margin %), cue indent %, paren
+  indent %; per-device presets (phone may want a shallower cue indent —
+  see reference doc §4).
 - **Code:** `src/epub/css.ts` (`.dialogue-block`, `p.character`,
   `p.parenthetical`).
 
@@ -50,18 +53,24 @@ currently hardcoded and needs surfacing when the app happens.
   font-size changes. This is the core fix over consumer converters —
   never expose an option that reintroduces fixed units.
 
-### 5. Keep-with-next on cues and parentheticals
-- **What:** `break-after: avoid` so a character cue never orphans from
-  its dialogue at a reader page break.
-- **Default:** on. **App option:** probably always-on (no good reason to
-  disable); log only.
+### 5. Keep-with-next — minimal chain (v2)
+- **What:** `break-after: avoid` on scene headings and character cues
+  ONLY. v1 also chained parentheticals; every avoid link grows the
+  unbreakable chunk a renderer pushes to the next page, and pushed
+  chunks show up as occasional blank-bottom "weird page breaks."
+- **Default:** heading + cue avoid; parenthetical breaks freely.
+- **App options:** "Keep scene heading with scene" toggle (dropping it
+  is the next lever if gaps persist on e-ink); cue avoid stays always-on.
 - **Code:** `src/epub/css.ts`.
 
-### 6. Typeface & line height
-- **What:** `"Courier Prime", "Courier New", Courier, monospace`,
-  line-height 1.45.
-- **App options:** font menu (mono tradition vs. reader-friendly serif);
-  line-height slider. Note: Kindle users can override fonts anyway.
+### 6. Typeface & line height (v2)
+- **What:** `"Courier Prime", "Courier New", Courier, monospace`. The v1
+  `line-height: 1.45` override is REMOVED — Enhanced Typesetting expects
+  default line height on body text and the reader's own line-spacing
+  setting owns within-paragraph spacing.
+- **App options:** font menu only. Do NOT offer a line-height slider for
+  Kindle targets — it would silently not work; between-element spacing
+  (option 3) is the honest spacing knob we control.
 - **Code:** `src/epub/css.ts` (`body`).
 
 ## Cleanup & rejoining

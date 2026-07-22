@@ -1,7 +1,14 @@
-// Reflowable screenplay stylesheet. All structural indents are in em so the
-// layout scales with the reader's font size — fixed-inch indents are what
-// break consumer converters. Indents stay modest so narrow screens at large
-// font sizes never overflow.
+// Reflowable screenplay stylesheet, Kindle-safe.
+//
+// Geometry rules (see docs/screenplay-format-reference.md for the math):
+// - HORIZONTAL structure in % — Kindle strips max-width and prescribes
+//   percentage side margins; % scales with screen width.
+// - VERTICAL rhythm in em — scales with the reader's font size; print's
+//   one-blank-Courier-line between elements = 1em.
+// - No line-height/font-size overrides on body text — Enhanced Typesetting
+//   owns within-paragraph spacing (the reader's own setting).
+// - Keep-with-next chain kept minimal (heading, cue) — every avoid link
+//   grows the unbreakable chunk renderers push, causing bottom-of-page gaps.
 export const SCREENPLAY_CSS = `
 html, body {
   margin: 0;
@@ -10,16 +17,13 @@ html, body {
 
 body {
   font-family: "Courier Prime", "Courier New", Courier, monospace;
-  line-height: 1.45;
-  widows: 2;
-  orphans: 2;
 }
 
 h2.scene-heading {
   font-size: 1em;
   font-weight: bold;
   text-transform: uppercase;
-  margin: 1.6em 0 0.8em 0;
+  margin: 1.6em 0 1em 0;
   page-break-after: avoid;
   break-after: avoid;
 }
@@ -41,30 +45,27 @@ p.mini-slug {
   break-after: avoid;
 }
 
-/* Print geometry, reflowed: dialogue is a narrow column centered on the
-   page (2.5"-margin column on paper), with the cue and parenthetical
-   indented WITHIN that column (cue +1.2", parenthetical +0.5" in print;
-   ≈7em / 3em in 12pt Courier). max-width degrades gracefully on phones. */
+/* Print geometry, reflowed: dialogue is a narrow column (58% of the body
+   column in print; symmetric 20% margins ≈ 60% here). Cue and parenthetical
+   indent WITHIN the column as percentages of it (print: cue +1.2" and
+   parenthetical +0.6" into the 3.5" column). */
 .dialogue-block {
   margin-top: 1em;
   margin-bottom: 1em;
-  margin-left: auto;
-  margin-right: auto;
-  max-width: 21em;
+  margin-left: 20%;
+  margin-right: 20%;
 }
 
 /* A cue must never orphan from its dialogue at a page break. */
 p.character {
-  margin-left: 7em;
+  margin-left: 33%;
   page-break-after: avoid;
   break-after: avoid;
 }
 
 p.parenthetical {
-  margin-left: 3em;
-  margin-right: 3em;
-  page-break-after: avoid;
-  break-after: avoid;
+  margin-left: 17%;
+  margin-right: 8%;
 }
 
 p.dialogue {

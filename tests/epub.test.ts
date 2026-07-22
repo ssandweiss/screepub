@@ -89,25 +89,42 @@ describe('tokensToBody', () => {
 
 // ── screenplay CSS geometry ──────────────────────────────
 
-describe('screenplay CSS', () => {
-  test('dialogue block is a centered narrow column', () => {
+describe('screenplay CSS (Kindle-safe geometry)', () => {
+  test('dialogue column narrows with % side margins — never max-width (Kindle strips it)', () => {
     const block = SCREENPLAY_CSS.match(/\.dialogue-block\s*{[^}]*}/)![0];
-    expect(block).toContain('margin-left: auto');
-    expect(block).toContain('margin-right: auto');
-    expect(block).toMatch(/max-width:\s*\d+em/);
+    expect(block).toMatch(/margin-left:\s*\d+%/);
+    expect(block).toMatch(/margin-right:\s*\d+%/);
+    expect(SCREENPLAY_CSS).not.toContain('max-width');
   });
 
-  test('cues keep with their dialogue and sit deeper in the column', () => {
+  test('cue keeps with its dialogue and indents by % of the column (print +1.2" of 3.5")', () => {
     const cue = SCREENPLAY_CSS.match(/p\.character\s*{[^}]*}/)![0];
     expect(cue).toContain('break-after: avoid');
-    expect(cue).toMatch(/margin-left:\s*\d+(\.\d+)?em/);
+    expect(cue).toMatch(/margin-left:\s*\d+%/);
   });
 
-  test('elements are separated by at least a full blank line', () => {
+  test('parenthetical indents by % of the column', () => {
+    const paren = SCREENPLAY_CSS.match(/p\.parenthetical\s*{[^}]*}/)![0];
+    expect(paren).toMatch(/margin-left:\s*\d+%/);
+  });
+
+  test('vertical rhythm is em-based: a full blank line between elements', () => {
     const action = SCREENPLAY_CSS.match(/p\.action\s*{[^}]*}/)![0];
     expect(action).toMatch(/margin:\s*1(\.\d+)?em 0/);
     const block = SCREENPLAY_CSS.match(/\.dialogue-block\s*{[^}]*}/)![0];
     expect(block).toMatch(/margin-top:\s*1(\.\d+)?em/);
+  });
+
+  test('body text keeps device-default line height (Enhanced Typesetting owns it)', () => {
+    const body = SCREENPLAY_CSS.match(/(^|\n)body\s*{[^}]*}/)![0];
+    expect(body).not.toContain('line-height');
+  });
+
+  test('keep-with-next chain is minimal: heading and cue only, not parenthetical', () => {
+    const paren = SCREENPLAY_CSS.match(/p\.parenthetical\s*{[^}]*}/)![0];
+    expect(paren).not.toContain('break-after');
+    const heading = SCREENPLAY_CSS.match(/h2\.scene-heading\s*{[^}]*}/)![0];
+    expect(heading).toContain('break-after: avoid');
   });
 });
 
