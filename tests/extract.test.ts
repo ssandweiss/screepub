@@ -13,6 +13,20 @@ describe('groupItemsIntoLines', () => {
     expect(lines[0].indent).toBe(10); // 61/612
   });
 
+  test("continuation suffix printed 1pt above its cue joins the cue line", () => {
+    // IntimacyParty's generator prints "(CONT'D)" as a separate item one
+    // point higher than the character name; exact-Y bucketing split it into
+    // its own line, which then serialized as a stray "(CONT'D)" paragraph.
+    const lines = groupItemsIntoLines(
+      [item("(CONT'D)", 290, 268), item('CLEO', 250, 267), item('You look insanely hot.', 180, 255)],
+      612,
+      1,
+    );
+    expect(lines).toHaveLength(2);
+    expect(lines[0].text).toBe("CLEO (CONT'D)");
+    expect(lines[1].text).toBe('You look insanely hot.');
+  });
+
   test('double-printed text at the same position is deduplicated', () => {
     // Final Draft double-prints (MORE) and (CONT'D) cue lines at identical
     // coordinates; naive joining yields "(MORE)(MORE)".

@@ -67,18 +67,19 @@ export function groupItemsIntoLines(
 
   if (textItems.length === 0) return [];
 
-  // Group items by Y coordinate (same line = same rounded Y)
-  const lineMap = new Map<number, TextItem[]>();
-
-  for (const item of textItems) {
-    const y = Math.round(item.transform[5]);
-    const existing = lineMap.get(y) ?? [];
-    existing.push(item);
-    lineMap.set(y, existing);
+  // Group items by Y coordinate, clustering within a small tolerance —
+  // baselines drift inside one visual line (one generator prints "(CONT'D)"
+  // a point above its cue name) while real line spacing is ~12pt.
+  const Y_TOLERANCE = 2;
+  const clusters: { y: number; items: TextItem[] }[] = [];
+  for (const item of [...textItems].sort((a, b) => b.transform[5] - a.transform[5])) {
+    const last = clusters[clusters.length - 1];
+    if (last && last.y - item.transform[5] <= Y_TOLERANCE) {
+      last.items.push(item);
+    } else {
+      clusters.push({ y: item.transform[5], items: [item] });
+    }
   }
-
-  // Sort lines top-to-bottom (higher Y = higher on page in PDF coords)
-  const sortedYs = [...lineMap.keys()].sort((a, b) => b - a);
 
   // Right-margin zone where revision stars live (Final Draft puts them at
   // ~94% of page width). Star-only items there are production markup, not
@@ -87,16 +88,15 @@ export function groupItemsIntoLines(
   const revisionMarginX = pageWidth * 0.8;
 
   const lines: LineItems[] = [];
-  for (const y of sortedYs) {
+  for (const { y, items: clusterItems } of clusters) {
     // Drop empty items (marked-content markers) and right-margin revision
     // stars — both would corrupt joining/classification below.
-    const lineItems = lineMap
-      .get(y)!
+    const lineItems = clusterItems
       .filter((item) => item.str !== '')
       .filter((item) => !(/^\*+$/.test(item.str) && item.transform[4] >= revisionMarginX));
     if (lineItems.length === 0) continue;
     lineItems.sort((a, b) => a.transform[4] - b.transform[4]);
-    lines.push({ y, items: lineItems });
+    lines.push({ y: Math.round(y), items: lineItems });
   }
 
   return deinterleaveDualDialogue(lines, pageWidth, pageNum);
