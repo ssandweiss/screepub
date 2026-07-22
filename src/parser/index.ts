@@ -3,6 +3,7 @@ import type {
   ScreenplayElement,
   CharacterInfo,
   SceneInfo,
+  RawLine,
 } from './types';
 import { extractLines } from './extract';
 import { groupBlocks } from './group';
@@ -15,14 +16,21 @@ import { suppressBoilerplate } from './boilerplate';
  * Pipeline: extract lines -> group blocks -> classify elements -> detect title pages -> build metadata.
  */
 export async function parse(pdfBytes: Uint8Array): Promise<ParsedScreenplay> {
-  // Element IDs are scoped to this parse() call via a local closure — not a
-  // module-level counter — so concurrent parse() calls (e.g. two screenplays
+  const lines = await extractLines(pdfBytes);
+  return parseLines(lines);
+}
+
+/**
+ * Classify already-extracted lines into a structured screenplay — the pure
+ * post-extraction pipeline, split out so callers that need the raw lines
+ * (e.g. scanned-PDF detection) don't load the PDF twice.
+ */
+export function parseLines(lines: RawLine[]): ParsedScreenplay {
+  // Element IDs are scoped to this call via a local closure — not a
+  // module-level counter — so concurrent calls (e.g. two screenplays
   // uploaded at once) never interleave or reset each other's ID sequence.
   let elementCounter = 0;
   const nextId = () => `elem${elementCounter++}`;
-
-  // Step 1: Extract raw lines from PDF
-  const lines = await extractLines(pdfBytes);
 
   // Step 2: Group into text blocks
   const blocks = groupBlocks(lines);

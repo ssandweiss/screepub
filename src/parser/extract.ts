@@ -1,7 +1,8 @@
 // Ported from nightwatch src/lib/tableread/parser/extract.ts, adapted for
-// headless Bun/Node: legacy pdf.js build, no browser worker.
+// headless Bun/Node: modern pdf.js build + DOM shims, no browser worker.
+import './pdfjs-shims';
 import type { RawLine } from './types';
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { getDocument } from 'pdfjs-dist/build/pdf.mjs';
 
 /**
  * Extract raw lines from a PDF buffer.
@@ -12,6 +13,18 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
  * @param maxPages - if set, only the first N pages are parsed.
  */
 export async function extractLines(pdfBytes: Uint8Array, maxPages?: number): Promise<RawLine[]> {
+  return (await extractDocument(pdfBytes, maxPages)).lines;
+}
+
+/**
+ * Extract lines AND the true page count in a single document load.
+ * NOTE: pdf.js transfers the underlying ArrayBuffer to its worker — the
+ * caller's `pdfBytes` is detached afterwards. Pass a copy if you still need it.
+ */
+export async function extractDocument(
+  pdfBytes: Uint8Array,
+  maxPages?: number,
+): Promise<{ lines: RawLine[]; pageCount: number }> {
   const pdf = await getDocument({ data: pdfBytes }).promise;
   const allLines: RawLine[] = [];
 
@@ -25,7 +38,7 @@ export async function extractLines(pdfBytes: Uint8Array, maxPages?: number): Pro
     allLines.push(...pageLines);
   }
 
-  return allLines;
+  return { lines: allLines, pageCount: pdf.numPages };
 }
 
 interface TextItem {
