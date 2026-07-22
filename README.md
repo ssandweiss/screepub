@@ -1,15 +1,57 @@
 # Screepub
 
-Screenplay PDF → reflowable EPUB3 that reads cleanly on Kindle. Three-stage
-pipeline: **PDF → Fountain → EPUB** — the `.fountain` intermediate is kept as
-a durable, editable artifact.
+Turn a screenplay PDF into something that actually reads well on a Kindle.
 
-The PDF parsing (element classification by normalized indent, boilerplate and
-watermark suppression, shooting-script scene numbers, title-page detection) is
-ported nearly verbatim from nightwatch's table-read parser
-(`nightwatch/src/lib/tableread/parser/`).
+Three-stage pipeline — **PDF → Fountain → EPUB3/MOBI** — with a small Mac
+app on top that converts with one drop and sends straight to a device.
+The `.fountain` intermediate is kept as a durable, editable artifact.
 
-## Usage
+## Why
+
+Consumer converters turn screenplays into walls of text: dialogue loses
+its column, cues detach from speeches, page geometry dies. Screepub
+parses the PDF's *positions* (element classification by indent), rebuilds
+real screenplay structure, and emits reflowable books that keep it at any
+font size.
+
+## The Mac app
+
+`app/dist/Screepub.app` (build: `app/build-app.sh` — SwiftPM + a compiled
+Bun sidecar, no Xcode needed). Drop a PDF (or `.fountain`) on the script-
+page-styled window:
+
+- **Transfer routes:** USB copy to a mounted Kindle (auto-converts to
+  AZW3 via Calibre when installed, else the engine's own MOBI — Kindles
+  never index sideloaded EPUBs), pre-addressed email to your
+  @kindle.com address, or Amazon's Send-to-Kindle app/web.
+- **Settings (⌘, or the gear on the page):** output library folder
+  (default `~/Documents/Screepub`), Kindle email, and a full Formatting
+  tab with a live script-page preview.
+- Guards surface clearly: scanned PDFs, non-screenplays (with Convert
+  Anyway), password-protected files.
+
+## What the conversion gets right
+
+- **Structure by geometry:** indent-based element classification,
+  dual-margin scene numbers, hybrid cues (`CLEO/PANNI`, `COP #2`),
+  revision-star and watermark/boilerplate stripping, Final Draft
+  double-print dedup, `(MORE)`/`(CONT'D)` page-break rejoin.
+- **Dual dialogue** de-interleaved into clean sequential speeches.
+- **Inline bold/italic** carried from PDF font styles into the book
+  (underline isn't detectable in PDFs, but `_markers_` added by hand to
+  the `.fountain` render).
+- **Kindle-safe layout:** dialogue as a centered narrow column (% side
+  margins — Kindle strips `max-width`), em vertical rhythm, cues and
+  scene headings kept with their content across page breaks, scene-level
+  TOC, generated title page.
+- **Optional original-pagination markers** ("47." in the margin) so page
+  count — the industry's evaluation metric — survives reflow.
+
+All formatting behaviors are options (`src/options.ts`), exposed in the
+app's Formatting settings and on the CLI via `--options file.json`.
+The registry with rationale for each: `docs/formatting-options-log.md`.
+
+## CLI
 
 ```bash
 bun src/cli.ts <input.pdf | input.fountain> [options]
@@ -17,54 +59,45 @@ bun src/cli.ts <input.pdf | input.fountain> [options]
 
 | Option | Effect |
 | --- | --- |
-| `-o, --output <file>` | EPUB path (default `<input>.epub`) |
-| `--fountain <file>` | Fountain path (default `<input>.fountain` for PDF input) |
-| `--no-fountain` | skip the intermediate `.fountain` file |
+| `-o, --output <file>` | EPUB path (default `<input>.epub`; companions follow it) |
+| `--mobi` | also write a MOBI 6 (dependency-free USB sideload) |
+| `--fountain <file>` / `--no-fountain` | intermediate `.fountain` control |
+| `--options <file.json>` | formatting knobs (see the registry) |
 | `--title` / `--author` | override detected metadata |
 | `--force` | convert even if it doesn't look like a screenplay |
-| `--debug` | dump classified elements to `<input>.elements.json` |
-
-Scanned/image-only PDFs are rejected with a clear message (no OCR fallback);
-documents with no scene headings *and* no dialogue are rejected unless
-`--force`.
-
-## What the EPUB gets right
-
-- **Em-based indents** — dialogue/parenthetical/cue structure survives any
-  reader font size (fixed-inch indents are what consumer converters get wrong).
-- **Keep-with-next** on character cues and parentheticals — a cue never
-  orphans from its dialogue at a page break.
-- **Centered dialogue column** — the dialogue block mirrors print geometry
-  (narrow centered column, cue and parenthetical indented within it).
-- **Scene-level TOC** — anchored scene sections, plus landmarks; scenes flow
-  continuously instead of forcing a page break per slugline (files split only
-  past a size budget).
-- **Title page** generated from the script's detected title/author.
-- **Page furniture stripped** — page numbers, `(MORE)`/`(CONT'D)` page-break
-  splits rejoined, revision slugs, draft stamps, watermarks.
+| `--json` | machine-readable result (the app↔engine contract) |
+| `--debug` | dump classified elements JSON |
 
 ## Development
 
 ```bash
-bun test          # unit + integration suite
-bunx tsc --noEmit # typecheck
+bun test                    # engine suite (201 tests)
+bunx tsc --noEmit           # typecheck
+app/build-app.sh            # build the Mac app
+(cd app && swift run -c release kit-check)   # Swift-side checks
+epubcheck out.epub          # validate
 ```
 
-Integration tests run against real script PDFs in `fixtures/` (gitignored —
-copy structurally different scripts in; sourced from nightwatch uploads).
-Validate outputs with `epubcheck` (brew-installed), then Kindle Previewer /
-Send-to-Kindle for a device check.
+Integration tests run against real script PDFs in `fixtures/`
+(gitignored — private material, bring your own structurally-different
+scripts). Docs worth reading before changing layout code:
+`docs/screenplay-format-reference.md` (print geometry + what Kindle's
+renderer actually honors) and `docs/adr/` (stack decisions).
 
 ## Architecture
 
 ```
 src/
-  parser/     ported nightwatch parser (extract → group → classify →
-              scene numbers → title pages → boilerplate suppression)
-  fountain/   elements → Fountain text (forcing syntax, (MORE)/(CONT'D) rejoin)
-  epub/       fountain-js tokens → XHTML chapters → EPUB3 (jszip)
-  convert.ts  orchestration + scanned/non-screenplay guards
-  cli.ts      argument parsing and output
+  parser/     PDF → classified elements (ported from nightwatch's
+              table-read parser, heavily extended)
+  fountain/   elements → Fountain (title block, CONT'D normalization,
+              dual-dialogue-safe, styled-text pass-through)
+  epub/       fountain-js tokens → EPUB3 (jszip, options-driven CSS)
+  mobi/       tokens → MOBI 6 (hand-built PalmDB container)
+  options.ts  FormatOptions — the single knob surface
+  convert.ts  orchestration + guards
+  cli.ts      CLI + --json contract
+app/
+  Sources/ScreepubKit/   engine bridge, transfer routes (USB/email/web)
+  Sources/ScreepubApp/   script-page UI + settings with live preview
 ```
-
-Design spec: `docs/superpowers/specs/2026-07-22-screepub-design.md`.

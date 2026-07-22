@@ -31,7 +31,7 @@ struct SettingsView: View {
             FormattingSettings()
                 .tabItem { Label("Formatting", systemImage: "text.alignleft") }
         }
-        .frame(width: 480)
+        .frame(width: 720)
         .padding(.bottom, 8)
     }
 }
@@ -103,6 +103,22 @@ struct FormattingSettings: View {
     @AppStorage("fmtPageMarkers") private var pageMarkers = false
 
     var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            formColumn
+            VStack(alignment: .leading, spacing: 6) {
+                Text("PREVIEW")
+                    .font(Theme.courier(10, .bold))
+                    .kerning(1.2)
+                    .foregroundStyle(Theme.inkFaint)
+                LayoutPreview()
+            }
+            .padding(.vertical, 18)
+            .padding(.trailing, 18)
+            .frame(width: 264)
+        }
+    }
+
+    private var formColumn: some View {
         Form {
             Section("Layout") {
                 slider("Dialogue column margins", value: $dialogueMargin, range: 0...30, unit: "%")
