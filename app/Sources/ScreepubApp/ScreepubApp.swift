@@ -6,7 +6,7 @@ struct ScreepubApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .frame(minWidth: 440, minHeight: 520)
+                .frame(minWidth: 460, minHeight: 560)
                 .onAppear {
                     // Ensure the window fronts when launched from a bare
                     // bundle (no Xcode-generated activation plumbing).
@@ -15,6 +15,7 @@ struct ScreepubApp: App {
                 }
         }
         .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
 
         Settings {
             SettingsView()

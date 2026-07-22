@@ -24,60 +24,31 @@ struct ContentView: View {
             .publisher(for: NSWorkspace.didUnmountNotification))
 
     var body: some View {
-        VStack(spacing: 0) {
-            switch state {
-            case .idle:
-                dropZone
-            case .converting(let name):
-                progressView(name)
-            case .done(let result):
-                resultView(result)
-            case .failed(let code, let message, let input):
-                failureView(code: code, message: message, input: input)
+        ZStack {
+            Theme.paper.ignoresSafeArea()
+            punchHoles
+            pageFurniture
+
+            Group {
+                switch state {
+                case .idle:
+                    titlePage
+                case .converting(let name):
+                    convertingPage(name)
+                case .done(let result):
+                    resultPage(result)
+                case .failed(let code, let message, let input):
+                    failurePage(code: code, message: message, input: input)
+                }
             }
+            .padding(.horizontal, 52)
+            .padding(.top, 44)
+            .padding(.bottom, 24)
         }
-        .padding(28)
-        .frame(width: 440, height: 520)
-        .background(.background)
+        .frame(width: 460, height: 560)
         .onReceive(volumeEvents) { _ in
             kindleVolumes = KindleDevice.mounted()
         }
-    }
-
-    // MARK: - Idle / drop zone
-
-    private var dropZone: some View {
-        VStack(spacing: 18) {
-            Spacer()
-            Image(systemName: "book.pages")
-                .font(.system(size: 56, weight: .light))
-                .foregroundStyle(dropTargeted ? Color.accentColor : .secondary)
-            Text("Drop a screenplay PDF")
-                .font(.title2.weight(.medium))
-            Text("Converts to a reflowable EPUB that reads properly on Kindle — sluglines, cues, and dialogue intact.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Button("Choose PDF…") { choose() }
-                .keyboardShortcut("o")
-            Spacer()
-            if let kindle = kindleVolumes.first {
-                Label("\(KindleDevice.name(of: kindle)) connected", systemImage: "cable.connector")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-            }
-            Text("Also accepts .fountain files")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(
-                    dropTargeted ? Color.accentColor : Color.secondary.opacity(0.35),
-                    style: StrokeStyle(lineWidth: 2, dash: [8, 6])
-                )
-        )
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             guard let provider = providers.first else { return false }
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -86,6 +57,115 @@ struct ContentView: View {
                 }
             }
             return true
+        }
+        .overlay(
+            Rectangle()
+                .strokeBorder(Theme.brass, style: StrokeStyle(lineWidth: 3, dash: [10, 7]))
+                .padding(6)
+                .opacity(dropTargeted ? 1 : 0)
+                .animation(.easeOut(duration: 0.15), value: dropTargeted)
+                .allowsHitTesting(false)
+        )
+    }
+
+    // MARK: - Page furniture
+
+    private var punchHoles: some View {
+        VStack {
+            ForEach(0..<3, id: \.self) { _ in
+                Circle()
+                    .fill(Theme.hole)
+                    .frame(width: 13, height: 13)
+                Spacer()
+            }
+        }
+        .padding(.vertical, 64)
+        .padding(.leading, 18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var pageFurniture: some View {
+        VStack {
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                Spacer()
+                Text(pageNumber)
+                    .font(Theme.courier(12))
+                    .foregroundStyle(Theme.inkFaint)
+                SettingsLink {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.inkFaint)
+                }
+                .buttonStyle(.plain)
+                .help("Settings (⌘,)")
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 26)
+            Spacer()
+        }
+    }
+
+    private var pageNumber: String {
+        switch state {
+        case .idle: return ""
+        case .converting: return "…"
+        case .done(let r): return r.pages.map { "\($0)." } ?? "1."
+        case .failed: return "1."
+        }
+    }
+
+    // MARK: - Idle: the title page
+
+    private var titlePage: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 60)
+            Text("SCREEPUB")
+                .font(Theme.courier(26, .bold))
+                .kerning(4)
+                .foregroundStyle(Theme.ink)
+                .overlay(
+                    Rectangle().fill(Theme.ink).frame(height: 1.4).offset(y: 4),
+                    alignment: .bottom
+                )
+            Text("screenplay · to · kindle")
+                .font(Theme.courier(12))
+                .foregroundStyle(Theme.inkFaint)
+                .padding(.top, 14)
+
+            Spacer(minLength: 36)
+
+            VStack(spacing: 10) {
+                Text("written by")
+                    .font(Theme.courier(12))
+                    .foregroundStyle(Theme.inkFaint)
+                Text("dropping a screenplay PDF here")
+                    .font(Theme.courier(14))
+                    .foregroundStyle(Theme.ink)
+                Button("CHOOSE PDF…") { choose() }
+                    .buttonStyle(MarginButtonStyle())
+                    .keyboardShortcut("o")
+                    .padding(.top, 6)
+            }
+
+            Spacer(minLength: 60)
+
+            HStack(alignment: .bottom) {
+                Text("also accepts\n.fountain files")
+                    .font(Theme.courier(10))
+                    .foregroundStyle(Theme.inkFaint)
+                    .lineSpacing(2)
+                Spacer()
+                if let kindle = kindleVolumes.first {
+                    Text("\(KindleDevice.name(of: kindle).uppercased()) CONNECTED")
+                        .font(Theme.courier(10, .bold))
+                        .kerning(1)
+                        .foregroundStyle(Theme.brass)
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 8)
+                        .overlay(Rectangle().stroke(Theme.brass, lineWidth: 1.2))
+                        .rotationEffect(.degrees(-3))
+                }
+            }
         }
     }
 
@@ -100,120 +180,129 @@ struct ContentView: View {
 
     // MARK: - Converting
 
-    private func progressView(_ name: String) -> some View {
-        VStack(spacing: 16) {
-            Spacer()
+    private func convertingPage(_ name: String) -> some View {
+        VStack(alignment: .leading, spacing: 22) {
+            Slugline(text: "INT. CONVERSION BAY - CONTINUOUS")
+            Text("The pages of \(name) reflow themselves, one scene at a time.")
+                .font(Theme.courier(13))
+                .foregroundStyle(Theme.ink)
+                .lineSpacing(4)
             ProgressView()
-                .controlSize(.large)
-            Text("Converting \(name)…")
-                .font(.headline)
+                .controlSize(.small)
+                .tint(Theme.brass)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 12)
             Spacer()
+            Transition(text: "PLEASE STAND BY:")
         }
     }
 
-    // MARK: - Done
+    // MARK: - Done: the script announces itself
 
-    private func resultView(_ result: EngineResult) -> some View {
-        VStack(spacing: 12) {
-            Spacer(minLength: 0)
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 40))
-                .foregroundStyle(.green)
-            Text(result.title ?? "Converted")
-                .font(.title2.weight(.semibold))
-                .multilineTextAlignment(.center)
-            if let author = result.author {
-                Text("by \(author)")
-                    .foregroundStyle(.secondary)
-            }
-            if let pages = result.pages, let scenes = result.scenes, let chars = result.characters {
-                Text("\(pages) pages · \(scenes) scenes · \(chars) speaking characters")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            if let warnings = result.warnings, !warnings.isEmpty {
-                ForEach(warnings, id: \.self) { w in
-                    Label(w, systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+    private func resultPage(_ result: EngineResult) -> some View {
+        VStack(spacing: 0) {
+            Slugline(text: "INT. YOUR LIBRARY - NIGHT")
+                .padding(.bottom, 18)
+
+            // The converted script gets a speech: cue, parenthetical, dialogue.
+            VStack(spacing: 5) {
+                Text((result.title ?? "Untitled").uppercased())
+                    .font(Theme.courier(15, .bold))
+                    .kerning(1)
+                    .foregroundStyle(Theme.ink)
+                    .multilineTextAlignment(.center)
+                if let author = result.author {
+                    Text("(by \(author))")
+                        .font(Theme.courier(12))
+                        .foregroundStyle(Theme.inkFaint)
+                }
+                if let pages = result.pages, let scenes = result.scenes, let chars = result.characters {
+                    Text("\(pages) pages. \(scenes) scenes.\n\(chars) speaking characters.")
+                        .font(Theme.courier(13))
+                        .foregroundStyle(Theme.ink)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                        .padding(.top, 3)
+                }
+                ForEach(result.warnings ?? [], id: \.self) { w in
+                    Text("(\(w))")
+                        .font(Theme.courier(11))
+                        .foregroundStyle(Theme.brass)
+                        .multilineTextAlignment(.center)
                 }
             }
-            Spacer(minLength: 6)
+            .padding(.horizontal, 24)
+
+            Spacer(minLength: 16)
+
             if let path = result.epubPath {
                 transferButtons(result: result, epub: URL(fileURLWithPath: path), title: result.title)
             }
+
             if let note = transferNote {
-                Text(note)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("(\(note))")
+                    .font(Theme.courier(11))
+                    .foregroundStyle(Theme.inkFaint)
                     .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+                    .padding(.top, 10)
             }
         }
     }
 
     @ViewBuilder
     private func transferButtons(result: EngineResult, epub: URL, title: String?) -> some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 9) {
             if let kindle = kindleVolumes.first {
-                Button {
+                Button("COPY TO \(KindleDevice.name(of: kindle).uppercased()) — USB") {
                     copyToDevice(result: result, epub: epub, volume: kindle)
-                } label: {
-                    Label("Copy to \(KindleDevice.name(of: kindle)) (USB)", systemImage: "cable.connector")
-                        .frame(maxWidth: .infinity)
                 }
-                .controlSize(.large)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(BradButtonStyle())
             }
 
-            let emailButton = Button {
+            Button("EMAIL TO KINDLE…") {
                 emailToKindle(epub, title: title)
-            } label: {
-                Label("Email to Kindle…", systemImage: "envelope")
-                    .frame(maxWidth: .infinity)
             }
-            .controlSize(.large)
-            if kindleVolumes.isEmpty {
-                emailButton.buttonStyle(.borderedProminent)
-            } else {
-                emailButton.buttonStyle(.bordered)
-            }
+            .buttonStyle(kindleVolumes.isEmpty ? AnyButtonStyle(BradButtonStyle()) : AnyButtonStyle(OutlineButtonStyle()))
 
-            HStack {
-                Button(SendToKindle.appIsInstalled ? "Send to Kindle app" : "Send to Kindle (web)") {
-                    SendToKindle.sendViaAmazon(epub)
-                }
-                Button("Show in Finder") {
+            Button(SendToKindle.appIsInstalled ? "SEND TO KINDLE APP" : "SEND TO KINDLE — WEB") {
+                SendToKindle.sendViaAmazon(epub)
+            }
+            .buttonStyle(OutlineButtonStyle())
+
+            HStack(spacing: 22) {
+                Button("SHOW IN FINDER") {
                     NSWorkspace.shared.activateFileViewerSelecting([epub])
                 }
-                Button("Convert Another") {
+                Button("CONVERT ANOTHER") {
                     transferNote = nil
                     state = .idle
                 }
             }
-            .controlSize(.small)
+            .buttonStyle(MarginButtonStyle())
+            .padding(.top, 6)
         }
     }
 
-    // MARK: - Failed
+    // MARK: - Failure
 
-    private func failureView(code: String, message: String, input: URL?) -> some View {
-        VStack(spacing: 14) {
-            Spacer()
-            Image(systemName: "xmark.octagon.fill")
-                .font(.system(size: 44))
-                .foregroundStyle(.red)
-            Text(friendlyTitle(for: code))
-                .font(.title3.weight(.semibold))
+    private func failurePage(code: String, message: String, input: URL?) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Transition(text: "SMASH CUT TO:")
+            Slugline(text: "INT. \(friendlyTitle(for: code)) - DAY")
+                .foregroundStyle(Theme.alarm)
             Text(message)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                .font(Theme.courier(13))
+                .foregroundStyle(Theme.ink)
+                .lineSpacing(4)
             Spacer()
-            HStack {
+            VStack(spacing: 9) {
                 if code == "not-screenplay", let input {
-                    Button("Convert Anyway") { convert(input, force: true) }
+                    Button("CONVERT ANYWAY") { convert(input, force: true) }
+                        .buttonStyle(BradButtonStyle())
                 }
-                Button("Back") { state = .idle }
+                Button("BACK TO ONE") { state = .idle }
+                    .buttonStyle(OutlineButtonStyle())
                     .keyboardShortcut(.cancelAction)
             }
         }
@@ -221,11 +310,11 @@ struct ContentView: View {
 
     private func friendlyTitle(for code: String) -> String {
         switch code {
-        case "scanned": return "This PDF has no text layer"
-        case "not-screenplay": return "This doesn't look like a screenplay"
-        case "password": return "Password-protected PDF"
-        case "engine-missing": return "Converter engine not found"
-        default: return "Conversion failed"
+        case "scanned": return "SCANNED PDF, NO TEXT"
+        case "not-screenplay": return "NOT A SCREENPLAY"
+        case "password": return "LOCKED PDF"
+        case "engine-missing": return "MISSING ENGINE"
+        default: return "CONVERSION TROUBLE"
         }
     }
 
@@ -263,19 +352,16 @@ struct ContentView: View {
     }
 
     private func copyToDevice(result: EngineResult, epub: URL, volume: URL) {
-        // Kindles never index sideloaded EPUBs, so USB copies a native
-        // format: Calibre's AZW3 when available (keeps the full EPUB
-        // styling), else the engine's own MOBI (dependency-free).
         let deviceName = KindleDevice.name(of: volume)
         let mobiPath = result.mobiPath
 
         if EbookConvert.isAvailable {
-            transferNote = "Converting to AZW3 for Kindle…"
+            transferNote = "converting to AZW3 for Kindle…"
         } else if mobiPath == nil {
-            transferNote = "No Kindle-native file available — use Email to Kindle instead."
+            transferNote = "no Kindle-native file available — use Email to Kindle instead"
             return
         } else {
-            transferNote = "Copying MOBI to \(deviceName)…"
+            transferNote = "copying MOBI to \(deviceName)…"
         }
 
         Task {
@@ -292,9 +378,9 @@ struct ContentView: View {
             }.value
             switch outcome {
             case .success(let format):
-                transferNote = "Copied to \(deviceName) as \(format) — eject before unplugging."
+                transferNote = "copied to \(deviceName) as \(format) — eject before unplugging"
             case .failure(let error):
-                transferNote = "Transfer failed: \(error.localizedDescription)"
+                transferNote = "transfer failed: \(error.localizedDescription)"
             }
         }
     }
@@ -302,14 +388,26 @@ struct ContentView: View {
     private func emailToKindle(_ epub: URL, title: String?) {
         let address = kindleEmail.trimmingCharacters(in: .whitespaces)
         guard !address.isEmpty else {
-            transferNote = "Set your @kindle.com address first (Screepub → Settings…)."
+            transferNote = "set your @kindle.com address first — Screepub → Settings"
             openSettings()
             return
         }
         if SendToKindle.email(epub, to: address, title: title) {
-            transferNote = "Mail compose opened — hit Send and it lands on every Kindle on your account."
+            transferNote = "Mail compose opened — hit Send and it lands on every Kindle on your account"
         } else {
-            transferNote = "No mail account available — configure Mail.app, or use the web uploader below."
+            transferNote = "no mail account available — configure Mail.app, or use the web uploader"
         }
+    }
+}
+
+/// Type-erased ButtonStyle so the email button can flip between primary
+/// and secondary depending on whether USB is available.
+struct AnyButtonStyle: ButtonStyle {
+    private let make: (Configuration) -> AnyView
+    init<S: ButtonStyle>(_ style: S) {
+        make = { AnyView(style.makeBody(configuration: $0)) }
+    }
+    func makeBody(configuration: Configuration) -> some View {
+        make(configuration)
     }
 }
