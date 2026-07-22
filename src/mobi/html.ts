@@ -19,6 +19,15 @@ function esc(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** Fountain inline emphasis → old-MOBI tags, applied AFTER escaping. */
+function inline(escaped: string): string {
+  return escaped
+    .replace(/\*\*\*(?!\s)([^*]+?)(?<!\s)\*\*\*/g, '<b><i>$1</i></b>')
+    .replace(/\*\*(?!\s)([^*]+?)(?<!\s)\*\*/g, '<b>$1</b>')
+    .replace(/\*(?!\s)([^*]+?)(?<!\s)\*/g, '<i>$1</i>')
+    .replace(/_(?!\s)([^_]+?)(?<!\s)_/g, '<u>$1</u>');
+}
+
 export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
   const out: string[] = [];
   out.push('<html><head></head><body>');
@@ -49,7 +58,7 @@ export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
       case 'action':
       case 'lyrics':
         closeSpeech();
-        out.push(`<p>${esc(text)}</p>`);
+        out.push(`<p>${inline(esc(text))}</p>`);
         break;
       case 'dialogue_begin':
         speech = [];
@@ -61,7 +70,7 @@ export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
         if (speech) speech.push(`<i>${esc(text)}</i>`);
         break;
       case 'dialogue':
-        if (speech) speech.push(esc(text).replace(/\n/g, '<br/>'));
+        if (speech) speech.push(inline(esc(text)).replace(/\n/g, '<br/>'));
         break;
       case 'dialogue_end':
         closeSpeech();

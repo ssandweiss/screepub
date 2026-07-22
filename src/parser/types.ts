@@ -18,6 +18,8 @@ export interface ScreenplayElement {
   ageValue?: string | number;
   /** Scene number from shooting scripts (e.g., "2.2.", "1A."), attached to scene elements */
   sceneNumber?: string;
+  /** text with fountain emphasis markers from PDF font styles (*i*, **b**) */
+  styledText?: string;
 }
 
 export interface CharacterInfo {
@@ -47,12 +49,15 @@ export interface RawLine {
   indent: number; // 0-100 normalized percentage
   y: number;
   pageNum: number;
+  /** text with fountain emphasis markers, present only when styles differ */
+  styled?: string;
 }
 
 // Grouped text block
 export interface TextBlock {
   lines: RawLine[];
   text: string;
+  styledText?: string;
   indent: number; // first line indent
   minIndent: number;
   maxIndent: number;

@@ -95,10 +95,14 @@ function cleanEllipsis(line: RawLine): RawLine {
 function buildBlock(lines: RawLine[]): TextBlock {
   const text = lines.map((l) => l.text).join(' ');
   const indents = lines.map((l) => l.indent);
+  const styledText = lines.some((l) => l.styled)
+    ? lines.map((l) => l.styled ?? l.text).join(' ')
+    : undefined;
 
   return {
     lines,
     text,
+    styledText,
     indent: lines[0].indent,
     minIndent: Math.min(...indents),
     maxIndent: Math.max(...indents),

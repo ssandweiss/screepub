@@ -58,6 +58,10 @@ span.scene-number {
   font-weight: normal;
 }
 
+span.underline {
+  text-decoration: underline;
+}
+
 p {
   margin: 0;
   text-indent: 0;

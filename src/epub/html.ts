@@ -35,6 +35,15 @@ export function escapeXml(s: string): string {
     .replace(/'/g, '&apos;');
 }
 
+/** Fountain inline emphasis → XHTML, applied AFTER escaping. */
+function inlineEmphasis(escaped: string): string {
+  return escaped
+    .replace(/\*\*\*(?!\s)([^*]+?)(?<!\s)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(?!\s)([^*]+?)(?<!\s)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(?!\s)([^*]+?)(?<!\s)\*/g, '<em>$1</em>')
+    .replace(/_(?!\s)([^_]+?)(?<!\s)_/g, '<span class="underline">$1</span>');
+}
+
 function xhtmlDoc(title: string, body: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
@@ -85,7 +94,7 @@ function renderBlocks(tokens: Token[], format: FormatOptions): string[] {
         break;
       }
       case 'action':
-        emit(`<p class="action">${escapeXml(text)}</p>\n`);
+        emit(`<p class="action">${inlineEmphasis(escapeXml(text))}</p>\n`);
         break;
       case 'dialogue_begin':
         speech = [];
@@ -103,17 +112,17 @@ function renderBlocks(tokens: Token[], format: FormatOptions): string[] {
         // Multi-line speech arrives as one token with embedded newlines
         // (lyrics, verse) — each line becomes its own paragraph.
         for (const line of text.split('\n')) {
-          if (line.trim()) emit(`<p class="dialogue">${escapeXml(line)}</p>\n`, 'dialogue');
+          if (line.trim()) emit(`<p class="dialogue">${inlineEmphasis(escapeXml(line))}</p>\n`, 'dialogue');
         }
         break;
       case 'transition':
         emit(`<p class="transition">${escapeXml(text.replace(/^>\s*/, ''))}</p>\n`);
         break;
       case 'centered':
-        emit(`<p class="centered">${escapeXml(text)}</p>\n`);
+        emit(`<p class="centered">${inlineEmphasis(escapeXml(text))}</p>\n`);
         break;
       case 'lyrics':
-        emit(`<p class="action">${escapeXml(text)}</p>\n`);
+        emit(`<p class="action">${inlineEmphasis(escapeXml(text))}</p>\n`);
         break;
       default:
         // structural/no-render tokens: title page, page breaks, notes, etc.

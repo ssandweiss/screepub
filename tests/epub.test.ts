@@ -240,3 +240,30 @@ describe('cue keep-with-dialogue wrapper', () => {
     );
   });
 });
+
+// ── inline emphasis rendering ────────────────────────────
+
+describe('inline emphasis in XHTML', () => {
+  test('fountain emphasis renders as em/strong/underline', () => {
+    const tokens = new Fountain().parse(
+      'INT. A - DAY\n\nThe sign reads ***DO NOT ENTER*** and **STOP** and *slow* and _underlined_.\n', true,
+    ).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toContain('<strong><em>DO NOT ENTER</em></strong>');
+    expect(file.xhtml).toContain('<strong>STOP</strong>');
+    expect(file.xhtml).toContain('<em>slow</em>');
+    expect(file.xhtml).toContain('<span class="underline">underlined</span>');
+  });
+
+  test('escaping still applies inside emphasized text', () => {
+    const tokens = new Fountain().parse('INT. A - DAY\n\nA *5 < 6* case.\n', true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toContain('<em>5 &lt; 6</em>');
+  });
+
+  test('stray asterisk-free text is untouched', () => {
+    const tokens = new Fountain().parse('INT. A - DAY\n\nPlain 2 * 3 math.\n', true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toContain('Plain 2 * 3 math.');
+  });
+});

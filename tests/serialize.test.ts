@@ -254,3 +254,30 @@ describe('PDF artifact handling', () => {
     expect(out).toBe('@MIDDLE SEAT PASSENGER (V.O.)\nHm.\n');
   });
 });
+
+// ── inline emphasis pass-through ─────────────────────────
+
+describe('styled text emission', () => {
+  test('dialogue and action emit their styled variant', () => {
+    const out = toFountain(
+      screenplay([
+        el({ text: 'The sign reads DANGER.', type: 'action', styledText: 'The sign reads **DANGER**.' }),
+        el({ text: 'JACK', type: 'character', character: 'JACK' }),
+        el({ text: 'I want insurance now.', type: 'dialogue', character: 'JACK', styledText: 'I want *insurance* now.' }),
+      ]),
+    );
+    expect(out).toContain('The sign reads **DANGER**.');
+    expect(out).toContain('I want *insurance* now.');
+  });
+
+  test('parentheticals and cues stay plain (markers would break recognition)', () => {
+    const out = toFountain(
+      screenplay([
+        el({ text: 'JACK', type: 'character', character: 'JACK', styledText: '**JACK**' }),
+        el({ text: '(scream singing)', type: 'parenthetical', character: 'JACK', styledText: '*(scream singing)*' }),
+        el({ text: 'La la la', type: 'dialogue', character: 'JACK' }),
+      ]),
+    );
+    expect(out).toContain('@JACK\n(scream singing)\nLa la la');
+  });
+});

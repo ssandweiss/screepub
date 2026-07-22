@@ -33,6 +33,7 @@ export async function extractDocument(
     const page = await pdf.getPage(pageNum);
     const viewport = page.getViewport({ scale: 1.0 });
     const textContent = await page.getTextContent();
+    await stampFontStyles(page, textContent.items);
 
     const pageLines = groupItemsIntoLines(textContent.items, viewport.width, pageNum);
     allLines.push(...pageLines);
@@ -44,6 +45,9 @@ export async function extractDocument(
 interface TextItem {
   str: string;
   transform: number[];
+  fontName?: string;
+  italic?: boolean;
+  bold?: boolean;
   /** actual rendered width from pdf.js — much more accurate than the
    * len*6 estimate (which false-splits names like "Hoffman" → "Ho ffman") */
   width?: number;
@@ -103,6 +107,45 @@ interface LineItems {
   items: TextItem[];
 }
 
+/**
+ * Mark each item bold/italic from its font's PostScript name (e.g.
+ * "CourierPrime-Italic"). getOperatorList() forces font resolution into
+ * page.commonObjs — getTextContent alone doesn't load fonts. Best-effort:
+ * failures leave items unstyled.
+ */
+async function stampFontStyles(
+  page: { getOperatorList(): Promise<unknown>; commonObjs: { get(id: string): unknown } },
+  items: unknown[],
+): Promise<void> {
+  try {
+    await page.getOperatorList();
+  } catch {
+    return;
+  }
+  const byFont = new Map<string, { italic: boolean; bold: boolean }>();
+  for (const raw of items) {
+    const item = raw as TextItem;
+    if (!item.fontName || byFont.has(item.fontName)) continue;
+    let flags = { italic: false, bold: false };
+    try {
+      const font = page.commonObjs.get(item.fontName) as { name?: string } | null;
+      const name = String(font?.name ?? '');
+      flags = { italic: /italic|oblique/i.test(name), bold: /bold|black|heavy/i.test(name) };
+    } catch {
+      // unresolved font — leave plain
+    }
+    byFont.set(item.fontName, flags);
+  }
+  for (const raw of items) {
+    const item = raw as TextItem;
+    const flags = item.fontName ? byFont.get(item.fontName) : undefined;
+    if (flags) {
+      item.italic = flags.italic;
+      item.bold = flags.bold;
+    }
+  }
+}
+
 /** Join sorted items into text: spaces at >5pt gaps, exact-overlap dedup
  * (Final Draft double-prints (MORE)/(CONT'D) furniture). */
 function joinItems(items: TextItem[]): string {
@@ -127,6 +170,59 @@ function joinItems(items: TextItem[]): string {
   // Items carry their own padding (italic spans especially) — collapse
   // runs so the fountain matches what HTML whitespace-collapsing renders.
   return text.replace(/ {2,}/g, ' ').trim();
+}
+
+const EMPHASIS_MARK: Record<string, string> = { i: '*', b: '**', bi: '***' };
+
+/**
+ * Join a line producing both plain text and (when fonts vary) a styled
+ * variant with fountain emphasis markers. Punctuation-only items never
+ * carry style — a lone italic comma must not become "*,*".
+ */
+function joinLine(items: TextItem[]): { text: string; styled?: string } {
+  interface Run { str: string; gapBefore: boolean; style: string }
+  const runs: Run[] = [];
+  let prevEndX = -1;
+  let prevX = Number.NaN;
+  let prevStr = '';
+  for (const item of items) {
+    const x = item.transform[4];
+    if (item.str === prevStr && Math.abs(x - prevX) < 2) continue;
+    const hasWord = /[\p{L}\p{N}]{2}/u.test(item.str);
+    const style = hasWord ? `${item.bold ? 'b' : ''}${item.italic ? 'i' : ''}` : '';
+    runs.push({ str: item.str, gapBefore: prevEndX >= 0 && x - prevEndX > 5, style });
+    prevEndX = endX(item);
+    prevX = x;
+    prevStr = item.str;
+  }
+
+  let plain = '';
+  for (const r of runs) plain += (r.gapBefore && plain ? ' ' : '') + r.str;
+  plain = plain.replace(/ {2,}/g, ' ').trim();
+  if (!runs.some((r) => r.style)) return { text: plain };
+
+  const groups: { style: string; text: string }[] = [];
+  for (const r of runs) {
+    const piece = (r.gapBefore ? ' ' : '') + r.str;
+    const last = groups[groups.length - 1];
+    if (last && last.style === r.style) last.text += piece;
+    else groups.push({ style: r.style, text: piece });
+  }
+  let styled = '';
+  for (const g of groups) {
+    const clean = g.text.replace(/ {2,}/g, ' ');
+    const core = clean.trim();
+    if (!g.style || !core) {
+      styled += clean;
+      continue;
+    }
+    const mark = EMPHASIS_MARK[g.style] ?? '*';
+    const lead = clean.match(/^\s*/)![0];
+    const trail = clean.match(/\s*$/)![0];
+    styled += `${lead}${mark}${core}${mark}${trail}`;
+  }
+  styled = styled.replace(/ {2,}/g, ' ').trim();
+  return { text: plain, styled: styled !== plain ? styled : undefined };
 }
 
 interface ClusterSplit {
@@ -200,10 +296,12 @@ function deinterleaveDualDialogue(
       // Shooting scripts print the scene number in BOTH margins on the
       // same row — collapse "2   2" / "12A.  12A." to a single token so
       // it classifies and attaches as one scene number.
-      const text = joinItems(lines[i].items).replace(/^(\d+[A-Z]?\.?)\s+\1$/, '$1');
+      const joined = joinLine(lines[i].items);
+      const text = joined.text.replace(/^(\d+[A-Z]?\.?)\s+\1$/, '$1');
       if (text) {
         const indent = Math.round((lines[i].items[0].transform[4] / pageWidth) * 100);
-        out.push({ text, indent, y: lines[i].y, pageNum });
+        const styled = text === joined.text ? joined.styled : undefined;
+        out.push({ text, indent, y: lines[i].y, pageNum, styled });
       }
       i++;
       continue;

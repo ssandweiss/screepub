@@ -177,6 +177,21 @@ future work; everything else is live.
   ("Courtney Ho ffman") and sharpens dual-dialogue boundaries.
 - **Code:** `src/parser/extract.ts` (`endX`).
 
+### 9d. Inline bold/italic pass-through
+- **What:** per-item font styles detected from PostScript names
+  ("CourierPrime-Italic" etc.; getOperatorList forces font resolution —
+  getTextContent alone doesn't load fonts). Styled runs travel as
+  fountain emphasis (*i*, **b**, ***bi***) in a `styledText` variant
+  carried beside plain text; classification always uses plain, and only
+  dialogue/action emit styled (markers would break cue/parenthetical/
+  slug recognition). Rendered as em/strong (EPUB) and i/b (MOBI).
+  Punctuation-only styled items never wrap alone (no "*,*").
+- **Limitation:** underline is drawn as vector graphics in PDFs, not
+  font data — NOT detected. The renderers do support `_underline_`
+  markers, so hand-edits to the .fountain render correctly.
+- **Code:** `src/parser/extract.ts` (`stampFontStyles`, `joinLine`),
+  `src/epub/html.ts` + `src/mobi/html.ts` (`inlineEmphasis`/`inline`).
+
 ### 10a. Dual dialogue — de-interleaved to sequential speeches
 - **What:** simultaneous two-column speeches (Meteor Anne p48, Highland
   ×23 lines) previously interleaved into garbage because extraction joins

@@ -143,13 +143,16 @@ export function toFountain(
         break;
       }
       case 'parenthetical':
-      case 'dialogue':
-        if (block) {
-          block.push(text);
-        } else {
-          out.push(text); // stray dialogue without a cue reads as action
-        }
+        // markers would break "(...)" recognition — always plain
+        if (block) block.push(text);
+        else out.push(text);
         break;
+      case 'dialogue': {
+        const line = (el.styledText ?? el.text).trim();
+        if (block) block.push(line);
+        else out.push(line); // stray dialogue without a cue reads as action
+        break;
+      }
       case 'scene':
         closeBlock();
         lastSpeaker = null;
@@ -160,9 +163,12 @@ export function toFountain(
         lastSpeaker = null;
         out.push(`> ${text}`);
         break;
-      default: // action, mini-slug
+      default: {
+        // action (styled allowed), mini-slug (plain)
         closeBlock();
-        out.push(NEEDS_FORCE.test(text) ? `!${text}` : text);
+        const body = el.type === 'action' ? (el.styledText ?? el.text).trim() : text;
+        out.push(NEEDS_FORCE.test(body) ? `!${body}` : body);
+      }
     }
   }
   closeBlock();

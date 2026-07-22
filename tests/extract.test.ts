@@ -182,3 +182,47 @@ describe('whitespace normalization', () => {
     expect(lines[0].text).toBe('want some insurance that');
   });
 });
+
+describe('inline style detection', () => {
+  const styled = (str: string, x: number, y: number, flags: { italic?: boolean; bold?: boolean }) =>
+    ({ str, transform: [1, 0, 0, 1, x, y], ...flags });
+
+  test('an italic run inside a plain line gains fountain emphasis markers', () => {
+    const lines = groupItemsIntoLines(
+      [styled('want some ', 110, 700, {}), styled('insurance', 220, 700, { italic: true }), styled(' that', 340, 700, {})],
+      612,
+      1,
+    );
+    expect(lines[0].text).toBe('want some insurance that');
+    expect(lines[0].styled).toBe('want some *insurance* that');
+  });
+
+  test('bold and bold-italic runs use ** and ***', () => {
+    const lines = groupItemsIntoLines(
+      [styled('a ', 110, 700, {}), styled('big', 200, 700, { bold: true }), styled(' loud', 300, 700, { bold: true, italic: true })],
+      612,
+      1,
+    );
+    expect(lines[0].styled).toBe('a **big** ***loud***');
+  });
+
+  test('a fully italic line wraps whole', () => {
+    const lines = groupItemsIntoLines([styled('I want you so badly', 200, 700, { italic: true })], 612, 1);
+    expect(lines[0].styled).toBe('*I want you so badly*');
+  });
+
+  test('punctuation-only styled items never wrap alone', () => {
+    const lines = groupItemsIntoLines(
+      [styled('by Levi Light', 110, 700, {}), styled(',', 189, 700, { italic: true }), styled(' the anthem', 195, 700, {})],
+      612,
+      1,
+    );
+    expect(lines[0].text).toBe('by Levi Light, the anthem');
+    expect(lines[0].styled).toBeUndefined();
+  });
+
+  test('uniform plain lines carry no styled variant', () => {
+    const lines = groupItemsIntoLines([styled('Just action.', 110, 700, {})], 612, 1);
+    expect(lines[0].styled).toBeUndefined();
+  });
+});

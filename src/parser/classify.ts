@@ -56,7 +56,7 @@ export function classifyBlock(
 ): ScreenplayElement {
   const { text, indent } = block;
   const id = nextId();
-  const base: ScreenplayElement = { id, type: 'action', text, pageNum: block.pageNum, isTitlePage: false, isReadable: true };
+  const base: ScreenplayElement = { id, type: 'action', text, styledText: block.styledText, pageNum: block.pageNum, isTitlePage: false, isReadable: true };
 
   // Get current character from previous element chain
   const currentCharacter = getActiveCharacter(prevElement);
