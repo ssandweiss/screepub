@@ -1,39 +1,39 @@
 import Foundation
 
 /// Result contract of `screepub --json` (see src/cli.ts).
-struct EngineResult: Codable, Sendable {
-    struct EngineError: Codable, Sendable {
-        let code: String
-        let message: String
+public struct EngineResult: Codable, Sendable {
+    public struct EngineError: Codable, Sendable {
+        public let code: String
+        public let message: String
     }
 
-    let ok: Bool
-    let title: String?
-    let author: String?
-    let pages: Int?
-    let scenes: Int?
-    let characters: Int?
-    let topCharacters: [String]?
-    let warnings: [String]?
-    let epubPath: String?
-    let fountainPath: String?
-    let error: EngineError?
+    public let ok: Bool
+    public let title: String?
+    public let author: String?
+    public let pages: Int?
+    public let scenes: Int?
+    public let characters: Int?
+    public let topCharacters: [String]?
+    public let warnings: [String]?
+    public let epubPath: String?
+    public let fountainPath: String?
+    public let error: EngineError?
 }
 
-enum EngineFailure: Error {
+public enum EngineFailure: Error {
     case notFound
     case badOutput(String)
 }
 
-enum Engine {
+public enum Engine {
     /// Locate the sidecar: bundled Resources first, then the dev fallback
     /// (running via `swift run` from the repo).
-    nonisolated static func binaryURL() -> URL? {
+    nonisolated public static func binaryURL() -> URL? {
         if let bundled = Bundle.main.resourceURL?.appendingPathComponent("screepub-engine"),
            FileManager.default.isExecutableFile(atPath: bundled.path) {
             return bundled
         }
-        let dev = URL(fileURLWithPath: #filePath) // app/Sources/ScreepubApp/Engine.swift
+        let dev = URL(fileURLWithPath: #filePath) // app/Sources/ScreepubKit/Engine.swift
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -45,7 +45,7 @@ enum Engine {
     }
 
     /// Run a conversion. Blocking — call from a background task.
-    nonisolated static func convert(input: URL, force: Bool) throws -> EngineResult {
+    nonisolated public static func convert(input: URL, force: Bool) throws -> EngineResult {
         guard let engine = binaryURL() else { throw EngineFailure.notFound }
 
         let output = input.deletingPathExtension().appendingPathExtension("epub")

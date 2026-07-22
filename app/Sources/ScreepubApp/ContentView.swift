@@ -1,5 +1,7 @@
 import SwiftUI
+import Combine
 import UniformTypeIdentifiers
+import ScreepubKit
 
 enum AppState {
     case idle
@@ -11,6 +13,15 @@ enum AppState {
 struct ContentView: View {
     @State private var state: AppState = .idle
     @State private var dropTargeted = false
+    @State private var kindleVolumes: [URL] = KindleDevice.mounted()
+    @State private var transferNote: String?
+    @AppStorage("kindleEmail") private var kindleEmail = ""
+    @Environment(\.openSettings) private var openSettings
+
+    private let volumeEvents = NSWorkspace.shared.notificationCenter
+        .publisher(for: NSWorkspace.didMountNotification)
+        .merge(with: NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.didUnmountNotification))
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,8 +37,11 @@ struct ContentView: View {
             }
         }
         .padding(28)
-        .frame(width: 440, height: 480)
+        .frame(width: 440, height: 520)
         .background(.background)
+        .onReceive(volumeEvents) { _ in
+            kindleVolumes = KindleDevice.mounted()
+        }
     }
 
     // MARK: - Idle / drop zone
@@ -47,6 +61,11 @@ struct ContentView: View {
             Button("Choose PDF…") { choose() }
                 .keyboardShortcut("o")
             Spacer()
+            if let kindle = kindleVolumes.first {
+                Label("\(KindleDevice.name(of: kindle)) connected", systemImage: "cable.connector")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
             Text("Also accepts .fountain files")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -95,10 +114,10 @@ struct ContentView: View {
     // MARK: - Done
 
     private func resultView(_ result: EngineResult) -> some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             Spacer(minLength: 0)
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 44))
+                .font(.system(size: 40))
                 .foregroundStyle(.green)
             Text(result.title ?? "Converted")
                 .font(.title2.weight(.semibold))
@@ -119,27 +138,59 @@ struct ContentView: View {
                         .foregroundStyle(.orange)
                 }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 6)
             if let path = result.epubPath {
-                VStack(spacing: 10) {
-                    Button {
-                        sendToKindle(URL(fileURLWithPath: path))
-                    } label: {
-                        Label(SendToKindle.appIsInstalled ? "Send to Kindle" : "Send to Kindle (web)…",
-                              systemImage: "paperplane.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .controlSize(.large)
-                    .buttonStyle(.borderedProminent)
+                transferButtons(epub: URL(fileURLWithPath: path), title: result.title)
+            }
+            if let note = transferNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
 
-                    HStack {
-                        Button("Show in Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                        }
-                        Button("Convert Another") { state = .idle }
-                    }
+    @ViewBuilder
+    private func transferButtons(epub: URL, title: String?) -> some View {
+        VStack(spacing: 10) {
+            if let kindle = kindleVolumes.first {
+                Button {
+                    copyToDevice(epub, volume: kindle)
+                } label: {
+                    Label("Copy to \(KindleDevice.name(of: kindle)) (USB)", systemImage: "cable.connector")
+                        .frame(maxWidth: .infinity)
+                }
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+            }
+
+            let emailButton = Button {
+                emailToKindle(epub, title: title)
+            } label: {
+                Label("Email to Kindle…", systemImage: "envelope")
+                    .frame(maxWidth: .infinity)
+            }
+            .controlSize(.large)
+            if kindleVolumes.isEmpty {
+                emailButton.buttonStyle(.borderedProminent)
+            } else {
+                emailButton.buttonStyle(.bordered)
+            }
+
+            HStack {
+                Button(SendToKindle.appIsInstalled ? "Send to Kindle app" : "Send to Kindle (web)") {
+                    SendToKindle.sendViaAmazon(epub)
+                }
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([epub])
+                }
+                Button("Convert Another") {
+                    transferNote = nil
+                    state = .idle
                 }
             }
+            .controlSize(.small)
         }
     }
 
@@ -181,6 +232,7 @@ struct ContentView: View {
     // MARK: - Actions
 
     private func convert(_ url: URL, force: Bool) {
+        transferNote = nil
         state = .converting(url.lastPathComponent)
         Task {
             let outcome: Result<EngineResult, Error> = await Task.detached {
@@ -208,7 +260,26 @@ struct ContentView: View {
         }
     }
 
-    private func sendToKindle(_ epub: URL) {
-        SendToKindle.send(epub)
+    private func copyToDevice(_ epub: URL, volume: URL) {
+        do {
+            try KindleDevice.copy(epub, to: volume)
+            transferNote = "Copied to \(KindleDevice.name(of: volume)) — eject the device before unplugging."
+        } catch {
+            transferNote = "Copy failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func emailToKindle(_ epub: URL, title: String?) {
+        let address = kindleEmail.trimmingCharacters(in: .whitespaces)
+        guard !address.isEmpty else {
+            transferNote = "Set your @kindle.com address first (Screepub → Settings…)."
+            openSettings()
+            return
+        }
+        if SendToKindle.email(epub, to: address, title: title) {
+            transferNote = "Mail compose opened — hit Send and it lands on every Kindle on your account."
+        } else {
+            transferNote = "No mail account available — configure Mail.app, or use the web uploader below."
+        }
     }
 }

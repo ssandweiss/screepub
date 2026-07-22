@@ -13,6 +13,9 @@ echo "── engine (bun build --compile)"
 mkdir -p "$BUILD"
 (cd "$REPO_DIR" && bun build --compile src/cli.ts --outfile "$BUILD/screepub-engine" >/dev/null)
 
+echo "── icon (svg → icns)"
+swift "$APP_DIR/make-icon.swift" "$REPO_DIR/assets/icon.svg" "$BUILD/Screepub.icns"
+
 echo "── shell (swift build -c release)"
 (cd "$APP_DIR" && swift build -c release 2>&1 | tail -2)
 SWIFT_BIN="$(cd "$APP_DIR" && swift build -c release --show-bin-path)/ScreepubApp"
@@ -22,6 +25,7 @@ rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp "$SWIFT_BIN" "$BUNDLE/Contents/MacOS/Screepub"
 cp "$BUILD/screepub-engine" "$BUNDLE/Contents/Resources/screepub-engine"
+cp "$BUILD/Screepub.icns" "$BUNDLE/Contents/Resources/Screepub.icns"
 
 cat > "$BUNDLE/Contents/Info.plist" << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -38,6 +42,7 @@ cat > "$BUNDLE/Contents/Info.plist" << 'PLIST'
   <key>LSMinimumSystemVersion</key>  <string>14.0</string>
   <key>NSPrincipalClass</key>        <string>NSApplication</string>
   <key>NSHighResolutionCapable</key> <true/>
+  <key>CFBundleIconFile</key>        <string>Screepub</string>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
