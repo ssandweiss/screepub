@@ -132,6 +132,24 @@ currently hardcoded and needs surfacing when the app happens.
 - **Default:** always on; not an option (pure artifact fix). Log only.
 - **Code:** `src/parser/extract.ts` (dup check in item join).
 
+### 10a. Dual dialogue — de-interleaved to sequential speeches
+- **What:** simultaneous two-column speeches (Meteor Anne p48, Highland
+  ×23 lines) previously interleaved into garbage because extraction joins
+  by Y line. Now: a dual-cue line (two cue-shaped clusters) anchors a
+  region; the column boundary starts at rightCueX−13% and refines only
+  LEFTWARD to the right column's text edge (parentheticals sit deeper and
+  must not drag it); body lines partition by start-x; regions end on a
+  full-width (straddling) line, a cue-shaped left-only line, text left of
+  the learned column edge, or a new dual-cue pair. Columns emit as left
+  speech then right speech — the standard reflowable treatment.
+- **Default:** on (correctness fix, not optional).
+- **App option (future):** "Dual dialogue: sequential / side-by-side" —
+  side-by-side needs Fountain `^` marking plus a two-cell table or
+  inline-block rendering; KF8 tables make this feasible on Kindle but
+  it's unbuilt. Known limitation: a short action line immediately after a
+  dual block with no intervening cue can absorb into the left speech.
+- **Code:** `src/parser/extract.ts` (`deinterleaveDualDialogue`).
+
 ## Metadata & navigation
 
 ### 11. Generated title page

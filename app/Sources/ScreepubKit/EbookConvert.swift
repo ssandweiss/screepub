@@ -32,31 +32,42 @@ public enum EbookConvert {
 
     nonisolated public static var isAvailable: Bool { toolURL() != nil }
 
-    /// Convert an EPUB to AZW3 next to it. Reuses an existing .azw3 that is
-    /// newer than the EPUB. Blocking — call from a background task.
+    /// Calibre would otherwise undo two Screepub decisions during EPUB→AZW3:
+    /// it inserts page-break-before on every h2 (scene-per-page again) and
+    /// strips percentage side margins from divs (dialogue column collapses
+    /// to full width). Flags disable the inserted breaks; em-based extra-css
+    /// restores the dialogue geometry (em survives Calibre's flattening and
+    /// renders reliably on older KF8 firmware).
+    private static let extraCss = """
+        .dialogue-block { margin-left: 4em; margin-right: 2em; }
+        p.character { margin-left: 5em; }
+        p.parenthetical { margin-left: 2em; margin-right: 2em; }
+        h2.scene-heading { page-break-before: auto; }
+        """
+
+    /// Convert an EPUB to AZW3 next to it (~1s; no caching — a stale cache
+    /// would outlive conversion-recipe changes). Blocking — call from a
+    /// background task.
     @discardableResult
     nonisolated public static func toAzw3(_ epub: URL) throws -> URL {
         guard let tool = toolURL() else { throw ConvertError.calibreMissing }
         let azw3 = epub.deletingPathExtension().appendingPathExtension("azw3")
 
-        let fm = FileManager.default
-        if fm.fileExists(atPath: azw3.path),
-           let azw3Date = try? azw3.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
-           let epubDate = try? epub.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
-           azw3Date > epubDate {
-            return azw3
-        }
-
         let process = Process()
         process.executableURL = tool
-        process.arguments = [epub.path, azw3.path]
+        process.arguments = [
+            epub.path, azw3.path,
+            "--page-breaks-before=/",
+            "--chapter-mark=none",
+            "--extra-css", extraCss,
+        ]
         let stderr = Pipe()
         process.standardOutput = Pipe()
         process.standardError = stderr
         try process.run()
         process.waitUntilExit()
 
-        guard process.terminationStatus == 0, fm.fileExists(atPath: azw3.path) else {
+        guard process.terminationStatus == 0, FileManager.default.fileExists(atPath: azw3.path) else {
             let detail = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? "no error output"
             throw ConvertError.failed(String(detail.suffix(300)))

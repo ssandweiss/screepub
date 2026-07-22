@@ -61,6 +61,80 @@ describe('groupItemsIntoLines', () => {
     expect(lines[0].text).toBe('***THIS SCENE IS FILMED***');
   });
 
+  test('dual dialogue de-interleaves into left speech then right speech', () => {
+    // p48 of Meteor Anne: MELVIN ‖ ANNE speaking simultaneously in two
+    // columns. Naive Y-joining interleaves the columns into garbage.
+    const lines = groupItemsIntoLines(
+      [
+        item('MELVIN', 180, 700), item('ANNE', 400, 700),
+        item('try this again.', 150, 688), item('maybe if you got better', 380, 688),
+        item('at lying.', 380, 676), // right column runs one line longer
+        item('They stare at each other.', 108, 640), // back to normal action
+      ],
+      612,
+      1,
+    );
+    expect(lines.map((l) => l.text)).toEqual([
+      'MELVIN',
+      'try this again.',
+      'ANNE',
+      'maybe if you got better',
+      'at lying.',
+      'They stare at each other.',
+    ]);
+    expect(lines[0].indent).toBe(40); // cue zone
+    expect(lines[1].indent).toBe(30); // dialogue zone
+    expect(lines[2].indent).toBe(40);
+    expect(lines[4].indent).toBe(30);
+  });
+
+  test('dual body lines with narrow gaps still split at the cue-anchored boundary', () => {
+    // Real Meteor Anne p48 failure: long dialogue lines close the
+    // inter-column gap, so splitting must use the boundary fixed by the
+    // dual-cue line, not per-line gap detection.
+    const lines = groupItemsIntoLines(
+      [
+        item('MELVIN', 180, 700), item('ANNE', 400, 700),
+        item("Let's go to break and we'll", 150, 688), item('Huh? Yes a slight delay.', 340, 688),
+      ],
+      612,
+      1,
+    );
+    expect(lines.map((l) => l.text)).toEqual([
+      'MELVIN',
+      "Let's go to break and we'll",
+      'ANNE',
+      'Huh? Yes a slight delay.',
+    ]);
+  });
+
+  test('a second dual-cue pair starts a new pair of speeches', () => {
+    const lines = groupItemsIntoLines(
+      [
+        item('MELVIN', 180, 700), item('ANNE', 400, 700),
+        item('try this again.', 150, 688), item('maybe if you got', 380, 688),
+        item("MELVIN (CONT'D)", 170, 664), item('ANNE', 400, 664),
+        item('No. Stop.', 150, 652), item('You stop!', 380, 652),
+      ],
+      612,
+      1,
+    );
+    expect(lines.map((l) => l.text)).toEqual([
+      'MELVIN', 'try this again.', 'ANNE', 'maybe if you got',
+      "MELVIN (CONT'D)", 'No. Stop.', 'ANNE', 'You stop!',
+    ]);
+  });
+
+  test('two-column title-page furniture is not treated as dual dialogue', () => {
+    const lines = groupItemsIntoLines(
+      [item('646-761-2994', 72, 700), item('October 28, 2024', 400, 700)],
+      612,
+      1,
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0].text).toBe('646-761-2994 October 28, 2024');
+  });
+
   test('legitimately repeated words at different positions are kept', () => {
     const lines = groupItemsIntoLines(
       [item('No.', 100, 700), item('No.', 140, 700)],
