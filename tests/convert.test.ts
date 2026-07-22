@@ -54,7 +54,7 @@ describe('convertFountain', () => {
     expect(result.meta.title).toBe('Direct Input');
     expect(result.meta.author).toBe('Someone');
     const zip = await JSZip.loadAsync(result.epub);
-    const ch = await zip.file('OEBPS/text/ch001.xhtml')!.async('string');
+    const ch = await zip.file('OEBPS/text/body001.xhtml')!.async('string');
     expect(ch).toContain('INT. VOID - DAY');
     expect(ch).toContain('<p class="character">VOICE</p>');
   });

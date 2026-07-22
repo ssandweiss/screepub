@@ -1,7 +1,7 @@
 // EPUB3 packaging: OCF zip with mimetype first (stored), package.opf,
 // nav.xhtml TOC from scene chapters, generated title page.
 import JSZip from 'jszip';
-import type { Chapter } from './html';
+import type { BookBody } from './html';
 import { escapeXml } from './html';
 import { SCREENPLAY_CSS } from './css';
 
@@ -23,11 +23,11 @@ function containerXml(): string {
 `;
 }
 
-function packageOpf(meta: BookMeta, chapters: Chapter[], modified: string): string {
-  const manifest = chapters
-    .map((c) => `    <item id="${c.id}" href="text/${c.id}.xhtml" media-type="application/xhtml+xml"/>`)
+function packageOpf(meta: BookMeta, body: BookBody, modified: string): string {
+  const manifest = body.files
+    .map((f) => `    <item id="${f.id}" href="text/${f.id}.xhtml" media-type="application/xhtml+xml"/>`)
     .join('\n');
-  const spine = chapters.map((c) => `    <itemref idref="${c.id}"/>`).join('\n');
+  const spine = body.files.map((f) => `    <itemref idref="${f.id}"/>`).join('\n');
   const creator = meta.author ? `    <dc:creator>${escapeXml(meta.author)}</dc:creator>\n` : '';
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -52,9 +52,9 @@ ${spine}
 `;
 }
 
-function navXhtml(meta: BookMeta, chapters: Chapter[]): string {
-  const items = chapters
-    .map((c) => `      <li><a href="text/${c.id}.xhtml">${escapeXml(c.title)}</a></li>`)
+function navXhtml(meta: BookMeta, body: BookBody): string {
+  const items = body.toc
+    .map((e) => `      <li><a href="${e.href}">${escapeXml(e.title)}</a></li>`)
     .join('\n');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -74,7 +74,7 @@ ${items}
 <nav epub:type="landmarks" hidden="hidden">
   <ol>
     <li><a epub:type="titlepage" href="titlepage.xhtml">Title Page</a></li>
-    <li><a epub:type="bodymatter" href="text/${chapters[0]?.id ?? 'ch001'}.xhtml">Begin Reading</a></li>
+    <li><a epub:type="bodymatter" href="text/${body.files[0]?.id ?? 'body001'}.xhtml">Begin Reading</a></li>
   </ol>
 </nav>
 </body>
@@ -103,7 +103,7 @@ ${author}</section>
 }
 
 /** Assemble a complete EPUB3 file. */
-export async function buildEpub(meta: BookMeta, chapters: Chapter[]): Promise<Uint8Array> {
+export async function buildEpub(meta: BookMeta, body: BookBody): Promise<Uint8Array> {
   const resolved: BookMeta = {
     identifier: `urn:uuid:${crypto.randomUUID()}`,
     ...meta,
@@ -114,12 +114,12 @@ export async function buildEpub(meta: BookMeta, chapters: Chapter[]): Promise<Ui
   // OCF: mimetype must be the first entry and stored uncompressed.
   zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
   zip.file('META-INF/container.xml', containerXml());
-  zip.file('OEBPS/package.opf', packageOpf(resolved, chapters, modified));
-  zip.file('OEBPS/nav.xhtml', navXhtml(resolved, chapters));
+  zip.file('OEBPS/package.opf', packageOpf(resolved, body, modified));
+  zip.file('OEBPS/nav.xhtml', navXhtml(resolved, body));
   zip.file('OEBPS/style.css', SCREENPLAY_CSS);
   zip.file('OEBPS/titlepage.xhtml', titlePageXhtml(resolved));
-  for (const c of chapters) {
-    zip.file(`OEBPS/text/${c.id}.xhtml`, c.xhtml);
+  for (const f of body.files) {
+    zip.file(`OEBPS/text/${f.id}.xhtml`, f.xhtml);
   }
 
   return zip.generateAsync({

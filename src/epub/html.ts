@@ -1,14 +1,28 @@
-// fountain-js tokens → XHTML chapters, one chapter per scene heading.
+// fountain-js tokens → XHTML body files. Scenes flow continuously as
+// anchored <section>s inside one file — a spine boundary forces a page break
+// in every reader, so files split only when a size budget is exceeded.
 import type { Token } from 'fountain-js';
 
-export interface Chapter {
-  /** filename-safe id, e.g. "ch001" */
+export interface BodyFile {
+  /** filename-safe id, e.g. "body001" */
   id: string;
-  /** TOC label — scene heading text */
-  title: string;
   /** complete XHTML document */
   xhtml: string;
 }
+
+export interface TocEntry {
+  title: string;
+  /** href relative to OEBPS/, e.g. "text/body001.xhtml#sc-001" */
+  href: string;
+}
+
+export interface BookBody {
+  files: BodyFile[];
+  toc: TocEntry[];
+}
+
+/** Keep each body file comfortably under Kindle's per-flow size warnings. */
+const DEFAULT_MAX_FILE_BYTES = 250_000;
 
 export function escapeXml(s: string): string {
   return s
@@ -33,7 +47,7 @@ ${body}</body>
 `;
 }
 
-/** Render body tokens (no title-page tokens) of one chapter. */
+/** Render body tokens (no title-page tokens) of one scene section. */
 function renderTokens(tokens: Token[]): string {
   const out: string[] = [];
   let inDialogue = false;
@@ -82,12 +96,22 @@ function renderTokens(tokens: Token[]): string {
   return out.join('');
 }
 
+interface SceneSection {
+  anchor: string;
+  title: string;
+  html: string;
+}
+
 /**
- * Split body tokens at scene headings, one chapter each. Content before the
- * first heading becomes an "Opening" chapter; a script with no headings
- * yields a single chapter.
+ * Split body tokens into anchored scene sections, then pack sections into
+ * as few files as the size budget allows. Content before the first scene
+ * heading becomes an "Opening" section.
  */
-export function tokensToChapters(tokens: Token[]): Chapter[] {
+export function tokensToBody(
+  tokens: Token[],
+  opts: { maxFileBytes?: number } = {},
+): BookBody {
+  const maxBytes = opts.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
   const body = tokens.filter((t) => !t.is_title);
 
   const groups: { title: string; tokens: Token[] }[] = [];
@@ -106,8 +130,38 @@ export function tokensToChapters(tokens: Token[]): Chapter[] {
     }
   }
 
-  return groups.map((g, i) => {
-    const id = `ch${String(i + 1).padStart(3, '0')}`;
-    return { id, title: g.title, xhtml: xhtmlDoc(g.title, renderTokens(g.tokens)) };
+  const sections: SceneSection[] = groups.map((g, i) => {
+    const anchor = `sc-${String(i + 1).padStart(3, '0')}`;
+    return {
+      anchor,
+      title: g.title,
+      html: `<section class="scene" id="${anchor}">\n${renderTokens(g.tokens)}</section>\n`,
+    };
   });
+
+  // Pack sections into files, starting a new file only when the budget
+  // would be exceeded (a file always holds at least one section).
+  const files: BodyFile[] = [];
+  const toc: TocEntry[] = [];
+  let pending: SceneSection[] = [];
+  let pendingBytes = 0;
+
+  const flush = () => {
+    if (pending.length === 0) return;
+    const id = `body${String(files.length + 1).padStart(3, '0')}`;
+    for (const s of pending) toc.push({ title: s.title, href: `text/${id}.xhtml#${s.anchor}` });
+    files.push({ id, xhtml: xhtmlDoc(pending[0].title, pending.map((s) => s.html).join('')) });
+    pending = [];
+    pendingBytes = 0;
+  };
+
+  for (const s of sections) {
+    const size = Buffer.byteLength(s.html, 'utf8');
+    if (pending.length > 0 && pendingBytes + size > maxBytes) flush();
+    pending.push(s);
+    pendingBytes += size;
+  }
+  flush();
+
+  return { files, toc };
 }

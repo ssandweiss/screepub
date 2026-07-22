@@ -5,7 +5,7 @@ import { extractDocument } from './parser/extract';
 import { parseLines } from './parser/index';
 import type { ParsedScreenplay } from './parser/types';
 import { extractTitleMeta, toFountain, type TitleMeta } from './fountain/serialize';
-import { tokensToChapters } from './epub/html';
+import { tokensToBody } from './epub/html';
 import { buildEpub, type BookMeta } from './epub/build';
 
 /** Below this many text lines per page, the PDF has no usable text layer. */
@@ -55,8 +55,8 @@ function resolveMeta(detected: TitleMeta, opts: ConvertOptions): BookMeta {
 
 function renderEpub(fountainText: string, meta: BookMeta) {
   const { tokens } = new Fountain().parse(fountainText, true);
-  const chapters = tokensToChapters(tokens);
-  return buildEpub(meta, chapters);
+  const body = tokensToBody(tokens);
+  return buildEpub(meta, body);
 }
 
 /** Full pipeline for a screenplay PDF. */
@@ -99,7 +99,7 @@ export async function convertFountain(
     author: tokens.find((t) => t.type === 'author' || t.type === 'authors')?.text,
   };
   const meta = resolveMeta(detected, opts);
-  const epub = await buildEpub(meta, tokensToChapters(tokens));
+  const epub = await buildEpub(meta, tokensToBody(tokens));
 
   return { epub, fountainText, screenplay: null, meta, warnings: [] };
 }

@@ -34,7 +34,11 @@ documents with no scene headings *and* no dialogue are rejected unless
   reader font size (fixed-inch indents are what consumer converters get wrong).
 - **Keep-with-next** on character cues and parentheticals — a cue never
   orphans from its dialogue at a page break.
-- **Scene-level TOC** — one chapter per slugline, plus landmarks.
+- **Centered dialogue column** — the dialogue block mirrors print geometry
+  (narrow centered column, cue and parenthetical indented within it).
+- **Scene-level TOC** — anchored scene sections, plus landmarks; scenes flow
+  continuously instead of forcing a page break per slugline (files split only
+  past a size budget).
 - **Title page** generated from the script's detected title/author.
 - **Page furniture stripped** — page numbers, `(MORE)`/`(CONT'D)` page-break
   splits rejoined, revision slugs, draft stamps, watermarks.

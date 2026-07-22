@@ -30,49 +30,56 @@ p {
 }
 
 p.action {
-  margin: 0.8em 0;
+  margin: 1em 0;
 }
 
 p.mini-slug {
   font-weight: bold;
   text-transform: uppercase;
-  margin: 1.2em 0 0.6em 0;
+  margin: 1.4em 0 1em 0;
   page-break-after: avoid;
   break-after: avoid;
 }
 
+/* Print geometry, reflowed: dialogue is a narrow column centered on the
+   page (2.5"-margin column on paper), with the cue and parenthetical
+   indented WITHIN that column (cue +1.2", parenthetical +0.5" in print;
+   ≈7em / 3em in 12pt Courier). max-width degrades gracefully on phones. */
 .dialogue-block {
-  margin: 0.8em 0;
+  margin-top: 1em;
+  margin-bottom: 1em;
+  margin-left: auto;
+  margin-right: auto;
+  max-width: 21em;
 }
 
 /* A cue must never orphan from its dialogue at a page break. */
 p.character {
-  margin-left: 3.5em;
+  margin-left: 7em;
   page-break-after: avoid;
   break-after: avoid;
 }
 
 p.parenthetical {
-  margin-left: 2.5em;
-  margin-right: 1.5em;
+  margin-left: 3em;
+  margin-right: 3em;
   page-break-after: avoid;
   break-after: avoid;
 }
 
 p.dialogue {
-  margin-left: 1.5em;
-  margin-right: 1em;
+  margin: 0;
 }
 
 p.transition {
   text-align: right;
   text-transform: uppercase;
-  margin: 0.8em 0;
+  margin: 1em 0;
 }
 
 p.centered {
   text-align: center;
-  margin: 0.8em 0;
+  margin: 1em 0;
 }
 
 /* Title page */
