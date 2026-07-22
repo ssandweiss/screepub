@@ -215,3 +215,42 @@ describe('fountain-js round-trip', () => {
     expect(cue.text).toBe('JACK (V.O.)');
   });
 });
+
+// ── regression: real-PDF artifacts ───────────────────────
+
+describe('PDF artifact handling', () => {
+  test('(MORE) is dropped regardless of classified type', () => {
+    const out = toFountain(
+      screenplay([
+        el({ text: 'JACK', type: 'character', character: 'JACK' }),
+        el({ text: 'Speech before break', type: 'dialogue', character: 'JACK' }),
+        el({ text: '(MORE)', type: 'action' }),
+        el({ text: "JACK (CONT'D)", type: 'character', character: 'JACK' }),
+        el({ text: 'speech after break.', type: 'dialogue', character: 'JACK' }),
+      ]),
+    );
+    expect(out).toBe('@JACK\nSpeech before break\nspeech after break.\n');
+  });
+
+  test("curly-apostrophe (CONT’D) cue merges across page break", () => {
+    const out = toFountain(
+      screenplay([
+        el({ text: 'MIKE', type: 'character', character: 'MIKE' }),
+        el({ text: 'First part', type: 'dialogue', character: 'MIKE' }),
+        el({ text: 'MIKE (CONT’D)', type: 'character', character: 'MIKE' }),
+        el({ text: 'second part.', type: 'dialogue', character: 'MIKE' }),
+      ]),
+    );
+    expect(out).toBe('@MIKE\nFirst part\nsecond part.\n');
+  });
+
+  test('cue internal whitespace is normalized', () => {
+    const out = toFountain(
+      screenplay([
+        el({ text: 'MIDDLE SEAT  PASSENGER  (V.O.)', type: 'character', character: 'MIDDLE SEAT PASSENGER' }),
+        el({ text: 'Hm.', type: 'dialogue', character: 'MIDDLE SEAT PASSENGER' }),
+      ]),
+    );
+    expect(out).toBe('@MIDDLE SEAT PASSENGER (V.O.)\nHm.\n');
+  });
+});

@@ -10,7 +10,7 @@ export interface TitleMeta {
 
 const BY_LINE = /\b(written by|screenplay by|by)\b/i;
 const MORE_PAREN = /^\(\s*MORE\s*\)$/i;
-const CONTD = /\(\s*CONT'?D\.?\s*\)/i;
+const CONTD = /\(\s*CONT['’]?D\.?\s*\)/i;
 // Leading chars that carry Fountain meaning at line start; ! forces action.
 const NEEDS_FORCE = /^[!.>=~@#]/;
 
@@ -64,7 +64,9 @@ function isBody(el: ScreenplayElement): boolean {
  * 3. demote cues with no following dialogue to action.
  */
 function prepare(elements: ScreenplayElement[]): ScreenplayElement[] {
-  const body = elements.filter(isBody).filter((el) => !(el.type === 'parenthetical' && MORE_PAREN.test(el.text)));
+  // "(MORE)" page-break markers can classify as parenthetical, action, or
+  // dialogue depending on the template's indents — drop them by text alone.
+  const body = elements.filter(isBody).filter((el) => !MORE_PAREN.test(el.text.trim()));
 
   const merged: ScreenplayElement[] = [];
   for (const el of body) {
@@ -119,7 +121,7 @@ export function toFountain(screenplay: ParsedScreenplay, meta?: TitleMeta): stri
     switch (el.type) {
       case 'character':
         closeBlock();
-        block = [`@${text}`];
+        block = [`@${text.replace(/\s+/g, ' ')}`];
         break;
       case 'parenthetical':
       case 'dialogue':

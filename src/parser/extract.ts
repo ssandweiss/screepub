@@ -46,7 +46,7 @@ interface TextItem {
   transform: number[];
 }
 
-function groupItemsIntoLines(
+export function groupItemsIntoLines(
   items: unknown[],
   pageWidth: number,
   pageNum: number
@@ -74,22 +74,34 @@ function groupItemsIntoLines(
   const lines: RawLine[] = [];
 
   for (const y of sortedYs) {
-    const lineItems = lineMap.get(y)!;
+    // Drop empty items (marked-content markers) — they carry no text and
+    // would break duplicate-adjacency detection below.
+    const lineItems = lineMap.get(y)!.filter((item) => item.str !== '');
+    if (lineItems.length === 0) continue;
     // Sort items left-to-right by X position
     lineItems.sort((a, b) => a.transform[4] - b.transform[4]);
 
     // Join items into text, inserting space for gaps > 5 points
     let text = '';
     let prevEndX = -1;
+    let prevX = Number.NaN;
+    let prevStr = '';
 
     for (const item of lineItems) {
       const x = item.transform[4];
+      // Double-printed text (Final Draft renders (MORE)/(CONT'D) lines twice
+      // at identical coordinates) — drop the exact-overlap duplicate.
+      if (item.str === prevStr && Math.abs(x - prevX) < 2) {
+        continue;
+      }
       if (prevEndX >= 0 && x - prevEndX > 5) {
         text += ' ';
       }
       text += item.str;
       // Approximate end X (rough, but works for gap detection)
       prevEndX = x + item.str.length * 6;
+      prevX = x;
+      prevStr = item.str;
     }
 
     text = text.trim();
