@@ -76,8 +76,8 @@ currently hardcoded and needs surfacing when the app happens.
   unbreakable chunk a renderer pushes to the next page, and pushed
   chunks show up as occasional blank-bottom "weird page breaks."
 - **Default:** heading + cue avoid; parenthetical breaks freely.
-- **App options:** "Keep scene heading with scene" toggle (dropping it
-  is the next lever if gaps persist on e-ink); cue avoid stays always-on.
+- **App options:** none — cue avoid stays always-on; the heading behavior
+  is governed by 5a's keep-together wrapper.
 - **Code:** `src/epub/css.ts`.
 
 ### 6. Typeface & line height (v2)
