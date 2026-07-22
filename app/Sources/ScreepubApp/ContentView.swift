@@ -140,7 +140,7 @@ struct ContentView: View {
             }
             Spacer(minLength: 6)
             if let path = result.epubPath {
-                transferButtons(epub: URL(fileURLWithPath: path), title: result.title)
+                transferButtons(result: result, epub: URL(fileURLWithPath: path), title: result.title)
             }
             if let note = transferNote {
                 Text(note)
@@ -152,11 +152,11 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func transferButtons(epub: URL, title: String?) -> some View {
+    private func transferButtons(result: EngineResult, epub: URL, title: String?) -> some View {
         VStack(spacing: 10) {
             if let kindle = kindleVolumes.first {
                 Button {
-                    copyToDevice(epub, volume: kindle)
+                    copyToDevice(result: result, epub: epub, volume: kindle)
                 } label: {
                     Label("Copy to \(KindleDevice.name(of: kindle)) (USB)", systemImage: "cable.connector")
                         .frame(maxWidth: .infinity)
@@ -260,26 +260,37 @@ struct ContentView: View {
         }
     }
 
-    private func copyToDevice(_ epub: URL, volume: URL) {
-        // Kindles ignore sideloaded EPUBs — USB copies must be AZW3.
-        guard EbookConvert.isAvailable else {
-            transferNote = "Kindle can't index a sideloaded EPUB, and Calibre "
-                + "(whose ebook-convert makes the AZW3) isn't installed — "
-                + "use Email to Kindle instead, or install Calibre."
-            return
-        }
-        transferNote = "Converting to AZW3 for Kindle…"
+    private func copyToDevice(result: EngineResult, epub: URL, volume: URL) {
+        // Kindles never index sideloaded EPUBs, so USB copies a native
+        // format: Calibre's AZW3 when available (keeps the full EPUB
+        // styling), else the engine's own MOBI (dependency-free).
         let deviceName = KindleDevice.name(of: volume)
+        let mobiPath = result.mobiPath
+
+        if EbookConvert.isAvailable {
+            transferNote = "Converting to AZW3 for Kindle…"
+        } else if mobiPath == nil {
+            transferNote = "No Kindle-native file available — use Email to Kindle instead."
+            return
+        } else {
+            transferNote = "Copying MOBI to \(deviceName)…"
+        }
+
         Task {
-            let outcome: Result<URL, Error> = await Task.detached {
+            let outcome: Result<String, Error> = await Task.detached {
                 Result {
-                    let azw3 = try EbookConvert.toAzw3(epub)
-                    return try KindleDevice.copy(azw3, to: volume)
+                    if EbookConvert.isAvailable {
+                        let azw3 = try EbookConvert.toAzw3(epub)
+                        try KindleDevice.copy(azw3, to: volume)
+                        return "AZW3"
+                    }
+                    try KindleDevice.copy(URL(fileURLWithPath: mobiPath!), to: volume)
+                    return "MOBI"
                 }
             }.value
             switch outcome {
-            case .success:
-                transferNote = "Copied to \(deviceName) as AZW3 — eject before unplugging."
+            case .success(let format):
+                transferNote = "Copied to \(deviceName) as \(format) — eject before unplugging."
             case .failure(let error):
                 transferNote = "Transfer failed: \(error.localizedDescription)"
             }

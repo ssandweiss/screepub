@@ -23,6 +23,7 @@ Options:
   --title <text>         override detected title
   --author <text>        override detected author
   --force                convert even if it doesn't look like a screenplay
+  --mobi                 also write <input>.mobi (for USB sideload to Kindle)
   --json                 machine-readable result on stdout (for the app)
   --debug                also dump classified elements to <input>.elements.json
   -h, --help             show this help
@@ -55,6 +56,7 @@ async function main() {
       title: { type: 'string' },
       author: { type: 'string' },
       force: { type: 'boolean', default: false },
+      mobi: { type: 'boolean', default: false },
       json: { type: 'boolean', default: false },
       debug: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
@@ -75,7 +77,7 @@ async function main() {
   const stem = join(dirname(input), basename(input, extname(input)));
   const epubPath = values.output ?? `${stem}.epub`;
 
-  const opts = { title: values.title, author: values.author, force: values.force };
+  const opts = { title: values.title, author: values.author, force: values.force, mobi: values.mobi };
 
   let result: ConvertResult;
   const isPdf = ext === '.pdf';
@@ -108,6 +110,12 @@ async function main() {
 
   await writeFile(epubPath, result.epub);
 
+  let mobiPath: string | undefined;
+  if (values.mobi && result.mobi) {
+    mobiPath = `${stem}.mobi`;
+    await writeFile(mobiPath, result.mobi);
+  }
+
   let fountainPath: string | undefined;
   if (isPdf && !values['no-fountain']) {
     fountainPath = values.fountain ?? `${stem}.fountain`;
@@ -132,6 +140,7 @@ async function main() {
         topCharacters: sp?.characters.slice(0, 5).map((c) => c.name) ?? [],
         warnings: result.warnings,
         epubPath,
+        mobiPath,
         fountainPath,
         debugPath,
       }),
@@ -151,7 +160,7 @@ async function main() {
     );
   }
   for (const w of result.warnings) console.log(`  warning: ${w}`);
-  for (const f of [epubPath, fountainPath, debugPath]) {
+  for (const f of [epubPath, mobiPath, fountainPath, debugPath]) {
     if (f) console.log(`  wrote ${f}`);
   }
 }

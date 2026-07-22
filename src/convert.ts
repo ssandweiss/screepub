@@ -7,6 +7,8 @@ import type { ParsedScreenplay } from './parser/types';
 import { extractTitleMeta, toFountain, type TitleMeta } from './fountain/serialize';
 import { tokensToBody } from './epub/html';
 import { buildEpub, type BookMeta } from './epub/build';
+import { tokensToMobiHtml } from './mobi/html';
+import { buildMobi } from './mobi/writer';
 
 /** Below this many text lines per page, the PDF has no usable text layer. */
 const MIN_LINES_PER_PAGE = 3;
@@ -36,10 +38,13 @@ export interface ConvertOptions {
   author?: string;
   /** convert even when the document doesn't look like a screenplay */
   force?: boolean;
+  /** also build a MOBI 6 for dependency-free USB sideload */
+  mobi?: boolean;
 }
 
 export interface ConvertResult {
   epub: Uint8Array;
+  mobi?: Uint8Array;
   fountainText: string;
   screenplay: ParsedScreenplay | null;
   meta: BookMeta;
@@ -53,10 +58,13 @@ function resolveMeta(detected: TitleMeta, opts: ConvertOptions): BookMeta {
   };
 }
 
-function renderEpub(fountainText: string, meta: BookMeta) {
+async function renderBooks(fountainText: string, meta: BookMeta, wantMobi: boolean) {
   const { tokens } = new Fountain().parse(fountainText, true);
-  const body = tokensToBody(tokens);
-  return buildEpub(meta, body);
+  const epub = await buildEpub(meta, tokensToBody(tokens));
+  const mobi = wantMobi
+    ? buildMobi({ title: meta.title, author: meta.author, html: tokensToMobiHtml(tokens, meta) })
+    : undefined;
+  return { epub, mobi };
 }
 
 /** Full pipeline for a screenplay PDF. */
@@ -83,9 +91,9 @@ export async function convertPdf(
 
   const meta = resolveMeta(extractTitleMeta(screenplay.elements), opts);
   const fountainText = toFountain(screenplay, { title: meta.title, author: meta.author });
-  const epub = await renderEpub(fountainText, meta);
+  const { epub, mobi } = await renderBooks(fountainText, meta, opts.mobi ?? false);
 
-  return { epub, fountainText, screenplay, meta, warnings };
+  return { epub, mobi, fountainText, screenplay, meta, warnings };
 }
 
 /** Pipeline for Fountain text input (stage 1 skipped). */
@@ -99,7 +107,7 @@ export async function convertFountain(
     author: tokens.find((t) => t.type === 'author' || t.type === 'authors')?.text,
   };
   const meta = resolveMeta(detected, opts);
-  const epub = await buildEpub(meta, tokensToBody(tokens));
+  const { epub, mobi } = await renderBooks(fountainText, meta, opts.mobi ?? false);
 
-  return { epub, fountainText, screenplay: null, meta, warnings: [] };
+  return { epub, mobi, fountainText, screenplay: null, meta, warnings: [] };
 }

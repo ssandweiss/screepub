@@ -16,6 +16,7 @@ public struct EngineResult: Codable, Sendable {
     public let topCharacters: [String]?
     public let warnings: [String]?
     public let epubPath: String?
+    public let mobiPath: String?
     public let fountainPath: String?
     public let error: EngineError?
 }
@@ -49,7 +50,7 @@ public enum Engine {
         guard let engine = binaryURL() else { throw EngineFailure.notFound }
 
         let output = input.deletingPathExtension().appendingPathExtension("epub")
-        var args = [input.path, "-o", output.path, "--json"]
+        var args = [input.path, "-o", output.path, "--json", "--mobi"]
         if force { args.append("--force") }
 
         let process = Process()

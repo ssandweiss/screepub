@@ -40,8 +40,15 @@ Kindle ecosystem first. Formatting toggles come after MVP (registry:
   copies but never appears in the library). Send-to-Kindle only accepts
   EPUB because Amazon converts server-side; Calibre's "Send to Device"
   converts to AZW3 locally first. Screepub's USB route does the same via
-  Calibre's `ebook-convert` (EPUB→AZW3, ~1s, cached next to the EPUB)
-  and refuses with a clear message when Calibre is absent.
+  Calibre's `ebook-convert` (EPUB→AZW3, ~1s, cached next to the EPUB).
+- Standalone USB (no Calibre): the engine writes its own **MOBI 6**
+  (`--mobi`; src/mobi/) — a PalmDB container with uncompressed UTF-8
+  HTML in the old renderer's dialect (blockquote speeches, bold cues,
+  right-flush transitions). Kindles index sideloaded MOBI. The app
+  prefers Calibre AZW3 (keeps full EPUB styling) and falls back to the
+  engine MOBI, so USB works with zero external dependencies. Priority
+  rationale: the user's own device is an older Kindle on a family
+  Amazon account, often offline — USB is their primary route.
 - Build tooling: Swift 6.3 CommandLineTools only (no full Xcode on this
   machine) → SwiftPM executable target + scripted .app bundle assembly
   + ad-hoc codesign. No Xcode project files.
