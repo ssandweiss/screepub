@@ -50,22 +50,38 @@ struct LayoutPreview: View {
                     heading("INT. MIDNIGHT OFFICE - NIGHT")
                     action("Rain hammers the window. A desk lamp burns low over a stack of unsolved rewrites.")
 
+                    // Inline emphasis showcase: bold / underline / italic.
+                    emphasisAction()
+
                     speech(cue: "DETECTIVE VERA",
                            paren: "(lighting a match)",
                            lines: ["Somebody re-paginated this town while we slept."],
                            blockW: blockW, sideMargin: sideMargin)
 
-                    action("The match gutters out. She flips the script to its final page.")
+                    miniSlug("LATER")
+
+                    action("The match gutters out. The INFORMANT leans in. They talk over each other.")
+
+                    // Dual dialogue — shown exactly as the books render it:
+                    // de-interleaved into sequential overlapping speeches.
+                    speech(cue: "DETECTIVE VERA",
+                           paren: "(overlapping)",
+                           lines: ["Read me the last page--"],
+                           blockW: blockW, sideMargin: sideMargin)
+                    speech(cue: "INFORMANT",
+                           paren: "(overlapping)",
+                           lines: ["--the last page burned."],
+                           blockW: blockW, sideMargin: sideMargin)
 
                     if contd != "strip" {
                         speech(cue: "DETECTIVE VERA (CONT'D)",
                                paren: nil,
-                               lines: ["And I intend to read every draft."],
+                               lines: ["Then I intend to read the ashes."],
                                blockW: blockW, sideMargin: sideMargin)
                     } else {
                         speech(cue: "DETECTIVE VERA",
                                paren: nil,
-                               lines: ["And I intend to read every draft."],
+                               lines: ["Then I intend to read the ashes."],
                                blockW: blockW, sideMargin: sideMargin)
                     }
 
@@ -112,6 +128,30 @@ struct LayoutPreview: View {
         }
         .padding(.top, gap * 1.6)
         .padding(.bottom, gap)
+    }
+
+    private func emphasisAction() -> some View {
+        (Text("One folder is stamped ")
+            + Text("CONFIDENTIAL").fontWeight(.bold)
+            + Text(", its title ")
+            + Text("underlined").underline()
+            + Text(" in ")
+            + Text("faded red ink").italic()
+            + Text("."))
+            .font(bodyFont(base))
+            .foregroundStyle(Theme.ink)
+            .lineSpacing(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, gap / 2)
+    }
+
+    private func miniSlug(_ text: String) -> some View {
+        Text(text)
+            .font(bodyFont(base, bold: true))
+            .foregroundStyle(Theme.ink)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, gap * 1.4)
+            .padding(.bottom, gap / 2)
     }
 
     private func action(_ text: String) -> some View {
