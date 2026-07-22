@@ -1,4 +1,5 @@
-// Reflowable screenplay stylesheet, Kindle-safe.
+// Reflowable screenplay stylesheet, Kindle-safe, parameterized by
+// FormatOptions (docs/formatting-options-log.md is the knob registry).
 //
 // Geometry rules (see docs/screenplay-format-reference.md for the math):
 // - HORIZONTAL structure in % — Kindle strips max-width and prescribes
@@ -9,16 +10,33 @@
 //   owns within-paragraph spacing (the reader's own setting).
 // - Keep-with-next chain kept minimal (heading, cue) — every avoid link
 //   grows the unbreakable chunk renderers push, causing bottom-of-page gaps.
-export const SCREENPLAY_CSS = `
+import type { FormatOptions } from '../options';
+import { DEFAULT_FORMAT_OPTIONS } from '../options';
+
+const FONT_STACKS: Record<FormatOptions['fontFamily'], string> = {
+  courier: '"Courier Prime", "Courier New", Courier, monospace',
+  serif: 'serif',
+  sans: 'sans-serif',
+};
+
+const em = (v: number) => `${Number(v.toFixed(2))}em`;
+
+export function screenplayCss(o: FormatOptions): string {
+  const gap = o.elementSpacingEm;
+  const sceneBreak = o.scenePageBreaks
+    ? '\nsection.scene { page-break-before: always; }\n'
+    : '';
+
+  return `
 html, body {
   margin: 0;
   padding: 0;
 }
 
 body {
-  font-family: "Courier Prime", "Courier New", Courier, monospace;
+  font-family: ${FONT_STACKS[o.fontFamily]};
 }
-
+${sceneBreak}
 /* Slugline + the scene's first block ride together across page breaks —
    if the pair doesn't fit at a page bottom, both move to the next page.
    Container-level inside-avoid is the KDP-documented keep-together form. */
@@ -31,9 +49,13 @@ h2.scene-heading {
   font-size: 1em;
   font-weight: bold;
   text-transform: uppercase;
-  margin: 1.6em 0 1em 0;
+  margin: ${em(gap * 1.6)} 0 ${em(gap)} 0;
   page-break-after: avoid;
   break-after: avoid;
+}
+
+span.scene-number {
+  font-weight: normal;
 }
 
 p {
@@ -42,38 +64,38 @@ p {
 }
 
 p.action {
-  margin: 1em 0;
+  margin: ${em(gap)} 0;
 }
 
 p.mini-slug {
   font-weight: bold;
   text-transform: uppercase;
-  margin: 1.4em 0 1em 0;
+  margin: ${em(gap * 1.4)} 0 ${em(gap)} 0;
   page-break-after: avoid;
   break-after: avoid;
 }
 
 /* Print geometry, reflowed: dialogue is a narrow column (58% of the body
-   column in print; symmetric 20% margins ≈ 60% here). Cue and parenthetical
-   indent WITHIN the column as percentages of it (print: cue +1.2" and
-   parenthetical +0.6" into the 3.5" column). */
+   column in print). Cue and parenthetical indent WITHIN the column as
+   percentages of it (print: cue +1.2" and parenthetical +0.6" into the
+   3.5" column). */
 .dialogue-block {
-  margin-top: 1em;
-  margin-bottom: 1em;
-  margin-left: 20%;
-  margin-right: 20%;
+  margin-top: ${em(gap)};
+  margin-bottom: ${em(gap)};
+  margin-left: ${o.dialogueSideMarginPct}%;
+  margin-right: ${o.dialogueSideMarginPct}%;
 }
 
 /* A cue must never orphan from its dialogue at a page break. */
 p.character {
-  margin-left: 33%;
+  margin-left: ${o.cueIndentPct}%;
   page-break-after: avoid;
   break-after: avoid;
 }
 
 p.parenthetical {
-  margin-left: 17%;
-  margin-right: 8%;
+  margin-left: ${o.parentheticalIndentPct}%;
+  margin-right: ${Math.round(o.parentheticalIndentPct / 2)}%;
 }
 
 p.dialogue {
@@ -83,12 +105,12 @@ p.dialogue {
 p.transition {
   text-align: right;
   text-transform: uppercase;
-  margin: 1em 0;
+  margin: ${em(gap)} 0;
 }
 
 p.centered {
   text-align: center;
-  margin: 1em 0;
+  margin: ${em(gap)} 0;
 }
 
 /* Title page */
@@ -113,3 +135,6 @@ section.titlepage p.author {
   margin: 0.4em 0;
 }
 `.trimStart();
+}
+
+export const SCREENPLAY_CSS = screenplayCss(DEFAULT_FORMAT_OPTIONS);

@@ -7,6 +7,7 @@ import type { ParsedScreenplay } from './parser/types';
 import { extractTitleMeta, toFountain, type TitleMeta } from './fountain/serialize';
 import { tokensToBody } from './epub/html';
 import { buildEpub, type BookMeta } from './epub/build';
+import { resolveFormatOptions, type FormatOptions } from './options';
 import { tokensToMobiHtml } from './mobi/html';
 import { buildMobi } from './mobi/writer';
 
@@ -40,6 +41,8 @@ export interface ConvertOptions {
   force?: boolean;
   /** also build a MOBI 6 for dependency-free USB sideload */
   mobi?: boolean;
+  /** formatting knobs (partial; merged over defaults) */
+  format?: Partial<FormatOptions>;
 }
 
 export interface ConvertResult {
@@ -58,9 +61,14 @@ function resolveMeta(detected: TitleMeta, opts: ConvertOptions): BookMeta {
   };
 }
 
-async function renderBooks(fountainText: string, meta: BookMeta, wantMobi: boolean) {
+async function renderBooks(
+  fountainText: string,
+  meta: BookMeta,
+  wantMobi: boolean,
+  format: FormatOptions,
+) {
   const { tokens } = new Fountain().parse(fountainText, true);
-  const epub = await buildEpub(meta, tokensToBody(tokens));
+  const epub = await buildEpub(meta, tokensToBody(tokens, { format }), format);
   const mobi = wantMobi
     ? buildMobi({ title: meta.title, author: meta.author, html: tokensToMobiHtml(tokens, meta) })
     : undefined;
@@ -89,9 +97,10 @@ export async function convertPdf(
     warnings.push('No scene headings detected — the EPUB will have no scene navigation.');
   }
 
+  const format = resolveFormatOptions(opts.format);
   const meta = resolveMeta(extractTitleMeta(screenplay.elements), opts);
-  const fountainText = toFountain(screenplay, { title: meta.title, author: meta.author });
-  const { epub, mobi } = await renderBooks(fountainText, meta, opts.mobi ?? false);
+  const fountainText = toFountain(screenplay, { title: meta.title, author: meta.author }, format);
+  const { epub, mobi } = await renderBooks(fountainText, meta, opts.mobi ?? false, format);
 
   return { epub, mobi, fountainText, screenplay, meta, warnings };
 }
@@ -106,8 +115,9 @@ export async function convertFountain(
     title: tokens.find((t) => t.type === 'title')?.text?.replace(/<[^>]+>/g, ''),
     author: tokens.find((t) => t.type === 'author' || t.type === 'authors')?.text,
   };
+  const format = resolveFormatOptions(opts.format);
   const meta = resolveMeta(detected, opts);
-  const { epub, mobi } = await renderBooks(fountainText, meta, opts.mobi ?? false);
+  const { epub, mobi } = await renderBooks(fountainText, meta, opts.mobi ?? false, format);
 
   return { epub, mobi, fountainText, screenplay: null, meta, warnings: [] };
 }

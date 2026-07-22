@@ -2,6 +2,8 @@
 // Fountain forcing syntax is used defensively (@cue, > transition, !action)
 // so fountain-js re-parses our output without relying on its own guesswork.
 import type { ParsedScreenplay, ScreenplayElement } from '../parser/types';
+import type { FormatOptions } from '../options';
+import { DEFAULT_FORMAT_OPTIONS } from '../options';
 
 export interface TitleMeta {
   title?: string;
@@ -63,7 +65,7 @@ function isBody(el: ScreenplayElement): boolean {
  *    (page-break splits) so the dialogue rejoins as one speech;
  * 3. demote cues with no following dialogue to action.
  */
-function prepare(elements: ScreenplayElement[]): ScreenplayElement[] {
+function prepare(elements: ScreenplayElement[], rejoin: boolean): ScreenplayElement[] {
   // "(MORE)" page-break markers can classify as parenthetical, action, or
   // dialogue depending on the template's indents — drop them by text alone.
   const body = elements.filter(isBody).filter((el) => !MORE_PAREN.test(el.text.trim()));
@@ -72,6 +74,7 @@ function prepare(elements: ScreenplayElement[]): ScreenplayElement[] {
   for (const el of body) {
     const prev = merged[merged.length - 1];
     if (
+      rejoin &&
       el.type === 'character' &&
       CONTD.test(el.text) &&
       prev &&
@@ -93,7 +96,11 @@ function prepare(elements: ScreenplayElement[]): ScreenplayElement[] {
 }
 
 /** Serialize a parsed screenplay to Fountain text. */
-export function toFountain(screenplay: ParsedScreenplay, meta?: TitleMeta): string {
+export function toFountain(
+  screenplay: ParsedScreenplay,
+  meta?: TitleMeta,
+  format: FormatOptions = DEFAULT_FORMAT_OPTIONS,
+): string {
   const out: string[] = [];
 
   if (meta?.title || meta?.author) {
@@ -114,7 +121,7 @@ export function toFountain(screenplay: ParsedScreenplay, meta?: TitleMeta): stri
     block = null;
   };
 
-  for (const el of prepare(screenplay.elements)) {
+  for (const el of prepare(screenplay.elements, format.rejoinSplitDialogue)) {
     const text = el.text.trim();
     if (!text) continue;
 

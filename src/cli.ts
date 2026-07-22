@@ -23,7 +23,8 @@ Options:
   --title <text>         override detected title
   --author <text>        override detected author
   --force                convert even if it doesn't look like a screenplay
-  --mobi                 also write <input>.mobi (for USB sideload to Kindle)
+  --mobi                 also write a .mobi (for USB sideload to Kindle)
+  --options <file.json>  formatting options (see docs/formatting-options-log.md)
   --json                 machine-readable result on stdout (for the app)
   --debug                also dump classified elements to <input>.elements.json
   -h, --help             show this help
@@ -57,6 +58,7 @@ async function main() {
       author: { type: 'string' },
       force: { type: 'boolean', default: false },
       mobi: { type: 'boolean', default: false },
+      options: { type: 'string' },
       json: { type: 'boolean', default: false },
       debug: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
@@ -74,10 +76,22 @@ async function main() {
 
   const input = positionals[0];
   const ext = extname(input).toLowerCase();
-  const stem = join(dirname(input), basename(input, extname(input)));
-  const epubPath = values.output ?? `${stem}.epub`;
+  const inputStem = join(dirname(input), basename(input, extname(input)));
+  const epubPath = values.output ?? `${inputStem}.epub`;
+  // Companion outputs (.mobi/.fountain/.elements.json) follow the EPUB, so
+  // -o into a library folder keeps everything together.
+  const stem = join(dirname(epubPath), basename(epubPath, extname(epubPath)));
 
-  const opts = { title: values.title, author: values.author, force: values.force, mobi: values.mobi };
+  let format: Record<string, unknown> | undefined;
+  if (values.options) {
+    try {
+      format = JSON.parse(await readFile(values.options, 'utf8'));
+    } catch (err) {
+      fail({ code: 'internal', message: `cannot read options file ${values.options}: ${err}` });
+    }
+  }
+
+  const opts = { title: values.title, author: values.author, force: values.force, mobi: values.mobi, format };
 
   let result: ConvertResult;
   const isPdf = ext === '.pdf';

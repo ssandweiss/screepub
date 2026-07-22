@@ -2,6 +2,8 @@
 // anchored <section>s inside one file — a spine boundary forces a page break
 // in every reader, so files split only when a size budget is exceeded.
 import type { Token } from 'fountain-js';
+import type { FormatOptions } from '../options';
+import { DEFAULT_FORMAT_OPTIONS } from '../options';
 
 export interface BodyFile {
   /** filename-safe id, e.g. "body001" */
@@ -52,7 +54,7 @@ ${body}</body>
  * per paragraph, with a complete dialogue block as a single string. Discrete
  * blocks let the section assembler wrap heading + first block together.
  */
-function renderBlocks(tokens: Token[]): string[] {
+function renderBlocks(tokens: Token[], format: FormatOptions): string[] {
   const blocks: string[] = [];
   let dialogue: string[] | null = null;
   const emit = (s: string) => {
@@ -63,9 +65,13 @@ function renderBlocks(tokens: Token[]): string[] {
   for (const t of tokens) {
     const text = t.text ?? '';
     switch (t.type) {
-      case 'scene_heading':
-        emit(`<h2 class="scene-heading">${escapeXml(text)}</h2>\n`);
+      case 'scene_heading': {
+        const num = format.showSceneNumbers && t.scene_number
+          ? `<span class="scene-number">${escapeXml(t.scene_number)}</span> `
+          : '';
+        emit(`<h2 class="scene-heading">${num}${escapeXml(text)}</h2>\n`);
         break;
+      }
       case 'action':
         emit(`<p class="action">${escapeXml(text)}</p>\n`);
         break;
@@ -112,9 +118,11 @@ function renderBlocks(tokens: Token[]): string[] {
  * together. `page-break-inside: avoid` on a container is the form Amazon
  * documents for exactly this ("headlines with paragraphs to keep together").
  */
-function renderScene(tokens: Token[], startsWithHeading: boolean): string {
-  const blocks = renderBlocks(tokens);
-  if (!startsWithHeading || blocks.length === 0) return blocks.join('');
+function renderScene(tokens: Token[], startsWithHeading: boolean, format: FormatOptions): string {
+  const blocks = renderBlocks(tokens, format);
+  if (!startsWithHeading || !format.keepSceneHeadingWithScene || blocks.length === 0) {
+    return blocks.join('');
+  }
   const kept = blocks.slice(0, 2).join('');
   const rest = blocks.slice(2).join('');
   return `<div class="keep-together">\n${kept}</div>\n${rest}`;
@@ -133,9 +141,10 @@ interface SceneSection {
  */
 export function tokensToBody(
   tokens: Token[],
-  opts: { maxFileBytes?: number } = {},
+  opts: { maxFileBytes?: number; format?: FormatOptions } = {},
 ): BookBody {
   const maxBytes = opts.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
+  const format = opts.format ?? DEFAULT_FORMAT_OPTIONS;
   const body = tokens.filter((t) => !t.is_title);
 
   const groups: { title: string; tokens: Token[] }[] = [];
@@ -160,7 +169,7 @@ export function tokensToBody(
     return {
       anchor,
       title: g.title,
-      html: `<section class="scene" id="${anchor}">\n${renderScene(g.tokens, startsWithHeading)}</section>\n`,
+      html: `<section class="scene" id="${anchor}">\n${renderScene(g.tokens, startsWithHeading, format)}</section>\n`,
     };
   });
 
