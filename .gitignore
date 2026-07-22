@@ -21,3 +21,6 @@ build/
 npm-debug.log*
 fixtures/
 out/
+app/build/
+app/dist/
+app/.build/
