@@ -18,6 +18,7 @@ final class ReaderModel: ObservableObject {
     @Published var errorLine: String?
     @Published var rendering = false
     private var renderTask: Task<Void, Never>?
+    private var generation = 0
 
     var fountainURL: URL { URL(fileURLWithPath: ref.fountainPath) }
 
@@ -30,23 +31,31 @@ final class ReaderModel: ObservableObject {
     }
 
     /// Debounced: persist sidecar, re-run engine from the cached .fountain,
-    /// refresh the web view. The library EPUB is rewritten too — sends stay
-    /// WYSIWYG with the preview.
+    /// refresh the web view. The library EPUB and MOBI are rewritten too —
+    /// sends stay WYSIWYG with the preview.
     func settingsChanged() {
-        try? ScriptSettings.save(settings, forFountain: fountainURL)
         renderTask?.cancel()
         renderTask = Task { [settings] in
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
+            do {
+                try ScriptSettings.save(settings, forFountain: self.fountainURL)
+            } catch {
+                self.errorLine = error.localizedDescription
+                return
+            }
             await self.render(with: settings)
         }
     }
 
     func renderNow() {
-        Task { await render(with: settings) }
+        renderTask?.cancel()
+        renderTask = Task { await render(with: settings) }
     }
 
     private func render(with settings: FormatSettings) async {
+        generation += 1
+        let mine = generation
         rendering = true
         defer { rendering = false }
         let fountain = fountainURL
@@ -55,13 +64,17 @@ final class ReaderModel: ObservableObject {
             .appendingPathComponent("screepub-preview-\(UUID().uuidString).html")
         let outcome: Result<String, Error> = await Task.detached {
             Result {
-                _ = try Engine.convert(
+                let result = try Engine.convert(
                     input: fountain, force: false, outputDir: outputDir,
-                    format: settings, includeMobi: false, previewHtml: previewFile)
+                    format: settings, includeMobi: true, previewHtml: previewFile)
+                guard result.ok else {
+                    throw EngineFailure.badOutput(result.error?.message ?? "engine error")
+                }
                 defer { try? FileManager.default.removeItem(at: previewFile) }
                 return try String(contentsOf: previewFile, encoding: .utf8)
             }
         }.value
+        guard mine == generation else { return }
         switch outcome {
         case .success(let doc): html = doc; errorLine = nil
         case .failure(let error): errorLine = error.localizedDescription
@@ -84,8 +97,9 @@ struct ScriptWebView: NSViewRepresentable {
         context.coordinator.lastHtml = html
         view.evaluateJavaScript("window.scrollY") { y, _ in
             let scrollY = (y as? Double) ?? 0
+            let script = "<script>window.scrollTo(0, \(scrollY)); addEventListener('load', () => requestAnimationFrame(() => window.scrollTo(0, \(scrollY))));</script>"
             view.loadHTMLString(
-                html + "<script>window.scrollTo(0, \(scrollY));</script>",
+                html.replacingOccurrences(of: "</body>", with: script + "</body>"),
                 baseURL: nil)
         }
     }

@@ -2,7 +2,7 @@
 // screepub — screenplay PDF → Fountain → reflowable EPUB3.
 import { parseArgs } from 'node:util';
 import { basename, dirname, extname, join } from 'node:path';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, rename } from 'node:fs/promises';
 import {
   convertPdf,
   convertFountain,
@@ -37,6 +37,18 @@ interface JsonError {
 }
 
 let jsonMode = false;
+
+/// Write to a temp file then rename into place, so a reader (e.g. the app's
+/// reader window mid-render) never observes a partially-written output.
+async function writeFileAtomic(
+  path: string,
+  data: Uint8Array | string,
+  enc?: BufferEncoding,
+): Promise<void> {
+  const tmp = `${path}.tmp`;
+  await writeFile(tmp, data, enc);
+  await rename(tmp, path);
+}
 
 function fail(error: JsonError): never {
   if (jsonMode) {
@@ -124,23 +136,23 @@ async function main() {
     throw err;
   }
 
-  await writeFile(epubPath, result.epub);
+  await writeFileAtomic(epubPath, result.epub);
 
   let mobiPath: string | undefined;
   if (values.mobi && result.mobi) {
     mobiPath = `${stem}.mobi`;
-    await writeFile(mobiPath, result.mobi);
+    await writeFileAtomic(mobiPath, result.mobi);
   }
 
   let fountainPath: string | undefined;
   if (isPdf && !values['no-fountain']) {
     fountainPath = values.fountain ?? `${stem}.fountain`;
-    await writeFile(fountainPath, result.fountainText, 'utf8');
+    await writeFileAtomic(fountainPath, result.fountainText, 'utf8');
   }
   let previewPath: string | undefined;
   if (values['preview-html']) {
     previewPath = values['preview-html'];
-    await writeFile(previewPath, result.previewHtml, 'utf8');
+    await writeFileAtomic(previewPath, result.previewHtml, 'utf8');
   }
   let debugPath: string | undefined;
   if (values.debug && result.screenplay) {

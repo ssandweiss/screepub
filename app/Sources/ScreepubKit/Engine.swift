@@ -21,9 +21,16 @@ public struct EngineResult: Codable, Sendable {
     public let error: EngineError?
 }
 
-public enum EngineFailure: Error {
+public enum EngineFailure: Error, LocalizedError {
     case notFound
     case badOutput(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .notFound: return "screepub-engine is missing from the app bundle."
+        case .badOutput(let detail): return detail
+        }
+    }
 }
 
 public enum Engine {
