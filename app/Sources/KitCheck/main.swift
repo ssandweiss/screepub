@@ -230,5 +230,21 @@ if EbookConvert.isAvailable, let tool = EbookConvert.toolURL() {
     }
 }
 
+// — per-script settings sidecar —
+let lib = tempDir("library")
+let fountain = lib.appendingPathComponent("Test Script.fountain")
+try! Data("Title: T".utf8).write(to: fountain)
+check(ScriptSettings.sidecarURL(forFountain: fountain).lastPathComponent == "Test Script.screepub.json",
+      "sidecar path derives from fountain stem")
+var fs = FormatSettings.defaults
+fs.dialogueSideMarginPct = 27
+try! ScriptSettings.save(fs, forFountain: fountain)
+let loaded = ScriptSettings.load(forFountain: fountain, fallback: FormatSettings.defaults)
+check(loaded.dialogueSideMarginPct == 27, "sidecar round-trips settings")
+let missing = lib.appendingPathComponent("Other.fountain")
+check(ScriptSettings.load(forFountain: missing, fallback: FormatSettings.defaults).dialogueSideMarginPct
+        == FormatSettings.defaults.dialogueSideMarginPct,
+      "absent sidecar falls back to defaults")
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
