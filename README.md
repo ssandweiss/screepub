@@ -112,3 +112,13 @@ app/
   Sources/ScreepubKit/   engine bridge, transfer routes (USB/email/web)
   Sources/ScreepubApp/   script-page UI + settings with live preview
 ```
+
+## License
+
+Screepub is licensed under the **GNU Affero General Public License v3.0 or
+later** (AGPL-3.0-or-later) — see [`LICENSE`](LICENSE). You're free to use,
+study, modify, and share it; but if you distribute it, or run a modified
+version as a network service, the corresponding source must be made
+available under the same license.
+
+Copyright © 2026 Darkwell Entertainment LLC.

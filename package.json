@@ -10,7 +10,7 @@
     "test": "bun test",
     "screepub": "bun src/cli.ts"
   },
-  "license": "UNLICENSED",
+  "license": "AGPL-3.0-or-later",
   "private": true,
   "dependencies": {
     "fountain-js": "^1.2.4",
