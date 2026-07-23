@@ -14,6 +14,10 @@ struct ReaderRail: View {
                     Text("Centered").tag("centered")
                     Text("Indented").tag("indented")
                 }
+                slider("Cue indent", value: binding(\.cueIndentPct), range: 0...60)
+                    .disabled(model.settings.cueAlignment == "centered")
+                slider("Paren indent", value: binding(\.parentheticalIndentPct), range: 0...40)
+                    .disabled(model.settings.cueAlignment == "centered")
                 slider("Spacing (em)", value: binding(\.elementSpacingEm), range: 0.4...1.6, step: 0.1)
                 Picker("Typeface", selection: binding(\.fontFamily)) {
                     Text("Courier").tag("courier")

@@ -296,7 +296,11 @@ struct ContentView: View {
     @ViewBuilder
     private func transferButtons(result: EngineResult, epub: URL, title: String?) -> some View {
         VStack(spacing: 9) {
-            if let fountainPath = result.fountainPath {
+            // result.fountainPath (--json's fountainPath) is only set for PDF
+            // input — the engine doesn't re-emit a .fountain for .fountain
+            // input, so fall back to the input file itself in that case.
+            if let fountainPath = result.fountainPath
+                ?? (lastInput?.pathExtension.lowercased() == "fountain" ? lastInput?.path : nil) {
                 Button("READ SCRIPT") {
                     openWindow(value: ScriptRef(
                         title: result.title ?? "Script",
@@ -385,7 +389,12 @@ struct ContentView: View {
         Task {
             let outputDir = AppSettings.outputFolder
             let stem = url.deletingPathExtension().lastPathComponent
-            let prospectiveFountain = outputDir.appendingPathComponent(stem).appendingPathExtension("fountain")
+            // For .fountain input the engine reads/re-caches the input itself
+            // (no separate .fountain is emitted into outputDir), so the
+            // sidecar lives beside the input, not beside a prospective copy.
+            let prospectiveFountain = url.pathExtension.lowercased() == "fountain"
+                ? url
+                : outputDir.appendingPathComponent(stem).appendingPathExtension("fountain")
             let format = ScriptSettings.load(forFountain: prospectiveFountain, fallback: AppSettings.formatSettings())
             let outcome: Result<EngineResult, Error> = await Task.detached {
                 Result { try Engine.convert(input: url, force: force, outputDir: outputDir, format: format) }

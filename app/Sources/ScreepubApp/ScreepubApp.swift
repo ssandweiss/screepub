@@ -23,6 +23,7 @@ struct ScreepubApp: App {
             }
         }
         .windowResizability(.contentMinSize)
+        .defaultSize(width: 700, height: 800)
 
         Settings {
             SettingsView()
