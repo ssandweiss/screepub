@@ -240,11 +240,23 @@ var fs = FormatSettings.defaults
 fs.dialogueSideMarginPct = 27
 try! ScriptSettings.save(fs, forFountain: fountain)
 let loaded = ScriptSettings.load(forFountain: fountain, fallback: FormatSettings.defaults)
-check(loaded.dialogueSideMarginPct == 27, "sidecar round-trips settings")
+check(loaded == fs, "sidecar round-trips settings")
 let missing = lib.appendingPathComponent("Other.fountain")
-check(ScriptSettings.load(forFountain: missing, fallback: FormatSettings.defaults).dialogueSideMarginPct
-        == FormatSettings.defaults.dialogueSideMarginPct,
+check(ScriptSettings.load(forFountain: missing, fallback: FormatSettings.defaults) == FormatSettings.defaults,
       "absent sidecar falls back to defaults")
+
+let garbageFountain = lib.appendingPathComponent("Garbage.fountain")
+try! Data("not json".utf8).write(to: ScriptSettings.sidecarURL(forFountain: garbageFountain))
+check(ScriptSettings.load(forFountain: garbageFountain, fallback: FormatSettings.defaults) == FormatSettings.defaults,
+      "corrupt sidecar (invalid JSON) falls back to defaults")
+
+let partialFountain = lib.appendingPathComponent("Partial.fountain")
+try! Data(#"{"dialogueSideMarginPct": 9}"#.utf8).write(to: ScriptSettings.sidecarURL(forFountain: partialFountain))
+let partialLoaded = ScriptSettings.load(forFountain: partialFountain, fallback: FormatSettings.defaults)
+var expectedPartial = FormatSettings.defaults
+expectedPartial.dialogueSideMarginPct = 9
+check(partialLoaded == expectedPartial,
+      "partial sidecar overlays present field, leaves rest at fallback")
 
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
