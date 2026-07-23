@@ -1,6 +1,16 @@
 import SwiftUI
 import ScreepubKit
 
+/// Open a pre-filled GitHub issue for feedback / bug reports, stamped with
+/// the app and OS versions. `context` seeds the "what happened" block
+/// (e.g. a conversion error) when reporting from a failure.
+@MainActor func openFeedback(context: String? = nil) {
+    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+    let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
+    NSWorkspace.shared.open(
+        Feedback.newIssueURL(appVersion: appVersion, osVersion: osVersion, context: context))
+}
+
 @main
 struct ScreepubApp: App {
     var body: some Scene {
@@ -16,6 +26,11 @@ struct ScreepubApp: App {
         }
         .windowResizability(.contentSize)
         .windowStyle(.hiddenTitleBar)
+        .commands {
+            CommandGroup(replacing: .help) {
+                Button("Send Feedback on GitHub…") { openFeedback() }
+            }
+        }
 
         WindowGroup("Script Preview", for: ScriptRef.self) { $ref in
             if let ref {

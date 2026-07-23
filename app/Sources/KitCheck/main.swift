@@ -258,5 +258,18 @@ expectedPartial.dialogueSideMarginPct = 9
 check(partialLoaded == expectedPartial,
       "partial sidecar overlays present field, leaves rest at fallback")
 
+// — feedback issue URL —
+let feedback = Feedback.newIssueURL(appVersion: "0.1.0", osVersion: "macOS 15.0", context: "scanned: no text")
+check(feedback.absoluteString.hasPrefix(Feedback.newIssueBase + "?"), "feedback URL targets the repo issue endpoint")
+if let q = URLComponents(url: feedback, resolvingAgainstBaseURL: false)?
+    .queryItems?.first(where: { $0.name == "body" })?.value {
+    check(q.contains("Screepub 0.1.0") && q.contains("macOS 15.0"), "feedback body carries app + OS versions")
+    check(q.contains("scanned: no text"), "feedback body includes the passed context")
+} else {
+    check(false, "feedback URL has a decodable body query item")
+}
+let plain = Feedback.newIssueURL(appVersion: "0.1.0", osVersion: "macOS 15.0")
+check(!plain.absoluteString.isEmpty, "feedback URL builds without a context")
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

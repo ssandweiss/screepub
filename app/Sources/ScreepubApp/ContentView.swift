@@ -366,6 +366,10 @@ struct ContentView: View {
                 Button("BACK TO ONE") { state = .idle }
                     .buttonStyle(OutlineButtonStyle())
                     .keyboardShortcut(.cancelAction)
+                Button("REPORT A BUG") {
+                    openFeedback(context: "\(code): \(message)")
+                }
+                .buttonStyle(MarginButtonStyle())
             }
         }
     }
