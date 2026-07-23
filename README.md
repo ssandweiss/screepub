@@ -30,6 +30,11 @@ page-styled window:
   native pagination plus pen annotation beats a reflow there.
 - **Connected-device stamps:** the title page shows a stamp per
   detected device, live on connect/disconnect.
+- **Script preview reader:** READ SCRIPT opens the converted script in
+  a resizable window — the EPUB's actual markup, live-retunable via a
+  formatting rail whose changes persist per script and re-render in
+  place; send buttons ride along so you can proof → tweak → ship
+  without switching windows.
 - **Settings (⌘, or the gear on the page):** output library folder
   (default `~/Documents/Screepub`), Kindle email, Kobo KEPUB toggle,
   and a full Formatting tab with a live script-page preview.

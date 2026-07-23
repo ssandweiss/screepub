@@ -315,3 +315,16 @@ future work; everything else is live.
   USB web interface (its EPUB renderer re-typesets, so reflow adds
   nothing on a 7.8–11.8" screen). Detection: `.kobo` dir, tolino
   volume name, Kindle documents/, reMarkable HTTP probe.
+- **Script preview reader (2026-07-22):** READ SCRIPT on the result page
+  opens a window rendering the engine's real preview HTML
+  (`--preview-html`; the same markup as the EPUB with the CSS inlined).
+  The rail edits a per-script sidecar (`<Stem>.screepub.json`,
+  ScriptSettings.swift, lenient per-field decode) with debounced,
+  serialized re-renders from the cached .fountain; "Save as app
+  defaults" promotes sidecar values to the global keys
+  (AppSettings.setFormatSettings). Every re-render rewrites the
+  library EPUB AND MOBI (atomic temp+rename, engine-side) so sends
+  match the preview; main-window conversions also load the sidecar, so
+  re-dropping a tuned script keeps its tuning (note: a NEW script whose
+  filename stem matches an old one inherits that sidecar — treated as
+  same-script-new-draft).
