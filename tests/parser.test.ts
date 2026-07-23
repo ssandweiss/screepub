@@ -67,6 +67,29 @@ describe('classifyBlock', () => {
       const result = classifyBlock(block, null);
       expect(result.type).toBe('scene');
     });
+
+    test('inline dual-margin scene numbers strip and attach (OUT THERE)', () => {
+      // Some generators print the shooting-script number in both margins of
+      // the heading row itself, joined into one line by extraction.
+      const block = makeBlock({ text: '2 EXT. OREGON WOODS - HIGH AND WIDE - ESTABLISHING 2', indent: 9 });
+      const result = classifyBlock(block, null);
+      expect(result.type).toBe('scene');
+      expect(result.text).toBe('EXT. OREGON WOODS - HIGH AND WIDE - ESTABLISHING');
+      expect(result.sceneNumber).toBe('2');
+    });
+
+    test('inline dual-margin numbers with letter suffix attach too', () => {
+      const block = makeBlock({ text: '12A INT. HALLWAY - CONTINUOUS 12A', indent: 9 });
+      const result = classifyBlock(block, null);
+      expect(result.type).toBe('scene');
+      expect(result.sceneNumber).toBe('12A');
+    });
+
+    test('mismatched margin numbers do not strip', () => {
+      const block = makeBlock({ text: '2 EXT. WOODS - DAY 3', indent: 9 });
+      const result = classifyBlock(block, null);
+      expect(result.type).toBe('action');
+    });
   });
 
   describe('character names', () => {

@@ -5,6 +5,11 @@ import { isBoilerplateLine } from './boilerplate';
 
 // Regex patterns ported from v2 spec
 const SCENE_HEADING = /^(INT\.|EXT\.|INT\.\/EXT\.|I\/E\.)/;
+// Shooting-script number printed in BOTH margins of the heading row itself
+// ("2 EXT. WOODS - DAY 2") — extraction joins the row into one line, so the
+// pair is stripped here and attached as the scene number. The same-token
+// requirement keeps false positives out.
+const DUAL_MARGIN_HEADING = /^(\d{1,3}[A-Z]?)\s+(.*\S)\s+\1$/;
 const TRANSITION = /^[A-Z\s]+:$/;
 const PAGE_NUMBER_BARE = /^\d+\.?$/;
 const PAGE_NUMBER_DASHED = /^-\s*\d+\s*-$/;
@@ -88,6 +93,10 @@ export function classifyBlock(
   // Priority 2: Scene heading (no indent check — most reliable)
   if (SCENE_HEADING.test(text)) {
     return { ...base, type: 'scene' };
+  }
+  const dualMargin = trimmed.match(DUAL_MARGIN_HEADING);
+  if (dualMargin && SCENE_HEADING.test(dualMargin[2])) {
+    return { ...base, type: 'scene', text: dualMargin[2], sceneNumber: dualMargin[1] };
   }
 
   // Priority 3: Transition

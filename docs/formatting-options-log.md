@@ -174,7 +174,13 @@ future work; everything else is live.
   the slugline row; joined they leaked as "2  2" action lines and never
   attached (IntimacyParty). Duplicated tokens collapse to one, which
   then classifies and attaches as the scene number.
-- **Code:** `src/parser/extract.ts` (normal-line emit).
+- **Inline variant (2026-07-22, OUT THERE):** some generators put the
+  numbers on the heading row itself ("2 EXT. WOODS - DAY 2"), which
+  defeated the ^INT/^EXT anchor — 0 scenes detected. Classifier now
+  strips a same-token leading/trailing number pair and attaches it as
+  `sceneNumber` when the inner text is a slugline.
+- **Code:** `src/parser/extract.ts` (normal-line emit),
+  `src/parser/classify.ts` (`DUAL_MARGIN_HEADING`).
 
 ### 9b. Hybrid character cues
 - **What:** CLEO/PANNI (shared), COP #2, MOM & DAD — the name pattern
