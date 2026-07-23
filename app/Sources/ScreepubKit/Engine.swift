@@ -52,7 +52,9 @@ public enum Engine {
         input: URL,
         force: Bool,
         outputDir: URL,
-        format: FormatSettings = .defaults
+        format: FormatSettings = .defaults,
+        includeMobi: Bool = true,
+        previewHtml: URL? = nil
     ) throws -> EngineResult {
         guard let engine = binaryURL() else { throw EngineFailure.notFound }
 
@@ -65,7 +67,9 @@ public enum Engine {
         try JSONEncoder().encode(format).write(to: optionsFile)
         defer { try? FileManager.default.removeItem(at: optionsFile) }
 
-        var args = [input.path, "-o", output.path, "--json", "--mobi", "--options", optionsFile.path]
+        var args = [input.path, "-o", output.path, "--json", "--options", optionsFile.path]
+        if includeMobi { args.append("--mobi") }
+        if let previewHtml { args.append(contentsOf: ["--preview-html", previewHtml.path]) }
         if force { args.append("--force") }
 
         let process = Process()
