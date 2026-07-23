@@ -177,6 +177,12 @@ func linkedDialogueRules(html: URL, stylesDir: URL) -> String {
     return rules
 }
 
+// — reMarkable endpoint sanity (regression: an IP literal in source once
+// arrived empty and the force-unwrapped URL(string:) crashed at launch) —
+check(RemarkableDevice.endpoint.absoluteString == "http://" + [10, 11, 99, 1].map(String.init).joined(separator: "."),
+      "reMarkable endpoint is the fixed USB address")
+check(RemarkableDevice.endpoint.host()?.isEmpty == false, "reMarkable endpoint has a non-empty host")
+
 // — KEPUB conversion (environment-dependent) —
 func fileContains(_ url: URL, _ needle: String) -> Bool {
     let p = Process()

@@ -2,10 +2,19 @@ import Foundation
 
 /// reMarkable tablets never mount as a volume (no mass storage, no MTP).
 /// With "USB web interface" enabled in the tablet's storage settings, the
-/// device serves HTTP at over a USB-ethernet link; files
-/// are added with a multipart POST. EPUB and PDF only.
+/// device serves plain HTTP on its fixed USB-ethernet address (octets
+/// below); files are added with a multipart POST. EPUB and PDF only.
 public enum RemarkableDevice {
-    nonisolated public static let endpoint = URL(string: "")!
+    /// The tablet's fixed address on the USB link, same on every unit.
+    nonisolated public static let usbAddress =
+        [10, 11, 99, 1].map(String.init).joined(separator: ".")
+
+    nonisolated public static let endpoint: URL = {
+        var components = URLComponents()
+        components.scheme = "http"
+        components.host = usbAddress
+        return components.url!
+    }()
 
     public enum UploadError: Error, LocalizedError {
         case badResponse(Int)
