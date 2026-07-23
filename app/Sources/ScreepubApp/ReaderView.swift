@@ -1,4 +1,6 @@
 import SwiftUI
+import Combine
+import AppKit
 import WebKit
 import ScreepubKit
 
@@ -18,8 +20,10 @@ final class ReaderModel: ObservableObject {
     @Published var errorLine: String?
     @Published var statusLine: String?
     @Published var rendering = false
+    @Published var devices: [ConnectedDevice] = []
     private var renderTask: Task<Void, Never>?
     private var generation = 0
+    private var deviceCancellable: AnyCancellable?
 
     var fountainURL: URL { URL(fileURLWithPath: ref.fountainPath) }
 
@@ -29,6 +33,13 @@ final class ReaderModel: ObservableObject {
             forFountain: URL(fileURLWithPath: ref.fountainPath),
             fallback: AppSettings.formatSettings()
         )
+        devices = DeviceDetect.mounted()
+        deviceCancellable = NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.didMountNotification)
+            .merge(with: NSWorkspace.shared.notificationCenter
+                .publisher(for: NSWorkspace.didUnmountNotification))
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.devices = DeviceDetect.mounted() }
     }
 
     /// Debounced: persist sidecar, re-run engine from the cached .fountain,
@@ -49,6 +60,7 @@ final class ReaderModel: ObservableObject {
             // Serialize with any render already underway so a slow older
             // engine run can't finish last and leave stale files on disk.
             _ = await previous?.value
+            guard !Task.isCancelled else { return }
             await self.render(with: settings)
         }
     }
@@ -58,6 +70,7 @@ final class ReaderModel: ObservableObject {
         previous?.cancel()
         renderTask = Task {
             _ = await previous?.value
+            guard !Task.isCancelled else { return }
             await self.render(with: settings)
         }
     }

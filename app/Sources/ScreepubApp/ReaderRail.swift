@@ -1,17 +1,10 @@
 import SwiftUI
-import Combine
 import ScreepubKit
 
 /// The reader's side rail: this script's formatting knobs (persisted to its
 /// sidecar, re-rendered live), promotion to app defaults, and send actions.
 struct ReaderRail: View {
     @ObservedObject var model: ReaderModel
-    @State private var devices: [ConnectedDevice] = DeviceDetect.mounted()
-
-    private let volumeEvents = NSWorkspace.shared.notificationCenter
-        .publisher(for: NSWorkspace.didMountNotification)
-        .merge(with: NSWorkspace.shared.notificationCenter
-            .publisher(for: NSWorkspace.didUnmountNotification))
 
     var body: some View {
         Form {
@@ -50,7 +43,7 @@ struct ReaderRail: View {
                 }
             }
             Section("Send") {
-                ForEach(devices) { device in
+                ForEach(model.devices) { device in
                     Button("Copy to \(device.name) — USB") { copy(to: device) }
                 }
                 Button("Email to Kindle") { emailToKindle() }
@@ -58,7 +51,6 @@ struct ReaderRail: View {
             .disabled(model.rendering)
         }
         .formStyle(.grouped)
-        .onReceive(volumeEvents) { _ in devices = DeviceDetect.mounted() }
     }
 
     /// Binding into the model's FormatSettings that triggers the debounced
