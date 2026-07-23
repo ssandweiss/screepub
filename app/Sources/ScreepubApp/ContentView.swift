@@ -20,6 +20,7 @@ struct ContentView: View {
     @AppStorage("kindleEmail") private var kindleEmail = ""
     @AppStorage("koboKepub") private var koboKepub = false
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
 
     private let volumeEvents = NSWorkspace.shared.notificationCenter
         .publisher(for: NSWorkspace.didMountNotification)
@@ -295,6 +296,15 @@ struct ContentView: View {
     @ViewBuilder
     private func transferButtons(result: EngineResult, epub: URL, title: String?) -> some View {
         VStack(spacing: 9) {
+            if let fountainPath = result.fountainPath {
+                Button("READ SCRIPT") {
+                    openWindow(value: ScriptRef(
+                        title: result.title ?? "Script",
+                        fountainPath: fountainPath,
+                        epubPath: epub.path))
+                }
+                .buttonStyle(BradButtonStyle())
+            }
             ForEach(devices) { device in
                 Button("COPY TO \(device.name.uppercased()) — USB") {
                     copyToDevice(result: result, epub: epub, device: device)

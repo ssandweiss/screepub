@@ -17,6 +17,13 @@ struct ScreepubApp: App {
         .windowResizability(.contentSize)
         .windowStyle(.hiddenTitleBar)
 
+        WindowGroup("Script Preview", for: ScriptRef.self) { $ref in
+            if let ref {
+                ReaderView(ref: ref)
+            }
+        }
+        .windowResizability(.contentMinSize)
+
         Settings {
             SettingsView()
         }
