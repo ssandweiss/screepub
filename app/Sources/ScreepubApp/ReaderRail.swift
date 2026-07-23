@@ -9,6 +9,14 @@ struct ReaderRail: View {
     var body: some View {
         Form {
             Section("This script") {
+                Menu("Apply device preset") {
+                    ForEach(DevicePreset.allCases) { preset in
+                        Button(preset.displayName) {
+                            model.settings = preset.settings
+                            model.settingsChanged()
+                        }
+                    }
+                }
                 slider("Dialogue margins", value: binding(\.dialogueSideMarginPct), range: 0...30)
                 Picker("Cues", selection: binding(\.cueAlignment)) {
                     Text("Centered").tag("centered")

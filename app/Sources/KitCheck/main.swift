@@ -271,5 +271,12 @@ if let q = URLComponents(url: feedback, resolvingAgainstBaseURL: false)?
 let plain = Feedback.newIssueURL(appVersion: "0.1.0", osVersion: "macOS 15.0")
 check(!plain.absoluteString.isEmpty, "feedback URL builds without a context")
 
+// — device presets —
+check(DevicePreset.kindleEink.settings == FormatSettings.defaults, "Kindle e-ink preset equals the baseline defaults")
+let phone = DevicePreset.phone.settings
+check(phone.dualDialogue == "sequential", "phone preset uses sequential dual dialogue")
+check(phone.dialogueSideMarginPct < FormatSettings.defaults.dialogueSideMarginPct, "phone preset widens the dialogue column")
+check(DevicePreset.allCases.count == 2, "two device presets ship")
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

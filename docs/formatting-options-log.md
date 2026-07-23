@@ -346,3 +346,14 @@ future work; everything else is live.
   re-dropping a tuned script keeps its tuning (note: a NEW script whose
   filename stem matches an old one inherits that sidecar — treated as
   same-script-new-draft).
+- **Device presets (2026-07-22):** `DevicePreset` (ScreepubKit) bundles
+  a full FormatSettings per device class — "Kindle e-ink (6\")" is the
+  baseline (== defaults); "Phone / narrow screen" flips dual dialogue to
+  sequential (side-by-side halves are an unreadable sliver on a narrow
+  screen) and widens the dialogue column (10% side margins). Applying a
+  preset replaces the whole FormatSettings — globally via Settings →
+  Formatting "Load device preset", or per-script via the reader rail
+  "Apply device preset" (then persisted to the sidecar). Responsive
+  reflow is impossible in a fixed e-book, so a conversion-time preset is
+  the mechanism. Adding a preset: extend the `DevicePreset` enum only —
+  the two menus and kit-check iterate `allCases`.

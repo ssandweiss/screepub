@@ -155,6 +155,18 @@ struct FormattingSettings: View {
 
     private var formColumn: some View {
         Form {
+            Section {
+                Menu("Load device preset") {
+                    ForEach(DevicePreset.allCases) { preset in
+                        Button(preset.displayName) {
+                            AppSettings.setFormatSettings(preset.settings)
+                        }
+                    }
+                }
+                Text("A starting point for a device class — overwrites the settings below, which you can then fine-tune.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("Layout") {
                 slider("Dialogue column margins", value: $dialogueMargin, range: 0...30, unit: "%")
                 Picker("Cue & parenthetical alignment", selection: $cueAlign) {
