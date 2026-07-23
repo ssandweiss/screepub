@@ -324,4 +324,9 @@ describe('tokensToPreviewHtml', () => {
     const html = tokensToPreviewHtml(tokens);
     expect(html).toContain('margin-left: 20%');
   });
+
+  test('empty tokens still fall back to a styled document', () => {
+    const html = tokensToPreviewHtml([]);
+    expect(html).toContain('<style>');
+  });
 });

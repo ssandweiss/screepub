@@ -5,7 +5,7 @@ import { extractDocument } from './parser/extract';
 import { parseLines } from './parser/index';
 import type { ParsedScreenplay } from './parser/types';
 import { extractTitleMeta, toFountain, type TitleMeta } from './fountain/serialize';
-import { tokensToBody } from './epub/html';
+import { tokensToBody, tokensToPreviewHtml } from './epub/html';
 import { buildEpub, type BookMeta } from './epub/build';
 import { resolveFormatOptions, type FormatOptions } from './options';
 import { tokensToMobiHtml } from './mobi/html';
@@ -48,6 +48,7 @@ export interface ConvertOptions {
 export interface ConvertResult {
   epub: Uint8Array;
   mobi?: Uint8Array;
+  previewHtml: string;
   fountainText: string;
   screenplay: ParsedScreenplay | null;
   meta: BookMeta;
@@ -69,10 +70,11 @@ async function renderBooks(
 ) {
   const { tokens } = new Fountain().parse(fountainText, true);
   const epub = await buildEpub(meta, tokensToBody(tokens, { format }), format);
+  const previewHtml = tokensToPreviewHtml(tokens, format);
   const mobi = wantMobi
     ? buildMobi({ title: meta.title, author: meta.author, html: tokensToMobiHtml(tokens, meta) })
     : undefined;
-  return { epub, mobi };
+  return { epub, mobi, previewHtml };
 }
 
 /** Full pipeline for a screenplay PDF. */
@@ -100,9 +102,9 @@ export async function convertPdf(
   const format = resolveFormatOptions(opts.format);
   const meta = resolveMeta(extractTitleMeta(screenplay.elements), opts);
   const fountainText = toFountain(screenplay, { title: meta.title, author: meta.author }, format);
-  const { epub, mobi } = await renderBooks(fountainText, meta, opts.mobi ?? false, format);
+  const { epub, mobi, previewHtml } = await renderBooks(fountainText, meta, opts.mobi ?? false, format);
 
-  return { epub, mobi, fountainText, screenplay, meta, warnings };
+  return { epub, mobi, previewHtml, fountainText, screenplay, meta, warnings };
 }
 
 /** Pipeline for Fountain text input (stage 1 skipped). */
@@ -117,7 +119,7 @@ export async function convertFountain(
   };
   const format = resolveFormatOptions(opts.format);
   const meta = resolveMeta(detected, opts);
-  const { epub, mobi } = await renderBooks(fountainText, meta, opts.mobi ?? false, format);
+  const { epub, mobi, previewHtml } = await renderBooks(fountainText, meta, opts.mobi ?? false, format);
 
-  return { epub, mobi, fountainText, screenplay: null, meta, warnings: [] };
+  return { epub, mobi, previewHtml, fountainText, screenplay: null, meta, warnings: [] };
 }

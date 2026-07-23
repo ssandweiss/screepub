@@ -64,3 +64,12 @@ describe('convertFountain', () => {
     expect(result.meta.title).toBe('Untitled Screenplay');
   });
 });
+
+describe('convertFountain previewHtml', () => {
+  test('returns the preview document', async () => {
+    const src = 'Title: T\n\nINT. LAB - DAY\n\nBeakers bubble.\n\nELI\nEureka.\n';
+    const result = await convertFountain(src, {});
+    expect(result.previewHtml).toContain('class="dialogue-block"');
+    expect(result.previewHtml).toContain('<style>');
+  });
+});

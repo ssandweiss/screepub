@@ -266,6 +266,6 @@ export function tokensToPreviewHtml(
   const doc = body.files[0]?.xhtml ?? xhtmlDoc('Script', '');
   return doc.replace(
     /<link rel="stylesheet"[^>]*\/>/,
-    `<style>\n${screenplayCss(resolved)}</style>`,
+    () => `<style>\n${screenplayCss(resolved)}</style>`,
   );
 }

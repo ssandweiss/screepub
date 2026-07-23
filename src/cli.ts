@@ -24,6 +24,7 @@ Options:
   --author <text>        override detected author
   --force                convert even if it doesn't look like a screenplay
   --mobi                 also write a .mobi (for USB sideload to Kindle)
+  --preview-html <file>  also write the script as one self-contained HTML file
   --options <file.json>  formatting options (see docs/formatting-options-log.md)
   --json                 machine-readable result on stdout (for the app)
   --debug                also dump classified elements to <input>.elements.json
@@ -58,6 +59,7 @@ async function main() {
       author: { type: 'string' },
       force: { type: 'boolean', default: false },
       mobi: { type: 'boolean', default: false },
+      'preview-html': { type: 'string' },
       options: { type: 'string' },
       json: { type: 'boolean', default: false },
       debug: { type: 'boolean', default: false },
@@ -135,6 +137,11 @@ async function main() {
     fountainPath = values.fountain ?? `${stem}.fountain`;
     await writeFile(fountainPath, result.fountainText, 'utf8');
   }
+  let previewPath: string | undefined;
+  if (values['preview-html']) {
+    previewPath = values['preview-html'];
+    await writeFile(previewPath, result.previewHtml, 'utf8');
+  }
   let debugPath: string | undefined;
   if (values.debug && result.screenplay) {
     debugPath = `${stem}.elements.json`;
@@ -156,6 +163,7 @@ async function main() {
         epubPath,
         mobiPath,
         fountainPath,
+        previewHtmlPath: previewPath,
         debugPath,
       }),
     );
@@ -174,7 +182,7 @@ async function main() {
     );
   }
   for (const w of result.warnings) console.log(`  warning: ${w}`);
-  for (const f of [epubPath, mobiPath, fountainPath, debugPath]) {
+  for (const f of [epubPath, mobiPath, fountainPath, previewPath, debugPath]) {
     if (f) console.log(`  wrote ${f}`);
   }
 }
