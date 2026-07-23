@@ -82,7 +82,7 @@ bun src/cli.ts <input.pdf | input.fountain> [options]
 ## Development
 
 ```bash
-bun test                    # engine suite (201 tests)
+bun test                    # engine suite
 bunx tsc --noEmit           # typecheck
 app/build-app.sh            # build the Mac app
 (cd app && swift run -c release kit-check)   # Swift-side checks

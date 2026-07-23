@@ -1,7 +1,7 @@
 # Formatting decisions log — future Mac app options registry
 
 Every formatting behavior Screepub applies, logged as it was tuned
-(2026-07-22, initial build + two Meteor Anne feedback rounds). The print
+(2026-07-22, initial build + two feedback rounds on a real script). The print
 geometry and Kindle CSS constraints behind these choices live in
 `docs/screenplay-format-reference.md` — read that first when adjusting. Each entry is
 written as a **toggle or slider in the Mac app** (Settings → Formatting;
@@ -16,7 +16,7 @@ future work; everything else is live.
 - **What:** scenes are anchored `<section>`s packed into one body XHTML
   file; files split only past a size budget, at a scene boundary. Spine
   boundaries force page breaks in every reader — one-file-per-scene made
-  every slugline start a fresh page (the first Meteor Anne complaint).
+  every slugline start a fresh page (the first feedback-round complaint).
 - **Default:** continuous, 250 KB/file budget.
 - **App option:** toggle "Start each scene on a new page" (off) +
   advanced: file-size budget.
@@ -61,7 +61,7 @@ future work; everything else is live.
 ### 3. Vertical rhythm between elements
 - **What:** a full blank line (`1em`) between action paragraphs, dialogue
   blocks, transitions, centered text; bumped from the original tighter
-  0.8em (third Meteor Anne complaint). Inside a dialogue block
+  0.8em (a later feedback-round complaint). Inside a dialogue block
   (cue → paren → lines) spacing stays at 0 — that tightness is correct.
 - **Default:** 1em between elements; scene heading 1.6em above / 0.8em
   below; mini-slug 1.4em above / 1em below.
@@ -117,8 +117,9 @@ future work; everything else is live.
 - **What:** star-only text items at >80% page width are production markup
   (revised-draft line markers). Dropped at extraction; leaving them in
   created bogus action elements that **reset dialogue context and
-  fragmented speeches** (found via Meteor Anne 11.10.25: PAMELA's lines).
-  Author-written `*emphasis*` at text indents is untouched.
+  fragmented speeches** (found via feedback-round testing 11.10.25: a
+  character's dialogue lines). Author-written `*emphasis*` at text
+  indents is untouched.
 - **Default:** drop.
 - **App option:** "Revision marks: hide / show right-aligned gutter ✱" —
   showing them needs a serializer+CSS path (float-right span), not built.
@@ -183,26 +184,26 @@ future work; everything else is live.
 ### 9a. Dual-margin scene numbers collapsed
 - **What:** shooting scripts print the scene number in BOTH margins of
   the slugline row; joined they leaked as "2  2" action lines and never
-  attached (IntimacyParty). Duplicated tokens collapse to one, which
+  attached (found in testing). Duplicated tokens collapse to one, which
   then classifies and attaches as the scene number.
-- **Inline variant (2026-07-22, OUT THERE):** some generators put the
-  numbers on the heading row itself ("2 EXT. WOODS - DAY 2"), which
-  defeated the ^INT/^EXT anchor — 0 scenes detected. Classifier now
-  strips a same-token leading/trailing number pair and attaches it as
-  `sceneNumber` when the inner text is a slugline.
+- **Inline variant (2026-07-22, found in another test script):** some
+  generators put the numbers on the heading row itself ("2 EXT. WOODS -
+  DAY 2"), which defeated the ^INT/^EXT anchor — 0 scenes detected.
+  Classifier now strips a same-token leading/trailing number pair and
+  attaches it as `sceneNumber` when the inner text is a slugline.
 - **Code:** `src/parser/extract.ts` (normal-line emit),
   `src/parser/classify.ts` (`DUAL_MARGIN_HEADING`).
 
 ### 9b. Hybrid character cues
 - **What:** CLEO/PANNI (shared), COP #2, MOM & DAD — the name pattern
   now allows / & # and digits; previously such cues fell to action and
-  their speeches collapsed (IntimacyParty lyrics block).
+  their speeches collapsed (a lyrics block found in testing).
 - **Code:** `src/parser/classify.ts` (CHARACTER_NAME).
 
 ### 9c. Width-aware item joining
 - **What:** gap detection now uses pdf.js's real item widths (falling
   back to the len×6 estimate) — fixes phantom spaces in split names
-  ("Courtney Ho ffman") and sharpens dual-dialogue boundaries.
+  ("Jo hn Sm ith") and sharpens dual-dialogue boundaries.
 - **Code:** `src/parser/extract.ts` (`endX`).
 
 ### 9d. Inline bold/italic pass-through
@@ -221,10 +222,11 @@ future work; everything else is live.
   `src/epub/html.ts` + `src/mobi/html.ts` (`inlineEmphasis`/`inline`).
 
 ### 10a. Dual dialogue — de-interleaved to sequential speeches
-- **What:** simultaneous two-column speeches (Meteor Anne p48, Highland
-  ×23 lines) previously interleaved into garbage because extraction joins
-  by Y line. Now: a dual-cue line (two cue-shaped clusters) anchors a
-  region; the column boundary starts at rightCueX−13% and refines only
+- **What:** simultaneous two-column speeches (seen in two different test
+  scripts, one with 23 lines of dual dialogue) previously interleaved
+  into garbage because extraction joins by Y line. Now: a dual-cue line
+  (two cue-shaped clusters) anchors a region; the column boundary starts
+  at rightCueX−13% and refines only
   LEFTWARD to the right column's text edge (parentheticals sit deeper and
   must not drag it); body lines partition by start-x; regions end on a
   full-width (straddling) line, a cue-shaped left-only line, text left of
@@ -305,7 +307,7 @@ future work; everything else is live.
   app can cache stage 1 and re-run stages 2–3 live as options change.
 - Validation habit worth keeping in the app: `epubcheck` after every
   render config change (all tweaks above shipped at 0 errors/0 warnings
-  across the five-generator fixture set + Meteor Anne).
+  across the five-generator fixture set + additional real-world scripts).
 - **Device routes (2026-07-22, not formatting knobs but adjacent):**
   Kindle → AZW3/MOBI to documents/; Kobo → EPUB to volume root, or
   KEPUB via Calibre when the app's "Convert to KEPUB" toggle is on
