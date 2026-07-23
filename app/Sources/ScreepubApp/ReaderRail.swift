@@ -9,7 +9,7 @@ struct ReaderRail: View {
     var body: some View {
         Form {
             Section("This script") {
-                Menu("Apply device preset") {
+                Menu("Load device preset") {
                     ForEach(DevicePreset.allCases) { preset in
                         Button(preset.displayName) {
                             model.settings = preset.settings
@@ -17,6 +17,9 @@ struct ReaderRail: View {
                         }
                     }
                 }
+                Text("Overwrites this script's settings below.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 slider("Dialogue margins", value: binding(\.dialogueSideMarginPct), range: 0...30)
                 Picker("Cues", selection: binding(\.cueAlignment)) {
                     Text("Centered").tag("centered")
