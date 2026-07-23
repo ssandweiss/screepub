@@ -4,6 +4,7 @@
 import type { Token } from 'fountain-js';
 import type { FormatOptions } from '../options';
 import { DEFAULT_FORMAT_OPTIONS } from '../options';
+import { screenplayCss } from './css';
 
 export interface BodyFile {
   /** filename-safe id, e.g. "body001" */
@@ -246,4 +247,25 @@ export function tokensToBody(
   flush();
 
   return { files, toc };
+}
+
+/**
+ * The whole script as ONE self-contained HTML document — the same section
+ * markup as the EPUB body, with the stylesheet inlined instead of linked.
+ * This is the app's reader-preview surface: what you proof is what ships.
+ */
+export function tokensToPreviewHtml(
+  tokens: Token[],
+  format: Partial<FormatOptions> = {},
+): string {
+  const resolved: FormatOptions = { ...DEFAULT_FORMAT_OPTIONS, ...format };
+  const body = tokensToBody(tokens, {
+    maxFileBytes: Number.MAX_SAFE_INTEGER,
+    format: resolved,
+  });
+  const doc = body.files[0]?.xhtml ?? xhtmlDoc('Script', '');
+  return doc.replace(
+    /<link rel="stylesheet"[^>]*\/>/,
+    `<style>\n${screenplayCss(resolved)}</style>`,
+  );
 }

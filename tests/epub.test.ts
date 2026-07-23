@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { Fountain } from 'fountain-js';
 import JSZip from 'jszip';
-import { tokensToBody } from '../src/epub/html';
+import { tokensToBody, tokensToPreviewHtml } from '../src/epub/html';
 import { buildEpub } from '../src/epub/build';
 import { SCREENPLAY_CSS } from '../src/epub/css';
 
@@ -301,5 +301,27 @@ describe('dual dialogue table rendering', () => {
   test('table style keeps the pair together and splits width evenly', () => {
     expect(SCREENPLAY_CSS.match(/table\.dual-dialogue\s*{[^}]*}/)![0]).toContain('page-break-inside: avoid');
     expect(SCREENPLAY_CSS.match(/table\.dual-dialogue td\s*{[^}]*}/)![0]).toContain('width: 50%');
+  });
+});
+
+// ── tokensToPreviewHtml ───────────────────────────────────
+
+describe('tokensToPreviewHtml', () => {
+  const tokens = new Fountain().parse(
+    'INT. KITCHEN - DAY\n\nA kettle screams.\n\nCLEO\nTurn it off.\n',
+    true,
+  ).tokens;
+
+  test('emits one self-contained document with inline css', () => {
+    const html = tokensToPreviewHtml(tokens, { dialogueSideMarginPct: 25 });
+    expect(html).toContain('class="dialogue-block"');
+    expect(html).toContain('<style>');
+    expect(html).toContain('margin-left: 25%');
+    expect(html).not.toContain('<link');
+  });
+
+  test('defaults options when none given', () => {
+    const html = tokensToPreviewHtml(tokens);
+    expect(html).toContain('margin-left: 20%');
   });
 });
