@@ -16,6 +16,7 @@ final class ReaderModel: ObservableObject {
     @Published var settings: FormatSettings
     @Published var html: String = ""
     @Published var errorLine: String?
+    @Published var statusLine: String?
     @Published var rendering = false
     private var renderTask: Task<Void, Never>?
     private var generation = 0
@@ -34,7 +35,8 @@ final class ReaderModel: ObservableObject {
     /// refresh the web view. The library EPUB and MOBI are rewritten too —
     /// sends stay WYSIWYG with the preview.
     func settingsChanged() {
-        renderTask?.cancel()
+        let previous = renderTask
+        previous?.cancel()
         renderTask = Task { [settings] in
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
@@ -44,13 +46,20 @@ final class ReaderModel: ObservableObject {
                 self.errorLine = error.localizedDescription
                 return
             }
+            // Serialize with any render already underway so a slow older
+            // engine run can't finish last and leave stale files on disk.
+            _ = await previous?.value
             await self.render(with: settings)
         }
     }
 
     func renderNow() {
-        renderTask?.cancel()
-        renderTask = Task { await render(with: settings) }
+        let previous = renderTask
+        previous?.cancel()
+        renderTask = Task {
+            _ = await previous?.value
+            await self.render(with: settings)
+        }
     }
 
     private func render(with settings: FormatSettings) async {
@@ -76,7 +85,7 @@ final class ReaderModel: ObservableObject {
         }.value
         guard mine == generation else { return }
         switch outcome {
-        case .success(let doc): html = doc; errorLine = nil
+        case .success(let doc): html = doc; errorLine = nil; statusLine = nil
         case .failure(let error): errorLine = error.localizedDescription
         }
     }

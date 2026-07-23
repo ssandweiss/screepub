@@ -46,6 +46,26 @@ enum AppSettings {
         )
     }
 
+    /// Write a full FormatSettings back to the same keys `formatSettings()`
+    /// reads — used to promote a script's tuned sidecar to the app default.
+    static func setFormatSettings(_ s: FormatSettings) {
+        let d = UserDefaults.standard
+        d.set(s.scenePageBreaks, forKey: "fmtScenePageBreaks")
+        d.set(s.dialogueSideMarginPct, forKey: "fmtDialogueMargin")
+        d.set(s.cueIndentPct, forKey: "fmtCueIndent")
+        d.set(s.parentheticalIndentPct, forKey: "fmtParenIndent")
+        d.set(s.elementSpacingEm, forKey: "fmtSpacing")
+        d.set(s.keepSceneHeadingWithScene, forKey: "fmtKeepHeading")
+        d.set(s.fontFamily, forKey: "fmtFont")
+        d.set(s.rejoinSplitDialogue, forKey: "fmtRejoin")
+        d.set(s.contdMode, forKey: "fmtContd")
+        d.set(s.cueAlignment, forKey: "fmtCueAlign")
+        d.set(s.includeTitlePage, forKey: "fmtTitlePage")
+        d.set(s.showSceneNumbers, forKey: "fmtSceneNumbers")
+        d.set(s.showPageMarkers, forKey: "fmtPageMarkers")
+        d.set(s.dualDialogue, forKey: "fmtDual")
+    }
+
     /// Reset all formatting keys so @AppStorage bindings fall back to defaults.
     static func resetFormatting() {
         for key in ["fmtScenePageBreaks", "fmtDialogueMargin", "fmtCueIndent", "fmtParenIndent",

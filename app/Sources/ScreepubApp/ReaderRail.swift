@@ -1,10 +1,17 @@
 import SwiftUI
+import Combine
 import ScreepubKit
 
 /// The reader's side rail: this script's formatting knobs (persisted to its
 /// sidecar, re-rendered live), promotion to app defaults, and send actions.
 struct ReaderRail: View {
     @ObservedObject var model: ReaderModel
+    @State private var devices: [ConnectedDevice] = DeviceDetect.mounted()
+
+    private let volumeEvents = NSWorkspace.shared.notificationCenter
+        .publisher(for: NSWorkspace.didMountNotification)
+        .merge(with: NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.didUnmountNotification))
 
     var body: some View {
         Form {
@@ -33,29 +40,25 @@ struct ReaderRail: View {
                 if let err = model.errorLine {
                     Text(err).font(.caption).foregroundStyle(.red)
                 }
-                Button("Save as app defaults") { saveAsDefaults() }
+                if let status = model.statusLine {
+                    Text(status).font(.caption).foregroundStyle(.secondary)
+                }
+                Button("Save as app defaults") { AppSettings.setFormatSettings(model.settings) }
                 Button("Show EPUB in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting(
                         [URL(fileURLWithPath: model.ref.epubPath)])
                 }
             }
             Section("Send") {
-                ForEach(DeviceDetect.mounted()) { device in
+                ForEach(devices) { device in
                     Button("Copy to \(device.name) — USB") { copy(to: device) }
                 }
-                Button("Email to Kindle") {
-                    let address = UserDefaults.standard.string(forKey: "kindleEmail") ?? ""
-                    if !address.isEmpty {
-                        _ = SendToKindle.email(
-                            URL(fileURLWithPath: model.ref.epubPath),
-                            to: address, title: model.ref.title)
-                    } else {
-                        model.errorLine = "set your @kindle.com address in Settings first"
-                    }
-                }
+                Button("Email to Kindle") { emailToKindle() }
             }
+            .disabled(model.rendering)
         }
         .formStyle(.grouped)
+        .onReceive(volumeEvents) { _ in devices = DeviceDetect.mounted() }
     }
 
     /// Binding into the model's FormatSettings that triggers the debounced
@@ -79,33 +82,26 @@ struct ReaderRail: View {
         }
     }
 
-    /// Copy this script's values into the global @AppStorage keys that
-    /// Settings → Formatting and future conversions read.
-    private func saveAsDefaults() {
-        let s = model.settings
-        let d = UserDefaults.standard
-        d.set(s.scenePageBreaks, forKey: "fmtScenePageBreaks")
-        d.set(s.dialogueSideMarginPct, forKey: "fmtDialogueMargin")
-        d.set(s.cueIndentPct, forKey: "fmtCueIndent")
-        d.set(s.parentheticalIndentPct, forKey: "fmtParenIndent")
-        d.set(s.elementSpacingEm, forKey: "fmtSpacing")
-        d.set(s.keepSceneHeadingWithScene, forKey: "fmtKeepHeading")
-        d.set(s.fontFamily, forKey: "fmtFont")
-        d.set(s.rejoinSplitDialogue, forKey: "fmtRejoin")
-        d.set(s.contdMode, forKey: "fmtContd")
-        d.set(s.cueAlignment, forKey: "fmtCueAlign")
-        d.set(s.includeTitlePage, forKey: "fmtTitlePage")
-        d.set(s.showSceneNumbers, forKey: "fmtSceneNumbers")
-        d.set(s.showPageMarkers, forKey: "fmtPageMarkers")
-        d.set(s.dualDialogue, forKey: "fmtDual")
+    private func emailToKindle() {
+        let address = (UserDefaults.standard.string(forKey: "kindleEmail") ?? "")
+            .trimmingCharacters(in: .whitespaces)
+        guard !address.isEmpty else {
+            model.statusLine = "set your @kindle.com address in Settings first"
+            return
+        }
+        if SendToKindle.email(URL(fileURLWithPath: model.ref.epubPath), to: address, title: model.ref.title) {
+            model.errorLine = nil
+            model.statusLine = "Mail compose opened"
+        } else {
+            model.errorLine = "no mail account available — configure Mail.app"
+        }
     }
 
     /// USB copy mirroring ContentView's route: AZW3 via Calibre for Kindle,
     /// fresh MOBI fallback without it, plain EPUB elsewhere.
     private func copy(to device: ConnectedDevice) {
         let epub = URL(fileURLWithPath: model.ref.epubPath)
-        let mobi = URL(fileURLWithPath: model.ref.epubPath)
-            .deletingPathExtension().appendingPathExtension("mobi")
+        let mobi = epub.deletingPathExtension().appendingPathExtension("mobi")
         Task {
             let outcome: Result<Void, Error> = await Task.detached {
                 Result {
@@ -123,10 +119,12 @@ struct ReaderRail: View {
                     }
                 }
             }.value
-            if case .failure(let error) = outcome {
-                model.errorLine = error.localizedDescription
-            } else {
+            switch outcome {
+            case .success:
                 model.errorLine = nil
+                model.statusLine = "copied to \(device.name) — eject before unplugging"
+            case .failure(let error):
+                model.errorLine = error.localizedDescription
             }
         }
     }

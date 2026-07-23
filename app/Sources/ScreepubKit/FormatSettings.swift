@@ -4,7 +4,9 @@ import Foundation
 /// and passed via --options. Defaults must match DEFAULT_FORMAT_OPTIONS.
 public struct FormatSettings: Codable, Sendable, Equatable {
     // Adding a field? Also update PartialFormatSettings + its merge in
-    // ScriptSettings.swift, and the engine's options.ts / DEFAULT_FORMAT_OPTIONS.
+    // ScriptSettings.swift, AppSettings.swift's formatSettings() /
+    // setFormatSettings() / resetFormatting() trio, and the engine's
+    // options.ts / DEFAULT_FORMAT_OPTIONS.
     public var scenePageBreaks: Bool
     public var dialogueSideMarginPct: Double
     public var cueIndentPct: Double
