@@ -15,6 +15,7 @@ id_rsa*
 # Logs / scratch
 *.log
 *.bun-build
+.superpowers/
 node_modules/
 .next/
 dist/
