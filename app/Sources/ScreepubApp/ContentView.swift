@@ -384,7 +384,9 @@ struct ContentView: View {
         state = .converting(url.lastPathComponent)
         Task {
             let outputDir = AppSettings.outputFolder
-            let format = AppSettings.formatSettings()
+            let stem = url.deletingPathExtension().lastPathComponent
+            let prospectiveFountain = outputDir.appendingPathComponent(stem).appendingPathExtension("fountain")
+            let format = ScriptSettings.load(forFountain: prospectiveFountain, fallback: AppSettings.formatSettings())
             let outcome: Result<EngineResult, Error> = await Task.detached {
                 Result { try Engine.convert(input: url, force: force, outputDir: outputDir, format: format) }
             }.value

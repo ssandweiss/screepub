@@ -45,7 +45,7 @@ async function writeFileAtomic(
   data: Uint8Array | string,
   enc?: BufferEncoding,
 ): Promise<void> {
-  const tmp = `${path}.tmp`;
+  const tmp = `${path}.${process.pid}.tmp`;
   await writeFile(tmp, data, enc);
   await rename(tmp, path);
 }

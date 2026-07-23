@@ -57,7 +57,7 @@ final class ReaderModel: ObservableObject {
         generation += 1
         let mine = generation
         rendering = true
-        defer { rendering = false }
+        defer { if mine == generation { rendering = false } }
         let fountain = fountainURL
         let outputDir = fountain.deletingLastPathComponent()
         let previewFile = FileManager.default.temporaryDirectory
@@ -120,9 +120,8 @@ struct ReaderView: View {
             ScriptWebView(html: model.html)
                 .frame(minWidth: 380)
                 .background(Color.white)
-            // Task 6 replaces this placeholder with the formatting rail.
-            Text("")
-                .frame(width: 0)
+            ReaderRail(model: model)
+                .frame(minWidth: 210, maxWidth: 240)
         }
         .frame(minWidth: 600, minHeight: 500)
         .navigationTitle(model.ref.title)
