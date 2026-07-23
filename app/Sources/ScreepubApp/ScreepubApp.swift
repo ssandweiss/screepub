@@ -38,6 +38,7 @@ struct SettingsView: View {
 
 struct GeneralSettings: View {
     @AppStorage("kindleEmail") private var kindleEmail = ""
+    @AppStorage("koboKepub") private var koboKepub = false
     @AppStorage(AppSettings.outputFolderKey) private var outputFolder = ""
 
     var body: some View {
@@ -64,6 +65,15 @@ struct GeneralSettings: View {
                     .textContentType(.emailAddress)
                     .autocorrectionDisabled()
                 Text("Find it under Amazon → Manage Your Content and Devices → Devices. Your own email address must be on Amazon's approved sender list.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Other devices") {
+                Toggle("Convert to KEPUB for Kobo", isOn: $koboKepub)
+                Text("KEPUB unlocks Kobo's page-turn counts and reading stats, but its renderer has justification quirks around dashes and ellipses — common in dialogue. Off sends a plain EPUB (recommended).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("tolino: books are copied into the Books folder. reMarkable: enable Settings → Storage → USB web interface on the tablet, then dock it over USB.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -13,9 +13,12 @@ enum AppState {
 struct ContentView: View {
     @State private var state: AppState = .idle
     @State private var dropTargeted = false
-    @State private var kindleVolumes: [URL] = KindleDevice.mounted()
+    @State private var devices: [ConnectedDevice] = DeviceDetect.mounted()
+    @State private var remarkableUp = false
+    @State private var lastInput: URL?
     @State private var transferNote: String?
     @AppStorage("kindleEmail") private var kindleEmail = ""
+    @AppStorage("koboKepub") private var koboKepub = false
     @Environment(\.openSettings) private var openSettings
 
     private let volumeEvents = NSWorkspace.shared.notificationCenter
@@ -47,7 +50,14 @@ struct ContentView: View {
         }
         .frame(width: 460, height: 560)
         .onReceive(volumeEvents) { _ in
-            kindleVolumes = KindleDevice.mounted()
+            devices = DeviceDetect.mounted()
+        }
+        .task {
+            // reMarkable never mounts — poll its USB web interface instead.
+            while !Task.isCancelled {
+                remarkableUp = await RemarkableDevice.probe()
+                try? await Task.sleep(for: .seconds(6))
+            }
         }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             guard let provider = providers.first else { return false }
@@ -169,18 +179,34 @@ struct ContentView: View {
                     .foregroundStyle(Theme.inkFaint)
                     .lineSpacing(2)
                 Spacer()
-                if let kindle = kindleVolumes.first {
-                    Text("\(KindleDevice.name(of: kindle).uppercased()) CONNECTED")
-                        .font(Theme.courier(10, .bold))
-                        .kerning(1)
-                        .foregroundStyle(Theme.brass)
-                        .padding(.vertical, 5)
-                        .padding(.horizontal, 8)
-                        .overlay(Rectangle().stroke(Theme.brass, lineWidth: 1.2))
-                        .rotationEffect(.degrees(-3))
-                }
+                deviceStamps
             }
         }
+    }
+
+    /// One rubber-stamp badge per connected device, stacked like a
+    /// producer's approval stamps in the page corner.
+    private var deviceStamps: some View {
+        VStack(alignment: .trailing, spacing: 7) {
+            ForEach(Array(stampLabels.enumerated()), id: \.element) { i, label in
+                Text(label)
+                    .font(Theme.courier(10, .bold))
+                    .kerning(1)
+                    .foregroundStyle(Theme.brass)
+                    .padding(.vertical, 5)
+                    .padding(.horizontal, 8)
+                    .overlay(Rectangle().stroke(Theme.brass, lineWidth: 1.2))
+                    .rotationEffect(.degrees(i.isMultiple(of: 2) ? -3 : 2))
+                    .transition(.opacity.combined(with: .scale(scale: 1.4)))
+            }
+        }
+        .animation(.spring(duration: 0.35), value: stampLabels)
+    }
+
+    private var stampLabels: [String] {
+        var labels = devices.map { "\($0.name.uppercased()) CONNECTED" }
+        if remarkableUp { labels.append("REMARKABLE DOCKED") }
+        return labels
     }
 
     private func choose() {
@@ -264,12 +290,20 @@ struct ContentView: View {
         }
     }
 
+    private var anyDeviceReachable: Bool { !devices.isEmpty || remarkableUp }
+
     @ViewBuilder
     private func transferButtons(result: EngineResult, epub: URL, title: String?) -> some View {
         VStack(spacing: 9) {
-            if let kindle = kindleVolumes.first {
-                Button("COPY TO \(KindleDevice.name(of: kindle).uppercased()) — USB") {
-                    copyToDevice(result: result, epub: epub, volume: kindle)
+            ForEach(devices) { device in
+                Button("COPY TO \(device.name.uppercased()) — USB") {
+                    copyToDevice(result: result, epub: epub, device: device)
+                }
+                .buttonStyle(BradButtonStyle())
+            }
+            if remarkableUp {
+                Button("SEND TO REMARKABLE — USB") {
+                    sendToRemarkable(epub: epub)
                 }
                 .buttonStyle(BradButtonStyle())
             }
@@ -277,7 +311,7 @@ struct ContentView: View {
             Button("EMAIL TO KINDLE…") {
                 emailToKindle(epub, title: title)
             }
-            .buttonStyle(kindleVolumes.isEmpty ? AnyButtonStyle(BradButtonStyle()) : AnyButtonStyle(OutlineButtonStyle()))
+            .buttonStyle(anyDeviceReachable ? AnyButtonStyle(OutlineButtonStyle()) : AnyButtonStyle(BradButtonStyle()))
 
             Button(SendToKindle.appIsInstalled ? "SEND TO KINDLE APP" : "SEND TO KINDLE — WEB") {
                 SendToKindle.sendViaAmazon(epub)
@@ -336,6 +370,7 @@ struct ContentView: View {
 
     private func convert(_ url: URL, force: Bool) {
         transferNote = nil
+        lastInput = url
         state = .converting(url.lastPathComponent)
         Task {
             let outputDir = AppSettings.outputFolder
@@ -365,36 +400,67 @@ struct ContentView: View {
         }
     }
 
-    private func copyToDevice(result: EngineResult, epub: URL, volume: URL) {
-        let deviceName = KindleDevice.name(of: volume)
+    private func copyToDevice(result: EngineResult, epub: URL, device: ConnectedDevice) {
         let mobiPath = result.mobiPath
+        let wantKepub = koboKepub
 
-        if EbookConvert.isAvailable {
+        switch device.kind {
+        case .kindle where EbookConvert.isAvailable:
             transferNote = "converting to AZW3 for Kindle…"
-        } else if mobiPath == nil {
+        case .kindle where mobiPath == nil:
             transferNote = "no Kindle-native file available — use Email to Kindle instead"
             return
-        } else {
-            transferNote = "copying MOBI to \(deviceName)…"
+        case .kindle:
+            transferNote = "copying MOBI to \(device.name)…"
+        case .kobo where wantKepub && EbookConvert.isAvailable:
+            transferNote = "converting to KEPUB for Kobo…"
+        default:
+            transferNote = "copying EPUB to \(device.name)…"
         }
 
         Task {
             let outcome: Result<String, Error> = await Task.detached {
                 Result {
-                    if EbookConvert.isAvailable {
-                        let azw3 = try EbookConvert.toAzw3(epub)
-                        try KindleDevice.copy(azw3, to: volume)
-                        return "AZW3"
+                    switch device.kind {
+                    case .kindle:
+                        if EbookConvert.isAvailable {
+                            let azw3 = try EbookConvert.toAzw3(epub)
+                            try DeviceTransfer.copy(azw3, to: device)
+                            return "AZW3"
+                        }
+                        try DeviceTransfer.copy(URL(fileURLWithPath: mobiPath!), to: device)
+                        return "MOBI"
+                    case .kobo where wantKepub && EbookConvert.isAvailable:
+                        let kepub = try EbookConvert.toKepub(epub)
+                        try DeviceTransfer.copy(kepub, to: device)
+                        return "KEPUB"
+                    default:
+                        try DeviceTransfer.copy(epub, to: device)
+                        return "EPUB"
                     }
-                    try KindleDevice.copy(URL(fileURLWithPath: mobiPath!), to: volume)
-                    return "MOBI"
                 }
             }.value
             switch outcome {
             case .success(let format):
-                transferNote = "copied to \(deviceName) as \(format) — eject before unplugging"
+                transferNote = "copied to \(device.name) as \(format) — eject before unplugging"
             case .failure(let error):
                 transferNote = "transfer failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// reMarkable is a big-screen PDF annotation device — send the original
+    /// screenplay PDF when we have one (native pagination + pen notes);
+    /// fall back to the EPUB for Fountain input.
+    private func sendToRemarkable(epub: URL) {
+        let file = lastInput?.pathExtension.lowercased() == "pdf" ? lastInput! : epub
+        transferNote = "sending \(file.lastPathComponent) to reMarkable…"
+        Task {
+            do {
+                try await RemarkableDevice.upload(file)
+                transferNote = "sent to reMarkable — it appears in My files"
+            } catch {
+                transferNote = "reMarkable upload failed: \(error.localizedDescription)"
             }
         }
     }

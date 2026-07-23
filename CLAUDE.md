@@ -1,8 +1,10 @@
 # Screepub
 
 Screenplay PDF → Fountain → reflowable EPUB3/MOBI, with a SwiftUI Mac app
-that converts and sends to Kindle. Engine is Bun/TypeScript; the app shells
-out to it as a compiled sidecar.
+that converts and sends to e-readers (Kindle first; Kobo/tolino via USB
+volume signatures, reMarkable via its USB web interface — see
+ScreepubKit's Device.swift/RemarkableDevice.swift). Engine is
+Bun/TypeScript; the app shells out to it as a compiled sidecar.
 
 ## Commands
 

@@ -23,10 +23,16 @@ page-styled window:
 - **Transfer routes:** USB copy to a mounted Kindle (auto-converts to
   AZW3 via Calibre when installed, else the engine's own MOBI — Kindles
   never index sideloaded EPUBs), pre-addressed email to your
-  @kindle.com address, or Amazon's Send-to-Kindle app/web.
+  @kindle.com address, or Amazon's Send-to-Kindle app/web. Kobo
+  (plain EPUB, or KEPUB via Calibre — toggle in Settings) and tolino
+  (EPUB into its Books folder) are detected the same way; a docked
+  reMarkable (USB web interface enabled) gets the original PDF —
+  native pagination plus pen annotation beats a reflow there.
+- **Connected-device stamps:** the title page shows a stamp per
+  detected device, live on connect/disconnect.
 - **Settings (⌘, or the gear on the page):** output library folder
-  (default `~/Documents/Screepub`), Kindle email, and a full Formatting
-  tab with a live script-page preview.
+  (default `~/Documents/Screepub`), Kindle email, Kobo KEPUB toggle,
+  and a full Formatting tab with a live script-page preview.
 - Guards surface clearly: scanned PDFs, non-screenplays (with Convert
   Anyway), password-protected files.
 

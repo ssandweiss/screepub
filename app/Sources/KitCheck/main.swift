@@ -51,6 +51,30 @@ try! Data("v2".utf8).write(to: src)
 try! KindleDevice.copy(src, to: kindle)
 check((try? String(contentsOf: dest, encoding: .utf8)) == "v2", "re-copy overwrites")
 
+// — multi-vendor device detection —
+let kobo = tempDir("KOBOeReader")
+try! FileManager.default.createDirectory(at: kobo.appendingPathComponent(".kobo"), withIntermediateDirectories: true)
+check(DeviceDetect.classify(kobo) == .kobo, "volume with .kobo dir detected as Kobo")
+
+let tolino = tempDir("tolino")
+check(DeviceDetect.classify(tolino) == .tolino, "volume named tolino detected as tolino")
+
+check(DeviceDetect.classify(kindle) == .kindle, "Kindle volume classified as kindle")
+check(DeviceDetect.classify(stick) == nil, "generic thumb drive classifies as no device")
+
+// — per-vendor copy destinations —
+let book = kobo.deletingLastPathComponent().appendingPathComponent("Script.epub")
+try! Data("epub".utf8).write(to: book)
+
+let koboDest = try! DeviceTransfer.copy(book, to: ConnectedDevice(kind: .kobo, name: "Kobo", volume: kobo))
+check(koboDest.path.hasSuffix("KOBOeReader/Script.epub"), "Kobo copy lands at volume root")
+
+let tolinoDest = try! DeviceTransfer.copy(book, to: ConnectedDevice(kind: .tolino, name: "tolino", volume: tolino))
+check(tolinoDest.path.hasSuffix("tolino/Books/Script.epub"), "tolino copy lands in Books/ (created)")
+
+let kindleDest = try! DeviceTransfer.copy(book, to: ConnectedDevice(kind: .kindle, name: "Kindle", volume: kindle))
+check(kindleDest.path.hasSuffix("Kindle/documents/Script.epub"), "Kindle copy still lands in documents/")
+
 // — ebook-convert discovery (environment-dependent: only consistency) —
 if let tool = EbookConvert.toolURL() {
     check(FileManager.default.isExecutableFile(atPath: tool.path), "discovered ebook-convert is executable")
@@ -151,6 +175,28 @@ func linkedDialogueRules(html: URL, stylesDir: URL) -> String {
         rules += after[..<(after.firstIndex(of: "}") ?? after.endIndex)]
     }
     return rules
+}
+
+// — KEPUB conversion (environment-dependent) —
+func fileContains(_ url: URL, _ needle: String) -> Bool {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/zipgrep")
+    p.arguments = ["-q", needle, url.path]
+    p.standardOutput = Pipe()
+    p.standardError = Pipe()
+    try? p.run()
+    p.waitUntilExit()
+    return p.terminationStatus == 0
+}
+
+if EbookConvert.isAvailable {
+    let epub = makeMiniScriptEpub()
+    if let kepub = try? EbookConvert.toKepub(epub) {
+        check(kepub.lastPathComponent.hasSuffix(".kepub.epub"), "KEPUB output named .kepub.epub for Kobo renderer")
+        check(fileContains(kepub, "koboSpan"), "KEPUB output carries koboSpan markup")
+    } else {
+        check(false, "EbookConvert.toKepub succeeds on minimal screenplay EPUB")
+    }
 }
 
 if EbookConvert.isAvailable, let tool = EbookConvert.toolURL() {

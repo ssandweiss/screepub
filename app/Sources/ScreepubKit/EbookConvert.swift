@@ -70,4 +70,37 @@ public enum EbookConvert {
         }
         return azw3
     }
+
+    /// Convert an EPUB to KEPUB next to it (Calibre 7.1+ emits KEPUB with
+    /// sentence-level koboSpan markup when the output extension is .kepub).
+    /// The Kobo renderer selects on the double extension, so the result is
+    /// renamed to `<name>.kepub.epub`. Blocking — call from a background
+    /// task.
+    @discardableResult
+    nonisolated public static func toKepub(_ epub: URL) throws -> URL {
+        guard let tool = toolURL() else { throw ConvertError.calibreMissing }
+        let base = epub.deletingPathExtension()
+        let raw = base.appendingPathExtension("kepub")
+        let kepub = URL(fileURLWithPath: base.path + ".kepub.epub")
+
+        let process = Process()
+        process.executableURL = tool
+        process.arguments = [epub.path, raw.path]
+        let stderr = Pipe()
+        process.standardOutput = Pipe()
+        process.standardError = stderr
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0, FileManager.default.fileExists(atPath: raw.path) else {
+            let detail = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? "no error output"
+            throw ConvertError.failed(String(detail.suffix(300)))
+        }
+        if FileManager.default.fileExists(atPath: kepub.path) {
+            try FileManager.default.removeItem(at: kepub)
+        }
+        try FileManager.default.moveItem(at: raw, to: kepub)
+        return kepub
+    }
 }

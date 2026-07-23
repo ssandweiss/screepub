@@ -289,3 +289,12 @@ future work; everything else is live.
 - Validation habit worth keeping in the app: `epubcheck` after every
   render config change (all tweaks above shipped at 0 errors/0 warnings
   across the five-generator fixture set + Meteor Anne).
+- **Device routes (2026-07-22, not formatting knobs but adjacent):**
+  Kindle → AZW3/MOBI to documents/; Kobo → EPUB to volume root, or
+  KEPUB via Calibre when the app's "Convert to KEPUB" toggle is on
+  (default OFF — Kobo's kepub renderer mis-justifies em-dashes/
+  ellipses, endemic in dialogue; kit-check verifies koboSpan markup);
+  tolino → EPUB into root `Books/`; reMarkable → original PDF over the
+  USB web interface (its EPUB renderer re-typesets, so reflow adds
+  nothing on a 7.8–11.8" screen). Detection: `.kobo` dir, tolino
+  volume name, Kindle documents/, reMarkable HTTP probe.
