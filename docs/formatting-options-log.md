@@ -145,6 +145,13 @@ future work; everything else is live.
 - **Code:** `src/fountain/serialize.ts` (`lastSpeaker` tracking).
 
 ### 8b. Cue keeps its first dialogue line (always on)
+- **Device verdict (2026-07-22, photo-confirmed on the user's old
+  Kindle):** pre-Enhanced-Typesetting KF8 firmware honors NO keep
+  mechanism — page-break-*:avoid ignored AND single-cell table
+  wrappers split mid-cell (A/B test: cue stranded identically with
+  and without tables). Keeps work on ET Kindles and WebKit readers;
+  on old KF8 they are unachievable — accepted limitation, do NOT
+  re-attempt via tables.
 - **What:** inside each dialogue block, cue + parentheticals + the first
   dialogue line share a `keep-together` wrapper (same KDP-documented
   container form as scene headings) so a cue never strands at a page
