@@ -34,6 +34,10 @@ export interface FormatOptions {
   showPageMarkers: boolean;
   /** simultaneous speech: side-by-side table or sequential speeches (registry #10a) */
   dualDialogue: 'sideBySide' | 'sequential';
+  /** justify body text vs. ragged-right (left-aligned). Screenplays are
+   * traditionally ragged-right; some readers justify by default, opening
+   * stretchy word gaps (registry #6b) */
+  justifyText: boolean;
 }
 
 export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
@@ -51,6 +55,7 @@ export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
   showSceneNumbers: false,
   showPageMarkers: false,
   dualDialogue: 'sideBySide',
+  justifyText: false,
 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -85,5 +90,6 @@ export function resolveFormatOptions(partial?: Record<string, unknown>): FormatO
     showSceneNumbers: bool('showSceneNumbers'),
     showPageMarkers: bool('showPageMarkers'),
     dualDialogue: p.dualDialogue === 'sequential' ? 'sequential' : d.dualDialogue,
+    justifyText: bool('justifyText'),
   };
 }

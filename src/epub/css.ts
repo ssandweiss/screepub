@@ -26,6 +26,9 @@ export function screenplayCss(o: FormatOptions): string {
   const sceneBreak = o.scenePageBreaks
     ? '\nsection.scene { page-break-before: always; }\n'
     : '';
+  // Screenplays are traditionally ragged-right; explicit `left` overrides
+  // a reader that justifies body text by default (stretchy word gaps).
+  const bodyAlign = o.justifyText ? 'justify' : 'left';
 
   return `
 html, body {
@@ -77,6 +80,7 @@ p {
 
 p.action {
   margin: ${em(gap)} 0;
+  text-align: ${bodyAlign};
 }
 
 p.mini-slug {
@@ -117,6 +121,7 @@ ${o.cueAlignment === 'centered'
 
 p.dialogue {
   margin: 0;
+  text-align: ${bodyAlign};
 }
 
 /* Simultaneous speech: two half-width columns, kept on one page. The

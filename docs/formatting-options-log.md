@@ -111,6 +111,22 @@ future work; everything else is live.
   (option 3) is the honest spacing knob we control.
 - **Code:** `src/epub/css.ts` (`body`).
 
+### 6b. Body text alignment — ragged-right by default (option)
+- **What:** action and dialogue paragraphs are emitted with an explicit
+  `text-align`. Screenplays are traditionally ragged-right (left
+  aligned); some e-readers justify body text by default, opening
+  distracting stretchy word gaps (observed on device 2026-07-22 —
+  action lines stretched full-width). Default `justifyText: false`
+  emits `text-align: left`, which overrides the reader's justification;
+  `justifyText: true` emits `text-align: justify` for readers who
+  prefer it. Cue/parenthetical alignment is governed separately (#2b);
+  this knob is body text only.
+- **Default:** ragged-right (`justifyText: false`).
+- **App option:** "Justify body text" toggle (Settings → Formatting
+  Layout section, and the reader rail).
+- **Code:** `src/options.ts` (`justifyText`), `src/epub/css.ts`
+  (`bodyAlign` → `p.action`, `p.dialogue`).
+
 ## Cleanup & rejoining
 
 ### 7. Right-margin revision stars — dropped

@@ -28,6 +28,7 @@ struct ReaderRail: View {
                     Text("Side by side").tag("sideBySide")
                     Text("Sequential").tag("sequential")
                 }
+                Toggle("Justify body text", isOn: binding(\.justifyText))
                 Toggle("Scene page breaks", isOn: binding(\.scenePageBreaks))
                 Toggle("Scene numbers", isOn: binding(\.showSceneNumbers))
                 Toggle("Page markers", isOn: binding(\.showPageMarkers))

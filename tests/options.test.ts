@@ -48,6 +48,12 @@ describe('resolveFormatOptions', () => {
     const opts = resolveFormatOptions({ nonsense: true } as Record<string, unknown>);
     expect(opts).toEqual(DEFAULT_FORMAT_OPTIONS);
   });
+
+  test('justifyText defaults to false and accepts a boolean', () => {
+    expect(resolveFormatOptions({}).justifyText).toBe(false);
+    expect(resolveFormatOptions({ justifyText: true }).justifyText).toBe(true);
+    expect(resolveFormatOptions({ justifyText: 'nope' } as Record<string, unknown>).justifyText).toBe(false);
+  });
 });
 
 // ── screenplayCss(options) ───────────────────────────────
@@ -81,6 +87,16 @@ describe('screenplayCss with options', () => {
   test('font family option switches the body stack', () => {
     expect(screenplayCss(resolveFormatOptions({ fontFamily: 'serif' }))).toMatch(/body\s*{[^}]*font-family:\s*serif/);
     expect(screenplayCss(resolveFormatOptions({ fontFamily: 'courier' }))).toContain('"Courier Prime"');
+  });
+
+  test('body text is ragged-right (left-aligned) by default, justified when enabled', () => {
+    const ragged = screenplayCss(resolveFormatOptions({}));
+    expect(ragged.match(/p\.action\s*{[^}]*}/)![0]).toContain('text-align: left');
+    expect(ragged.match(/p\.dialogue\s*{[^}]*}/)![0]).toContain('text-align: left');
+
+    const justified = screenplayCss(resolveFormatOptions({ justifyText: true }));
+    expect(justified.match(/p\.action\s*{[^}]*}/)![0]).toContain('text-align: justify');
+    expect(justified.match(/p\.dialogue\s*{[^}]*}/)![0]).toContain('text-align: justify');
   });
 });
 

@@ -28,6 +28,7 @@ public enum ScriptSettings {
         var showSceneNumbers: Bool?
         var showPageMarkers: Bool?
         var dualDialogue: String?
+        var justifyText: Bool?
     }
 
     nonisolated public static func load(forFountain fountain: URL, fallback: FormatSettings) -> FormatSettings {
@@ -51,6 +52,7 @@ public enum ScriptSettings {
         if let v = partial.showSceneNumbers { merged.showSceneNumbers = v }
         if let v = partial.showPageMarkers { merged.showPageMarkers = v }
         if let v = partial.dualDialogue { merged.dualDialogue = v }
+        if let v = partial.justifyText { merged.justifyText = v }
         return merged
     }
 

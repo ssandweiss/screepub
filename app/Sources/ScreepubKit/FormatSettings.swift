@@ -21,6 +21,7 @@ public struct FormatSettings: Codable, Sendable, Equatable {
     public var showSceneNumbers: Bool
     public var showPageMarkers: Bool
     public var dualDialogue: String
+    public var justifyText: Bool
 
     public static let defaults = FormatSettings(
         scenePageBreaks: false,
@@ -36,7 +37,8 @@ public struct FormatSettings: Codable, Sendable, Equatable {
         includeTitlePage: true,
         showSceneNumbers: false,
         showPageMarkers: false,
-        dualDialogue: "sideBySide"
+        dualDialogue: "sideBySide",
+        justifyText: false
     )
 
     public init(
@@ -45,7 +47,7 @@ public struct FormatSettings: Codable, Sendable, Equatable {
         keepSceneHeadingWithScene: Bool, fontFamily: String,
         rejoinSplitDialogue: Bool, contdMode: String, cueAlignment: String,
         includeTitlePage: Bool, showSceneNumbers: Bool, showPageMarkers: Bool,
-        dualDialogue: String
+        dualDialogue: String, justifyText: Bool
     ) {
         self.scenePageBreaks = scenePageBreaks
         self.dialogueSideMarginPct = dialogueSideMarginPct
@@ -61,5 +63,6 @@ public struct FormatSettings: Codable, Sendable, Equatable {
         self.showSceneNumbers = showSceneNumbers
         self.showPageMarkers = showPageMarkers
         self.dualDialogue = dualDialogue
+        self.justifyText = justifyText
     }
 }

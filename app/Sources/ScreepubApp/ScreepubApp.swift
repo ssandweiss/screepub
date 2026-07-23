@@ -120,6 +120,7 @@ struct FormattingSettings: View {
     @AppStorage("fmtSceneNumbers") private var sceneNumbers = false
     @AppStorage("fmtPageMarkers") private var pageMarkers = false
     @AppStorage("fmtDual") private var dualDialogue = "sideBySide"
+    @AppStorage("fmtJustify") private var justifyText = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -155,6 +156,7 @@ struct FormattingSettings: View {
                     Text("Serif (reader default)").tag("serif")
                     Text("Sans-serif").tag("sans")
                 }
+                Toggle("Justify body text", isOn: $justifyText)
             }
             Section("Pages") {
                 Toggle("Start each scene on a new page", isOn: $scenePageBreaks)
