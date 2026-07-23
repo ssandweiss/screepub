@@ -16,7 +16,7 @@ jobs:
       - run: bunx tsc --noEmit
       - run: bun test
   app:
-    runs-on: macos-14
+    runs-on: macos-15   # Swift 6 toolchain (macos-14 ships 5.10)
     steps:
       - uses: actions/checkout@v4   # first-party; pin to SHA when convenient
       - run: swift build -c release
