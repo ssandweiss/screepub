@@ -394,6 +394,9 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - run: bun install --frozen-lockfile
 
+      - name: Ensure Rosetta (x86_64 Swift slice builds under it)
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+
       - name: Import Developer ID certificate
         env:
           CERT_B64: ${{ secrets.DEVELOPER_ID_CERT_P12_BASE64 }}
@@ -436,14 +439,16 @@ jobs:
         run: |
           VERSION="${TAG#v}"
           SHA="$(shasum -a 256 app/dist/Screepub-macOS.dmg | awk '{print $1}')"
+          printf '%s\n' \
+            "Notarized universal build for macOS 14+ (Apple Silicon + Intel)." \
+            "" \
+            "**Install:** download \`Screepub-macOS.dmg\`, open it, drag Screepub to Applications, and double-click." \
+            "" \
+            "DMG SHA-256: \`$SHA\`" > "$RUNNER_TEMP/notes.md"
           gh release create "$TAG" \
             app/dist/Screepub-macOS.dmg app/dist/screepub-macOS \
             --title "Screepub $VERSION" \
-            --notes "Notarized universal build for macOS 14+.
-
-          **Install:** download \`Screepub-macOS.dmg\`, open it, drag Screepub to Applications.
-
-          DMG SHA-256: \`$SHA\`"
+            --notes-file "$RUNNER_TEMP/notes.md"
 ```
 
 - [ ] **Step 2: Lint the workflow (if actionlint present)**
