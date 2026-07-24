@@ -1,10 +1,40 @@
 # Screepub
 
-Turn a screenplay PDF into something that actually reads well on a Kindle.
+[![Release](https://img.shields.io/github/v/release/ssandweiss/screepub)](https://github.com/ssandweiss/screepub/releases/latest)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)
 
-Three-stage pipeline — **PDF → Fountain → EPUB3/MOBI** — with a small Mac
-app on top that converts with one drop and sends straight to a device.
-The `.fountain` intermediate is kept as a durable, editable artifact.
+**Turn a screenplay PDF into something that actually reads well on a Kindle.**
+
+<p align="center">
+  <a href="https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-macOS.dmg">
+    <strong>⬇️ Download Screepub for macOS</strong>
+  </a>
+</p>
+
+<!-- Replace assets/hero.png with a real screenshot of the app mid-conversion:
+     open the app, then run  screencapture -w assets/hero.png  and click the window. -->
+![Screepub converting a screenplay](assets/hero.png)
+
+## Install
+
+1. **Download** the `.dmg` (button above).
+2. **Open it** and drag **Screepub** into your Applications folder.
+3. **Double-click** Screepub. It's notarized by Apple, so it just opens —
+   no security warnings to click through.
+
+Drop a screenplay PDF on the window and it converts, then sends straight
+to a connected e-reader.
+
+**Requirements:** macOS 14 (Sonoma) or later, Apple Silicon or Intel.
+[Calibre](https://calibre-ebook.com) is optional — only needed for the
+AZW3 Kindle-sideload format.
+
+---
+
+*Screepub is a three-stage pipeline — PDF → Fountain → EPUB3/MOBI — with
+a small Mac app on top. The `.fountain` intermediate is kept as a
+durable, editable artifact.*
 
 ## Why
 
