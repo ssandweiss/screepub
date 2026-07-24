@@ -138,12 +138,30 @@ sp_build_icon() {
 }
 
 sp_build_swift() {                 # -> echoes the ScreepubApp binary path
-  echo "── shell (swift build -c release)" >&2
-  local archflags=()
-  [[ "${UNIVERSAL:-}" == "1" ]] && archflags=(--arch arm64 --arch x86_64)
-  (cd "$APP_DIR" && swift build -c release "${archflags[@]}" 2>&1 | tail -2 >&2)
-  echo "$(cd "$APP_DIR" && swift build -c release "${archflags[@]}" --show-bin-path)/ScreepubApp"
+  if [[ "${UNIVERSAL:-}" == "1" ]]; then
+    # Universal without full Xcode: multi-arch `swift build --arch` needs
+    # xcbuild (Xcode); this project is Command Line Tools only. So build each
+    # slice natively — x86_64 under Rosetta — then lipo. Each arch lands in a
+    # distinct .build/<triple>/release dir, so the two binaries don't collide.
+    echo "── shell (swift build -c release, arm64)" >&2
+    (cd "$APP_DIR" && swift build -c release 2>&1 | tail -2 >&2)
+    local arm_bin; arm_bin="$(cd "$APP_DIR" && swift build -c release --show-bin-path)/ScreepubApp"
+    echo "── shell (swift build -c release, x86_64 via Rosetta)" >&2
+    (cd "$APP_DIR" && arch -x86_64 swift build -c release 2>&1 | tail -2 >&2)
+    local x64_bin; x64_bin="$(cd "$APP_DIR" && arch -x86_64 swift build -c release --show-bin-path)/ScreepubApp"
+    local uni="$BUILD/ScreepubApp-universal"
+    lipo -create -output "$uni" "$arm_bin" "$x64_bin"
+    echo "$uni"
+  else
+    echo "── shell (swift build -c release)" >&2
+    (cd "$APP_DIR" && swift build -c release 2>&1 | tail -2 >&2)
+    echo "$(cd "$APP_DIR" && swift build -c release --show-bin-path)/ScreepubApp"
+  fi
 }
+# NB (found in execution): macOS bash is 3.2 — an empty array under `set -u`
+# throws, so avoid `"${arr[@]}"` for maybe-empty flag lists. And the CI
+# workflow (Task 5) must ensure Rosetta on the arm64 runner:
+# `softwareupdate --install-rosetta --agree-to-license` before the release build.
 
 sp_assemble_bundle() {             # $1 = version string
   local version="$1" swift_bin; swift_bin="$(sp_build_swift)"
