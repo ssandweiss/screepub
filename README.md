@@ -4,7 +4,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)
 
-**Turn a screenplay PDF into something that actually reads well on a Kindle.**
+**Read screenplays on your Kindle the way they're meant to be read.**
 
 <p align="center">
   <a href="https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-macOS.dmg">
@@ -16,6 +16,31 @@
      open the app, then run  screencapture -w assets/hero.png  and click the window. -->
 ![Screepub converting a screenplay](assets/hero.png)
 
+You get scripts as PDFs. You'd love to read them on a Kindle — on the couch, on a plane, anywhere that isn't a laptop. But drop a screenplay into any ordinary PDF-to-ebook converter and it falls apart: dialogue collapses into paragraphs, character names drift away from their lines, and the whole thing becomes a wall of text you have to pinch and squint at.
+
+Screepub reads the script the way a person does. It looks at how the scenes, cues, and dialogue actually sit on the page, then rebuilds a proper e-book from that structure. Scenes stay scenes. Speeches stay readable. And because the result reflows, it looks right at *any* text size — so you can crank the font up on e-ink and the script still holds its shape.
+
+## What it does for you
+
+- **Drop a PDF, get a clean e-book.** Drag a screenplay onto the window and Screepub converts it — no settings to wrestle with first.
+- **Send it straight to your reader.** Plug in your Kindle and it copies over, ready to open — or send it by email. No fiddling with file formats.
+- **Look before you send.** A built-in reader shows exactly how the script will read on the device, with formatting controls — margins, spacing, optional page numbers — that update live as you adjust them.
+- **Built for real scripts.** Dual dialogue, revision marks, watermarks, page-break interruptions, offbeat character cues — the messy stuff in production drafts. Screepub sorts it out instead of choking on it.
+- **Free and open source.** No account, no subscription, no catch.
+
+## Which readers?
+
+Screepub was built for the **Kindle**, and that's the device it's actually
+been tested on — sideloaded over USB, or sent to your `@kindle.com`
+address. If you read scripts on a Kindle, you're on the well-worn path.
+
+It also supports **Kobo** and **tolino** (the app spots them and copies
+over the right format), plus a docked **reMarkable** (which gets the
+original PDF — its own pagination and pen annotation suit scripts better
+than a reflow). These are built in but haven't had the same real-device
+testing yet, so treat them as promising rather than proven —
+[feedback is very welcome](https://github.com/ssandweiss/screepub/issues).
+
 ## Install
 
 1. **Download** the `.dmg` (button above).
@@ -23,7 +48,7 @@
 3. **Double-click** Screepub. It's notarized by Apple, so it just opens —
    no security warnings to click through.
 
-Drop a screenplay PDF on the window and it converts, then sends straight
+Then drop a screenplay PDF on the window. It converts, and sends straight
 to a connected e-reader.
 
 **Requirements:** macOS 14 (Sonoma) or later, Apple Silicon or Intel.
@@ -32,65 +57,16 @@ AZW3 Kindle-sideload format.
 
 ---
 
-*Screepub is a three-stage pipeline — PDF → Fountain → EPUB3/MOBI — with
-a small Mac app on top. The `.fountain` intermediate is kept as a
-durable, editable artifact.*
+## For developers
 
-## Why
-
-Consumer converters turn screenplays into walls of text: dialogue loses
-its column, cues detach from speeches, page geometry dies. Screepub
-parses the PDF's *positions* (element classification by indent), rebuilds
-real screenplay structure, and emits reflowable books that keep it at any
-font size.
-
-## The Mac app
-
-`app/dist/Screepub.app` (build: `app/build-app.sh` — SwiftPM + a compiled
-Bun sidecar, no Xcode needed). Drop a PDF (or `.fountain`) on the script-
-page-styled window:
-
-- **Transfer routes:** USB copy to a mounted Kindle (auto-converts to
-  AZW3 via Calibre when installed, else the engine's own MOBI — Kindles
-  never index sideloaded EPUBs), pre-addressed email to your
-  @kindle.com address, or Amazon's Send-to-Kindle app/web. Kobo
-  (plain EPUB, or KEPUB via Calibre — toggle in Settings) and tolino
-  (EPUB into its Books folder) are detected the same way; a docked
-  reMarkable (USB web interface enabled) gets the original PDF —
-  native pagination plus pen annotation beats a reflow there.
-- **Connected-device stamps:** the title page shows a stamp per
-  detected device, live on connect/disconnect.
-- **Script preview reader:** READ SCRIPT opens the converted script in
-  a resizable window — the EPUB's actual markup, live-retunable via a
-  formatting rail whose changes persist per script and re-render in
-  place; send buttons ride along so you can proof → tweak → ship
-  without switching windows.
-- **Settings (⌘, or the gear on the page):** output library folder
-  (default `~/Documents/Screepub`), Kindle email, Kobo KEPUB toggle,
-  and a full Formatting tab with a live script-page preview.
-- Guards surface clearly: scanned PDFs, non-screenplays (with Convert
-  Anyway), password-protected files.
-
-## What the conversion gets right
-
-- **Structure by geometry:** indent-based element classification,
-  dual-margin scene numbers, hybrid cues (`CLEO/PANNI`, `COP #2`),
-  revision-star and watermark/boilerplate stripping, Final Draft
-  double-print dedup, `(MORE)`/`(CONT'D)` page-break rejoin.
-- **Dual dialogue** de-interleaved into clean sequential speeches.
-- **Inline bold/italic** carried from PDF font styles into the book
-  (underline isn't detectable in PDFs, but `_markers_` added by hand to
-  the `.fountain` render).
-- **Kindle-safe layout:** dialogue as a centered narrow column (% side
-  margins — Kindle strips `max-width`), em vertical rhythm, cues and
-  scene headings kept with their content across page breaks, scene-level
-  TOC, generated title page.
-- **Optional original-pagination markers** ("47." in the margin) so page
-  count — the industry's evaluation metric — survives reflow.
-
-All formatting behaviors are options (`src/options.ts`), exposed in the
-app's Formatting settings and on the CLI via `--options file.json`.
-The registry with rationale for each: `docs/formatting-options-log.md`.
+Everything above is all most people need. The rest of this README is the
+technical side — the command-line tool, how to build the app, and how it
+works under the hood. Screepub is a three-stage pipeline (PDF → Fountain →
+EPUB3/MOBI) with a small Mac app on top; the `.fountain` intermediate is
+kept as a durable, editable artifact. All formatting behaviors are options
+(`src/options.ts`), exposed in the app's Formatting settings and on the CLI
+via `--options file.json`; the registry with rationale for each lives in
+`docs/formatting-options-log.md`.
 
 ## CLI
 
