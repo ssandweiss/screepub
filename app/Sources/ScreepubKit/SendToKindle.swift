@@ -43,4 +43,18 @@ public enum SendToKindle {
     private static func existing(_ path: String) -> URL? {
         FileManager.default.fileExists(atPath: path) ? URL(fileURLWithPath: path) : nil
     }
+
+    /// True when Apple Mail handles `mailto:`. The compose handoff attaches
+    /// the file correctly there; with a third-party default client macOS
+    /// degrades the request to a `mailto:` URL, which by RFC 6068 carries no
+    /// attachment at all — recipient and subject survive, the file vanishes,
+    /// and `canPerform` still reports true. So the compose route is offered
+    /// only when this is true.
+    @MainActor
+    public static var defaultMailClientIsAppleMail: Bool {
+        guard let mailto = URL(string: "mailto:test@example.com"),
+              let app = NSWorkspace.shared.urlForApplication(toOpen: mailto),
+              let bundle = Bundle(url: app) else { return false }
+        return bundle.bundleIdentifier == "com.apple.mail"
+    }
 }

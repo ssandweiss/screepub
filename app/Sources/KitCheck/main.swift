@@ -368,5 +368,10 @@ check(ResultActions.primary(devices: [rmDev]) == .saveCopy,
 check(ResultActions.primary(devices: [rmDev, kindleDev]) == .transfer(kindleDev),
       "a volume device wins over a docked reMarkable")
 
+// — default mail client detection (value is machine-dependent) —
+let isAppleMail = await MainActor.run { SendToKindle.defaultMailClientIsAppleMail }
+check(isAppleMail == true || isAppleMail == false,
+      "default-mail-client detection resolves without crashing")
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
