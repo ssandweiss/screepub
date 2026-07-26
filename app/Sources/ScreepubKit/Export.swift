@@ -40,4 +40,17 @@ public enum Export {
         }
         return formats
     }
+
+    /// True when `artifact` is missing or older than the EPUB it derives
+    /// from. Reader re-renders rewrite only the EPUB, so a previously
+    /// built .mobi silently goes out of date.
+    nonisolated public static func needsRegeneration(_ artifact: URL,
+                                                     freshRelativeTo epub: URL) -> Bool {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: artifact.path) else { return true }
+        let mtime: (URL) -> Date = { url in
+            (try? fm.attributesOfItem(atPath: url.path)[.modificationDate] as? Date) ?? .distantPast
+        }
+        return mtime(artifact) < mtime(epub)
+    }
 }

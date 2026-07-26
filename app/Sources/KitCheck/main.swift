@@ -303,5 +303,24 @@ try! Data("mobi".utf8).write(to: exMobi)
 check(Export.available(for: exEpub, calibreAvailable: false) == [.epub, .kindle],
       "an existing .mobi makes the kindle format available")
 
+// — kindle artifact staleness —
+let stDir = tempDir("stale")
+let stEpub = stDir.appendingPathComponent("S.epub")
+let stMobi = stDir.appendingPathComponent("S.mobi")
+try! Data("e".utf8).write(to: stEpub)
+check(Export.needsRegeneration(stMobi, freshRelativeTo: stEpub),
+      "missing kindle artifact needs regeneration")
+
+try! Data("m".utf8).write(to: stMobi)
+try! FileManager.default.setAttributes(
+    [.modificationDate: Date(timeIntervalSinceNow: -600)], ofItemAtPath: stMobi.path)
+check(Export.needsRegeneration(stMobi, freshRelativeTo: stEpub),
+      "kindle artifact older than the epub is stale")
+
+try! FileManager.default.setAttributes(
+    [.modificationDate: Date(timeIntervalSinceNow: 600)], ofItemAtPath: stMobi.path)
+check(!Export.needsRegeneration(stMobi, freshRelativeTo: stEpub),
+      "kindle artifact newer than the epub is fresh")
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
