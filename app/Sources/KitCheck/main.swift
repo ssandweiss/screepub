@@ -303,6 +303,16 @@ try! Data("mobi".utf8).write(to: exMobi)
 check(Export.available(for: exEpub, calibreAvailable: false) == [.epub, .kindle],
       "an existing .mobi makes the kindle format available")
 
+// Real scripts in this project are named like "METEOR ANNE 11.10.25.pdf" —
+// dots in the stem, not just the extension. Script.epub can't catch a
+// regression in sibling-path derivation for that shape; this can.
+let dottedEpub = exDir.appendingPathComponent("METEOR ANNE 11.10.25.epub")
+try! Data("epub".utf8).write(to: dottedEpub)
+let dottedMobi = exDir.appendingPathComponent("METEOR ANNE 11.10.25.mobi")
+try! Data("mobi".utf8).write(to: dottedMobi)
+check(Export.available(for: dottedEpub, calibreAvailable: false) == [.epub, .kindle],
+      "dotted script filename still finds its sibling .mobi")
+
 // — kindle artifact staleness —
 let stDir = tempDir("stale")
 let stEpub = stDir.appendingPathComponent("S.epub")
@@ -321,6 +331,30 @@ try! FileManager.default.setAttributes(
     [.modificationDate: Date(timeIntervalSinceNow: 600)], ofItemAtPath: stMobi.path)
 check(!Export.needsRegeneration(stMobi, freshRelativeTo: stEpub),
       "kindle artifact newer than the epub is fresh")
+
+let equalMoment = Date()
+try! FileManager.default.setAttributes([.modificationDate: equalMoment], ofItemAtPath: stEpub.path)
+try! FileManager.default.setAttributes([.modificationDate: equalMoment], ofItemAtPath: stMobi.path)
+check(Export.needsRegeneration(stMobi, freshRelativeTo: stEpub),
+      "kindle artifact with the same mtime as the epub is treated as stale")
+
+let goneEpubDir = tempDir("stale-missing-epub")
+let goneEpub = goneEpubDir.appendingPathComponent("Gone.epub")
+let orphanMobi = goneEpubDir.appendingPathComponent("Gone.mobi")
+try! Data("m".utf8).write(to: orphanMobi)
+check(Export.needsRegeneration(orphanMobi, freshRelativeTo: goneEpub),
+      "artifact present but epub missing is treated as stale")
+
+// — Export.copy —
+let copyDir = tempDir("export-copy")
+let copySrc = copyDir.appendingPathComponent("Source.epub")
+let copyDest = copyDir.appendingPathComponent("Dest.epub")
+try! Data("v1".utf8).write(to: copySrc)
+try! Export.copy(copySrc, to: copyDest)
+check((try? String(contentsOf: copyDest, encoding: .utf8)) == "v1", "Export.copy copies content")
+try! Data("v2".utf8).write(to: copySrc)
+try! Export.copy(copySrc, to: copyDest)
+check((try? String(contentsOf: copyDest, encoding: .utf8)) == "v2", "Export.copy re-copy overwrites")
 
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
