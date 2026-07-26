@@ -49,8 +49,8 @@ public enum Export {
 
     /// True when `artifact` is missing, or no newer than the EPUB it
     /// derives from. This catches a MOBI write that failed partway
-    /// through (leaving a stale file on disk) and a `.mobi` produced by a
-    /// CLI run that skipped `--mobi` and never wrote one at all. Ties
+    /// through, and a re-conversion run WITHOUT `--mobi`, which rewrites
+    /// the EPUB and leaves the previous `.mobi` behind untouched. Ties
     /// count as stale (not fresh): `copyItem`, `rsync -t`, Time Machine
     /// restores, and archive extraction can all reproduce identical
     /// mtimes, and an unreadable EPUB mtime (deleted, unmounted, no
