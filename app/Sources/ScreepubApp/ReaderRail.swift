@@ -132,6 +132,10 @@ struct ReaderRail: View {
                     }
                 } catch {
                     await MainActor.run {
+                        // Drop "saving…" — the rail renders statusLine and
+                        // errorLine together, so leaving it would show the
+                        // save as still in progress AND failed.
+                        model.statusLine = nil
                         model.errorLine = "save failed: \(error.localizedDescription)"
                     }
                 }
@@ -155,22 +159,36 @@ struct ReaderRail: View {
         }
     }
 
-    /// USB copy mirroring ContentView's route: AZW3 via Calibre for Kindle,
-    /// fresh MOBI fallback without it, plain EPUB elsewhere.
+    /// USB copy: AZW3 via Calibre for Kindle, else a MOBI that
+    /// `freshKindleArtifact` rebuilds from this script's own settings when the
+    /// one on disk is stale or absent, plain EPUB for everything else.
+    /// A physical Kindle is the one place a stale book is hardest to notice,
+    /// so the freshness check is not optional here.
     private func copy(to device: ConnectedDevice) {
         let epub = URL(fileURLWithPath: model.ref.epubPath)
-        let mobi = Export.mobiSibling(for: epub)
+        // Read off the main actor's state before detaching, exactly as
+        // saveACopy does: `model.settings` is this script's sidecar tuning,
+        // and passing globals instead would rebuild the MOBI (and rewrite the
+        // library EPUB with it) in formatting the user never chose.
+        let fountainPath = model.ref.fountainPath
+        let settings = model.settings
+        let calibre = EbookConvert.isAvailable
         Task {
             let outcome: Result<Void, Error> = await Task.detached {
                 Result {
                     if device.kind == .kindle {
-                        if EbookConvert.isAvailable {
+                        if calibre {
                             let azw3 = try EbookConvert.toAzw3(epub)
                             try DeviceTransfer.copy(azw3, to: device)
-                        } else if FileManager.default.fileExists(atPath: mobi.path) {
-                            try DeviceTransfer.copy(mobi, to: device)
                         } else {
-                            throw EbookConvert.ConvertError.calibreMissing
+                            // Throws rather than copying anything when no
+                            // Kindle file can be produced.
+                            let mobi = try Export.freshKindleArtifact(
+                                for: epub,
+                                fountainPath: fountainPath,
+                                format: settings,
+                                calibreAvailable: false)
+                            try DeviceTransfer.copy(mobi, to: device)
                         }
                     } else {
                         try DeviceTransfer.copy(epub, to: device)

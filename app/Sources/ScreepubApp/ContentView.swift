@@ -303,9 +303,10 @@ struct ContentView: View {
         }
     }
 
-    /// Exactly one emphasized route out of the app. A mounted volume owns
-    /// that slot when there is one (its own button is already brass), so Save
-    /// a Copy takes it only when nothing is plugged in.
+    /// Exactly one emphasized route out of the app. A mounted volume device
+    /// owns that slot when there is one (its own button is already brass), so
+    /// Save a Copy takes it whenever no volume is mounted — including with a
+    /// reMarkable docked, which never mounts and lives under "More ways…".
     private var saveACopyStyle: AnyButtonStyle {
         ResultActions.primary(devices: devices) == .saveCopy
             ? AnyButtonStyle(BradButtonStyle())
@@ -554,14 +555,24 @@ struct ContentView: View {
     /// Amazon account state.
     private func saveACopy(result: EngineResult, epub: URL) {
         let stem = epub.deletingPathExtension().lastPathComponent
+        // Everything the save depends on is captured HERE, not inside the
+        // completion: `panel.begin` is modeless, so CONVERT ANOTHER can move
+        // `lastInput` to a different script while the sheet is still open.
+        let fountainPath = result.fountainPath
+            ?? (lastInput?.pathExtension.lowercased() == "fountain" ? lastInput?.path : nil)
+        // The export must reproduce the settings the library EPUB was built
+        // from — the same per-script sidecar, globals only as fallback, that
+        // convert() resolves. It isn't just the exported file at stake: the
+        // Kindle branch can re-run the engine, which rewrites <stem>.epub in
+        // place, so exporting under any other settings would silently desync
+        // the library EPUB from its own <Stem>.screepub.json.
+        let settings = fountainPath.map {
+            ScriptSettings.load(forFountain: URL(fileURLWithPath: $0),
+                                fallback: AppSettings.formatSettings())
+        } ?? AppSettings.formatSettings()
+        let calibre = EbookConvert.isAvailable
         ExportPanel.present(epub: epub, stem: stem) { destination, format in
             transferNote = "saving…"
-            let fountainPath = result.fountainPath
-                ?? (lastInput?.pathExtension.lowercased() == "fountain" ? lastInput?.path : nil)
-            // Main-window export uses the app-wide defaults; the reader rail
-            // is the one that must use a script's own sidecar settings.
-            let settings = AppSettings.formatSettings()
-            let calibre = EbookConvert.isAvailable
             // freshKindleArtifact spawns Calibre or the engine — keep it off
             // the main actor or the whole UI stalls behind it.
             Task.detached {
@@ -598,7 +609,7 @@ struct ContentView: View {
             return
         }
         if SendToKindle.email(epub, to: address, title: title) {
-            transferNote = "Mail compose opened — hit Send and it lands on every Kindle on your account"
+            transferNote = "Mail compose opened — send from an address you've approved in Amazon, or it's discarded silently"
         } else {
             transferNote = "no mail account available — configure Mail.app, or use the web uploader"
         }

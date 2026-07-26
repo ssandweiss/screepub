@@ -7,8 +7,9 @@ public enum ResultAction: Equatable, Sendable {
 }
 
 /// Which action to emphasize after a conversion. Lives here rather than in
-/// the views so the main window, the reader rail, and kit-check all share
-/// one answer instead of separately re-deriving it.
+/// the view so the main window and kit-check share one answer instead of
+/// separately re-deriving it. The reader rail does not use it — its send
+/// section has no primary slot to assign.
 public enum ResultActions {
     /// A mounted volume device is the best route when one is present.
     /// reMarkable is excluded: it uploads over its USB web interface rather

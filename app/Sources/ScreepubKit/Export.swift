@@ -29,8 +29,9 @@ public enum ExportFormat: Sendable {
 
 public enum Export {
     /// The sibling `.mobi` for a given EPUB — same directory, same stem.
-    /// Shared by `available(for:)` and `freshKindleArtifact` (and by UI
-    /// call sites) so the derivation lives in exactly one place.
+    /// Shared by `available(for:)` and `freshKindleArtifact` so the
+    /// derivation lives in exactly one place; call sites go through those
+    /// two rather than deriving the path themselves.
     nonisolated public static func mobiSibling(for epub: URL) -> URL {
         epub.deletingPathExtension().appendingPathExtension("mobi")
     }
@@ -48,9 +49,14 @@ public enum Export {
     }
 
     /// True when `artifact` is missing, or no newer than the EPUB it
-    /// derives from. This catches a MOBI write that failed partway
-    /// through, and a re-conversion run WITHOUT `--mobi`, which rewrites
-    /// the EPUB and leaves the previous `.mobi` behind untouched. Ties
+    /// derives from. What it catches is a run that rewrote the EPUB but
+    /// produced no new `.mobi` beside it — a re-conversion WITHOUT
+    /// `--mobi`, which leaves the previous `.mobi` untouched, or one that
+    /// died after the EPUB and before the `.mobi`. It says nothing about a
+    /// half-written `.mobi`: cli.ts writes the EPUB first and the `.mobi`
+    /// second, each to a temp file it then renames into place, so a
+    /// partial `.mobi` never appears at the final path in the first
+    /// place. Ties
     /// count as stale (not fresh): `copyItem`, `rsync -t`, Time Machine
     /// restores, and archive extraction can all reproduce identical
     /// mtimes, and an unreadable EPUB mtime (deleted, unmounted, no
