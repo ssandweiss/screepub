@@ -278,5 +278,30 @@ check(phone.dualDialogue == "sequential", "phone preset uses sequential dual dia
 check(phone.dialogueSideMarginPct < FormatSettings.defaults.dialogueSideMarginPct, "phone preset widens the dialogue column")
 check(DevicePreset.allCases.count == 2, "two device presets ship")
 
+// — export formats —
+let exDir = tempDir("export")
+let exEpub = exDir.appendingPathComponent("Script.epub")
+try! Data("epub".utf8).write(to: exEpub)
+
+check(ExportFormat.epub.fileExtension(calibreAvailable: false) == "epub",
+      "epub format uses .epub")
+check(ExportFormat.kindle.fileExtension(calibreAvailable: true) == "azw3",
+      "kindle format is azw3 when Calibre is available")
+check(ExportFormat.kindle.fileExtension(calibreAvailable: false) == "mobi",
+      "kindle format falls back to mobi without Calibre")
+check(ExportFormat.epub.label(calibreAvailable: false).contains("email"),
+      "epub label states its purpose")
+check(ExportFormat.kindle.label(calibreAvailable: true).contains("sideload"),
+      "kindle label states its purpose")
+
+check(Export.available(for: exEpub, calibreAvailable: true) == [.epub, .kindle],
+      "with Calibre both formats offered")
+check(Export.available(for: exEpub, calibreAvailable: false) == [.epub],
+      "without Calibre and without a .mobi, only epub offered")
+let exMobi = exDir.appendingPathComponent("Script.mobi")
+try! Data("mobi".utf8).write(to: exMobi)
+check(Export.available(for: exEpub, calibreAvailable: false) == [.epub, .kindle],
+      "an existing .mobi makes the kindle format available")
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
