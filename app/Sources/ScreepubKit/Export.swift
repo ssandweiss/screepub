@@ -53,4 +53,51 @@ public enum Export {
         }
         return mtime(artifact) < mtime(epub)
     }
+
+    public enum ExportError: Error, LocalizedError {
+        case cannotRegenerate
+        public var errorDescription: String? {
+            "Can't rebuild the Kindle file — the script's .fountain is missing."
+        }
+    }
+
+    /// A Kindle-format file guaranteed current with `epub`.
+    /// Calibre converts straight from the present EPUB, so that branch is
+    /// fresh by construction; the MOBI branch re-runs the engine only when
+    /// the staleness rule says the file is out of date.
+    ///
+    /// Blocking (spawns Calibre or the engine) — call off the main thread.
+    /// `format` must be the script's real settings, not `.defaults`, or the
+    /// export silently loses the user's tuned formatting.
+    nonisolated public static func freshKindleArtifact(
+        for epub: URL,
+        fountainPath: String?,
+        format: FormatSettings,
+        calibreAvailable: Bool
+    ) throws -> URL {
+        if calibreAvailable {
+            return try EbookConvert.toAzw3(epub)
+        }
+        let mobi = epub.deletingPathExtension().appendingPathExtension("mobi")
+        guard needsRegeneration(mobi, freshRelativeTo: epub) else { return mobi }
+        guard let fountainPath else { throw ExportError.cannotRegenerate }
+        _ = try Engine.convert(
+            input: URL(fileURLWithPath: fountainPath),
+            force: false,
+            outputDir: epub.deletingLastPathComponent(),
+            format: format,
+            includeMobi: true
+        )
+        return mobi
+    }
+
+    /// Copy a produced artifact to the user's chosen destination,
+    /// replacing whatever is there.
+    nonisolated public static func copy(_ source: URL, to destination: URL) throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: destination.path) {
+            try fm.removeItem(at: destination)
+        }
+        try fm.copyItem(at: source, to: destination)
+    }
 }
