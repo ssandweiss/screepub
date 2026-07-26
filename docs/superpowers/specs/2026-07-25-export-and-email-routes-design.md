@@ -87,12 +87,20 @@ The resolver returns display labels stating the purpose ("EPUB — for
 emailing to Kindle and most e-readers", "AZW3 — for USB sideload to
 Kindle"), so the UI never has to hardcode format prose.
 
-**Freshness rule (correctness, not polish):** the reader window
-re-renders write only the EPUB (`includeMobi: false`), so a `.mobi`
-sitting in the library can be **older than the current EPUB**. Before
-exporting a Kindle-format file, compare its mtime to the EPUB's and
-regenerate when missing or stale. Exporting a stale book is exactly the
-kind of silent wrongness this whole spec exists to remove.
+**Freshness rule (correctness, not polish):** before exporting a
+Kindle-format file, regenerate it when it is missing, or older than the
+EPUB it derives from.
+
+*Corrected 2026-07-25 during implementation review:* an earlier draft of
+this spec justified the rule by claiming reader re-renders rewrite only
+the EPUB (`includeMobi: false`). That is **false** in this tree —
+`ReaderView.swift:91` passes `includeMobi: true`, so re-renders rewrite
+both. The rule still earns its place: the artifact can be absent
+entirely, a partially-failed run can leave an old `.mobi` behind, and a
+CLI conversion without `--mobi` produces no companion at all. But it is
+cheap insurance, not the load-bearing fix the first draft implied. The
+rule must fail **closed** — if either file's mtime cannot be read, or
+the two are equal, regenerate.
 
 ### 2. Export panel (ScreepubApp — UI)
 

@@ -134,7 +134,9 @@ git commit -m "kit: ExportFormat + availability, labeled by purpose"
 
 ## Task 2: Staleness rule
 
-The reader window re-renders write only the EPUB (`includeMobi: false`), so a `.mobi` in the library can be **older than the current EPUB**. Exporting it unchecked hands the user a stale book — the exact silent wrongness this feature exists to remove.
+Regenerate the Kindle artifact when it is missing, or older than the EPUB it derives from.
+
+> **Corrected during review:** this task originally claimed reader re-renders write only the EPUB (`includeMobi: false`). That is false — `ReaderView.swift:91` passes `includeMobi: true`. The rule still earns its place (the artifact can be absent, a partially-failed run can leave an old `.mobi`, a CLI run without `--mobi` produces none), but it is cheap insurance rather than the load-bearing fix first claimed. It must fail **closed**: unreadable mtime on either side, or equal mtimes, means regenerate.
 
 **Files:**
 - Modify: `app/Sources/ScreepubKit/Export.swift`
@@ -743,9 +745,11 @@ bun test && bunx tsc --noEmit
 ```
 Expected: 216 pass / 0 fail, `tsc` silent. (No `src/` changes — a failure here means something unrelated broke.)
 
-- [ ] **Step 3: The stale-MOBI check that motivated Task 2**
+- [ ] **Step 3: The staleness path from Task 2**
 
-With Calibre *not* on PATH: convert a script, open `READ SCRIPT`, change a formatting knob (which rewrites only the EPUB), close the reader, then `SAVE A COPY…` → Kindle format. Confirm the saved `.mobi` reflects the change rather than the pre-edit render.
+Reader re-renders rewrite both files (`includeMobi: true`), so the stale case has to be induced deliberately. With Calibre *not* on PATH: convert a script, then in Terminal delete the `.mobi` from the library folder and run `SAVE A COPY…` → Kindle format. Confirm it regenerates rather than erroring, and that the saved file matches the current EPUB.
+
+Then induce the failure branch: point the script's `.fountain` somewhere invalid (rename it), delete the `.mobi` again, and confirm the export reports a clear error instead of silently handing over a stale or missing file.
 
 - [ ] **Step 4: Rebuild the app bundle**
 
