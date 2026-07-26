@@ -356,5 +356,17 @@ try! Data("v2".utf8).write(to: copySrc)
 try! Export.copy(copySrc, to: copyDest)
 check((try? String(contentsOf: copyDest, encoding: .utf8)) == "v2", "Export.copy re-copy overwrites")
 
+// — which action owns the primary slot —
+let kindleDev = ConnectedDevice(kind: .kindle, name: "Kindle", volume: URL(fileURLWithPath: "/Volumes/Kindle"))
+let rmDev = ConnectedDevice(kind: .remarkable, name: "reMarkable", volume: nil)
+check(ResultActions.primary(devices: []) == .saveCopy,
+      "no devices -> Save a Copy is promoted to primary")
+check(ResultActions.primary(devices: [kindleDev]) == .transfer(kindleDev),
+      "a mounted Kindle takes the primary slot")
+check(ResultActions.primary(devices: [rmDev]) == .saveCopy,
+      "reMarkable alone does not take primary (it lives under More ways)")
+check(ResultActions.primary(devices: [rmDev, kindleDev]) == .transfer(kindleDev),
+      "a volume device wins over a docked reMarkable")
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
