@@ -112,34 +112,54 @@ This is the shortest path for the motivating case: drag straight from
 Screepub into a compose window in any mail client, with no intermediate
 file on the Desktop.
 
-### 4. `COPY KINDLE ADDRESS` (ScreepubApp — UI)
+### 4. Result-view hierarchy — "contextual" layout
 
-The app already stores the destination `@kindle.com` address
-(`@AppStorage("kindleEmail")`). This copies it to the clipboard so it
-can be pasted into any client. When unset, it points the user at
-Settings rather than copying an empty string.
+Adding export buttons to a view that already had five would have made it
+a control panel. The count is cut by demotion, not rearrangement:
 
-### 5. Conditional compose (ScreepubKit + ScreepubApp)
+- **Primary (brass), exactly one** — whichever route is best *right
+  now*. A device is mounted → `COPY TO <DEVICE> — USB`. Nothing
+  connected → `SAVE A COPY…` is promoted into the slot. The most likely
+  action is always the emphasized one.
+- **Secondary (outline), up to two** — `READ SCRIPT`, plus whichever of
+  `SAVE A COPY…` / device transfer is not currently primary.
+- **Tertiary (margin text)** — `MORE WAYS…`, `SHOW IN FINDER`,
+  `CONVERT ANOTHER`.
 
-`SendToKindle` gains `defaultMailClientIsAppleMail` — resolve
-`mailto:` via `NSWorkspace.urlForApplication(toOpen:)` and compare the
-bundle identifier to `com.apple.mail`. The `EMAIL TO KINDLE…` button
-renders **only when that is true**, where the attachment genuinely
-works. Everyone else sees the export affordances instead of a button
-that lies. `SendToKindle.email` itself is unchanged.
+Three buttons at any moment, whatever the context.
 
-### 6. Guidance line (ScreepubApp — UI)
+`MORE WAYS…` holds the rare routes: `SEND TO KINDLE APP` / `— WEB`, the
+Apple Mail compose (component 6), and reMarkable when docked. Cost: one
+extra click for those routes, accepted deliberately.
 
-One line under the buttons: email the saved file to your `@kindle.com`
-address from any mail app, and note that the **sending** address must be
-on Amazon's Approved Personal Document E-mail List or the message is
-silently discarded. This is the failure users would otherwise blame on
+### 5. Guidance line with inline copyable address (ScreepubApp — UI)
+
+The `@kindle.com` address is *information*, not an action, so it does
+not get a button competing with USB transfer. One line under the
+buttons reads "Or email it to `yourname_42@kindle.com`", where the
+address itself is click-to-copy (the app already stores it in
+`@AppStorage("kindleEmail")`). When unset, the line instead points to
+Settings.
+
+The same line carries the warning that the **sending** address must be
+on Amazon's Approved Personal Document E-mail List, or the message is
+silently discarded — the failure users would otherwise blame on
 Screepub.
+
+### 6. Conditional compose (ScreepubKit + ScreepubApp)
+
+`SendToKindle` gains `defaultMailClientIsAppleMail` — resolve `mailto:`
+via `NSWorkspace.urlForApplication(toOpen:)` and compare the bundle
+identifier to `com.apple.mail`. The `EMAIL TO KINDLE…` entry appears
+under `MORE WAYS…` **only when that is true**, where the attachment
+genuinely works. Everyone else never sees a button that lies.
+`SendToKindle.email` itself is unchanged.
 
 ## Call sites
 
 Both windows change identically, so behavior does not diverge:
-- `ContentView.swift:325` (main result view) — full set.
+- `ContentView.swift:325` (main result view) — the full hierarchy in
+  component 4.
 - `ReaderRail.swift:93` (reader window rail) — same treatment; its
   `emailToKindle()` becomes the conditional-compose path and gains the
   export affordances.
@@ -154,7 +174,8 @@ untouched.
   `errorLine` surfaces the reason; no silent success anywhere.
 - Kindle-format regeneration invokes the engine (or Calibre) and can be
   slow; the UI shows in-flight state rather than appearing frozen.
-- `COPY KINDLE ADDRESS` with no address set → directs to Settings.
+- Guidance line with no address set → directs to Settings instead of
+  offering an empty string to copy.
 
 ## Testing
 
@@ -163,6 +184,11 @@ untouched.
   stale-MOBI freshness comparison (touch an old mtime, assert it is
   reported stale); `defaultMailClientIsAppleMail` returns without
   crashing (its *value* is machine-dependent and must not be asserted).
+- **Primary-slot resolution** is pure logic and must be kit-checked, not
+  eyeballed: given "one device mounted" it returns the USB transfer;
+  given "no devices" it returns `SAVE A COPY…`. Keep this decision in
+  ScreepubKit so both windows and the test share one answer rather than
+  each view re-deriving it.
 - **Engine unaffected** — no `src/` changes, so `bun test` stays green
   as a regression net.
 - **Manual:** save panel writes a valid file to the Desktop; drag-out
