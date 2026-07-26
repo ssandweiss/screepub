@@ -62,7 +62,14 @@ struct ReaderRail: View {
                 ForEach(model.devices) { device in
                     Button("Copy to \(device.name) — USB") { copy(to: device) }
                 }
-                Button("Email to Kindle") { emailToKindle() }
+                Button("Save a copy…") { saveACopy() }
+                // Only Apple Mail actually attaches the file: with a
+                // third-party default client macOS degrades the compose to a
+                // mailto: URL, which carries no attachment (RFC 6068) and
+                // still reports success. Offer the route only where it works.
+                if SendToKindle.defaultMailClientIsAppleMail {
+                    Button("Email to Kindle…") { composeInAppleMail() }
+                }
             }
             .disabled(model.rendering)
         }
@@ -90,18 +97,61 @@ struct ReaderRail: View {
         }
     }
 
-    private func emailToKindle() {
+    /// Save this script somewhere of the user's choosing, in the format they
+    /// pick — the route that works regardless of mail client or device.
+    private func saveACopy() {
+        let epub = URL(fileURLWithPath: model.ref.epubPath)
+        let stem = epub.deletingPathExtension().lastPathComponent
+        let fountainPath = model.ref.fountainPath
+        // The reader's PER-SCRIPT sidecar settings, not AppSettings' globals.
+        // This rail is where the user tunes THIS script, so a global here
+        // would silently export formatting they never chose.
+        let settings = model.settings
+        let calibre = EbookConvert.isAvailable
+        ExportPanel.present(epub: epub, stem: stem) { destination, format in
+            model.errorLine = nil
+            model.statusLine = "saving…"
+            // freshKindleArtifact spawns Calibre or the engine — keep it off
+            // the main actor or the whole UI stalls behind it.
+            Task.detached {
+                do {
+                    let source: URL
+                    switch format {
+                    case .epub:
+                        source = epub
+                    case .kindle:
+                        source = try Export.freshKindleArtifact(
+                            for: epub,
+                            fountainPath: fountainPath,
+                            format: settings,
+                            calibreAvailable: calibre)
+                    }
+                    try Export.copy(source, to: destination)
+                    await MainActor.run {
+                        model.statusLine = "saved to \(destination.deletingLastPathComponent().lastPathComponent)"
+                    }
+                } catch {
+                    await MainActor.run {
+                        model.errorLine = "save failed: \(error.localizedDescription)"
+                    }
+                }
+            }
+        }
+    }
+
+    private func composeInAppleMail() {
         let address = (UserDefaults.standard.string(forKey: "kindleEmail") ?? "")
             .trimmingCharacters(in: .whitespaces)
         guard !address.isEmpty else {
             model.statusLine = "set your @kindle.com address in Settings first"
             return
         }
-        if SendToKindle.email(URL(fileURLWithPath: model.ref.epubPath), to: address, title: model.ref.title) {
+        if SendToKindle.email(URL(fileURLWithPath: model.ref.epubPath),
+                              to: address, title: model.ref.title) {
             model.errorLine = nil
             model.statusLine = "Mail compose opened"
         } else {
-            model.errorLine = "no mail account available — configure Mail.app"
+            model.errorLine = "Mail couldn't open a compose window"
         }
     }
 
@@ -109,7 +159,7 @@ struct ReaderRail: View {
     /// fresh MOBI fallback without it, plain EPUB elsewhere.
     private func copy(to device: ConnectedDevice) {
         let epub = URL(fileURLWithPath: model.ref.epubPath)
-        let mobi = epub.deletingPathExtension().appendingPathExtension("mobi")
+        let mobi = Export.mobiSibling(for: epub)
         Task {
             let outcome: Result<Void, Error> = await Task.detached {
                 Result {
