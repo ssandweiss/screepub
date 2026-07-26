@@ -241,7 +241,8 @@ struct ContentView: View {
     // MARK: - Done: the script announces itself
 
     private func resultPage(_ result: EngineResult) -> some View {
-        VStack(spacing: 0) {
+        let epub = result.epubPath.map { URL(fileURLWithPath: $0) }
+        return VStack(spacing: 0) {
             Slugline(text: "INT. YOUR LIBRARY - NIGHT")
                 .padding(.bottom, 18)
 
@@ -273,11 +274,22 @@ struct ContentView: View {
                 }
             }
             .padding(.horizontal, 24)
+            // The title block IS the file: drag it straight into a compose
+            // window (Superhuman, webmail, Messages). Dragging is the one
+            // route that carries the attachment whatever the default mail
+            // client happens to be.
+            .onDrag {
+                guard let epub, let provider = NSItemProvider(contentsOf: epub) else {
+                    return NSItemProvider()
+                }
+                return provider
+            }
+            .help("Drag this into a mail compose window — or any app — to attach the file")
 
             Spacer(minLength: 16)
 
-            if let path = result.epubPath {
-                transferButtons(result: result, epub: URL(fileURLWithPath: path), title: result.title)
+            if let epub {
+                transferButtons(result: result, epub: epub, title: result.title)
             }
 
             if let note = transferNote {
@@ -291,7 +303,18 @@ struct ContentView: View {
         }
     }
 
-    private var anyDeviceReachable: Bool { !devices.isEmpty || remarkableUp }
+    /// Exactly one emphasized route out of the app. A mounted volume owns
+    /// that slot when there is one (its own button is already brass), so Save
+    /// a Copy takes it only when nothing is plugged in.
+    private var saveACopyStyle: AnyButtonStyle {
+        ResultActions.primary(devices: devices) == .saveCopy
+            ? AnyButtonStyle(BradButtonStyle())
+            : AnyButtonStyle(OutlineButtonStyle())
+    }
+
+    private var kindleAddress: String {
+        kindleEmail.trimmingCharacters(in: .whitespaces)
+    }
 
     @ViewBuilder
     private func transferButtons(result: EngineResult, epub: URL, title: String?) -> some View {
@@ -315,22 +338,58 @@ struct ContentView: View {
                 }
                 .buttonStyle(BradButtonStyle())
             }
-            if remarkableUp {
-                Button("SEND TO REMARKABLE — USB") {
-                    sendToRemarkable(epub: epub)
+            Button("SAVE A COPY…") {
+                saveACopy(result: result, epub: epub)
+            }
+            .buttonStyle(saveACopyStyle)
+
+            // Everything below is a rare route — demoted to a menu so the
+            // page reads as one obvious action plus an escape hatch.
+            Menu {
+                Button(SendToKindle.appIsInstalled ? "Send to Kindle app" : "Send to Kindle — web") {
+                    SendToKindle.sendViaAmazon(epub)
                 }
-                .buttonStyle(BradButtonStyle())
+                // Only Apple Mail actually attaches the file: with a
+                // third-party default client macOS degrades the compose to a
+                // mailto: URL, which carries no attachment (RFC 6068) and
+                // still reports success. Offer the route only where it works.
+                if SendToKindle.defaultMailClientIsAppleMail {
+                    Button("Email to Kindle…") {
+                        emailToKindle(epub, title: title)
+                    }
+                }
+                // reMarkable lives here rather than in a button of its own:
+                // ResultActions never gives it the primary slot (it uploads
+                // over a USB web interface instead of being copied to).
+                if remarkableUp {
+                    Button("Send to reMarkable — USB") {
+                        sendToRemarkable(epub: epub)
+                    }
+                }
+            } label: {
+                Text("MORE WAYS…")
+                    .font(Theme.courier(11, .bold))
+                    .kerning(0.6)
+                    .foregroundStyle(Theme.inkFaint)
             }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .padding(.top, 2)
 
-            Button("EMAIL TO KINDLE…") {
-                emailToKindle(epub, title: title)
+            if !kindleAddress.isEmpty {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(kindleAddress, forType: .string)
+                    transferNote = "copied \(kindleAddress) — attach the file to a new message and send"
+                } label: {
+                    Text("Or email it to \(kindleAddress)")
+                        .font(Theme.courier(10))
+                        .foregroundStyle(Theme.inkFaint)
+                        .underline()
+                }
+                .buttonStyle(.plain)
+                .help("Copies the address. Amazon only accepts documents sent FROM an address on your Approved Personal Document E-mail List — mail from anywhere else is discarded silently, with no bounce. Add your sender address at amazon.com → Manage Your Content and Devices → Preferences.")
             }
-            .buttonStyle(anyDeviceReachable ? AnyButtonStyle(OutlineButtonStyle()) : AnyButtonStyle(BradButtonStyle()))
-
-            Button(SendToKindle.appIsInstalled ? "SEND TO KINDLE APP" : "SEND TO KINDLE — WEB") {
-                SendToKindle.sendViaAmazon(epub)
-            }
-            .buttonStyle(OutlineButtonStyle())
 
             HStack(spacing: 22) {
                 Button("SHOW IN FINDER") {
@@ -490,8 +549,49 @@ struct ContentView: View {
         }
     }
 
+    /// Save the script somewhere of the user's choosing, in the format they
+    /// pick — the route that works regardless of mail client, device, or
+    /// Amazon account state.
+    private func saveACopy(result: EngineResult, epub: URL) {
+        let stem = epub.deletingPathExtension().lastPathComponent
+        ExportPanel.present(epub: epub, stem: stem) { destination, format in
+            transferNote = "saving…"
+            let fountainPath = result.fountainPath
+                ?? (lastInput?.pathExtension.lowercased() == "fountain" ? lastInput?.path : nil)
+            // Main-window export uses the app-wide defaults; the reader rail
+            // is the one that must use a script's own sidecar settings.
+            let settings = AppSettings.formatSettings()
+            let calibre = EbookConvert.isAvailable
+            // freshKindleArtifact spawns Calibre or the engine — keep it off
+            // the main actor or the whole UI stalls behind it.
+            Task.detached {
+                do {
+                    let source: URL
+                    switch format {
+                    case .epub:
+                        source = epub
+                    case .kindle:
+                        source = try Export.freshKindleArtifact(
+                            for: epub,
+                            fountainPath: fountainPath,
+                            format: settings,
+                            calibreAvailable: calibre)
+                    }
+                    try Export.copy(source, to: destination)
+                    await MainActor.run {
+                        transferNote = "saved to \(destination.deletingLastPathComponent().lastPathComponent)"
+                    }
+                } catch {
+                    await MainActor.run {
+                        transferNote = "save failed: \(error.localizedDescription)"
+                    }
+                }
+            }
+        }
+    }
+
     private func emailToKindle(_ epub: URL, title: String?) {
-        let address = kindleEmail.trimmingCharacters(in: .whitespaces)
+        let address = kindleAddress
         guard !address.isEmpty else {
             transferNote = "set your @kindle.com address first — Screepub → Settings"
             openSettings()
@@ -505,8 +605,8 @@ struct ContentView: View {
     }
 }
 
-/// Type-erased ButtonStyle so the email button can flip between primary
-/// and secondary depending on whether USB is available.
+/// Type-erased ButtonStyle so Save a Copy can flip between primary and
+/// secondary depending on whether a device holds the brass slot.
 struct AnyButtonStyle: ButtonStyle {
     private let make: (Configuration) -> AnyView
     init<S: ButtonStyle>(_ style: S) {
