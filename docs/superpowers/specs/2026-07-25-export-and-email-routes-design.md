@@ -125,16 +125,22 @@ file on the Desktop.
 Adding export buttons to a view that already had five would have made it
 a control panel. The count is cut by demotion, not rearrangement:
 
-- **Primary (brass), exactly one** — whichever route is best *right
+- **Primary (brass) — exactly one route OUT of the app** (`READ SCRIPT`
+  is also brass and stays that way; it opens the in-app reader rather
+  than sending the book anywhere, so two brass buttons on screen is
+  expected — confirmed visually 2026-07-26 and accepted by the owner).
+  The slot goes to whichever route is best *right
   now*. A device is mounted → `COPY TO <DEVICE> — USB`. Nothing
   connected → `SAVE A COPY…` is promoted into the slot. The most likely
   action is always the emphasized one.
-- **Secondary (outline), up to two** — `READ SCRIPT`, plus whichever of
-  `SAVE A COPY…` / device transfer is not currently primary.
+- **Secondary (outline)** — whichever of `SAVE A COPY…` / device
+  transfer is not currently primary.
 - **Tertiary (margin text)** — `MORE WAYS…`, `SHOW IN FINDER`,
   `CONVERT ANOTHER`.
 
-Three buttons at any moment, whatever the context.
+Two or three buttons at any moment, whatever the context: `READ SCRIPT`,
+the primary route out, and — when a device is mounted — the demoted
+other one.
 
 `MORE WAYS…` holds the rare routes: `SEND TO KINDLE APP` / `— WEB`, the
 Apple Mail compose (component 6), and reMarkable when docked. Cost: one

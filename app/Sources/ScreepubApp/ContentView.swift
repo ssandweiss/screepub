@@ -303,10 +303,15 @@ struct ContentView: View {
         }
     }
 
-    /// Exactly one emphasized route out of the app. A mounted volume device
+    /// Exactly one emphasized route OUT of the app. A mounted volume device
     /// owns that slot when there is one (its own button is already brass), so
     /// Save a Copy takes it whenever no volume is mounted — including with a
     /// reMarkable docked, which never mounts and lives under "More ways…".
+    ///
+    /// READ SCRIPT is also brass and deliberately stays that way: it opens the
+    /// in-app reader rather than sending the book anywhere, so it competes for
+    /// attention but not for this slot. Two brass buttons on screen is expected
+    /// — verified on device 2026-07-26 and accepted.
     private var saveACopyStyle: AnyButtonStyle {
         ResultActions.primary(devices: devices) == .saveCopy
             ? AnyButtonStyle(BradButtonStyle())
