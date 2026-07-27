@@ -237,6 +237,20 @@ future work; everything else is live.
 - **Code:** `src/parser/extract.ts` (`stampFontStyles`, `joinLine`),
   `src/epub/html.ts` + `src/mobi/html.ts` (`inlineEmphasis`/`inline`).
 
+### 9e. Cue extensions tolerate a missing closing period
+- **What:** `(O.S)`, `(V.O)`, `(O.C)` — the period-less spellings writers
+  routinely type — now count as dialogue extensions. Previously only the
+  fully punctuated `(O.S.)` matched, so the bare form skipped the
+  extension branch and then hit the "periods only in ellipsis" guard:
+  the cue fell to action and its speech collapsed with it (same failure
+  shape as 9b). A script can spell one speaker BOTH ways — METEOR ANNE
+  has "REALITY HOST (O.S)" on p7 and "REALITY HOST (O.S.)" on p8, which
+  rendered as description and cue respectively. Once both are cues, 8a
+  correctly adds `(CONT'D)` to the second.
+- **Not changed:** `(CONT'D)`/`(CONT.)` keep requiring their existing
+  spellings — no reported miss, and loosening them buys nothing.
+- **Code:** `src/parser/classify.ts` (`DIALOGUE_EXTENSIONS`).
+
 ### 10a. Dual dialogue — de-interleaved to sequential speeches
 - **What:** simultaneous two-column speeches (seen in two different test
   scripts, one with 23 lines of dual dialogue) previously interleaved

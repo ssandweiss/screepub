@@ -22,8 +22,13 @@ const PARENTHETICAL_TRUNCATED = /^\([^)]+\)\.{3}$/;
 const CHARACTER_NAME = /^[A-Z][A-Z0-9\s'\/&#-]*(\s*\([^)]+\))*\.{0,3}$/;
 const COMPANY_NAME = /\b(LLC|LLP|INC|CORP|CO|LTD)\.?$/i;
 const PUNCTUATION_EXCLUDE = /[!?;,]/;
+// The closing period is optional: writers routinely type "(O.S)" for
+// "(O.S.)", and a script can spell the SAME speaker both ways. Without the
+// `\.?` the unpunctuated form misses this pattern, then trips the
+// "periods only in ellipsis" guard in isLikelyCharacterName — so the cue
+// and the speech under it both fall through to action.
 const DIALOGUE_EXTENSIONS =
-  /\((?:V\.O\.|O\.S\.|O\.C\.|CONT'D|CONT\.|INTO PHONE|FILTERED|PRE-LAP)\)/i;
+  /\((?:V\.O\.?|O\.S\.?|O\.C\.?|CONT'D|CONT\.|INTO PHONE|FILTERED|PRE-LAP)\)/i;
 const CHARACTER_EXTENSIONS = /(\s*\([^)]+\))+\s*$/g;
 
 const ACTION_POSSESSIVE = /^[A-Z][a-z]+['\u2019]s /;

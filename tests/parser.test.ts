@@ -122,6 +122,39 @@ describe('classifyBlock', () => {
       expect(result.character).toBe('DETECTIVE JONES');
     });
 
+    // Writers routinely drop the closing period — METEOR ANNE has the same
+    // speaker as both "REALITY HOST (O.S)" and "REALITY HOST (O.S.)". The
+    // unpunctuated form used to fall through the extension branch and then
+    // hit the "periods only in ellipsis" guard, so the cue AND its speech
+    // both landed as action.
+    test('character with a period-less O.S extension', () => {
+      const block = makeBlock({ text: 'REALITY HOST (O.S)', indent: 40 });
+      const result = classifyBlock(block, null);
+      expect(result.type).toBe('character');
+      expect(result.character).toBe('REALITY HOST');
+    });
+
+    test('character with a period-less V.O extension', () => {
+      const block = makeBlock({ text: 'SARAH (V.O)', indent: 40 });
+      const result = classifyBlock(block, null);
+      expect(result.type).toBe('character');
+      expect(result.character).toBe('SARAH');
+    });
+
+    test('character with a period-less O.C extension', () => {
+      const block = makeBlock({ text: 'MIKE (O.C)', indent: 40 });
+      const result = classifyBlock(block, null);
+      expect(result.type).toBe('character');
+      expect(result.character).toBe('MIKE');
+    });
+
+    test('both spellings of one speaker yield the same character name', () => {
+      const dotted = classifyBlock(makeBlock({ text: 'REALITY HOST (O.S.)', indent: 40 }), null);
+      const bare = classifyBlock(makeBlock({ text: 'REALITY HOST (O.S)', indent: 40 }), null);
+      expect(bare.character).toBe(dotted.character);
+      expect(bare.baseCharacter).toBe(dotted.baseCharacter);
+    });
+
     test('rejects character name at action indent', () => {
       const block = makeBlock({ text: 'JACK', indent: 10 });
       const result = classifyBlock(block, null);
