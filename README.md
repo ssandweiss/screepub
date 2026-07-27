@@ -56,6 +56,44 @@ to a connected e-reader.
 [Calibre](https://calibre-ebook.com) is optional — only needed for the
 AZW3 Kindle-sideload format.
 
+## Emailing scripts to your Kindle
+
+Amazon lets you email documents to your Kindle and they show up wirelessly
+— which is the *better* way to read a Screepub book, because Amazon
+re-typesets what you send and the formatting comes out cleaner than a
+plugged-in transfer.
+
+It needs a one-time setup on Amazon's side, and it's genuinely confusing
+the first time, so here it is in full. **Both steps are required** — most
+people do the first, skip the second, and then their scripts silently
+never arrive.
+
+Everything below happens at Amazon → **Manage Your Content and Devices** →
+**Preferences** → **Personal Document Settings**
+([direct link](https://www.amazon.com/hz/mycd/digital-console/alldevices)).
+
+**1. Find your Kindle's own email address.**
+Under *Send-to-Kindle E-Mail Settings*, each device has an address like
+`yourname_a1b2c3@kindle.com`. That's where you'll send scripts. You can
+edit the part before the `@` to something memorable. Paste it into
+Screepub's Settings (⌘,) and the app will offer to copy it for you on
+every conversion.
+
+**2. Approve the address you send *from*. ← the step everyone misses**
+Under *Approved Personal Document E-Mail List*, click **Add a new approved
+e-mail address** and add your own everyday email — the one you'll be
+sending from. Amazon **silently discards** documents from any address not
+on this list: no bounce, no error, no message. If your scripts never turn
+up, this is almost always why.
+
+**Then just send it.** Attach the EPUB to a normal email addressed to your
+`@kindle.com` address and hit send. Subject and body don't matter. It
+lands on every Kindle on the account, usually within a minute or two.
+
+> Send the **EPUB**, not the MOBI or AZW3 — Amazon stopped accepting those
+> for email delivery in 2022. Screepub's **Save a Copy…** defaults to EPUB
+> and labels each format by what it's for, so you don't have to keep track.
+
 ---
 
 ## For developers
