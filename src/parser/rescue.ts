@@ -35,6 +35,10 @@ export function rescueCues(elements: ScreenplayElement[], blocks: TextBlock[]): 
   for (let i = 0; i < elements.length - 1; i++) {
     const el = elements[i];
     if (el.type !== 'action') continue;
+    // Centered title text lands at cue-band indent, so a script whose title
+    // (or author) matches a character name would grow a spurious cue on
+    // page 1. Title pages are never dialogue; skip them outright.
+    if (el.isTitlePage) continue;
     if (!inCueBand(i)) continue;
 
     const established = roster.get(normalizeCueName(el.text ?? ''));
@@ -50,6 +54,7 @@ export function rescueCues(elements: ScreenplayElement[], blocks: TextBlock[]): 
 
     for (let j = i + 1; j < elements.length; j++) {
       if (elements[j].type !== 'action' || !inSpeechBand(j)) break;
+      if (elements[j].isTitlePage) break;
       // Don't swallow the NEXT missed cue: the bands overlap at 35, so a
       // cue sitting exactly there is in both. Consuming it as dialogue
       // would merge two speakers and put it beyond rescue.

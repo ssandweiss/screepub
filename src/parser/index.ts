@@ -10,6 +10,7 @@ import { groupBlocks } from './group';
 import { classifyBlock, attachSceneNumbers } from './classify';
 import { detectTitlePages } from './title-page';
 import { suppressBoilerplate } from './boilerplate';
+import { rescueCues } from './rescue';
 
 /**
  * Parse a PDF buffer into a structured screenplay.
@@ -55,6 +56,18 @@ export function parseLines(lines: RawLine[]): ParsedScreenplay {
   // page-number; must run before metadata so counts stay consistent.
   const pageCountForSuppression = Math.max(...withTitlePages.map((el) => el.pageNum), 1);
   const suppressed = suppressBoilerplate(withTitlePages, pageCountForSuppression);
+
+  // Step 5.6: Rescue cues the text heuristics rejected. Placement is
+  // deliberate. AFTER suppressBoilerplate, because suppression only re-types
+  // elements that are still `action` — a recurring watermark that happened to
+  // match a character name would otherwise be rescued to `character` first and
+  // become permanently immune to suppression. BEFORE extractCharacters, so
+  // rescued speeches reach the dialogue counts. It also needs `isTitlePage`,
+  // which only exists after step 5.
+  // Steps 4/5/5.5 are all length-preserving (attachSceneNumbers mutates in
+  // place; detectTitlePages copies and reassigns by index; suppressBoilerplate
+  // is a 1:1 map), so blocks[i] still pairs with suppressed[i].
+  rescueCues(suppressed, blocks);
 
   // Step 6: Build metadata
   const characters = extractCharacters(suppressed);
