@@ -151,3 +151,49 @@ describe('buildMobi', () => {
     }
   });
 });
+
+describe('MOBI page markers', () => {
+  // Markers ride inside the NEXT block rather than taking a line of their
+  // own — same rule as the EPUB path. MOBI 6 has no stylesheet, so the
+  // number is sized with a <font> wrapper (this file's convention) and
+  // carries none of EPUB3's pagebreak semantics.
+  function markerHtml(source: string): string {
+    const { tokens } = new Fountain().parse(source, true);
+    return tokensToMobiHtml(tokens, { title: 'T', author: 'A' });
+  }
+
+  test('marker rides inside the following block, not its own paragraph', () => {
+    const html = markerHtml(`INT. KITCHEN - DAY
+
+= pg 47
+
+Jack enters, exhausted.
+`);
+    expect(html).not.toMatch(/<p class="page-marker">/);
+    expect(html).toMatch(/page-marker/);
+    // it sits inside a block, not standing alone between two closing tags
+    expect(html).toMatch(/<(p|h[1-6])[^>]*>\s*<span class="page-marker">/);
+  });
+
+  test('carries no EPUB3 pagebreak semantics', () => {
+    const html = markerHtml(`INT. KITCHEN - DAY
+
+= pg 47
+
+Jack enters.
+`);
+    expect(html).not.toMatch(/epub:type/);
+    expect(html).not.toMatch(/doc-pagebreak/);
+    expect(html).not.toMatch(/id="pg47"/);
+  });
+
+  test('a trailing marker with nothing after it is dropped', () => {
+    const html = markerHtml(`INT. KITCHEN - DAY
+
+Jack enters.
+
+= pg 48
+`);
+    expect(html).not.toMatch(/page-marker/);
+  });
+});
