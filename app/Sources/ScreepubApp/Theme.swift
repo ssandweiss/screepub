@@ -70,10 +70,10 @@ struct Transition: View {
 struct BradButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(Theme.courier(13, .bold))
+            .font(Theme.courier(12, .bold))
             .kerning(0.8)
             .foregroundStyle(Color.black.opacity(0.82))
-            .padding(.vertical, 9)
+            .padding(.vertical, 6)
             .frame(maxWidth: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 3)
@@ -88,10 +88,10 @@ struct BradButtonStyle: ButtonStyle {
 struct OutlineButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(Theme.courier(13, .bold))
+            .font(Theme.courier(12, .bold))
             .kerning(0.8)
             .foregroundStyle(Theme.ink)
-            .padding(.vertical, 9)
+            .padding(.vertical, 6)
             .frame(maxWidth: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 3)

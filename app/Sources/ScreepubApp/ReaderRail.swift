@@ -62,7 +62,7 @@ struct ReaderRail: View {
                 ForEach(model.devices) { device in
                     Button("Copy to \(device.name) — USB") { copy(to: device) }
                 }
-                Button("Save a copy…") { saveACopy() }
+                Button("Save") { saveACopy() }
                 // Only Apple Mail actually attaches the file: with a
                 // third-party default client macOS degrades the compose to a
                 // mailto: URL, which carries no attachment (RFC 6068) and

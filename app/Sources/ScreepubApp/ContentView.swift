@@ -305,13 +305,13 @@ struct ContentView: View {
 
     /// Exactly one emphasized route OUT of the app. A mounted volume device
     /// owns that slot when there is one (its own button is already brass), so
-    /// Save a Copy takes it whenever no volume is mounted — including with a
-    /// reMarkable docked, which never mounts and lives under "More ways…".
+    /// SAVE takes it whenever no volume is mounted — including with a
+    /// reMarkable docked, which never mounts and so never enters `devices`.
     ///
-    /// READ SCRIPT is also brass and deliberately stays that way: it opens the
-    /// in-app reader rather than sending the book anywhere, so it competes for
-    /// attention but not for this slot. Two brass buttons on screen is expected
-    /// — verified on device 2026-07-26 and accepted.
+    /// PREVIEW SCRIPT is also brass and deliberately stays that way: it opens
+    /// the in-app reader rather than sending the book anywhere, so it competes
+    /// for attention but not for this slot. Two brass buttons on screen is
+    /// expected — verified on device 2026-07-26 and accepted.
     private var saveACopyStyle: AnyButtonStyle {
         ResultActions.primary(devices: devices) == .saveCopy
             ? AnyButtonStyle(BradButtonStyle())
@@ -330,7 +330,7 @@ struct ContentView: View {
             // input, so fall back to the input file itself in that case.
             if let fountainPath = result.fountainPath
                 ?? (lastInput?.pathExtension.lowercased() == "fountain" ? lastInput?.path : nil) {
-                Button("READ SCRIPT") {
+                Button("PREVIEW SCRIPT") {
                     openWindow(value: ScriptRef(
                         title: result.title ?? "Script",
                         fountainPath: fountainPath,
@@ -344,43 +344,35 @@ struct ContentView: View {
                 }
                 .buttonStyle(BradButtonStyle())
             }
-            Button("SAVE A COPY…") {
+            Button("SAVE") {
                 saveACopy(result: result, epub: epub)
             }
             .buttonStyle(saveACopyStyle)
 
-            // Everything below is a rare route — demoted to a menu so the
-            // page reads as one obvious action plus an escape hatch.
-            Menu {
-                Button(SendToKindle.appIsInstalled ? "Send to Kindle app" : "Send to Kindle — web") {
-                    SendToKindle.sendViaAmazon(epub)
-                }
-                // Only Apple Mail actually attaches the file: with a
-                // third-party default client macOS degrades the compose to a
-                // mailto: URL, which carries no attachment (RFC 6068) and
-                // still reports success. Offer the route only where it works.
-                if SendToKindle.defaultMailClientIsAppleMail {
-                    Button("Email to Kindle…") {
-                        emailToKindle(epub, title: title)
-                    }
-                }
-                // reMarkable lives here rather than in a button of its own:
-                // ResultActions never gives it the primary slot (it uploads
-                // over a USB web interface instead of being copied to).
-                if remarkableUp {
-                    Button("Send to reMarkable — USB") {
-                        sendToRemarkable(epub: epub)
-                    }
-                }
-            } label: {
-                Text("MORE WAYS…")
-                    .font(Theme.courier(11, .bold))
-                    .kerning(0.6)
-                    .foregroundStyle(Theme.inkFaint)
+            Button(SendToKindle.appIsInstalled ? "SEND TO KINDLE APP" : "SEND TO KINDLE — WEB") {
+                SendToKindle.sendViaAmazon(epub)
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .padding(.top, 2)
+            .buttonStyle(OutlineButtonStyle())
+
+            // Only Apple Mail actually attaches the file: with a third-party
+            // default client macOS degrades the compose to a mailto: URL,
+            // which carries no attachment (RFC 6068) and still reports
+            // success. Offer the route only where it works.
+            if SendToKindle.defaultMailClientIsAppleMail {
+                Button("EMAIL TO KINDLE…") {
+                    emailToKindle(epub, title: title)
+                }
+                .buttonStyle(OutlineButtonStyle())
+            }
+
+            // reMarkable uploads over its USB web interface rather than being
+            // copied to, so ResultActions never gives it the primary slot.
+            if remarkableUp {
+                Button("SEND TO REMARKABLE — USB") {
+                    sendToRemarkable(epub: epub)
+                }
+                .buttonStyle(OutlineButtonStyle())
+            }
 
             if !kindleAddress.isEmpty {
                 Button {
