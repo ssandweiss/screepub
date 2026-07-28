@@ -56,6 +56,37 @@ to a connected e-reader.
 [Calibre](https://calibre-ebook.com) is optional — only needed for the
 AZW3 Kindle-sideload format.
 
+## Your script stays on your machine
+
+Scripts are confidential. Screepub is built accordingly.
+
+- **No AI, no machine learning.** The conversion is ordinary code — it
+  measures where text sits on the page and applies screenplay layout
+  rules. There is no model involved, local or remote. The engine's entire
+  dependency list is three libraries: a Fountain parser, a zip library,
+  and Mozilla's PDF renderer.
+- **Nothing is uploaded.** The conversion engine makes no network requests
+  of any kind. Your PDF is read from disk and the e-book is written back
+  to disk, on your computer.
+- **No training data, ever.** Your scripts are not collected, stored,
+  transmitted, or used to train anything — by us or anyone else. There is
+  no server to send them to.
+- **No accounts, no telemetry, no analytics.** Screepub does not track
+  usage, report crashes, or phone home. It works fully offline.
+
+The app touches the network in exactly three places, all of which need
+your click: uploading to a **docked reMarkable** over its USB connection
+(your own hardware, not the internet), opening **Amazon's Send-to-Kindle
+page** in your browser, and opening **GitHub** if you report a bug.
+
+The one thing worth being clear about: **you** can choose to send a script
+somewhere — to your Kindle, over USB, or by email. If you email it to your
+`@kindle.com` address, Amazon receives it and their terms apply, not ours.
+That's your call to make, and Screepub never makes it for you.
+
+Don't take our word for any of this — the [source is right here](src/),
+and the licence guarantees it stays inspectable.
+
 ## Emailing scripts to your Kindle
 
 Amazon lets you email documents to your Kindle and they show up wirelessly
