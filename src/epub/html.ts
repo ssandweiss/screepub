@@ -60,11 +60,24 @@ ${body}</body>
 }
 
 /**
+ * A page marker waiting for a block to ride inside. Carried ACROSS scene
+ * sections (each section is its own `renderBlocks` call) so a marker that
+ * lands at a scene seam attaches to the next slugline instead of vanishing.
+ */
+interface MarkerState {
+  pending: { label: string; html: string } | null;
+}
+
+/**
  * Render body tokens (no title-page tokens) as discrete blocks — one string
  * per paragraph, with a complete dialogue block as a single string. Discrete
  * blocks let the section assembler wrap heading + first block together.
  */
-function renderBlocks(tokens: Token[], format: FormatOptions): string[] {
+function renderBlocks(
+  tokens: Token[],
+  format: FormatOptions,
+  markers: MarkerState = { pending: null },
+): string[] {
   const blocks: string[] = [];
   let speech: { kind: string; html: string }[] | null = null;
   // Simultaneous speech renders as a two-cell table — the one column
@@ -72,6 +85,15 @@ function renderBlocks(tokens: Token[], format: FormatOptions): string[] {
   // reliable under Enhanced Typesetting).
   let dual: { left: string[]; right: string[]; side: 'left' | 'right' } | null = null;
   const emit = (s: string, kind = 'other') => {
+    // A pending page marker slips inside this block's opening tag — costing
+    // no line of its own — and is consumed once it lands.
+    if (markers.pending) {
+      const open = /^<(p|h[1-6]|div)\b[^>]*>/.exec(s);
+      if (open) {
+        s = s.slice(0, open[0].length) + markers.pending.html + s.slice(open[0].length);
+        markers.pending = null;
+      }
+    }
     if (speech) speech.push({ kind, html: s });
     else blocks.push(s);
   };
@@ -148,8 +170,17 @@ function renderBlocks(tokens: Token[], format: FormatOptions): string[] {
         break;
       case 'synopsis': {
         // "= pg N" lines are our page markers; other synopses stay invisible.
+        // The marker doesn't emit a block — it waits for the next one, and
+        // the same span doubles as the EPUB3 pagination anchor.
         const pg = /^pg\s+(\S+)$/.exec(text.trim());
-        if (pg) emit(`<p class="page-marker">${escapeXml(pg[1])}.</p>\n`);
+        if (pg) {
+          const label = escapeXml(pg[1]);
+          markers.pending = {
+            label: pg[1],
+            html: `<span epub:type="pagebreak" role="doc-pagebreak" id="pg${label}"`
+              + ` title="${label}" class="page-marker">${label}.</span>`,
+          };
+        }
         break;
       }
       default:
@@ -167,8 +198,13 @@ function renderBlocks(tokens: Token[], format: FormatOptions): string[] {
  * together. `page-break-inside: avoid` on a container is the form Amazon
  * documents for exactly this ("headlines with paragraphs to keep together").
  */
-function renderScene(tokens: Token[], startsWithHeading: boolean, format: FormatOptions): string {
-  const blocks = renderBlocks(tokens, format);
+function renderScene(
+  tokens: Token[],
+  startsWithHeading: boolean,
+  format: FormatOptions,
+  markers?: MarkerState,
+): string {
+  const blocks = renderBlocks(tokens, format, markers);
   if (!startsWithHeading || !format.keepSceneHeadingWithScene || blocks.length === 0) {
     return blocks.join('');
   }
@@ -212,13 +248,16 @@ export function tokensToBody(
     }
   }
 
+  // One marker state for the whole script: a page marker at the tail of one
+  // scene rides into the first block of the next.
+  const markers: MarkerState = { pending: null };
   const sections: SceneSection[] = groups.map((g, i) => {
     const anchor = `sc-${String(i + 1).padStart(3, '0')}`;
     const startsWithHeading = g.tokens[0]?.type === 'scene_heading';
     return {
       anchor,
       title: g.title,
-      html: `<section class="scene" id="${anchor}">\n${renderScene(g.tokens, startsWithHeading, format)}</section>\n`,
+      html: `<section class="scene" id="${anchor}">\n${renderScene(g.tokens, startsWithHeading, format, markers)}</section>\n`,
     };
   });
 

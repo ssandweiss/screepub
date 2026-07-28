@@ -158,6 +158,14 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
     expect(heading).toContain('break-after: avoid');
   });
 
+  test('page markers float out of the flow so they cost no line', () => {
+    expect(SCREENPLAY_CSS).not.toMatch(/p\.page-marker\s*{/);
+    const marker = SCREENPLAY_CSS.match(/span\.page-marker\s*{[^}]*}/)![0];
+    expect(marker).toContain('float: right');
+    // horizontal geometry in % per the CSS invariants
+    expect(marker).toMatch(/margin-left:\s*\d+%/);
+  });
+
   test('keep-together container uses break-inside avoid (the KDP-documented form)', () => {
     const keep = SCREENPLAY_CSS.match(/\.keep-together\s*{[^}]*}/)![0];
     expect(keep).toContain('page-break-inside: avoid');
@@ -271,10 +279,42 @@ describe('inline emphasis in XHTML', () => {
 // ── page markers render ──────────────────────────────────
 
 describe('page markers in XHTML', () => {
-  test('pg synopsis lines become page-marker paragraphs', () => {
-    const tokens = new Fountain().parse('INT. A - DAY\n\nAction.\n\n= pg 47\n\nMore.\n', true).tokens;
+  test('a marker rides inside the next block, not in a paragraph of its own', () => {
+    const tokens = new Fountain().parse(
+      'INT. A - DAY\n\nAction.\n\n= pg 47\n\nAnne crosses the room.\n', true,
+    ).tokens;
     const [file] = tokensToBody(tokens).files;
-    expect(file.xhtml).toContain('<p class="page-marker">47.</p>');
+    expect(file.xhtml).not.toContain('<p class="page-marker">');
+    expect(file.xhtml).toMatch(/<span[^>]*class="page-marker"[^>]*>47\.<\/span>/);
+    // immediately inside the following paragraph's opening tag
+    expect(file.xhtml).toMatch(
+      /<p class="action"><span[^>]*class="page-marker"[^>]*>47\.<\/span>Anne crosses the room\./,
+    );
+  });
+
+  test('the marker span is the EPUB3 pagination anchor', () => {
+    const tokens = new Fountain().parse('INT. A - DAY\n\n= pg 47\n\nAction.\n', true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toContain('epub:type="pagebreak"');
+    expect(file.xhtml).toContain('role="doc-pagebreak"');
+    expect(file.xhtml).toContain('id="pg47"');
+    expect(file.xhtml).toContain('title="47"');
+  });
+
+  test('a trailing marker with no block to ride in is dropped', () => {
+    const tokens = new Fountain().parse('INT. A - DAY\n\nAnne crosses the room.\n\n= pg 48\n', true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).not.toContain('page-marker');
+  });
+
+  test('a marker at a scene seam rides into the next heading, not lost', () => {
+    const tokens = new Fountain().parse(
+      'INT. A - DAY\n\nAction.\n\n= pg 12\n\nINT. B - NIGHT\n\nMore.\n', true,
+    ).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toMatch(
+      /<h2 class="scene-heading"><span[^>]*class="page-marker"[^>]*>12\.<\/span>INT\. B - NIGHT<\/h2>/,
+    );
   });
 
   test('ordinary synopsis lines stay invisible', () => {

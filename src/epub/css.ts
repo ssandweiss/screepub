@@ -65,12 +65,13 @@ span.underline {
   text-decoration: underline;
 }
 
-/* Original PDF page numbers — small, right-flush, out of the way. */
-p.page-marker {
-  text-align: right;
+/* Original PDF page numbers — a marginal reference, out of the flow so
+   they cost no line. Horizontal in %, per the CSS invariants. */
+span.page-marker {
+  float: right;
   font-size: 0.75em;
   color: #777777;
-  margin: 1em 0 0 0;
+  margin-left: 1%;
 }
 
 p {
