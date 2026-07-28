@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { classifyBlock, resetCounter, attachSceneNumbers, normalizeCueName } from '../src/parser/classify';
+import { rescueCues } from '../src/parser/rescue';
 import { groupBlocks } from '../src/parser/group';
 import { detectTitlePages } from '../src/parser/title-page';
 import type { ScreenplayElement } from '../src/parser/types';
@@ -834,5 +835,95 @@ describe('normalizeCueName', () => {
   });
   test('leaves an ordinary name alone', () => {
     expect(normalizeCueName('KARINA')).toBe('KARINA');
+  });
+});
+
+describe('rescueCues', () => {
+  // elements[i] pairs with blocks[i]; only indent is read off the block.
+  const el = (over: Partial<ScreenplayElement> & { type: string; text: string }) =>
+    ({ id: 'x', pageNum: 1, isTitlePage: false, isReadable: true, ...over }) as ScreenplayElement;
+  const blk = (indent: number) => makeBlock({ text: '', indent });
+
+  test('promotes a lowercase cue when the name is in the roster', () => {
+    const elements = [
+      el({ type: 'character', text: 'MIKE', character: 'MIKE', baseCharacter: 'MIKE' }),
+      el({ type: 'dialogue', text: 'Hello.', character: 'MIKE' }),
+      el({ type: 'action', text: 'mike' }),
+      el({ type: 'action', text: 'Oh, yes. The dreaded poo-shi.' }),
+    ];
+    rescueCues(elements, [blk(40), blk(30), blk(40), blk(30)]);
+    expect(elements[2].type).toBe('character');
+    expect(elements[2].baseCharacter).toBe('MIKE');
+    expect(elements[3].type).toBe('dialogue');
+    expect(elements[3].character).toBe('MIKE');
+  });
+
+  test('promotes a curly-apostrophe cue seen once with an extension', () => {
+    const elements = [
+      el({ type: 'character', text: 'ANNA’S MOM (O.S.)', character: 'ANNA’S MOM', baseCharacter: 'ANNA’S MOM' }),
+      el({ type: 'dialogue', text: 'Hi.', character: 'ANNA’S MOM' }),
+      el({ type: 'action', text: 'ANNA’S MOM' }),
+      el({ type: 'action', text: 'Why don’t we start with something smaller.' }),
+    ];
+    rescueCues(elements, [blk(40), blk(30), blk(40), blk(30)]);
+    expect(elements[2].type).toBe('character');
+    expect(elements[3].type).toBe('dialogue');
+  });
+
+  test('does NOT promote a name absent from the roster', () => {
+    const elements = [
+      el({ type: 'character', text: 'MIKE', character: 'MIKE', baseCharacter: 'MIKE' }),
+      el({ type: 'dialogue', text: 'Hi.', character: 'MIKE' }),
+      el({ type: 'action', text: 'STRANGER' }),
+      el({ type: 'action', text: 'Some line.' }),
+    ];
+    rescueCues(elements, [blk(40), blk(30), blk(40), blk(30)]);
+    expect(elements[2].type).toBe('action');
+  });
+
+  test('does NOT promote outside the character indent band', () => {
+    const elements = [
+      el({ type: 'character', text: 'MIKE', character: 'MIKE', baseCharacter: 'MIKE' }),
+      el({ type: 'dialogue', text: 'Hi.', character: 'MIKE' }),
+      el({ type: 'action', text: 'MIKE' }),
+      el({ type: 'action', text: 'Some line.' }),
+    ];
+    rescueCues(elements, [blk(40), blk(30), blk(10), blk(30)]);
+    expect(elements[2].type).toBe('action');
+  });
+
+  test('does NOT promote when the next line is not dialogue-indent', () => {
+    const elements = [
+      el({ type: 'character', text: 'MIKE', character: 'MIKE', baseCharacter: 'MIKE' }),
+      el({ type: 'dialogue', text: 'Hi.', character: 'MIKE' }),
+      el({ type: 'action', text: 'MIKE' }),
+      el({ type: 'action', text: 'Some action at action indent.' }),
+    ];
+    rescueCues(elements, [blk(40), blk(30), blk(40), blk(10)]);
+    expect(elements[2].type).toBe('action');
+  });
+
+  test('retypes the whole speech run and stops at the boundary', () => {
+    const elements = [
+      el({ type: 'character', text: 'MIKE', character: 'MIKE', baseCharacter: 'MIKE' }),
+      el({ type: 'dialogue', text: 'Hi.', character: 'MIKE' }),
+      el({ type: 'action', text: 'mike' }),
+      el({ type: 'action', text: 'Line one.' }),
+      el({ type: 'action', text: 'Line two.' }),
+      el({ type: 'action', text: 'She leaves the room.' }),
+    ];
+    rescueCues(elements, [blk(40), blk(30), blk(40), blk(30), blk(30), blk(10)]);
+    expect(elements[3].type).toBe('dialogue');
+    expect(elements[4].type).toBe('dialogue');
+    expect(elements[5].type).toBe('action');
+  });
+
+  test('no roster means no rescues and no crash', () => {
+    const elements = [
+      el({ type: 'action', text: 'MIKE' }),
+      el({ type: 'action', text: 'Some line.' }),
+    ];
+    rescueCues(elements, [blk(40), blk(30)]);
+    expect(elements[0].type).toBe('action');
   });
 });
