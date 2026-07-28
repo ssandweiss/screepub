@@ -332,9 +332,16 @@ future work; everything else is live.
   synopsis lines (`= pg N` — invisible to other fountain tools) and land
   only at block boundaries: a page turning mid-speech defers its marker
   to the next block. PDF input only (fountain has no pages).
+- **Rendering:** the marker rides inside the next block as a floated
+  `<span>`, so it costs no line (it used to be its own `<p>` with a 1em
+  top margin). In EPUB the same span is the EPUB3 pagination anchor
+  (`epub:type="pagebreak"` + `title`), and a hidden `page-list` nav gives
+  capable readers real page numbers and page-jump. MOBI gets the floated
+  span only. If a legacy renderer ignores `float`, the number degrades to
+  inline text at the head of the paragraph.
 - **Code:** `src/fountain/serialize.ts` (`printedPageOffset`),
   `src/epub/html.ts` + `src/mobi/html.ts` (synopsis case),
-  `src/epub/css.ts` (`p.page-marker`).
+  `src/epub/css.ts` (`span.page-marker`), `src/epub/build.ts` (page-list).
 
 ## Guards (behavior, not formatting — app should surface as dialogs)
 

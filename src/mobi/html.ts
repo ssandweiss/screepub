@@ -42,9 +42,25 @@ export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
   // Body: dialogue blocks accumulate into a single <blockquote>.
   let speech: string[] | null = null;
   let dual: { left: string[]; right: string[]; side: 'left' | 'right' } | null = null;
+  // Page markers ride inside the NEXT block instead of taking a line of
+  // their own — same rule as the EPUB, minus the EPUB3 semantics (no
+  // epub:type/role/id here). There is no stylesheet in this dialect to hang
+  // a float on, so the number reads as a small prefix at the head of the
+  // block; <font size="-2"> is how this file expresses "small".
+  let pendingMarker: string | null = null;
+  const push = (s: string) => {
+    if (pendingMarker) {
+      const open = /^<(p|blockquote|center|table|div|h[1-6])\b[^>]*>/.exec(s);
+      if (open) {
+        s = s.slice(0, open[0].length) + pendingMarker + s.slice(open[0].length);
+        pendingMarker = null;
+      }
+    }
+    out.push(s);
+  };
   const closeSpeech = () => {
     if (speech) {
-      out.push(`<blockquote>${speech.join('<br/>')}</blockquote>`);
+      push(`<blockquote>${speech.join('<br/>')}</blockquote>`);
       speech = null;
     }
   };
@@ -54,19 +70,19 @@ export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
     switch (t.type) {
       case 'scene_heading':
         closeSpeech();
-        out.push(`<p><b>${esc(text)}</b></p>`);
+        push(`<p><b>${esc(text)}</b></p>`);
         break;
       case 'action':
       case 'lyrics':
         closeSpeech();
-        out.push(`<p>${inline(esc(text))}</p>`);
+        push(`<p>${inline(esc(text))}</p>`);
         break;
       case 'dual_dialogue_begin':
         dual = { left: [], right: [], side: 'left' };
         break;
       case 'dual_dialogue_end':
         if (dual) {
-          out.push(
+          push(
             `<table width="100%"><tr><td width="50%">${dual.left.join('<br/>')}</td><td width="50%">${dual.right.join('<br/>')}</td></tr></table>`,
           );
           dual = null;
@@ -95,17 +111,18 @@ export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
         break;
       case 'transition':
         closeSpeech();
-        out.push(`<p align="right">${esc(text.replace(/^>\s*/, ''))}</p>`);
+        push(`<p align="right">${esc(text.replace(/^>\s*/, ''))}</p>`);
         break;
       case 'centered':
         closeSpeech();
-        out.push(`<center>${esc(text)}</center>`);
+        push(`<center>${esc(text)}</center>`);
         break;
       case 'synopsis': {
+        // Emits no block of its own: it waits for the next one. That also
+        // means a marker no longer splits a speech's blockquote in two.
         const pg = /^pg\s+(\S+)$/.exec(text.trim());
         if (pg) {
-          closeSpeech();
-          out.push(`<p align="right"><font size="-2">${esc(pg[1])}.</font></p>`);
+          pendingMarker = `<span class="page-marker"><font size="-2">${esc(pg[1])}.</font></span>`;
         }
         break;
       }
