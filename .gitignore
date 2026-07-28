@@ -1,0 +1,31 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+.mcp.json
+*.pem
+*.key
+id_rsa*
+
+# OS / editor / agent scratch
+.DS_Store
+.idea/
+.vscode/
+.claude/
+
+# Logs / scratch
+*.log
+*.bun-build
+.superpowers/
+node_modules/
+.next/
+dist/
+build/
+npm-debug.log*
+# Root-anchored: private real scripts live in /fixtures, but the invented,
+# publishable ones in tests/fixtures/ are committed on purpose.
+/fixtures/
+/out/
+app/build/
+app/dist/
+app/.build/

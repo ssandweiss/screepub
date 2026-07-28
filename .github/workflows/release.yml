@@ -1,0 +1,103 @@
+# Release on version tags. Requires repo secrets (see docs/release-secrets.md):
+#   DEVELOPER_ID_CERT_P12_BASE64, CERT_PASSWORD, KEYCHAIN_PASSWORD,
+#   AC_API_KEY_P8_BASE64, AC_API_KEY_ID, AC_API_ISSUER_ID
+# Least privilege + pinned third-party actions, matching ci.yml.
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: macos-15   # Apple Silicon; Swift 6 toolchain
+    permissions:
+      contents: write   # create the GitHub Release + upload assets
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - run: bun install --frozen-lockfile
+
+      - name: Ensure Rosetta (x86_64 Swift slice builds under it)
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Import Developer ID certificate
+        env:
+          CERT_B64: ${{ secrets.DEVELOPER_ID_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          KC="$RUNNER_TEMP/build.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          echo "$CERT_B64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security list-keychains -d user -s "$KC" login.keychain-db
+          # codesign: must be in the partition list or the key is present but
+          # unusable for signing (prompts, which never succeed headlessly).
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+            -k "$KEYCHAIN_PASSWORD" "$KC" >/dev/null
+
+          # Diagnostics — identity names and SHA-1s only, no key material.
+          echo "── valid identities in the build keychain:"
+          security find-identity -v -p codesigning "$KC" || true
+          echo "── ALL identities (including invalid — an unchained leaf lands here):"
+          security find-identity -p codesigning "$KC" || true
+
+          # Prefer a valid identity; fall back to any Developer ID present,
+          # which is what happens when the intermediate CA is missing so the
+          # leaf can't be validated even though the key is fine.
+          IDENT="$(security find-identity -v -p codesigning "$KC" \
+            | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
+          if [ -z "$IDENT" ]; then
+            echo "No VALID Developer ID identity; retrying without the -v filter."
+            IDENT="$(security find-identity -p codesigning "$KC" \
+              | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
+          fi
+          if [ -z "$IDENT" ]; then
+            echo "::error::The imported .p12 holds no 'Developer ID Application' identity."
+            echo "What it DID contain is listed above. The usual cause is exporting the"
+            echo "wrong certificate: 'Apple Development' signs builds for your own devices"
+            echo "and CANNOT notarize. In Keychain Access → login → My Certificates, export"
+            echo "the row beginning 'Developer ID Application:', not the 'Apple Development'"
+            echo "one. If the list shows neither, the certificate isn't on that Mac at all."
+            exit 1
+          fi
+          echo "Signing identity: $IDENT"
+          echo "SIGN_IDENTITY=$IDENT" >> "$GITHUB_ENV"
+
+      - name: Write App Store Connect API key
+        env:
+          AC_KEY_B64: ${{ secrets.AC_API_KEY_P8_BASE64 }}
+        run: |
+          echo "$AC_KEY_B64" | base64 --decode > "$RUNNER_TEMP/ac_api_key.p8"
+          echo "AC_API_KEY_PATH=$RUNNER_TEMP/ac_api_key.p8" >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize, package
+        env:
+          VERSION: ${{ github.ref_name }}   # 'v0.2.0'; stripped below
+          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
+        run: |
+          export VERSION="${VERSION#v}"
+          app/release.sh
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          SHA="$(shasum -a 256 app/dist/Screepub-macOS.dmg | awk '{print $1}')"
+          printf '%s\n' \
+            "Notarized universal build for macOS 14+ (Apple Silicon + Intel)." \
+            "" \
+            "**Install:** download \`Screepub-macOS.dmg\`, open it, drag Screepub to Applications, and double-click." \
+            "" \
+            "DMG SHA-256: \`$SHA\`" > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" \
+            app/dist/Screepub-macOS.dmg app/dist/screepub-macOS \
+            --title "Screepub $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md"

@@ -1,0 +1,57 @@
+# Dependabot version updates.
+#
+# Security ALERTS are separate and need no config — enable them in
+# Settings → Code security. They're the higher-value half and cover
+# pdfjs-dist even if the PRs below prove fiddly.
+version: 2
+updates:
+  # GitHub Actions are a supply-chain surface: a compromised action runs
+  # with our release secrets. We pin to SHAs; Dependabot bumps the hash
+  # and keeps the trailing version comment honest, which hand-pinning
+  # never does reliably. (checkout sat three majors behind on v4 until
+  # a Node 20 deprecation warning surfaced it.)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # pdfjs-dist is the one that matters: it parses UNTRUSTED PDFs — the
+  # whole point of this app — and pdf.js has a real CVE history. jszip
+  # and fountain-js are lower risk; keeping all three current is cheap.
+  #
+  # NOTE: CI runs `bun install --frozen-lockfile` against a committed
+  # bun.lock. Dependabot's npm ecosystem is built around npm/yarn/pnpm
+  # lockfiles, so a PR that bumps package.json without regenerating
+  # bun.lock will FAIL that check — loudly, which is the right failure.
+  # Fix by running `bun install` on the PR branch and pushing the lock.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    # Matches minimumReleaseAge in bunfig.toml (24 hours). Without this,
+    # Dependabot proposes versions bun then REFUSES to install — which is
+    # exactly what happened with pdfjs-dist 6.2.108, opened 2.6 hours after
+    # publication. Majors wait longer: they carry breaking-change risk on
+    # top of supply-chain risk, and this project has four documented
+    # invariants riding on pdf.js behaviour.
+    cooldown:
+      default-days: 1
+      semver-major-days: 30
+    groups:
+      # One PR for routine bumps; security fixes still arrive separately
+      # and immediately via Dependabot alerts.
+      dependencies:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+# No SwiftPM entry on purpose: app/Package.swift declares only local
+# targets, so there is nothing external to update.

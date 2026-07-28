@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/ssandweiss/screepub/security/advisories/new
+    about: Report privately, not as a public issue. See SECURITY.md.
+  - name: Device support (Kobo, tolino, reMarkable)
+    url: https://github.com/ssandweiss/screepub/issues/new?labels=device&title=Device+report%3A+
+    about: These are implemented but untested on real hardware — reports either way are welcome.

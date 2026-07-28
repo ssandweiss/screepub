@@ -1,0 +1,31 @@
+name: Bug report
+description: The app or CLI misbehaved — a crash, a failed transfer, a broken control
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what happened, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Screepub and macOS versions
+      placeholder: Screepub 0.1.0 (Screepub → About), macOS 14.6, Apple Silicon
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: E-reader involved, if any
+      placeholder: Kobo Clara, connected over USB
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: |
+        If the CLI was involved, the output of the same conversion with
+        `--json` is useful. Please redact anything confidential first.
+      render: shell

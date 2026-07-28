@@ -1,0 +1,48 @@
+name: Conversion problem
+description: A script converted, but the e-book came out wrong
+labels: [conversion]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please don't attach a confidential script.** Conversion bugs are
+        almost always about where text sat on the page, not what it said —
+        a description usually gets us there, and `tools/make-fixture.py`
+        builds a small invented script that reproduces a given shape.
+  - type: textarea
+    id: what-went-wrong
+    attributes:
+      label: What came out wrong?
+      description: And what did you expect instead?
+      placeholder: |
+        Character cues ended up in the middle of the action paragraphs,
+        starting around page 40.
+    validations:
+      required: true
+  - type: input
+    id: written-in
+    attributes:
+      label: What was the PDF written in?
+      placeholder: Final Draft 13 / Highland / Fade In / Celtx / unknown
+  - type: dropdown
+    id: where-seen
+    attributes:
+      label: Where did you see the problem?
+      multiple: true
+      options:
+        - Screepub's built-in reader
+        - On the e-reader after sending
+        - In the EPUB opened elsewhere
+        - In the .fountain file
+  - type: input
+    id: device
+    attributes:
+      label: Which e-reader?
+      placeholder: Kindle Paperwhite 11th gen, firmware 5.19.2
+  - type: textarea
+    id: versions
+    attributes:
+      label: Screepub and macOS versions
+      placeholder: Screepub 0.1.0 (Screepub → About), macOS 14.6
+    validations:
+      required: true
