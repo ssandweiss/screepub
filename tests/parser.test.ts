@@ -155,6 +155,24 @@ describe('classifyBlock', () => {
       expect(bare.baseCharacter).toBe(dotted.baseCharacter);
     });
 
+    // MAN OF HER DREAMS types ANNA’S MOM with a curly apostrophe. The name
+    // pattern allowed only the straight ', so every bare instance fell to
+    // action — while "ANNA’S MOM (O.S.)" passed, because an extension takes
+    // a different branch that never reaches CHARACTER_NAME.
+    test('character name with a curly apostrophe', () => {
+      const block = makeBlock({ text: 'ANNA’S MOM', indent: 40 });
+      const result = classifyBlock(block, null);
+      expect(result.type).toBe('character');
+      expect(result.character).toBe('ANNA’S MOM');
+    });
+
+    test('character name with a straight apostrophe still works', () => {
+      const block = makeBlock({ text: "ANNA'S DAD", indent: 40 });
+      const result = classifyBlock(block, null);
+      expect(result.type).toBe('character');
+      expect(result.character).toBe("ANNA'S DAD");
+    });
+
     test('rejects character name at action indent', () => {
       const block = makeBlock({ text: 'JACK', indent: 10 });
       const result = classifyBlock(block, null);

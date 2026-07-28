@@ -19,7 +19,7 @@ const SCENE_NUMBER = /^\d+[A-Z]?(?:[.\-](?:\d+[A-Z]?|[A-Z]))*\.?$/;
 const PARENTHETICAL = /^\([^)]+\)$/;
 const PARENTHETICAL_TRUNCATED = /^\([^)]+\)\.{3}$/;
 // Allows shared cues (CLEO/PANNI), numbered (COP #2), and paired (MOM & DAD).
-const CHARACTER_NAME = /^[A-Z][A-Z0-9\s'\/&#-]*(\s*\([^)]+\))*\.{0,3}$/;
+const CHARACTER_NAME = /^[A-Z][A-Z0-9\s'’\/&#-]*(\s*\([^)]+\))*\.{0,3}$/;
 const COMPANY_NAME = /\b(LLC|LLP|INC|CORP|CO|LTD)\.?$/i;
 const PUNCTUATION_EXCLUDE = /[!?;,]/;
 // The closing period is optional: writers routinely type "(O.S)" for
