@@ -256,6 +256,21 @@ function extractAgeVariant(name: string): {
   return { baseName: name };
 }
 
+/**
+ * Canonical key for comparing a candidate cue against the character
+ * roster: smart quotes straightened, case folded, extensions dropped.
+ * Deliberately lossy — it exists to match "mike" and "ANNA’S MOM" to
+ * names the script already established, not to display.
+ */
+export function normalizeCueName(text: string): string {
+  return text
+    .replace(/[‘’ʼ]/g, "'")
+    .replace(/(\s*\([^)]*\))+\s*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
 function isActionByPattern(text: string): boolean {
   return (
     ACTION_POSSESSIVE.test(text) ||

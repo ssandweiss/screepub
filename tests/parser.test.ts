@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { classifyBlock, resetCounter, attachSceneNumbers } from '../src/parser/classify';
+import { classifyBlock, resetCounter, attachSceneNumbers, normalizeCueName } from '../src/parser/classify';
 import { groupBlocks } from '../src/parser/group';
 import { detectTitlePages } from '../src/parser/title-page';
 import type { ScreenplayElement } from '../src/parser/types';
@@ -815,5 +815,24 @@ describe('hybrid and non-standard character cues', () => {
     const line = classifyBlock(makeBlock({ text: 'I want you so badly', indent: 30 }), paren);
     expect(line.type).toBe('dialogue');
     expect(line.character).toBe('CLEO/PANNI');
+  });
+});
+
+describe('normalizeCueName', () => {
+  test('straightens curly apostrophes', () => {
+    expect(normalizeCueName('ANNA’S MOM')).toBe("ANNA'S MOM");
+  });
+  test('upper-cases', () => {
+    expect(normalizeCueName('mike')).toBe('MIKE');
+  });
+  test('strips a trailing extension', () => {
+    expect(normalizeCueName('ANNA’S MOM (O.S.)')).toBe("ANNA'S MOM");
+    expect(normalizeCueName("MIKE (CONT'D)")).toBe('MIKE');
+  });
+  test('collapses internal whitespace and trims', () => {
+    expect(normalizeCueName('  REALITY   HOST  ')).toBe('REALITY HOST');
+  });
+  test('leaves an ordinary name alone', () => {
+    expect(normalizeCueName('KARINA')).toBe('KARINA');
   });
 });
