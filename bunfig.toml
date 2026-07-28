@@ -1,0 +1,18 @@
+# Supply-chain hardening, mirrored from the machine-level policy in
+# ~/.bunfig.toml (IT-General security arm · ticket IT-18) so it applies in
+# CI too — the runner holds the Developer ID signing key, and a global
+# config on one laptop does not travel with the repo.
+#
+# minimumReleaseAge is in MINUTES (10080 = 7 days): bun refuses a version
+# published within that window, which is when a hijacked release does its
+# damage. Requires bun >= 1.3.
+#
+# Does NOT slow normal CI: bun applies this on fresh resolution only, and
+# `bun install --frozen-lockfile` installs versions already pinned in
+# bun.lock (oven-sh/bun#30525). It bites exactly when a dependency changes
+# — which is the moment worth gating.
+#
+# Dependabot's own `cooldown` in .github/dependabot.yml is set to the same
+# 7 days so it never proposes a bump this would then refuse to install.
+[install]
+minimumReleaseAge = 10080

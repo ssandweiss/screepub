@@ -37,6 +37,15 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
+    # Matches minimumReleaseAge in bunfig.toml (7 days). Without this,
+    # Dependabot proposes versions bun then REFUSES to install — which is
+    # exactly what happened with pdfjs-dist 6.2.108, opened 2.6 hours after
+    # publication. Majors wait longer: they carry breaking-change risk on
+    # top of supply-chain risk, and this project has four documented
+    # invariants riding on pdf.js behaviour.
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
     groups:
       # One PR for routine bumps; security fixes still arrive separately
       # and immediately via Dependabot alerts.
