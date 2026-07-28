@@ -251,6 +251,26 @@ future work; everything else is live.
   spellings — no reported miss, and loosening them buys nothing.
 - **Code:** `src/parser/classify.ts` (`DIALOGUE_EXTENSIONS`).
 
+### 9f. Cue rescue from the character roster
+- **What:** classification is geometric, but the text guards in
+  `isLikelyCharacterName` can overrule position — a dropped period (9e), a
+  curly apostrophe, a lowercase cue. Each rejection costs TWO elements:
+  with no active character the speech underneath falls to action too (9
+  paragraphs lost in one 94-page script). A second pass now promotes an
+  `action` element back to `character` when ALL hold: cue-band indent, the
+  normalized text matches a name already established elsewhere in the same
+  script, and a dialogue-indent speech follows. It cannot invent
+  characters — the roster is corroboration — and it is guard-agnostic, so
+  it catches variants nobody has reported yet.
+- **Ordering:** runs after boilerplate suppression (so a watermark can't
+  be rescued into permanent immunity) and before character extraction (so
+  rescued speeches reach the dialogue counts). Title-page elements are
+  never rescued.
+- **Also:** `CHARACTER_NAME` now accepts curly apostrophes (`ANNA’S MOM`),
+  matching how §8 already treats `(CONT'D)`.
+- **Code:** `src/parser/rescue.ts`, `src/parser/index.ts`,
+  `src/parser/classify.ts` (`normalizeCueName`, `CHARACTER_NAME`).
+
 ### 10a. Dual dialogue — de-interleaved to sequential speeches
 - **What:** simultaneous two-column speeches (seen in two different test
   scripts, one with 23 lines of dual dialogue) previously interleaved
