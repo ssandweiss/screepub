@@ -57,10 +57,12 @@ jobs:
               | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
           fi
           if [ -z "$IDENT" ]; then
-            echo "::error::No Developer ID Application identity in the imported .p12."
-            echo "The export probably contained the certificate without its private key."
-            echo "Re-export from Keychain Access under 'My Certificates' (the category"
-            echo "that shows a private key nested under the certificate), not 'Certificates'."
+            echo "::error::The imported .p12 holds no 'Developer ID Application' identity."
+            echo "What it DID contain is listed above. The usual cause is exporting the"
+            echo "wrong certificate: 'Apple Development' signs builds for your own devices"
+            echo "and CANNOT notarize. In Keychain Access → login → My Certificates, export"
+            echo "the row beginning 'Developer ID Application:', not the 'Apple Development'"
+            echo "one. If the list shows neither, the certificate isn't on that Mac at all."
             exit 1
           fi
           echo "Signing identity: $IDENT"
