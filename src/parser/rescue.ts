@@ -50,6 +50,10 @@ export function rescueCues(elements: ScreenplayElement[], blocks: TextBlock[]): 
 
     for (let j = i + 1; j < elements.length; j++) {
       if (elements[j].type !== 'action' || !inSpeechBand(j)) break;
+      // Don't swallow the NEXT missed cue: the bands overlap at 35, so a
+      // cue sitting exactly there is in both. Consuming it as dialogue
+      // would merge two speakers and put it beyond rescue.
+      if (inCueBand(j) && roster.has(normalizeCueName(elements[j].text ?? ''))) break;
       elements[j].type = 'dialogue';
       elements[j].character = established;
     }

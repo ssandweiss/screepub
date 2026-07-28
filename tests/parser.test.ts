@@ -918,6 +918,27 @@ describe('rescueCues', () => {
     expect(elements[5].type).toBe('action');
   });
 
+  test('does not swallow a following missed cue that sits in the overlap', () => {
+    const elements = [
+      el({ type: 'character', text: 'MIKE', character: 'MIKE', baseCharacter: 'MIKE' }),
+      el({ type: 'dialogue', text: 'Hi.', character: 'MIKE' }),
+      el({ type: 'character', text: 'ANNA', character: 'ANNA', baseCharacter: 'ANNA' }),
+      el({ type: 'dialogue', text: 'Hey.', character: 'ANNA' }),
+      el({ type: 'action', text: 'mike' }),
+      el({ type: 'action', text: 'Line for Mike.' }),
+      el({ type: 'action', text: 'ANNA' }),          // second missed cue, indent 35
+      el({ type: 'action', text: 'Line for Anna.' }),
+    ];
+    rescueCues(elements, [blk(40), blk(30), blk(40), blk(30), blk(40), blk(30), blk(35), blk(30)]);
+    expect(elements[4].type).toBe('character');
+    expect(elements[5].type).toBe('dialogue');
+    expect(elements[5].character).toBe('MIKE');
+    // The second cue must NOT have been eaten as Mike's dialogue.
+    expect(elements[6].type).toBe('character');
+    expect(elements[6].character).toBe('ANNA');
+    expect(elements[7].character).toBe('ANNA');
+  });
+
   test('no roster means no rescues and no crash', () => {
     const elements = [
       el({ type: 'action', text: 'MIKE' }),
