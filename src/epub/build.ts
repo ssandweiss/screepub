@@ -61,6 +61,18 @@ function navXhtml(meta: BookMeta, body: BookBody, includeTitlePage: boolean): st
     .map((e) => `      <li><a href="${e.href}">${escapeXml(e.title)}</a></li>`)
     .join('\n');
 
+  // The script's ORIGINAL printed pagination, so capable readers can show
+  // real page numbers and jump by page. Only meaningful when the book
+  // actually carries markers (each href points at a pagebreak anchor).
+  const pageListNav = body.pageList.length
+    ? `<nav epub:type="page-list" hidden="hidden">
+  <ol>
+${body.pageList.map((p) => `    <li><a href="${p.href}">${escapeXml(p.label)}</a></li>`).join('\n')}
+  </ol>
+</nav>
+`
+    : '';
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
@@ -80,7 +92,7 @@ ${items}
 ${includeTitlePage ? '    <li><a epub:type="titlepage" href="titlepage.xhtml">Title Page</a></li>\n' : ''}    <li><a epub:type="bodymatter" href="text/${body.files[0]?.id ?? 'body001'}.xhtml">Begin Reading</a></li>
   </ol>
 </nav>
-</body>
+${pageListNav}</body>
 </html>
 `;
 }

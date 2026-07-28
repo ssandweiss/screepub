@@ -22,6 +22,8 @@ export interface TocEntry {
 export interface BookBody {
   files: BodyFile[];
   toc: TocEntry[];
+  /** Page markers, in document order, for the EPUB3 page-list nav. */
+  pageList: { label: string; href: string }[];
 }
 
 /** Keep each body file comfortably under Kindle's per-flow size warnings. */
@@ -66,6 +68,12 @@ ${body}</body>
  */
 interface MarkerState {
   pending: { label: string; html: string } | null;
+  /**
+   * Labels that actually LANDED in the blocks of the current call — a marker
+   * is only navigable once it has an anchor, and it belongs to whichever
+   * section (hence file) absorbed it.
+   */
+  landed: string[];
 }
 
 /**
@@ -76,7 +84,7 @@ interface MarkerState {
 function renderBlocks(
   tokens: Token[],
   format: FormatOptions,
-  markers: MarkerState = { pending: null },
+  markers: MarkerState = { pending: null, landed: [] },
 ): string[] {
   const blocks: string[] = [];
   let speech: { kind: string; html: string }[] | null = null;
@@ -91,6 +99,7 @@ function renderBlocks(
       const open = /^<(p|h[1-6]|div)\b[^>]*>/.exec(s);
       if (open) {
         s = s.slice(0, open[0].length) + markers.pending.html + s.slice(open[0].length);
+        markers.landed.push(markers.pending.label);
         markers.pending = null;
       }
     }
@@ -217,6 +226,8 @@ interface SceneSection {
   anchor: string;
   title: string;
   html: string;
+  /** page-marker labels anchored inside this section, in document order */
+  pageLabels: string[];
 }
 
 /**
@@ -250,28 +261,33 @@ export function tokensToBody(
 
   // One marker state for the whole script: a page marker at the tail of one
   // scene rides into the first block of the next.
-  const markers: MarkerState = { pending: null };
+  const markers: MarkerState = { pending: null, landed: [] };
   const sections: SceneSection[] = groups.map((g, i) => {
     const anchor = `sc-${String(i + 1).padStart(3, '0')}`;
     const startsWithHeading = g.tokens[0]?.type === 'scene_heading';
-    return {
-      anchor,
-      title: g.title,
-      html: `<section class="scene" id="${anchor}">\n${renderScene(g.tokens, startsWithHeading, format, markers)}</section>\n`,
-    };
+    markers.landed = [];
+    const html = `<section class="scene" id="${anchor}">\n${renderScene(g.tokens, startsWithHeading, format, markers)}</section>\n`;
+    return { anchor, title: g.title, html, pageLabels: markers.landed };
   });
 
   // Pack sections into files, starting a new file only when the budget
   // would be exceeded (a file always holds at least one section).
   const files: BodyFile[] = [];
   const toc: TocEntry[] = [];
+  const pageList: BookBody['pageList'] = [];
   let pending: SceneSection[] = [];
   let pendingBytes = 0;
 
   const flush = () => {
     if (pending.length === 0) return;
     const id = `body${String(files.length + 1).padStart(3, '0')}`;
-    for (const s of pending) toc.push({ title: s.title, href: `text/${id}.xhtml#${s.anchor}` });
+    for (const s of pending) {
+      toc.push({ title: s.title, href: `text/${id}.xhtml#${s.anchor}` });
+      // fragment must match the id renderBlocks stamped on the anchor span
+      for (const label of s.pageLabels) {
+        pageList.push({ label, href: `text/${id}.xhtml#pg${escapeXml(label)}` });
+      }
+    }
     files.push({ id, xhtml: xhtmlDoc(pending[0].title, pending.map((s) => s.html).join('')) });
     pending = [];
     pendingBytes = 0;
@@ -285,7 +301,7 @@ export function tokensToBody(
   }
   flush();
 
-  return { files, toc };
+  return { files, toc, pageList };
 }
 
 /**

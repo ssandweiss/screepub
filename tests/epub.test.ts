@@ -211,6 +211,26 @@ describe('buildEpub', () => {
     expect(nav).toContain('<a href="text/body001.xhtml#sc-002">EXT. YARD - NIGHT</a>');
   });
 
+  test('nav.xhtml carries a hidden page-list when the script has markers', async () => {
+    const tokens = new Fountain().parse(
+      'INT. A - DAY\n\n= pg 12\n\nShe waits.\n\n= pg 13\n\nHe leaves.\n', true,
+    ).tokens;
+    const body = tokensToBody(tokens);
+    const zip = await JSZip.loadAsync(await buildEpub({ title: 'Test Script' }, body));
+    const nav = await zip.file('OEBPS/nav.xhtml')!.async('string');
+    expect(nav).toContain('<nav epub:type="page-list" hidden="hidden">');
+    expect(nav).toContain('<a href="text/body001.xhtml#pg12">12</a>');
+    expect(nav).toContain('<a href="text/body001.xhtml#pg13">13</a>');
+    // page-list follows landmarks
+    expect(nav.indexOf('page-list')).toBeGreaterThan(nav.indexOf('landmarks'));
+  });
+
+  test('no page-list nav at all when the script has no markers', async () => {
+    const { zip } = await build();
+    const nav = await zip.file('OEBPS/nav.xhtml')!.async('string');
+    expect(nav).not.toContain('page-list');
+  });
+
   test('title page renders title and author', async () => {
     const { zip } = await build();
     const tp = await zip.file('OEBPS/titlepage.xhtml')!.async('string');
@@ -321,6 +341,43 @@ describe('page markers in XHTML', () => {
     const tokens = new Fountain().parse('INT. A - DAY\n\n= Jack discovers the truth\n\nAction.\n', true).tokens;
     const [file] = tokensToBody(tokens).files;
     expect(file.xhtml).not.toContain('discovers the truth');
+  });
+
+  test('page-list records every marker, in document order', () => {
+    const tokens = new Fountain().parse(
+      'INT. A - DAY\n\n= pg 12\n\nShe waits.\n\n= pg 13\n\nHe leaves.\n', true,
+    ).tokens;
+    const body = tokensToBody(tokens);
+    expect(body.pageList).toEqual([
+      { label: '12', href: 'text/body001.xhtml#pg12' },
+      { label: '13', href: 'text/body001.xhtml#pg13' },
+    ]);
+  });
+
+  test('every page-list href resolves to an id in the file it names', () => {
+    const tokens = new Fountain().parse(
+      'INT. A - DAY\n\n= pg 12\n\nShe waits a long while by the window.\n\n'
+      + 'INT. B - NIGHT\n\n= pg 13\n\nHe leaves without a word to anyone.\n', true,
+    ).tokens;
+    const body = tokensToBody(tokens, { maxFileBytes: 400 });
+    expect(body.files.length).toBeGreaterThan(1);
+    for (const p of body.pageList) {
+      const [name, fragment] = p.href.split('#');
+      const file = body.files.find((f) => name === `text/${f.id}.xhtml`);
+      expect(file).toBeTruthy();
+      expect(file!.xhtml).toContain(`id="${fragment}"`);
+    }
+    // the second marker followed its scene into the second file
+    expect(body.pageList[1].href).toBe('text/body002.xhtml#pg13');
+  });
+
+  test('a dropped trailing marker never reaches the page-list', () => {
+    const tokens = new Fountain().parse('INT. A - DAY\n\nShe waits.\n\n= pg 48\n', true).tokens;
+    expect(tokensToBody(tokens).pageList).toEqual([]);
+  });
+
+  test('a script without markers has an empty page-list', () => {
+    expect(tokensToBody(sampleTokens()).pageList).toEqual([]);
   });
 });
 
