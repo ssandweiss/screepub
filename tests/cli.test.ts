@@ -22,6 +22,42 @@ async function runCli(args: string[]) {
   return { stdout, stderr, exitCode };
 }
 
+describe('cli --version', () => {
+  test('prints a semver and exits 0', async () => {
+    const { stdout, exitCode } = await runCli(['--version']);
+    expect(exitCode).toBe(0);
+    expect(stdout.trim()).toMatch(/^screepub \d+\.\d+\.\d+/);
+  });
+
+  test('matches the version in package.json', async () => {
+    const pkg = await Bun.file(`${ROOT}package.json`).json();
+    const { stdout } = await runCli(['--version']);
+    expect(stdout.trim()).toBe(`screepub ${pkg.version}`);
+  });
+});
+
+// pdf.js warns about our build choices — the modern-build notice fires at
+// import time, and the standard-font notice on every base-14 PDF, which is
+// most screenplays. Neither is actionable for someone converting a script,
+// and both look like errors. They belong behind --debug.
+describe('cli quiets pdf.js internals', () => {
+  test('a normal conversion prints nothing to stderr', async () => {
+    const { stderr, exitCode } = await runCli([
+      `${FIXTURES}screenplay.pdf`, '-o', `${SCRATCH}/quiet.epub`, '--no-fountain',
+    ]);
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+  }, 60000);
+
+  test('--debug lets them through', async () => {
+    const { stderr, exitCode } = await runCli([
+      `${FIXTURES}screenplay.pdf`, '-o', `${SCRATCH}/loud.epub`, '--no-fountain', '--debug',
+    ]);
+    expect(exitCode).toBe(0);
+    expect(stderr).toContain('Warning');
+  }, 60000);
+});
+
 describe('cli --json contract', () => {
   test('success emits a single machine-readable JSON object', async () => {
     const out = `${SCRATCH}/cli-json-test.epub`;

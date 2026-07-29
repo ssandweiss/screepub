@@ -6,6 +6,9 @@
 // globalThis.pdfjsWorker (checked before any dynamic import) — pdf.js's
 // fallback dynamically imports "./pdf.worker.mjs" at runtime, which breaks
 // inside a `bun build --compile` binary where that file doesn't exist.
+// MUST stay the first import: it patches console.warn before any pdf.js
+// module is evaluated. See quiet-pdfjs.ts for why that ordering matters.
+import './quiet-pdfjs';
 import * as pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs';
 
 (globalThis as Record<string, unknown>).pdfjsWorker = pdfjsWorker;

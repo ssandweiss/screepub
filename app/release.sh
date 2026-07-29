@@ -12,6 +12,16 @@ sp_paths
 : "${VERSION:?set VERSION (e.g. 0.2.0)}"
 : "${SIGN_IDENTITY:?set SIGN_IDENTITY (Developer ID Application: … (TEAMID))}"
 
+# `screepub --version` reports package.json's version, inlined at compile
+# time. If it disagrees with the tag being released, the binary would lie
+# about itself in every bug report — so fail here rather than ship it.
+PKG_VERSION="$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' "$REPO_DIR/package.json" | head -1)"
+if [[ "$PKG_VERSION" != "$VERSION" ]]; then
+  echo "::error::package.json says $PKG_VERSION but the tag says $VERSION." >&2
+  echo "Bump \"version\" in package.json to $VERSION and re-tag." >&2
+  exit 1
+fi
+
 export UNIVERSAL=1
 sp_build_engine
 sp_build_icon

@@ -3,6 +3,9 @@
 import { parseArgs } from 'node:util';
 import { basename, dirname, extname, join } from 'node:path';
 import { readFile, writeFile, rename } from 'node:fs/promises';
+// Inlined by `bun build --compile`, so the shipped binary reports the same
+// version as the tag that built it. release.sh checks the two agree.
+import pkg from '../package.json' with { type: 'json' };
 import {
   convertPdf,
   convertFountain,
@@ -27,8 +30,10 @@ Options:
   --preview-html <file>  also write the script as one self-contained HTML file
   --options <file.json>  formatting options (see docs/formatting-options-log.md)
   --json                 machine-readable result on stdout (for the app)
-  --debug                also dump classified elements to <input>.elements.json
+  --debug                also dump classified elements, and let pdf.js's
+                         internal warnings through to stderr
   -h, --help             show this help
+      --version          print the version and exit
 `;
 
 interface JsonError {
@@ -76,10 +81,15 @@ async function main() {
       json: { type: 'boolean', default: false },
       debug: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
+      version: { type: 'boolean', default: false },
     },
   });
   jsonMode = values.json;
 
+  if (values.version) {
+    console.log(`screepub ${pkg.version}`);
+    process.exit(0);
+  }
   if (values.help || positionals.length === 0) {
     console.log(USAGE);
     process.exit(values.help ? 0 : 1);
