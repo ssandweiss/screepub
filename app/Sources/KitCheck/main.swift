@@ -374,5 +374,19 @@ let isAppleMail = await MainActor.run { SendToKindle.defaultMailClientIsAppleMai
 check(isAppleMail == true || isAppleMail == false,
       "default-mail-client detection resolves without crashing")
 
+// — Apple Books (the iOS route; Books ships with macOS but can be absent) —
+check(AppleBooks.isAvailable == (AppleBooks.appURL != nil),
+      "Books availability agrees with the resolved app URL")
+if let books = AppleBooks.appURL {
+    check(FileManager.default.fileExists(atPath: books.path),
+          "resolved Books.app actually exists on disk")
+    check(books.pathExtension == "app", "Books resolves to an app bundle")
+} else {
+    // A machine without Books must hide the button rather than offer a
+    // no-op: send() returning false is what the views key off.
+    let sent = await MainActor.run { AppleBooks.send(URL(fileURLWithPath: "/tmp/none.epub")) }
+    check(sent == false, "send() reports failure when Books is absent")
+}
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

@@ -42,6 +42,13 @@ Screepub was built for the **Kindle**, and that's the device it's actually
 been tested on — sideloaded over USB, or sent to your `@kindle.com`
 address. If you read scripts on a Kindle, you're on the well-worn path.
 
+**On an iPhone or iPad, use Apple Books** — hit *Open in Apple Books* and
+the script joins your library, then appears on every device signed into the
+same iCloud account. No cable, no conversion, no Amazon. It's also the
+sharpest result Screepub produces: Books renders with the same engine as
+Safari, so it honours the rules that keep a character cue attached to the
+line it introduces — rules a Kindle ignores on sideloaded files.
+
 It also supports **Kobo** and **tolino** (the app spots them and copies
 over the right format), plus a docked **reMarkable** (which gets the
 original PDF — its own pagination and pen annotation suit scripts better
@@ -56,7 +63,19 @@ Here's the honest state of it:
 | Kobo | EPUB (or KEPUB) over USB | ⚠️ Built and code-tested, never run on a real device |
 | tolino | EPUB into the device's `Books` folder | ⚠️ Built and code-tested, never run on a real device |
 | reMarkable | Original PDF over its USB web interface | ⚠️ Built and code-tested, never run on a real device |
-| Kindle (2024+, MTP) | — | ❌ Not supported; these no longer mount as USB drives |
+| Newer Kindles that don't appear as a drive | Email — see below | ✅ Use email delivery |
+| iPhone / iPad / Mac (Apple Books) | Added to your Books library, syncs via iCloud | ✅ Verified — best-looking output of any route |
+
+**If your Kindle doesn't show up as a drive when you plug it in**, it's one
+of the newer ones that speaks MTP instead — a protocol macOS has no built-in
+support for, which is why nothing appears in Finder either. Email it instead
+(see [below](#emailing-scripts-to-your-kindle)). That isn't a consolation
+prize: Amazon re-typesets what you send with its modern renderer, so scene
+breaks and page breaks land where they should. Sideloading over USB uses an
+older rendering path that ignores those rules, which is why a plugged-in
+transfer can strand a character cue at the bottom of a page. **USB's real
+advantage is that it works offline and your script never leaves your
+machine** — worth choosing deliberately if the material is confidential.
 
 The ⚠️ rows are not a hedge — they mean nobody has plugged one in. The code
 paths are written and checked, but device firmware is where e-book

@@ -354,6 +354,18 @@ struct ContentView: View {
             }
             .buttonStyle(OutlineButtonStyle())
 
+            // Books reads the EPUB as-is — no conversion, and WebKit honours
+            // the page-break rules a Kindle sideload ignores. Adding it here
+            // is also how a script reaches an iPhone or iPad: Books syncs the
+            // library through the user's own iCloud account.
+            if AppleBooks.isAvailable {
+                Button("OPEN IN APPLE BOOKS") {
+                    AppleBooks.send(epub)
+                    transferNote = "added to Apple Books — it syncs to your iPhone and iPad if Books iCloud is on"
+                }
+                .buttonStyle(OutlineButtonStyle())
+            }
+
             // Only Apple Mail actually attaches the file: with a third-party
             // default client macOS degrades the compose to a mailto: URL,
             // which carries no attachment (RFC 6068) and still reports

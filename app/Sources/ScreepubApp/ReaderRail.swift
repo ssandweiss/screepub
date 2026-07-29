@@ -63,6 +63,12 @@ struct ReaderRail: View {
                     Button("Copy to \(device.name) — USB") { copy(to: device) }
                 }
                 Button("Save") { saveACopy() }
+                if AppleBooks.isAvailable {
+                    Button("Open in Apple Books") {
+                        AppleBooks.send(URL(fileURLWithPath: model.ref.epubPath))
+                        model.statusLine = "added to Apple Books — syncs to iPhone and iPad via iCloud"
+                    }
+                }
                 // Only Apple Mail actually attaches the file: with a
                 // third-party default client macOS degrades the compose to a
                 // mailto: URL, which carries no attachment (RFC 6068) and
