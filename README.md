@@ -45,9 +45,34 @@ address. If you read scripts on a Kindle, you're on the well-worn path.
 It also supports **Kobo** and **tolino** (the app spots them and copies
 over the right format), plus a docked **reMarkable** (which gets the
 original PDF — its own pagination and pen annotation suit scripts better
-than a reflow). These are built in but haven't had the same real-device
-testing yet, so treat them as promising rather than proven —
-[feedback is very welcome](https://github.com/ssandweiss/screepub/issues).
+than a reflow).
+
+Here's the honest state of it:
+
+| Device | How it's sent | Status |
+| --- | --- | --- |
+| Kindle (USB mass storage) | AZW3 over USB, or the engine's MOBI | ✅ Verified on hardware, firmware 5.19.2 |
+| Kindle (email) | EPUB to your `@kindle.com` address | ✅ Verified — and the better-looking route |
+| Kobo | EPUB (or KEPUB) over USB | ⚠️ Built and code-tested, never run on a real device |
+| tolino | EPUB into the device's `Books` folder | ⚠️ Built and code-tested, never run on a real device |
+| reMarkable | Original PDF over its USB web interface | ⚠️ Built and code-tested, never run on a real device |
+| Kindle (2024+, MTP) | — | ❌ Not supported; these no longer mount as USB drives |
+
+The ⚠️ rows are not a hedge — they mean nobody has plugged one in. The code
+paths are written and checked, but device firmware is where e-book
+formatting goes to die, and I only own a Kindle. **If you own one of these,
+a five-minute report either way is the single most useful thing you can send
+me** — it works, or here's the screenshot of how it broke:
+[open an issue](https://github.com/ssandweiss/screepub/issues/new/choose).
+
+## What Screepub isn't
+
+- **Not a screenwriting app.** It doesn't write, edit, or format scripts.
+  It's for *reading* ones that already exist.
+- **Not a coverage or analysis tool.** No summaries, no notes, no AI
+  anything.
+- **Not a PDF viewer.** It converts a screenplay into an e-book you read
+  somewhere else, on a device built for reading.
 
 ## Install
 
