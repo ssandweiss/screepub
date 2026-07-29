@@ -1,6 +1,6 @@
 # Screepub
 
-[![Release](https://img.shields.io/github/v/release/ssandweiss/screepub)](https://github.com/ssandweiss/screepub/releases/latest)
+[![Release](https://img.shields.io/github/v/release/ssandweiss/screepub?cacheSeconds=300)](https://github.com/ssandweiss/screepub/releases/latest)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)
 
