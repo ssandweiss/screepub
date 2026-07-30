@@ -20,6 +20,12 @@ const USAGE = `screepub — screenplay PDF → reflowable EPUB3 (via Fountain)
 Usage:
   screepub <input.pdf | input.fountain> [options]
 
+PDF is the primary path. .fountain input is PARTIALLY SUPPORTED: contdMode
+and rejoinSplitDialogue are applied when a PDF is read, so they do not take
+effect here (asking to strip (CONT'D) warns rather than failing silently),
+and the scanned-PDF and not-a-screenplay guards are PDF-only. See the
+README's "Fountain input" section.
+
 Options:
   -o, --output <file>    EPUB output path (default: <input>.epub)
   --fountain <file>      Fountain output path (default: <input>.fountain for PDF input)

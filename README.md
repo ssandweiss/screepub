@@ -202,9 +202,9 @@ technical side — the command-line tool, how to build the app, and how it
 works under the hood. Screepub is a three-stage pipeline (PDF → Fountain →
 EPUB3/MOBI) with a small Mac app on top; the `.fountain` intermediate is
 kept as a durable, editable artifact. All formatting behaviors are options
-(`src/options.ts`), exposed in the app's Formatting settings and on the CLI
-via `--options file.json`; the registry with rationale for each lives in
-`docs/formatting-options-log.md`.
+(`src/options.ts`), exposed in the app's preview window (beside a live
+render of the script) and on the CLI via `--options file.json`; the registry
+with rationale for each lives in `docs/formatting-options-log.md`.
 
 ## CLI
 
@@ -222,6 +222,29 @@ bun src/cli.ts <input.pdf | input.fountain> [options]
 | `--force` | convert even if it doesn't look like a screenplay |
 | `--json` | machine-readable result (the app↔engine contract) |
 | `--debug` | dump classified elements JSON |
+
+### Fountain input — partial support
+
+PDF is the primary path. `.fountain` input is **partially supported**: the
+render pipeline runs in full and 13 of the 15 formatting options apply
+normally, but two do not, because they are consumed in
+`src/fountain/serialize.ts` — upstream of the `.fountain` itself, where the
+pipeline's durable artifact begins.
+
+| Option | On `.fountain` input |
+| --- | --- |
+| `contdMode` | **Not applied.** `(CONT'D)` is already written into the cue text. Asking to strip it emits a warning on the CLI and in `--json` rather than silently doing nothing; re-convert the PDF to change it. |
+| `rejoinSplitDialogue` | **Not applicable.** It repairs speeches that a PDF's pagination split across pages. Fountain has no pages, so there is nothing to rejoin. |
+
+The input guards are PDF-only too: Fountain input runs neither the
+scanned-PDF check nor the not-a-screenplay check, and does not warn when a
+script has no scene headings. Handing over Fountain is taken as the claim
+that it is a screenplay.
+
+None of this affects Screepub's own use of the path — the app's preview
+window re-renders a script it already converted, where both options were
+settled when the PDF was read. It matters when you bring a `.fountain` from
+another tool.
 
 ## Development
 
@@ -256,7 +279,7 @@ src/
   cli.ts      CLI + --json contract
 app/
   Sources/ScreepubKit/   engine bridge, transfer routes (USB/email/web)
-  Sources/ScreepubApp/   script-page UI + settings with live preview
+  Sources/ScreepubApp/   script-page UI + preview window with live render
 ```
 
 ## License
