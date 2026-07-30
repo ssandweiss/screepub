@@ -209,8 +209,21 @@ export function toFountain(
         lastSpeaker = null;
         out.push(`> ${text}`);
         break;
+      case 'mini-slug':
+        // A secondary slugline ("LATER", "THE KITCHEN") is a heading, and
+        // Fountain's word for a heading that doesn't open INT./EXT. is the
+        // forced form. Plain text would not survive the round trip: bare
+        // "LATER" re-parses as action (the mini-slug styling never applied)
+        // and "BACK TO:" as a transition. Stays PLAIN — emphasis markers
+        // would break slug recognition, same rule as cues and parentheticals.
+        // Text already starting with a Fountain marker can't take the dot
+        // ("..45" is not a forced slug), so it falls back to forced action.
+        closeBlock();
+        out.push(NEEDS_FORCE.test(text) ? `!${text}` : `.${text}`);
+        break;
       default: {
-        // action (styled allowed), mini-slug (plain)
+        // action — the only type left, and the only one here allowed to
+        // carry its styled variant (a future type falls back to plain).
         closeBlock();
         const body = el.type === 'action' ? (el.styledText ?? el.text).trim() : text;
         out.push(NEEDS_FORCE.test(body) ? `!${body}` : body);

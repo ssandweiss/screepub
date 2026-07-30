@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { Fountain } from 'fountain-js';
 import { extractTitleMeta, toFountain } from '../src/fountain/serialize';
+import { tokensToBody } from '../src/epub/html';
 import type { ScreenplayElement, ParsedScreenplay } from '../src/parser/types';
 
 let idCounter = 0;
@@ -130,9 +131,26 @@ describe('toFountain', () => {
     expect(out).toBe('!.45 on the table.\n\n!> ominous graffiti\n');
   });
 
-  test('mini-slugs pass through as standalone lines', () => {
+  test('mini-slugs serialize as forced sluglines', () => {
     const out = toFountain(screenplay([el({ text: 'LATER', type: 'mini-slug' })]));
-    expect(out).toBe('LATER\n');
+    expect(out).toBe('.LATER\n');
+  });
+
+  test('a mini-slug Fountain cannot force stays an action line', () => {
+    // ".45 ON THE COUNTER" would become "..45 …", which fountain-js reads as
+    // action anyway — the dot form is only reachable for text that has none.
+    const out = toFountain(screenplay([el({ text: '.45 ON THE COUNTER', type: 'mini-slug' })]));
+    expect(out).toBe('!.45 ON THE COUNTER\n');
+  });
+
+  test('a mini-slug never becomes a transition on re-parse', () => {
+    // Plain "BACK TO:" matches fountain-js's transition rule (".+ TO:") and
+    // used to render right-flush; the forced slugline pins it down.
+    const { tokens } = new Fountain().parse(
+      toFountain(screenplay([el({ text: 'BACK TO:', type: 'mini-slug' })])),
+      true,
+    );
+    expect(tokens.filter((t) => t.type !== 'title_page').map((t) => t.type)).toEqual(['scene_heading']);
   });
 
   test('(MORE) parentheticals are dropped', () => {
@@ -213,6 +231,22 @@ describe('fountain-js round-trip', () => {
     expect(scene.scene_number).toBe('7');
     const cue = tokens.find((t) => t.type === 'character')!;
     expect(cue.text).toBe('JACK (V.O.)');
+  });
+
+  test('a parsed mini-slug reaches the EPUB as a mini-slug', () => {
+    // The whole seam: parser element → Fountain → tokens → XHTML. The class
+    // the stylesheet styles has to be the one the renderer emits.
+    const out = toFountain(
+      screenplay([
+        el({ text: 'INT. KITCHEN - DAY', type: 'scene' }),
+        el({ text: 'Jack waits.', type: 'action' }),
+        el({ text: 'LATER', type: 'mini-slug' }),
+        el({ text: 'Jack is still waiting.', type: 'action' }),
+      ]),
+    );
+    const { tokens } = new Fountain().parse(out, true);
+    const body = tokensToBody(tokens);
+    expect(body.files[0].xhtml).toContain('<p class="mini-slug">LATER</p>');
   });
 });
 

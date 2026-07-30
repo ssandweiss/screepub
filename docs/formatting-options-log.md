@@ -65,7 +65,7 @@ is live.
   0.8em (a later feedback-round complaint). Inside a dialogue block
   (cue → paren → lines) spacing stays at 0 — that tightness is correct.
 - **Default:** 1em between elements; scene heading 1.6em above / 0.8em
-  below; mini-slug 1.4em above / 1em below.
+  below; mini-slug 1.4em above / 1em below (#5b).
 - **App option:** "Element spacing" slider (compact 0.6 → airy 1.4em);
   possibly independent scene-heading spacing.
 - **Code:** `src/epub/css.ts`.
@@ -92,12 +92,48 @@ is live.
 - **Code:** `src/epub/html.ts` (`renderScene`), `src/epub/css.ts`
   (`.keep-together`).
 
+### 5b. Mini-slugs (secondary sluglines) — micro-headings, not scenes
+- **What:** "LATER", "THE BACK ROOM", "MOMENTS LATER" — the slugs that
+  move you inside a scene. They render as `p.mini-slug`: bold, uppercase,
+  1.4em above / 1em below (#3), `break-after: avoid`. NOT a scene: no
+  `<section>`, no TOC entry (#12), no `scenePageBreaks` page break, and no
+  5a keep-together wrapper.
+- **How it survives the .fountain:** as Fountain's **forced slugline**
+  (`.LATER`) — the format's own word for a heading that doesn't open
+  INT./EXT., and what screenwriters type by hand. Plain text does not
+  survive: bare "LATER" re-parses as action, and "BACK TO:" re-parses as
+  a right-flush *transition*. `p.mini-slug` was styled from the first
+  commit but no path ever emitted the class, because serialize.ts wrote
+  mini-slugs plain — fixed 2026-07-30 by forcing the dot. Mini-slug text
+  stays PLAIN (no emphasis markers), same rule as cues and parentheticals;
+  text that already starts with a Fountain marker can't take the dot and
+  falls back to forced action (`!.45 ON THE COUNTER`).
+- **Renderer side:** a `scene_heading` token whose text fails fountain-js's
+  own unforced-heading pattern (`PRIMARY_SLUG` — a copy of its
+  `rules.scene_heading` first alternative) could only have come from the
+  forced form, so that is the exact discriminator. Applies to hand-written
+  Fountain input too. MOBI has no third weight in its dialect: mini-slug
+  and slugline are both `<p><b>`.
+- **KNOWN GAP (2026-07-30):** PDF input still produces **zero** mini-slug
+  elements. `classify.ts`'s mini-slug branch requires `indent < 5`, but
+  extraction measures indent from the PAGE edge, where action sits at
+  15–18 — no block in any of the five generator fixtures scores under 5.
+  So the whole path is live and tested from `.fountain` inward, and dead
+  from the PDF. Reopening it is a classification decision, not a rendering
+  one: the same band holds all-caps sound-effect action ("THUD.",
+  "CRASH!"), which must NOT become headings, and `isActionByPattern`
+  already vetoes the common "THE KITCHEN" shape at priority 7.
+- **Code:** `src/fountain/serialize.ts` (`mini-slug` case),
+  `src/epub/html.ts` (`PRIMARY_SLUG`, `isMiniSlug`), `src/epub/css.ts`
+  (`p.mini-slug`), `src/parser/classify.ts` (priority 9, the gap).
+
 ### 5. Keep-with-next — minimal chain (v2)
-- **What:** `break-after: avoid` on scene headings and character cues
-  ONLY. v1 also chained parentheticals; every avoid link grows the
-  unbreakable chunk a renderer pushes to the next page, and pushed
-  chunks show up as occasional blank-bottom "weird page breaks."
-- **Default:** heading + cue avoid; parenthetical breaks freely.
+- **What:** `break-after: avoid` on scene headings, mini-slugs (#5b) and
+  character cues ONLY. v1 also chained parentheticals; every avoid link
+  grows the unbreakable chunk a renderer pushes to the next page, and
+  pushed chunks show up as occasional blank-bottom "weird page breaks."
+- **Default:** heading + mini-slug + cue avoid; parenthetical breaks
+  freely.
 - **App options:** none — cue avoid stays always-on; the heading behavior
   is governed by 5a's keep-together wrapper.
 - **Code:** `src/epub/css.ts`.
@@ -339,8 +375,9 @@ is live.
   `src/epub/build.ts` (`titlePageXhtml`).
 
 ### 12. Scene-level TOC
-- **What:** every slugline becomes a TOC entry (nav.xhtml) linking to its
-  anchor; landmarks for title page / begin-reading.
+- **What:** every PRIMARY slugline becomes a TOC entry (nav.xhtml) linking
+  to its anchor; landmarks for title page / begin-reading. Mini-slugs are
+  deliberately absent — "LATER" is not a destination (#5b).
 - **Default:** on, labeled "Scenes".
 - **App options:** TOC on/off; possible "TOC every N scenes" for
    150-scene scripts where the drawer gets long.

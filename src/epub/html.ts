@@ -29,6 +29,20 @@ export interface BookBody {
 /** Keep each body file comfortably under Kindle's per-flow size warnings. */
 const DEFAULT_MAX_FILE_BYTES = 250_000;
 
+/**
+ * The openers fountain-js accepts for an UNFORCED scene heading (its own
+ * `rules.scene_heading`, first alternative). A `scene_heading` token whose
+ * text fails this could only have come from the forced `.SLUG` form —
+ * which is how serialize.ts writes the parser's mini-slug elements, and how
+ * screenwriters write secondary sluglines in Fountain by hand. Those are
+ * micro-headings INSIDE a scene: bold uppercase, no section, no TOC entry.
+ */
+const PRIMARY_SLUG = /^(?:\*{0,3}_?)?(?:(?:int|i)\.?\/(?:ext|e)|int|ext|est)[. ]/i;
+
+function isMiniSlug(t: Token): boolean {
+  return t.type === 'scene_heading' && !PRIMARY_SLUG.test(t.text ?? '');
+}
+
 export function escapeXml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -123,6 +137,10 @@ function renderBlocks(
     const text = t.text ?? '';
     switch (t.type) {
       case 'scene_heading': {
+        if (isMiniSlug(t)) {
+          emit(`<p class="mini-slug">${escapeXml(text)}</p>\n`);
+          break;
+        }
         const num = format.showSceneNumbers && t.scene_number
           ? `<span class="scene-number">${escapeXml(t.scene_number)}</span> `
           : '';
@@ -247,7 +265,7 @@ export function tokensToBody(
   let current: { title: string; tokens: Token[] } | null = null;
 
   for (const t of body) {
-    if (t.type === 'scene_heading') {
+    if (t.type === 'scene_heading' && !isMiniSlug(t)) {
       current = { title: t.text ?? 'Scene', tokens: [t] };
       groups.push(current);
     } else {
@@ -264,7 +282,8 @@ export function tokensToBody(
   const markers: MarkerState = { pending: null, landed: [] };
   const sections: SceneSection[] = groups.map((g, i) => {
     const anchor = `sc-${String(i + 1).padStart(3, '0')}`;
-    const startsWithHeading = g.tokens[0]?.type === 'scene_heading';
+    const first = g.tokens[0];
+    const startsWithHeading = first?.type === 'scene_heading' && !isMiniSlug(first);
     markers.landed = [];
     const html = `<section class="scene" id="${anchor}">\n${renderScene(g.tokens, startsWithHeading, format, markers)}</section>\n`;
     return { anchor, title: g.title, html, pageLabels: markers.landed };
