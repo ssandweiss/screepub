@@ -46,7 +46,7 @@ In `src/options.ts`, after the `keepSceneHeadingWithScene: boolean;` interface l
 
 ```ts
   /** whole speeches ride one page: dialogue blocks become unbreakable;
-   * off = the proven default, cue + first line keep only (registry #14) */
+   * off = the proven default, cue + first line keep only (registry #8c) */
   keepSpeechesWhole: boolean;
 ```
 
@@ -528,13 +528,13 @@ git commit -m "keepSpeechesWhole reaches the app: settings key, sidecar, Pages t
 
 - [ ] **Step 1: Update registry entry #5a.** Find entry `#5a` (scene heading keep) and rewrite its mechanics paragraph to state: the keep is now `page-break-after: avoid` on `h2.scene-heading`, gated by `keepSceneHeadingWithScene` (default on); the old heading-plus-first-block wrapper was removed 2026-07-30 because it made the whole first block unbreakable and pushed half-page chunks on KFX and Apple Books (the half-empty-page report). Keep the entry number; append the date-stamped change note in the entry's existing style.
 
-- [ ] **Step 2: Append three new entries** following the registry's numbering and voice (check the highest existing number first — expected next: #14, #15, #16):
+- [ ] **Step 2: Append three new entries** following the registry's numbering and voice. NOTE: #14 and #15 are TAKEN (scanned-PDF bail-out, not-a-screenplay guard). Use the suffix convention where an entry extends an existing story, flat numbers otherwise:
 
-- `#14 keepSpeechesWhole` — opt-in atomic speeches: `.dialogue-block` gets `break-inside: avoid`; default off because the proven cue + first-line keep suffices and atomic blocks trade white space for never splitting a speech; speeches taller than a page still break bare (CSS avoid yields); the cue keep remains as a degradation layer either way.
-- `#15 transitions never begin a page` — `p.transition { break-before: avoid }`, unconditional; the universal print rule (a transition belongs to the shot before it); see `docs/pagination-reference.md` §2.
-- `#16 tall dual exchanges fall back to sequential` — a dual table is unbreakable on Kindle regardless of CSS, so an exchange whose taller column exceeds ~12 estimated rendered lines (at ~30 chars/line, constants in `src/epub/html.ts`) renders as two ordinary sequential speeches; short exchanges keep the side-by-side table.
+- `#8c keepSpeechesWhole` (extends the #8b cue-keep story) — opt-in atomic speeches: `.dialogue-block` gets `break-inside: avoid`; default off because the proven cue + first-line keep suffices and atomic blocks trade white space for never splitting a speech; speeches taller than a page still break bare (CSS avoid yields); the cue keep remains as a degradation layer either way.
+- `#16 transitions never begin a page` — `p.transition { break-before: avoid }`, unconditional; the universal print rule (a transition belongs to the shot before it); see `docs/pagination-reference.md` §2 (note: that doc lives on branch worktree-device-map).
+- `#10b tall dual exchanges fall back to sequential` (extends #10a dual dialogue) — a dual table is unbreakable on Kindle regardless of CSS, so an exchange whose taller column exceeds ~12 estimated rendered lines (at ~30 chars/line, constants in `src/epub/html.ts`) renders as two ordinary sequential speeches; short exchanges keep the side-by-side table.
 
-Also note under #16 or #14 (one line): the MOBI dialect has no stylesheet, so none of these keeps apply there (structural limitation, unchanged).
+Also note under #10b or #8c (one line): the MOBI dialect has no stylesheet, so none of these keeps apply there (structural limitation, unchanged).
 
 - [ ] **Step 3: Rebuild the app bundle** (CLAUDE.md: it embeds the engine sidecar).
 
