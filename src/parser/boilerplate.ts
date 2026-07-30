@@ -40,6 +40,17 @@ const RECUR_PAGE_FRACTION = 0.4;
  * Recurrence layer (the watermark killer): any candidate whose normalized
  * text appears on >= max(3, 40% of pages) distinct pages is re-typed to
  * "page-number". Pure and idempotent; never mutates its input.
+ *
+ * Mini-slugs go through the SAME rule as action, and must. Classification
+ * runs first, so a left-flush all-caps watermark ("CONFIDENTIAL") classifies
+ * as a mini-slug at priority 9 — outside this layer it would render as a
+ * bold micro-heading on every page. Counting them keeps the pool exactly
+ * what it was before classify.ts learned to mint mini-slugs, and hiding them
+ * on the same terms keeps ONE watermark verdict per document: a mark that
+ * happens to type action on one page and mini-slug on the next must not come
+ * out hidden in one place and visible in the other. Verbatim recurrence on
+ * 40%+ of pages is watermark-shaped, not slug-shaped — real slug families
+ * vary by location — so the threshold is doing the job it was built for. #5b.
  */
 export function suppressBoilerplate(
   elements: ScreenplayElement[],
@@ -48,7 +59,7 @@ export function suppressBoilerplate(
   const threshold = Math.max(RECUR_MIN_PAGES, Math.ceil(pageCount * RECUR_PAGE_FRACTION));
   const pagesByText = new Map<string, Set<number>>();
   const isCandidate = (e: ScreenplayElement) =>
-    (e.type === 'action' || e.type === 'page-number') &&
+    (e.type === 'action' || e.type === 'page-number' || e.type === 'mini-slug') &&
     e.text.trim().length > 0 &&
     e.text.trim().length <= RECUR_MAX_LEN;
   const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -60,14 +71,15 @@ export function suppressBoilerplate(
     if (!pages) pagesByText.set(key, (pages = new Set()));
     pages.add(e.pageNum);
   }
+  const recurs = (e: ScreenplayElement) =>
+    (pagesByText.get(norm(e.text))?.size ?? 0) >= threshold;
 
   return elements.map((e) => {
-    if (e.type !== 'action') return e;
+    if (e.type !== 'action' && e.type !== 'mini-slug') return e;
     // Pattern layer: slugs embedding per-page-varying page marks never recur
     // verbatim, so the recurrence count alone misses them — catch directly.
     if (isBoilerplateLine(e.text)) return { ...e, type: 'page-number' as const };
     if (!isCandidate(e)) return e;
-    const pages = pagesByText.get(norm(e.text));
-    return pages && pages.size >= threshold ? { ...e, type: 'page-number' as const } : e;
+    return recurs(e) ? { ...e, type: 'page-number' as const } : e;
   });
 }

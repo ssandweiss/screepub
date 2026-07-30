@@ -52,3 +52,45 @@ describe('parseLines metadata', () => {
     expect(sp.pageCount).toBe(2);
   });
 });
+
+/// Classification (priority 9) runs BEFORE suppressBoilerplate, so anything
+/// the mini-slug rule claims leaves the recurrence layer's view. A left-flush
+/// all-caps watermark is mini-slug-shaped, and it recurs by definition — the
+/// two passes have to be told about each other or every page grows a heading.
+describe('mini-slugs and the recurrence suppressor', () => {
+  /// `slugOnPages` pages carry `mark` at the action margin; every page also
+  /// carries a heading and a line of action so the doc has a real page count.
+  function pages(pageCount: number, mark: string, markOnPages: number[]): RawLine[] {
+    const lines: RawLine[] = [];
+    for (let p = 1; p <= pageCount; p++) {
+      if (markOnPages.includes(p)) lines.push(line(mark, 17, 720, p));
+      lines.push(line(`INT. ROOM ${p} - DAY`, 17, 660, p));
+      lines.push(line(`Someone crosses the floor on page ${p}.`, 17, 600, p));
+    }
+    return lines;
+  }
+  const all = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
+  const typesOf = (ls: RawLine[], text: string) =>
+    new Set(parseLines(ls).elements.filter((e) => e.text === text).map((e) => e.type));
+
+  test('a per-page watermark does not escape into a heading on every page', () => {
+    // 10 pages, threshold max(3, 40%) = 4. Before mini-slug was a recurrence
+    // candidate this rendered ten bold micro-headings.
+    expect(typesOf(pages(10, 'CONFIDENTIAL', all(10)), 'CONFIDENTIAL')).not.toContain('mini-slug');
+  });
+
+  test('a suppressed mini-slug is hidden on the same terms as action', () => {
+    // page-number is the suppressor's sink and every consumer skips it. One
+    // rule for both types, so a mark that types action on one page and
+    // mini-slug on the next cannot come out hidden here and visible there.
+    expect([...typesOf(pages(10, 'PROPERTY OF THE STUDIO', all(10)), 'PROPERTY OF THE STUDIO')])
+      .toEqual(['page-number']);
+  });
+
+  test('a mini-slug that legitimately repeats under the threshold survives', () => {
+    // 3 of 20 pages against a threshold of 8. Mini-slugs do repeat, so the
+    // threshold is what has to hold — and it does: the widest page-spread of
+    // any real mini-slug in the corpus is 14%, against a 40% bar.
+    expect([...typesOf(pages(20, 'LATER', [4, 9, 15]), 'LATER')]).toEqual(['mini-slug']);
+  });
+});

@@ -209,8 +209,29 @@ export function toFountain(
         lastSpeaker = null;
         out.push(`> ${text}`);
         break;
+      case 'mini-slug':
+        // A secondary slugline ("LATER", "THE KITCHEN") is a heading, and
+        // Fountain's word for a heading that doesn't open INT./EXT. is the
+        // forced form. Plain text would not survive the round trip: bare
+        // "LATER" re-parses as action (the mini-slug styling never applied)
+        // and "BACK TO:" as a transition. Stays PLAIN — emphasis markers
+        // would break slug recognition, same rule as cues and parentheticals.
+        //
+        // A LEADING DOT is the only text the dot-force can't carry
+        // (fountain-js's rule is `^\s*\.(?!\.+)`), so ".45 ON THE COUNTER"
+        // falls back to forced action; every other marker rides through the
+        // dot intact and keeps its heading treatment.
+        //
+        // Resets lastSpeaker like scene and transition do: a mini-slug is a
+        // cut in time or place, so the speaker after it is starting fresh
+        // and must not inherit a (CONT'D) from before it (#8a).
+        closeBlock();
+        lastSpeaker = null;
+        out.push(/^\./.test(text) ? `!${text}` : `.${text}`);
+        break;
       default: {
-        // action (styled allowed), mini-slug (plain)
+        // action — the only type left, and the only one here allowed to
+        // carry its styled variant (a future type falls back to plain).
         closeBlock();
         const body = el.type === 'action' ? (el.styledText ?? el.text).trim() : text;
         out.push(NEEDS_FORCE.test(body) ? `!${body}` : body);

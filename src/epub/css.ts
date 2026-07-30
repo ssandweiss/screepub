@@ -13,7 +13,7 @@
 //   whole inventory, one line each:
 //     break-after: avoid   h2.scene-heading (gated: keepSceneHeadingWithScene)
 //     break-after: avoid   p.character
-//     break-after: avoid   p.mini-slug (inert — no such class is emitted)
+//     break-after: avoid   p.mini-slug (live: secondary sluglines, registry #5b)
 //     break-before: avoid  p.transition
 //     break-inside: avoid  .keep-together (the cue keep)
 //     break-inside: avoid  table.dual-dialogue

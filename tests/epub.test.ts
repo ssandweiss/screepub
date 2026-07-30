@@ -1,9 +1,12 @@
 import { describe, test, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { Fountain } from 'fountain-js';
 import JSZip from 'jszip';
-import { tokensToBody, tokensToPreviewHtml } from '../src/epub/html';
+import { tokensToBody, tokensToPreviewHtml, PRIMARY_SLUG } from '../src/epub/html';
 import { buildEpub } from '../src/epub/build';
 import { SCREENPLAY_CSS } from '../src/epub/css';
+import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
+import { PRIMARY_SLUG as PARSER_PRIMARY_SLUG } from '../src/parser/classify';
 
 const SAMPLE = `INT. KITCHEN - DAY
 
@@ -469,6 +472,112 @@ describe('dual dialogue table rendering', () => {
   test('table style keeps the pair together and splits width evenly', () => {
     expect(SCREENPLAY_CSS.match(/table\.dual-dialogue\s*{[^}]*}/)![0]).toContain('page-break-inside: avoid');
     expect(SCREENPLAY_CSS.match(/table\.dual-dialogue td\s*{[^}]*}/)![0]).toContain('width: 50%');
+  });
+});
+
+// ── mini-slugs (secondary sluglines) ─────────────────────
+
+describe('mini-slug rendering', () => {
+  // "LATER", "THE KITCHEN" — forced sluglines in Fountain, which is how
+  // serialize.ts writes the parser's mini-slug elements.
+  const SRC = 'INT. STORE - NIGHT\n\nMargo locks up.\n\n.LATER\n\nThe lights are still on.\n';
+
+  test('a forced non-INT/EXT slug renders as a micro-heading, not a scene heading', () => {
+    const [file] = tokensToBody(new Fountain().parse(SRC, true).tokens).files;
+    expect(file.xhtml).toContain('<p class="mini-slug">LATER</p>');
+    expect(file.xhtml).not.toContain('<h2 class="scene-heading">LATER</h2>');
+  });
+
+  test('a mini-slug stays inside its scene — no section, no TOC entry', () => {
+    const body = tokensToBody(new Fountain().parse(SRC, true).tokens);
+    expect(body.toc).toEqual([
+      { title: 'INT. STORE - NIGHT', href: 'text/body001.xhtml#sc-001' },
+    ]);
+    expect(body.files[0].xhtml).not.toContain('sc-002');
+  });
+
+  test('primary sluglines are untouched — INT/EXT/EST/I-E stay scene headings', () => {
+    const src = 'INT. A - DAY\n\nOne.\n\nEXT. B - DAY\n\nTwo.\n\nEST. C - DAY\n\nThree.\n\nI/E. D - DAY\n\nFour.\n';
+    const body = tokensToBody(new Fountain().parse(src, true).tokens);
+    expect(body.files[0].xhtml).not.toContain('mini-slug');
+    expect(body.toc.map((t) => t.title)).toEqual([
+      'INT. A - DAY', 'EXT. B - DAY', 'EST. C - DAY', 'I/E. D - DAY',
+    ]);
+  });
+
+  test('a mini-slug can open a script without swallowing the Opening section', () => {
+    // Also the documented divergence for hand-written Fountain (README,
+    // registry #5b): a dot-forced ".COLD OPEN" is a mini-slug here, not a
+    // scene, so it gets no TOC entry. The trade Screepub takes for owning
+    // the dot-force as its mini-slug carrier.
+    const body = tokensToBody(new Fountain().parse('.COLD OPEN\n\nBlack.\n', true).tokens);
+    expect(body.toc).toEqual([{ title: 'Opening', href: 'text/body001.xhtml#sc-001' }]);
+    expect(body.files[0].xhtml).toContain('<p class="mini-slug">COLD OPEN</p>');
+  });
+
+  test('a numbered mini-slug keeps its number, like a slugline does', () => {
+    const tokens = new Fountain().parse('INT. A - DAY\n\nOne.\n\n.LATER #5#\n\nTwo.\n', true).tokens;
+    const [file] = tokensToBody(tokens, { format: { ...DEFAULT_FORMAT_OPTIONS, showSceneNumbers: true } }).files;
+    expect(file.xhtml).toContain('<p class="mini-slug"><span class="scene-number">5</span> LATER</p>');
+  });
+
+  test('PRIMARY_SLUG stays in lockstep with fountain-js', () => {
+    // Every opener fountain-js promotes UNFORCED must also promote when it
+    // arrives forced, and nothing else may. An upstream rule change breaks
+    // this table rather than silently reshuffling headings and TOC entries.
+    const cases: [string, boolean][] = [
+      ['INT. HOUSE - DAY', true],
+      ['INT HOUSE - DAY', true],
+      ['EXT. YARD - NIGHT', true],
+      ['EST. THE HOUSE', true],
+      ['I/E. CAR - DAY', true],
+      ['I/E CAR - DAY', true],
+      ['INT./EXT. CAR - DAY', true],
+      ['INT/EXT CAR - DAY', true],
+      ['LATER', false],
+      ['THE BACK ROOM', false],
+      ['ESTABLISHING SHOT', false],
+      ['INTO THE WOODS', false],
+      ['BACK TO:', false],
+    ];
+    for (const [text, promotes] of cases) {
+      const unforced = new Fountain().parse(`${text}\n\nAction.\n`, true).tokens;
+      expect([text, unforced[0].type === 'scene_heading']).toEqual([text, promotes]);
+      const [file] = tokensToBody(new Fountain().parse(`.${text}\n\nAction.\n`, true).tokens).files;
+      expect([text, file.xhtml.includes('<h2 class="scene-heading">')]).toEqual([text, promotes]);
+      expect([text, file.xhtml.includes('<p class="mini-slug">')]).toEqual([text, !promotes]);
+    }
+  });
+
+  test('the parser excludes from mini-slug exactly what this promotes', () => {
+    // One literal, two layers: classify.ts must not mint a mini-slug that
+    // the renderer would turn back into a scene heading.
+    expect(PARSER_PRIMARY_SLUG.source).toBe(PRIMARY_SLUG.source);
+    expect(PARSER_PRIMARY_SLUG.flags).toBe(PRIMARY_SLUG.flags);
+  });
+
+  test('the stylesheet gives it the bold uppercase micro-heading treatment', () => {
+    const rule = SCREENPLAY_CSS.match(/p\.mini-slug\s*{[^}]*}/)![0];
+    expect(rule).toContain('font-weight: bold');
+    expect(rule).toContain('text-transform: uppercase');
+    // Vertical rhythm in em, per the CSS invariants: more air above than below.
+    expect(rule).toMatch(/margin:\s*1\.4em 0 1em 0/);
+  });
+
+  test('every class the stylesheet styles is one a renderer emits', () => {
+    // The regression this suite exists for: p.mini-slug was styled for
+    // months while no code path ever emitted the class.
+    const emitted = readFileSync(new URL('../src/epub/html.ts', import.meta.url), 'utf8')
+      + readFileSync(new URL('../src/epub/build.ts', import.meta.url), 'utf8');
+    // Every class in every selector, descendants included (p.credit inside
+    // section.titlepage counts) — comments stripped first, or "e.g." reads
+    // as a class named "g".
+    const selectors = [...SCREENPLAY_CSS.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{/g)];
+    const styled = selectors.flatMap((s) => [...s[1].matchAll(/\.([a-z][a-z0-9-]*)/g)].map((m) => m[1]));
+    expect(new Set(styled).size).toBeGreaterThan(12);
+    for (const cls of new Set(styled)) {
+      expect(emitted).toContain(`class="${cls}"`);
+    }
   });
 });
 

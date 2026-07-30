@@ -66,6 +66,12 @@ describe('tokensToMobiHtml', () => {
   test('text is HTML-escaped', () => {
     expect(sampleHtml()).toContain('5 &lt; 6 &amp; &quot;quotes&quot; too.');
   });
+
+  test('mini-slugs read as bold paragraphs too — this dialect has no third weight', () => {
+    const tokens = new Fountain().parse('INT. STORE - NIGHT\n\nThe gate rattles.\n\n.LATER\n\nStill on.\n', true).tokens;
+    const html = tokensToMobiHtml(tokens, { title: 'T' });
+    expect(html).toContain('<p><b>LATER</b></p>');
+  });
 });
 
 // ── MOBI container ───────────────────────────────────────

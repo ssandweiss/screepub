@@ -44,6 +44,29 @@ const EST_CHARS_PER_DUAL_LINE = 30;
  * it is a closed set — a typo'd literal would silently wrap every speech. */
 type Cell = { kind: 'character' | 'parenthetical' | 'dialogue' | 'other'; html: string };
 
+/**
+ * The openers fountain-js accepts for an UNFORCED scene heading (its own
+ * `rules.scene_heading`, first alternative). A `scene_heading` token whose
+ * text fails this could only have come from the forced `.SLUG` form —
+ * which is how serialize.ts writes the parser's mini-slug elements, and how
+ * screenwriters write secondary sluglines in Fountain by hand. Those are
+ * micro-headings INSIDE a scene: bold uppercase, no section, no TOC entry.
+ *
+ * Note the asymmetry this creates for hand-written Fountain: a dot-forced
+ * `.BLACK` renders as a mini-slug, not a scene. Screepub owns the dot-force
+ * as its mini-slug carrier; the trade is recorded in the README's Fountain
+ * divergence table and registry #5b.
+ *
+ * `classify.ts` carries the same literal (it must not mint a mini-slug this
+ * would promote back to a heading) and `tests/epub.test.ts` pins the pair
+ * to each other AND to fountain-js's own tokenizer.
+ */
+export const PRIMARY_SLUG = /^(?:\*{0,3}_?)?(?:(?:int|i)\.?\/(?:ext|e)|int|ext|est)[. ]/i;
+
+function isMiniSlug(t: Token): boolean {
+  return t.type === 'scene_heading' && !PRIMARY_SLUG.test(t.text ?? '');
+}
+
 export function escapeXml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -144,7 +167,12 @@ function renderBlocks(
         const num = format.showSceneNumbers && t.scene_number
           ? `<span class="scene-number">${escapeXml(t.scene_number)}</span> `
           : '';
-        emit(`<h2 class="scene-heading">${num}${escapeXml(text)}</h2>\n`);
+        // A mini-slug can carry a shooting-script number too (fountain-js
+        // splits `#5#` off either kind of heading) — dropping it here would
+        // lose it silently.
+        emit(isMiniSlug(t)
+          ? `<p class="mini-slug">${num}${escapeXml(text)}</p>\n`
+          : `<h2 class="scene-heading">${num}${escapeXml(text)}</h2>\n`);
         break;
       }
       case 'action':
@@ -254,7 +282,7 @@ export function tokensToBody(
   let current: { title: string; tokens: Token[] } | null = null;
 
   for (const t of body) {
-    if (t.type === 'scene_heading') {
+    if (t.type === 'scene_heading' && !isMiniSlug(t)) {
       current = { title: t.text ?? 'Scene', tokens: [t] };
       groups.push(current);
     } else {
