@@ -102,6 +102,54 @@ describe('convertFountain', () => {
   });
 });
 
+// contdMode is consumed in fountain/serialize.ts, upstream of the .fountain
+// cache boundary — so on Fountain input it is already baked into the cue text
+// and asking to strip it cannot work. It used to fail silently, which is worse
+// than failing: the app's reader re-renders from the cached .fountain, so the
+// control looked dead exactly where a user would reach for it.
+describe('convertFountain warns when a stage-1 option cannot apply', () => {
+  const WITH_CONTD =
+    'INT. STORE - NIGHT\n\nAction.\n\n@MARGO\nFirst half.\n\n@MARGO (CONT’D)\nSecond half.\n';
+  const WITHOUT_CONTD = 'INT. STORE - NIGHT\n\nAction.\n\n@MARGO\nOnly speech.\n';
+
+  test('strip requested but (CONT’D) is already baked into the cues', async () => {
+    const result = await convertFountain(WITH_CONTD, { format: { contdMode: 'strip' } });
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain("(CONT'D)");
+    // Must name the fix, not just the failure.
+    expect(result.warnings[0]).toMatch(/re-?convert/i);
+  });
+
+  test('the cues really do keep their (CONT’D), which is what the warning is about', async () => {
+    const result = await convertFountain(WITH_CONTD, { format: { contdMode: 'strip' } });
+    const zip = await JSZip.loadAsync(result.epub);
+    const ch = await zip.file('OEBPS/text/body001.xhtml')!.async('string');
+    expect(ch).toContain('CONT');
+  });
+
+  test('silent when there is no (CONT’D) to strip', async () => {
+    const result = await convertFountain(WITHOUT_CONTD, { format: { contdMode: 'strip' } });
+    expect(result.warnings).toEqual([]);
+  });
+
+  test('silent for keep and auto, which do not promise removal here', async () => {
+    for (const contdMode of ['keep', 'auto'] as const) {
+      const result = await convertFountain(WITH_CONTD, { format: { contdMode } });
+      expect(result.warnings).toEqual([]);
+    }
+  });
+
+  test('PDF input never warns — there the option genuinely applies', async () => {
+    const result = await convertPdf(await bytes(`${PUBLIC}screenplay.pdf`), {
+      format: { contdMode: 'strip' },
+    });
+    expect(result.warnings.filter((w) => w.includes("CONT'D"))).toEqual([]);
+    const zip = await JSZip.loadAsync(result.epub);
+    const ch = await zip.file('OEBPS/text/body001.xhtml')!.async('string');
+    expect(ch).not.toContain('CONT&apos;D');
+  }, 60000);
+});
+
 describe('convertFountain previewHtml', () => {
   test('returns the preview document', async () => {
     const src = 'Title: T\n\nINT. LAB - DAY\n\nBeakers bubble.\n\nELI\nEureka.\n';

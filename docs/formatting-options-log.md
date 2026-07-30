@@ -160,7 +160,22 @@ is live.
   (default) strips source cues' (CONT'D) and re-adds it exactly where
   the rule applies (same speaker continues, reset at scene/transition);
   **strip** removes all; **keep** preserves the source.
-- **Code:** `src/fountain/serialize.ts` (`lastSpeaker` tracking).
+- **Stage-1 only (2026-07-30):** this and #8 are the ONLY two knobs
+  consumed in `fountain/serialize.ts` rather than in `epub/`. They are
+  written INTO the `.fountain`, which is the app's cache boundary, so on
+  **Fountain input they cannot apply** — the decision is already frozen
+  into the cue text. Rendering a fountain that carries `@MARGO (CONT'D)`
+  with `contdMode: strip` keeps the (CONT'D); the same PDF converted with
+  `strip` does not. This used to exit 0 and silently change nothing;
+  `convertFountain` now returns a warning for the provable case (strip
+  requested, `(CONT'D)` cues present), which reaches `--json`, the CLI's
+  human output, and the app. #8 gets no runtime warning because
+  `serialize.ts` drops `(MORE)` unconditionally, so an unrejoined split is
+  indistinguishable from an ordinary same-speaker continuation — a guessed
+  warning would be worse than this note. The reader rail groups both under
+  "From the PDF" and says they apply on the next conversion.
+- **Code:** `src/fountain/serialize.ts` (`lastSpeaker` tracking);
+  `src/convert.ts` (`stageOneWarnings`, `CONTD_CUE`).
 
 ### 8b. Cue keeps its first dialogue line (always on)
 - **SUPERSEDED IN PART — device verdict (2026-07-29, same-day A/B on
