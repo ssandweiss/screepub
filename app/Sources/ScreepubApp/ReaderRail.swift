@@ -21,6 +21,13 @@ struct ReaderRail: View {
                 Text("Overwrites this script's settings below.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            Section("Page") {
+                slider("Spacing (em)", value: binding(\.elementSpacingEm), range: 0.4...1.6, step: 0.1)
+                Toggle("Scene page breaks", isOn: binding(\.scenePageBreaks))
+                Toggle("Keep headings with scene", isOn: binding(\.keepSceneHeadingWithScene))
+            }
+            Section("Dialogue") {
                 slider("Dialogue margins", value: binding(\.dialogueSideMarginPct), range: 0...30)
                 Picker("Cues", selection: binding(\.cueAlignment)) {
                     Text("Centered").tag("centered")
@@ -30,20 +37,29 @@ struct ReaderRail: View {
                     .disabled(model.settings.cueAlignment == "centered")
                 slider("Paren indent", value: binding(\.parentheticalIndentPct), range: 0...40)
                     .disabled(model.settings.cueAlignment == "centered")
-                slider("Spacing (em)", value: binding(\.elementSpacingEm), range: 0.4...1.6, step: 0.1)
+                Picker("Dual dialogue", selection: binding(\.dualDialogue)) {
+                    Text("Side by side").tag("sideBySide")
+                    Text("Sequential").tag("sequential")
+                }
+            }
+            Section("Text") {
                 Picker("Typeface", selection: binding(\.fontFamily)) {
                     Text("Courier").tag("courier")
                     Text("Serif").tag("serif")
                     Text("Sans").tag("sans")
                 }
-                Picker("Dual dialogue", selection: binding(\.dualDialogue)) {
-                    Text("Side by side").tag("sideBySide")
-                    Text("Sequential").tag("sequential")
-                }
                 Toggle("Justify body text", isOn: binding(\.justifyText))
-                Toggle("Scene page breaks", isOn: binding(\.scenePageBreaks))
+            }
+            Section("Content") {
+                Toggle("Title page", isOn: binding(\.includeTitlePage))
                 Toggle("Scene numbers", isOn: binding(\.showSceneNumbers))
                 Toggle("Page markers", isOn: binding(\.showPageMarkers))
+                Toggle("Rejoin split dialogue", isOn: binding(\.rejoinSplitDialogue))
+                Picker("(CONT'D)", selection: binding(\.contdMode)) {
+                    Text("Automatic").tag("auto")
+                    Text("Remove all").tag("strip")
+                    Text("Keep as written").tag("keep")
+                }
             }
             Section {
                 if model.rendering { ProgressView().controlSize(.small) }
