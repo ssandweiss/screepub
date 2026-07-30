@@ -93,7 +93,7 @@ is live.
   (`.keep-together`).
 
 ### 5b. Mini-slugs (secondary sluglines) — micro-headings, not scenes
-- **What:** "LATER", "THE BACK ROOM", "MOMENTS LATER" — the slugs that
+- **What:** "LATER", "IN THE BACK ROOM", "END OF MONTAGE" — the slugs that
   move you inside a scene. They render as `p.mini-slug`: bold, uppercase,
   1.4em above / 1em below (#3), `break-after: avoid`. NOT a scene: no
   `<section>`, no TOC entry (#12), no `scenePageBreaks` page break, and no
@@ -124,7 +124,10 @@ is live.
   HOUSE`, and promoted straight back to a full scene heading with a TOC
   entry. `tests/epub.test.ts` pins the two literals to each other and the
   renderer's verdict to fountain-js's own tokenizer, so an upstream rule
-  change fails a table instead of quietly reshuffling headings.
+  change fails a table instead of quietly reshuffling headings. The literal
+  is anchored, so classify.ts also tests it against the line with a leading
+  shooting-script number stripped — an unpaired number ("2 EXT. WOODS - DAY
+  3", which the dual-margin strip leaves whole) pushes the opener off `^`.
 - **THE TRADE — hand-written Fountain (2026-07-30):** Screepub owns the
   dot-force as its mini-slug carrier, so a hand-written `.BLACK` or
   `.THE BRIDGE` from another tool renders as a **mini-slug, not a scene**:
@@ -135,19 +138,72 @@ is live.
   divergence table. Building a marker to tell the two apart was considered
   and rejected — any marker either pollutes the durable `.fountain` for
   other tools or hides the line from them entirely.
-- **KNOWN GAP (2026-07-30):** PDF input still produces **zero** mini-slug
-  elements. `classify.ts`'s mini-slug branch requires `indent < 5`, but
-  extraction measures indent from the PAGE edge, where action sits at
-  15–18 — no block in any of the five generator fixtures scores under 5.
-  So the whole path is live and tested from `.fountain` inward, and dead
-  from the PDF. Reopening it is a classification decision, not a rendering
-  one: the same band holds all-caps sound-effect action ("THUD.",
-  "CRASH!"), which must NOT become headings, and `isActionByPattern`
-  already vetoes the common "THE KITCHEN" shape at priority 7.
+- **Classified from the PDF (2026-07-30) — this CLOSES the KNOWN GAP this
+  entry carried,** and nothing above it changes: the dot-force, THE TRADE
+  and the PRIMARY_SLUG agreement all still hold, with the classifier now
+  the fourth thing obeying them. The gap was that the old branch
+  asked for `indent < 5` on a measure taken from the PAGE edge, where the
+  modal action indent is 15–18 — so no block in any generator ever scored
+  under 5 and PDF input produced **zero** mini-slugs. The rule now works in
+  the real action band and leans on shape instead. A block is a mini-slug
+  when ALL hold: `indent < ACTION_MAX` (20); **exactly one line** in the
+  block; strictly all-caps; 2–55 characters; letters are ≥50% of the
+  non-space characters; the last character is a letter, digit or `:`; and
+  it does not end in `TO:`. `PRIMARY_SLUG` (with and without a leading
+  shooting-script number) and bare parentheticals are out.
+- **Why each guard:** *single line* — groupBlocks breaks on a >20pt Y gap,
+  so a one-line block IS a standalone beat, and prose long enough to be a
+  sentence wraps. *Strict caps* (not the cue heuristic's 0.8 ratio) drops
+  the "Dev CROSSES TO THE COUNTER" emphasis style. *Letters ≥50%* keeps a
+  WGA registration number off the heading. *Terminal punctuation* is THE
+  discriminator: across all six fixtures every sound effect and shouted
+  beat carried a `.` or `!` and every true slug ended bare or on `:`, so
+  the ambiguity the type invited (a bare "SILENCE" beat vs a bare "END
+  DREAM" slug) does not occur in the corpus — it also rejects a trailing
+  dash and a `***revision note***`. *Ends in `TO:`* is Fountain's own
+  transition rule, and it is what keeps left-flush "DISSOLVE TO:" /
+  "SMASH CUT TO:" out (the transition branch only fires right-flush).
+  *`PRIMARY_SLUG`* is the shared heading exclusion above; testing it a
+  second time against a number-stripped copy catches the unpaired
+  shooting-script heading ("2 EXT. WOODS - DAY 3") that the anchor misses.
+- **Priority stays 9 — LAST, after every existing veto.** Precision beats
+  recall here: a missed slug renders as action (harmless), a promoted
+  sound effect renders as a bold heading (visible defect). **The priority-7
+  decision: `isActionByPattern`'s ACTION_PRONOUNS veto keeps its say, so
+  "THE KITCHEN"-shaped slugs stay action.** The carve-out was measured and
+  rejected: it would have gained ~18 true slugs in one fixture, but that
+  same fixture holds "THE ENGINE STARTS." and "THE DOOR OPENS." — all-caps
+  prose sentences one dropped period away from promotion. The shapes are
+  identical; only the period separates them, so the second guard is free
+  precision and the recall loss is deliberate. ACTION_CAMERA likewise still
+  vetoes "FADE IN:" and "CLOSE ON: …".
+- **Tested against the danger set:** "THUD.", "CRASH!", "DING!",
+  "BEEP. BEEP.", an all-caps action sentence, a dash-broken line, a
+  revision-starred note, both `TO:` transitions, mixed case, a wrapped
+  two-line block, an over-long line, a digit-dominated registration line,
+  and cue/speech-band non-interference (the band test alone forbids it:
+  ACTION_MAX 20 sits below DIALOGUE_MIN 25 and CHARACTER_MIN 35).
+- **Fixture sweep (5 generators + both committed fixtures):** total element
+  count, and the scene / character / dialogue / parenthetical / transition /
+  page-number counts, are **unchanged everywhere**; the only movement is
+  action → mini-slug — 79 / 7 / 4 / 2 / 0 / 0, plus 2 section headings in
+  the non-screenplay prose fixture (which still trips the guard, since that
+  keys on scenes and dialogue). epubcheck clean on the 79-slug output.
+- **Not in the recurrence suppressor:** `suppressBoilerplate` only re-types
+  `action` and `page-number`, so mini-slugs sit outside it. Deliberate —
+  mini-slugs repeat by design ("LATER", "THE FOYER") and would trip the
+  ≥40%-of-pages threshold in a short script, which would delete text. The
+  pattern layer still runs first (priority 1.5), so revision slugs, draft
+  stamps and dates can never become mini-slugs, and zero recurrence-caught
+  lines in the corpus fit the mini-slug shape.
+- **Known residual:** a left-flush transition that is neither camera-prefixed
+  nor `TO:`-terminated ("SMASH TO BLACK", "OVER BLACK:") reads as a
+  mini-slug. It renders at the right visual weight for what it is, so this
+  is a naming miss, not a defect; 3 instances in one fixture.
 - **Code:** `src/fountain/serialize.ts` (`mini-slug` case),
   `src/epub/html.ts` (`PRIMARY_SLUG`, `isMiniSlug`), `src/epub/css.ts`
-  (`p.mini-slug`), `src/parser/classify.ts` (`PRIMARY_SLUG`, priority 9 —
-  also where the gap lives).
+  (`p.mini-slug`), `src/parser/classify.ts` (`PRIMARY_SLUG`,
+  `isMiniSlugShaped`, priority 9).
 
 ### 5. Keep-with-next — minimal chain (v2)
 - **What:** `break-after: avoid` on scene headings, mini-slugs (#5b) and

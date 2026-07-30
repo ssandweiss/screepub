@@ -40,6 +40,16 @@ const DIALOGUE_EXTENSIONS =
   /\((?:V\.O\.?|O\.S\.?|O\.C\.?|CONT'D|CONT\.|INTO PHONE|FILTERED|PRE-LAP)\)/i;
 const CHARACTER_EXTENSIONS = /(\s*\([^)]+\))+\s*$/g;
 
+// Mini-slug shape (see isMiniSlugShaped). A slugline ends bare or on a
+// colon; the last character carries most of the signal.
+const MINI_SLUG_TAIL = /[A-Z0-9:)]$/;
+const TRANSITION_TAIL = /\bTO:$/;
+// PRIMARY_SLUG anchors at the start, but an unpaired shooting-script number
+// pushes the opener off it ("2 EXT. WOODS - DAY 3" — the dual-margin strip
+// above needs MATCHING numbers, so a mismatch leaves the heading whole).
+// Stripping a leading number lets the same literal judge that line too.
+const LEADING_SCENE_NUMBER = /^\d{1,3}[A-Z]?\s+/;
+
 const ACTION_POSSESSIVE = /^[A-Z][a-z]+['\u2019]s /;
 const ACTION_PRONOUNS = /^(He |She |They |It |The |A |An |His |Her |Their |Its )/i;
 const ACTION_VERBS =
@@ -150,10 +160,8 @@ export function classifyBlock(
     return { ...base, type: 'dialogue', character: currentCharacter };
   }
 
-  // Priority 9: Mini-slug. Excluded by PRIMARY_SLUG, not SCENE_HEADING: the
-  // serializer's forced slugline would promote those back to full headings.
-  if (indent < 5 && text === text.toUpperCase() && text.length >= 2 && text.length <= 40 &&
-    !PRIMARY_SLUG.test(text) && !PARENTHETICAL.test(text)) {
+  // Priority 9: Mini-slug (secondary slugline)
+  if (isMiniSlugShaped(block)) {
     return { ...base, type: 'mini-slug' };
   }
 
@@ -279,6 +287,78 @@ export function normalizeCueName(text: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .toUpperCase();
+}
+
+/**
+ * Mini-slug (secondary slugline) shape test — "END OF MONTAGE",
+ * "IN THE PROJECTION BOOTH", "QUICK MONTAGE:".
+ *
+ * Runs LAST in the chain (priority 9), so every existing veto keeps its
+ * say: a candidate that reads as a cue, a speech, or action-by-pattern
+ * has already returned. This is deliberate. The band it works in also
+ * holds all-caps sound effects ("THUD.", "CRASH!") and all-caps action
+ * sentences ("THE ENGINE STARTS."), and a promoted sound effect renders
+ * as a bold heading — a visible defect — while a missed slug renders as
+ * action, which is harmless. Precision beats recall here, so the rule
+ * only claims blocks that nothing else objects to.
+ *
+ * Every guard, and why (calibrated against the five generator fixtures,
+ * 2026-07-30 — 655 all-caps blocks in the action band, 92 promoted):
+ */
+function isMiniSlugShaped(block: TextBlock): boolean {
+  const t = block.text.trim();
+
+  // Action band, measured from the PAGE edge — where extraction puts it.
+  // The old `indent < 5` assumed a margin-relative measure that no
+  // generator produces (the real modal action indent is 15-18), which is
+  // why PDF input produced zero mini-slugs for as long as the type existed.
+  // ACTION_MAX (20) also sits structurally below DIALOGUE_MIN (25) and
+  // CHARACTER_MIN (35), so this can never fire in the cue or speech band.
+  if (block.indent >= INDENT_RANGES.ACTION_MAX) return false;
+
+  // One line, bounded by blank lines — groupBlocks breaks on a >20pt Y gap,
+  // so a single-line block IS a standalone beat. Prose long enough to be a
+  // sentence wraps, and a wrapped block is never a heading.
+  if (block.lines.length !== 1) return false;
+
+  // Strict all-caps. Not the cue heuristic's 0.8 ratio — a slugline is
+  // typed in caps, entirely. This alone rejects the "Dev CROSSES TO THE
+  // COUNTER" emphasis style that some writers use for action.
+  if (t !== t.toUpperCase()) return false;
+
+  // Observed true slugs top out at 52 characters; 55 leaves a margin
+  // without opening the door to a full line of caps prose.
+  if (t.length < 2 || t.length > 55) return false;
+
+  // A slugline is words. Letters must carry the line — this is what keeps
+  // a WGA registration number ("WGA 1234567 555-0100") off the heading.
+  const dense = t.replace(/\s/g, '');
+  if ((dense.match(/[A-Z]/g) || []).length / dense.length < 0.5) return false;
+
+  // THE discriminator. Mini-slugs end bare or on a colon; sound effects and
+  // action sentences end on terminal punctuation. Across all six fixtures
+  // every sound effect and shouted beat carried a "." or "!" and every true
+  // slug ended bare or on ":" — the ambiguity the type invited ("SILENCE"
+  // vs "END DREAM") does not actually occur in the corpus. Also rejects the
+  // trailing dash of a broken-off line and the "***" of a revision note.
+  if (!MINI_SLUG_TAIL.test(t)) return false;
+
+  // Fountain's own transition rule: uppercase, ends in "TO:". The format
+  // says that is a transition, so it is not a slug — this is what keeps
+  // "DISSOLVE TO:" and "SMASH CUT TO:" (both left-flush in real scripts)
+  // out, since the transition branch above only fires at right-flush indent.
+  if (TRANSITION_TAIL.test(t)) return false;
+
+  // PRIMARY_SLUG, not SCENE_HEADING: a mini-slug serializes as a FORCED
+  // slugline, and fountain-js promotes a forced line back to a full scene
+  // heading — section, TOC entry and all — whenever its text also matches
+  // that wider unforced shape (EST., the space forms, bare I/E). Minting one
+  // here would round-trip into a scene. Tested against the line as written
+  // AND with a leading shooting-script number stripped, since that number
+  // pushes the opener off the anchor. A bare parenthetical with no active
+  // character also reaches here.
+  if (PRIMARY_SLUG.test(t) || PRIMARY_SLUG.test(t.replace(LEADING_SCENE_NUMBER, ''))) return false;
+  return !PARENTHETICAL.test(t);
 }
 
 function isActionByPattern(text: string): boolean {

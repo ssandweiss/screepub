@@ -405,6 +405,11 @@ describe('classifyBlock', () => {
   });
 
   describe('mini-slugs', () => {
+    // Extraction measures indent from the PAGE edge, so the real action
+    // margin is 15-18 across every generator — not the 0-4 the first
+    // implementation assumed. These blocks sit where real ones do.
+    const slug = (text: string, indent = 17) => classifyBlock(makeBlock({ text, indent }), null);
+
     test('short uppercase text at low indent', () => {
       const block = makeBlock({ text: 'LATER', indent: 2 });
       const result = classifyBlock(block, null);
@@ -444,6 +449,131 @@ describe('classifyBlock', () => {
       // The opener needs its dot or space: ESTABLISHING is not EST.
       expect(classifyBlock(makeBlock({ text: 'ESTABLISHING SHOT', indent: 2 }), null).type).toBe('mini-slug');
       expect(classifyBlock(makeBlock({ text: 'INTO THE WOODS', indent: 2 }), null).type).toBe('mini-slug');
+    });
+
+    // The same widened exclusion at the real action margin, and with an
+    // unpaired shooting-script number pushing the opener off the anchor.
+    test('the widened heading exclusion holds at the action margin too', () => {
+      expect(slug('EST. THE HOUSE').type).toBe('action');
+      expect(slug('I/E CAR - DAY').type).toBe('action');
+      expect(slug('ESTABLISHING SHOT').type).toBe('mini-slug');
+    });
+
+    // ── accepted shapes, at the real action margin ────────
+    test('a bare location slug at the action margin', () => {
+      expect(slug('IN THE PROJECTION BOOTH').type).toBe('mini-slug');
+    });
+
+    test('a one-word position slug', () => {
+      expect(slug('UPSTAIRS').type).toBe('mini-slug');
+    });
+
+    test('a montage bracket, bare', () => {
+      expect(slug('END OF MONTAGE').type).toBe('mini-slug');
+    });
+
+    test('a colon-terminated slug', () => {
+      expect(slug('QUICK MONTAGE:').type).toBe('mini-slug');
+    });
+
+    test('a slug with an internal dash', () => {
+      expect(slug('MONTAGE - VARIOUS').type).toBe('mini-slug');
+    });
+
+    test('a time slug', () => {
+      expect(slug('ANOTHER MOMENT:').type).toBe('mini-slug');
+    });
+
+    // ── the danger set: sound effects and shouted beats ───
+    test('a period-terminated sound effect stays action', () => {
+      expect(slug('THUD.').type).toBe('action');
+    });
+
+    test('a shouted beat stays action', () => {
+      expect(slug('CRASH!').type).toBe('action');
+    });
+
+    test('a repeated sound effect stays action', () => {
+      expect(slug('BEEP. BEEP.').type).toBe('action');
+    });
+
+    test('a one-word bang stays action', () => {
+      expect(slug('DING!').type).toBe('action');
+    });
+
+    test('an all-caps action sentence stays action', () => {
+      expect(slug('GLASSES CLINK ON THE FAR SIDE OF THE ROOM.').type).toBe('action');
+    });
+
+    test('a line broken off mid-thought with a dash stays action', () => {
+      expect(slug('HANDS TREMBLE AS THE LATCH GIVES-').type).toBe('action');
+    });
+
+    test('a revision-starred production note stays action', () => {
+      expect(slug('***SHOT ON THE SECOND CAMERA***').type).toBe('action');
+    });
+
+    // ── transitions must not become headings ──────────────
+    test("Fountain's own transition rule wins: anything ending in TO:", () => {
+      expect(slug('DISSOLVE TO:').type).toBe('action');
+      expect(slug('SMASH CUT TO:').type).toBe('action');
+    });
+
+    test('a camera-prefixed line is still vetoed at priority 7', () => {
+      expect(slug('FADE IN:').type).toBe('action');
+    });
+
+    // ── the priority-7 decision, recorded as behavior ─────
+    test('a THE-prefixed slug stays action — priority 7 keeps its veto', () => {
+      // Deliberate recall loss. "THE DOOR OPENS." and "THE KITCHEN" are
+      // the same shape one period apart, so the pronoun veto stays.
+      expect(slug('THE PROJECTION BOOTH').type).toBe('action');
+      expect(slug('THE DOOR OPENS').type).toBe('action');
+    });
+
+    // ── shape guards ──────────────────────────────────────
+    test('a wrapped multi-line block is never a slug', () => {
+      const block = makeBlock({
+        text: 'THE ROOM EMPTIES AND THE HOUSE LIGHTS COME UP SLOWLY',
+        indent: 17,
+        lines: [
+          { text: 'THE ROOM EMPTIES AND THE HOUSE', indent: 17, y: 100, pageNum: 1 },
+          { text: 'LIGHTS COME UP SLOWLY', indent: 17, y: 88, pageNum: 1 },
+        ],
+      });
+      expect(classifyBlock(block, null).type).toBe('action');
+    });
+
+    test('mixed case is never a slug', () => {
+      expect(slug('In the projection booth').type).toBe('action');
+      expect(slug('Dev CROSSES TO THE COUNTER').type).toBe('action');
+    });
+
+    test('a digit-dominated registration line is never a slug', () => {
+      expect(slug('WGA 1234567 555-0100').type).toBe('action');
+    });
+
+    test('an unpaired shooting-script heading is never a slug', () => {
+      // The dual-margin strip needs matching numbers; when they mismatch
+      // the heading survives whole and must not read as a micro-heading.
+      expect(slug('2 EXT. WOODS - DAY 3', 9).type).toBe('action');
+    });
+
+    test('an over-long line is never a slug', () => {
+      expect(slug('MONTAGE - EVERY DOORWAY IN THE BUILDING, ONE AFTER ANOTHER').type).toBe('action');
+    });
+
+    // ── band non-interference ─────────────────────────────
+    test('the rule never fires in the cue band', () => {
+      // 35-50 is the cue band; a bare uppercase word there is a character.
+      expect(classifyBlock(makeBlock({ text: 'LATER', indent: 40 }), null).type).toBe('character');
+      expect(classifyBlock(makeBlock({ text: 'UPSTAIRS', indent: 43 }), null).type).toBe('character');
+    });
+
+    test('the rule never fires in the speech band', () => {
+      const cue = classifyBlock(makeBlock({ text: 'MARGO', indent: 43 }), null);
+      const speech = classifyBlock(makeBlock({ text: 'UPSTAIRS', indent: 29 }), cue);
+      expect(speech.type).toBe('dialogue');
     });
   });
 
