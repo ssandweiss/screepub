@@ -109,7 +109,7 @@ Expected: FAIL on the `on` assertions (rule lacks the avoid lines).
 - [ ] **Step 3: Implement.** In `src/epub/css.ts` inside `screenplayCss`, after the `bodyAlign` const add:
 
 ```ts
-  // Atomic speeches (registry #14): opt-in, because an unbreakable block
+  // Atomic speeches (registry #8c): opt-in, because an unbreakable block
   // taller than the space left on a page gets pushed whole — bounded
   // white space traded for never splitting a speech.
   const speechKeep = o.keepSpeechesWhole
