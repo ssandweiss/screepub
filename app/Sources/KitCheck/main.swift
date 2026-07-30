@@ -2,6 +2,7 @@
 // CommandLineTools ships neither XCTest nor swift-testing.
 // Run: swift run kit-check   (exits non-zero on failure)
 import Foundation
+import Network
 import ScreepubKit
 import KFXKit
 
@@ -216,6 +217,109 @@ if let defaultsData = try? Data(contentsOf: defaultsFile) {
 check(RemarkableDevice.endpoint.absoluteString == "http://" + [10, 11, 99, 1].map(String.init).joined(separator: "."),
       "reMarkable endpoint is the fixed USB address")
 check(RemarkableDevice.endpoint.host()?.isEmpty == false, "reMarkable endpoint has a non-empty host")
+
+// — reMarkable transfer semantics, against a local stand-in for the
+//   tablet's USB web interface. The real interface's /upload writes into
+//   the LAST-LISTED folder (server-side state), so "upload to root" is
+//   only true if root is listed immediately before the POST. —
+final class StubRemarkable: @unchecked Sendable {
+    private let listener: NWListener
+    private let lock = NSLock()
+    private var recorded: [String] = []
+    private var documentsStatusLocked = 200
+
+    var requests: [String] { lock.lock(); defer { lock.unlock() }; return recorded }
+    var documentsStatus: Int {
+        get { lock.lock(); defer { lock.unlock() }; return documentsStatusLocked }
+        set { lock.lock(); documentsStatusLocked = newValue; lock.unlock() }
+    }
+    func reset() { lock.lock(); recorded = []; lock.unlock() }
+
+    var baseURL: URL { URL(string: "http://127.0.0.1:\(listener.port!.rawValue)")! }
+
+    init() throws {
+        listener = try NWListener(using: .tcp, on: .any)
+        let ready = DispatchSemaphore(value: 0)
+        listener.stateUpdateHandler = { if case .ready = $0 { ready.signal() } }
+        listener.newConnectionHandler = { [weak self] conn in
+            conn.start(queue: .global())
+            self?.receive(conn, buffered: Data())
+        }
+        listener.start(queue: .global())
+        ready.wait()
+    }
+
+    private func receive(_ conn: NWConnection, buffered: Data) {
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 1 << 16) { [weak self] chunk, _, done, _ in
+            guard let self else { return conn.cancel() }
+            var buf = buffered
+            if let chunk { buf.append(chunk) }
+            guard let headerEnd = buf.range(of: Data("\r\n\r\n".utf8)) else {
+                return done ? conn.cancel() : self.receive(conn, buffered: buf)
+            }
+            let head = String(decoding: buf[..<headerEnd.lowerBound], as: UTF8.self)
+            let contentLength = head.components(separatedBy: "\r\n")
+                .first { $0.lowercased().hasPrefix("content-length:") }
+                .flatMap { Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) } ?? 0
+            guard buf.count - headerEnd.upperBound >= contentLength else {
+                return done ? conn.cancel() : self.receive(conn, buffered: buf)
+            }
+            let parts = head.components(separatedBy: "\r\n")[0].components(separatedBy: " ")
+            let method = parts.first ?? "?", path = parts.count > 1 ? parts[1] : "?"
+            self.lock.lock()
+            self.recorded.append("\(method) \(path)")
+            self.lock.unlock()
+            let status = path.hasPrefix("/documents") ? self.documentsStatus : 200
+            let reply = "HTTP/1.1 \(status) \(status == 200 ? "OK" : "Error")\r\n"
+                + "Content-Length: 2\r\nConnection: close\r\n\r\n[]"
+            conn.send(content: Data(reply.utf8), completion: .contentProcessed { _ in conn.cancel() })
+        }
+    }
+}
+
+if let stub = try? StubRemarkable() {
+    let rmFile = tempDir("remarkable").appendingPathComponent("Script.epub")
+    try! Data("epub".utf8).write(to: rmFile)
+    try? await RemarkableDevice.upload(rmFile, to: stub.baseURL)
+    check(stub.requests == ["GET /documents/", "POST /upload"],
+          "upload lists the root folder immediately before posting (got: \(stub.requests))")
+
+    stub.reset()
+    check(await RemarkableDevice.probe(at: stub.baseURL), "probe succeeds against a serving web interface")
+    check(stub.requests == ["GET /documents/"],
+          "probe asks for the documents listing, not the bare root (got: \(stub.requests))")
+
+    // A cancelled listing must abort the send: a blind POST would land the
+    // file in whatever folder the tablet last showed.
+    stub.reset()
+    stub.documentsStatus = 500
+    let listingError: Error?
+    do { try await RemarkableDevice.upload(rmFile, to: stub.baseURL); listingError = nil }
+    catch { listingError = error }
+    check(listingError != nil, "upload fails when the root listing fails")
+    check(!stub.requests.contains("POST /upload"), "no blind POST after a failed root listing")
+    stub.documentsStatus = 200
+
+    // Paper Pro's web interface caps uploads at 100 MB; reject before any
+    // bytes move (sparse file: big on disk, instant to make).
+    stub.reset()
+    let big = tempDir("remarkable-big").appendingPathComponent("big.epub")
+    FileManager.default.createFile(atPath: big.path, contents: nil)
+    let bigHandle = try! FileHandle(forWritingTo: big)
+    try! bigHandle.truncate(atOffset: 100 * 1024 * 1024 + 1)
+    try! bigHandle.close()
+    let oversize: Error?
+    do { try await RemarkableDevice.upload(big, to: stub.baseURL); oversize = nil }
+    catch { oversize = error }
+    check(oversize != nil, "a file over the tablet's 100 MB cap is rejected")
+    check(oversize?.localizedDescription.contains("100 MB") == true,
+          "the oversize message names the cap")
+    check(stub.requests.isEmpty, "the oversize rejection makes no network request")
+} else {
+    check(false, "local stub server starts for reMarkable checks")
+}
+check(!(await RemarkableDevice.probe(at: URL(string: "http://127.0.0.1:1")!, timeout: 0.5)),
+      "probe reports false when nothing is serving")
 
 // — KEPUB conversion (environment-dependent) —
 func fileContains(_ url: URL, _ needle: String) -> Bool {
