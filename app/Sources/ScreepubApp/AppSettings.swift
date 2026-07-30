@@ -41,6 +41,7 @@ enum AppSettings {
             parentheticalIndentPct: double("fmtParenIndent", def.parentheticalIndentPct),
             elementSpacingEm: double("fmtSpacing", def.elementSpacingEm),
             keepSceneHeadingWithScene: bool("fmtKeepHeading", def.keepSceneHeadingWithScene),
+            keepSpeechesWhole: bool("fmtKeepSpeeches", def.keepSpeechesWhole),
             fontFamily: d.string(forKey: "fmtFont") ?? def.fontFamily,
             rejoinSplitDialogue: bool("fmtRejoin", def.rejoinSplitDialogue),
             contdMode: d.string(forKey: "fmtContd") ?? def.contdMode,
@@ -63,6 +64,7 @@ enum AppSettings {
         d.set(s.parentheticalIndentPct, forKey: "fmtParenIndent")
         d.set(s.elementSpacingEm, forKey: "fmtSpacing")
         d.set(s.keepSceneHeadingWithScene, forKey: "fmtKeepHeading")
+        d.set(s.keepSpeechesWhole, forKey: "fmtKeepSpeeches")
         d.set(s.fontFamily, forKey: "fmtFont")
         d.set(s.rejoinSplitDialogue, forKey: "fmtRejoin")
         d.set(s.contdMode, forKey: "fmtContd")
@@ -77,7 +79,7 @@ enum AppSettings {
     /// Reset all formatting keys so @AppStorage bindings fall back to defaults.
     static func resetFormatting() {
         for key in ["fmtScenePageBreaks", "fmtDialogueMargin", "fmtCueIndent", "fmtParenIndent",
-                    "fmtSpacing", "fmtKeepHeading", "fmtFont", "fmtRejoin", "fmtContd",
+                    "fmtSpacing", "fmtKeepHeading", "fmtKeepSpeeches", "fmtFont", "fmtRejoin", "fmtContd",
                     "fmtCueAlign", "fmtTitlePage", "fmtSceneNumbers", "fmtPageMarkers",
                     "fmtDual", "fmtJustify"] {
             UserDefaults.standard.removeObject(forKey: key)

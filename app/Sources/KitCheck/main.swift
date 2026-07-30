@@ -211,6 +211,9 @@ if let defaultsData = try? Data(contentsOf: defaultsFile) {
     print("  --  format-defaults.json not found (partial checkout); sync untested here")
 }
 
+check(FormatSettings.defaults.keepSpeechesWhole == false,
+      "keepSpeechesWhole defaults off — speeches flow; atomicity is opt-in")
+
 // — reMarkable endpoint sanity (regression: an IP literal in source once
 // arrived empty and the force-unwrapped URL(string:) crashed at launch) —
 check(RemarkableDevice.endpoint.absoluteString == "http://" + [10, 11, 99, 1].map(String.init).joined(separator: "."),

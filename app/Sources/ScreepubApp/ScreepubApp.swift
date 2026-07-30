@@ -268,6 +268,7 @@ struct FormattingSettings: View {
     @AppStorage("fmtParenIndent") private var parenIndent = FormatSettings.defaults.parentheticalIndentPct
     @AppStorage("fmtSpacing") private var spacing = FormatSettings.defaults.elementSpacingEm
     @AppStorage("fmtKeepHeading") private var keepHeading = FormatSettings.defaults.keepSceneHeadingWithScene
+    @AppStorage("fmtKeepSpeeches") private var keepSpeeches = FormatSettings.defaults.keepSpeechesWhole
     @AppStorage("fmtFont") private var font = FormatSettings.defaults.fontFamily
     @AppStorage("fmtRejoin") private var rejoin = FormatSettings.defaults.rejoinSplitDialogue
     @AppStorage("fmtContd") private var contd = FormatSettings.defaults.contdMode
@@ -329,6 +330,10 @@ struct FormattingSettings: View {
             Section("Pages") {
                 Toggle("Start each scene on a new page", isOn: $scenePageBreaks)
                 Toggle("Keep scene headings with their scene", isOn: $keepHeading)
+                Toggle("Keep each speech on one page", isOn: $keepSpeeches)
+                Text("Avoids mid-speech page turns; long speeches may leave white space at page bottoms. Speeches taller than a full page still break.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("Content") {
                 Toggle("Generate a title page", isOn: $titlePage)

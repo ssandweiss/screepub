@@ -16,6 +16,7 @@ public struct FormatSettings: Codable, Sendable, Equatable {
     public var parentheticalIndentPct: Double
     public var elementSpacingEm: Double
     public var keepSceneHeadingWithScene: Bool
+    public var keepSpeechesWhole: Bool
     public var fontFamily: String
     public var rejoinSplitDialogue: Bool
     public var contdMode: String
@@ -33,6 +34,7 @@ public struct FormatSettings: Codable, Sendable, Equatable {
         parentheticalIndentPct: 17,
         elementSpacingEm: 1,
         keepSceneHeadingWithScene: true,
+        keepSpeechesWhole: false,
         fontFamily: "courier",
         rejoinSplitDialogue: true,
         contdMode: "auto",
@@ -47,7 +49,7 @@ public struct FormatSettings: Codable, Sendable, Equatable {
     public init(
         scenePageBreaks: Bool, dialogueSideMarginPct: Double, cueIndentPct: Double,
         parentheticalIndentPct: Double, elementSpacingEm: Double,
-        keepSceneHeadingWithScene: Bool, fontFamily: String,
+        keepSceneHeadingWithScene: Bool, keepSpeechesWhole: Bool, fontFamily: String,
         rejoinSplitDialogue: Bool, contdMode: String, cueAlignment: String,
         includeTitlePage: Bool, showSceneNumbers: Bool, showPageMarkers: Bool,
         dualDialogue: String, justifyText: Bool
@@ -58,6 +60,7 @@ public struct FormatSettings: Codable, Sendable, Equatable {
         self.parentheticalIndentPct = parentheticalIndentPct
         self.elementSpacingEm = elementSpacingEm
         self.keepSceneHeadingWithScene = keepSceneHeadingWithScene
+        self.keepSpeechesWhole = keepSpeechesWhole
         self.fontFamily = fontFamily
         self.rejoinSplitDialogue = rejoinSplitDialogue
         self.contdMode = contdMode
