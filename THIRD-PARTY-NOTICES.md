@@ -80,6 +80,21 @@ DEALINGS IN THE SOFTWARE.
 
 ---
 
+## KFX Output plugin for Calibre 2.12.0 — GPL-3.0 (aggregated, not linked)
+
+Copyright John Howell (jhowell), with a Traditional-Chinese rendering fix
+by lcandy2. Carried inside the app as an unmodified zip
+(`KFXKit_KFXKit.bundle/Vendor/KFX_Output_plugin.zip`, full GPL-3 text
+beside it) and — only when you click "Install plugin" in Settings —
+installed into **your own copy of Calibre**, where it runs as part of
+Calibre, a separate GPL-3 program. It is never linked into Screepub or
+KFXKit. Provenance and update notes:
+`app/Packages/KFXKit/Sources/KFXKit/Vendor/PROVENANCE.md`.
+
+The plugin in turn drives Amazon's **Kindle Previewer** (not bundled,
+proprietary, installed by you) to perform the actual KFX conversion. The
+`KFXKit` package itself is MIT — see `app/Packages/KFXKit/LICENSE`.
+
 ## Not bundled
 
 [Calibre](https://calibre-ebook.com) (GPL-3.0) is optional and used only if
