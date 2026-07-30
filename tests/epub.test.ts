@@ -136,9 +136,24 @@ describe('dual dialogue height fallback', () => {
     expect(file.xhtml).not.toContain('<table class="dual-dialogue">');
     expect(file.xhtml).toContain('<p class="character">JACK</p>');
     expect(file.xhtml).toContain('<p class="character">JILL</p>');
-    // both speeches render as ordinary dialogue blocks, each with the cue keep
+    // each speech is a full dialogue block whose cue opens the keep, and
+    // JACK's speech still precedes JILL's
+    expect(file.xhtml).toMatch(
+      /<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JACK<\/p>[\s\S]*?<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JILL<\/p>/,
+    );
     const blocks = file.xhtml.match(/<div class="dialogue-block">/g) ?? [];
     expect(blocks.length).toBe(2);
+  });
+
+  // Measured against this script shape: the taller column costs one line for
+  // the cue plus ceil((N + 1) / EST_CHARS_PER_DUAL_LINE) for the dialogue
+  // (the + 1 is the cell's trailing newline), so the flip lands between 329
+  // and 330. Change either constant and this pair fails.
+  test('the table/sequential flip sits exactly where the constants put it', () => {
+    const render = (n: number) =>
+      tokensToBody(new Fountain().parse(dualScript('x'.repeat(n)), true).tokens).files[0].xhtml;
+    expect(render(329)).toContain('<table class="dual-dialogue">');
+    expect(render(330)).not.toContain('<table class="dual-dialogue">');
   });
 });
 

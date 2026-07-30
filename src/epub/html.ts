@@ -30,11 +30,19 @@ export interface BookBody {
 const DEFAULT_MAX_FILE_BYTES = 250_000;
 
 /** A dual exchange whose taller column exceeds this many estimated
- * rendered lines cannot fit beside itself on one page; the unbreakable
- * table would push whole and leave a page-sized gap, so it degrades to
- * sequential speeches. Estimate assumes ~30 chars per half-width line. */
+ * rendered lines is taller than the space typically left at a page
+ * bottom; the unbreakable table then pushes whole, wasting up to its own
+ * height, so it degrades to sequential speeches. Twelve lines is roughly
+ * half a typical device page — past that the odds of a costly push climb
+ * faster than the side-by-side reading is worth. The estimate assumes
+ * ~30 chars per half-width line and counts each cell's tag-stripped
+ * text, including its trailing newline. */
 const DUAL_SEQUENTIAL_LINE_THRESHOLD = 12;
 const EST_CHARS_PER_DUAL_LINE = 30;
+
+/** One rendered paragraph inside a speech. `kind` drives the cue keep, so
+ * it is a closed set — a typo'd literal would silently wrap every speech. */
+type Cell = { kind: 'character' | 'parenthetical' | 'dialogue' | 'other'; html: string };
 
 export function escapeXml(s: string): string {
   return s
@@ -93,16 +101,12 @@ function renderBlocks(
   markers: MarkerState = { pending: null, landed: [] },
 ): string[] {
   const blocks: string[] = [];
-  let speech: { kind: string; html: string }[] | null = null;
+  let speech: Cell[] | null = null;
   // Simultaneous speech renders as a two-cell table — the one column
   // construct Kindle's renderer honors (floats/inline-block are not
   // reliable under Enhanced Typesetting).
-  let dual: {
-    left: { kind: string; html: string }[];
-    right: { kind: string; html: string }[];
-    side: 'left' | 'right';
-  } | null = null;
-  const emit = (s: string, kind = 'other') => {
+  let dual: { left: Cell[]; right: Cell[]; side: 'left' | 'right' } | null = null;
+  const emit = (s: string, kind: Cell['kind'] = 'other') => {
     // A pending page marker slips inside this block's opening tag — costing
     // no line of its own — and is consumed once it lands.
     if (markers.pending) {
@@ -120,7 +124,7 @@ function renderBlocks(
   // unbreakable wrapper so a cue never strands at a page bottom with its
   // speech on the next page — the wrapper form, which scene headings no
   // longer need.
-  const speechBlock = (cells: { kind: string; html: string }[]): string => {
+  const speechBlock = (cells: Cell[]): string => {
     const firstLine = cells.findIndex((c) => c.kind === 'dialogue');
     const cut = firstLine === -1 ? cells.length : firstLine + 1;
     const head = cells.slice(0, cut).map((c) => c.html).join('');
@@ -151,7 +155,7 @@ function renderBlocks(
         break;
       case 'dual_dialogue_end':
         if (dual) {
-          const estLines = (col: { html: string }[]) =>
+          const estLines = (col: Cell[]) =>
             col.reduce((n, c) => {
               const len = c.html.replace(/<[^>]*>/g, '').length;
               return n + Math.max(1, Math.ceil(len / EST_CHARS_PER_DUAL_LINE));
