@@ -58,3 +58,30 @@ gh release delete v0.0.2-rc --yes && git push --delete origin v0.0.2-rc
 Then do the real acceptance test: download the DMG on a **different Mac**,
 open it, drag to Applications, double-click, and convert a PDF — that's
 what confirms notarization + the sidecar entitlements are correct.
+
+## After the next tag: flip the Homebrew formula to per-arch
+
+The release now ships the CLI as `screepub-cli-macos-{arm64,x64}.tar.gz`
+(~25MB each) instead of one raw 133MB universal binary — bun embeds its
+runtime per slice, so universal doubled every download for no benefit. The
+DMG stays universal on purpose: a browser can't detect the visitor's CPU,
+and Homebrew can.
+
+Once a tag has produced those assets, replace the formula's single
+`url`/`sha256` with:
+
+```ruby
+  on_arm do
+    url "https://github.com/ssandweiss/screepub/releases/download/v#{version}/screepub-cli-macos-arm64.tar.gz"
+    sha256 "ARM64_TARBALL_SHA"
+  end
+  on_intel do
+    url "https://github.com/ssandweiss/screepub/releases/download/v#{version}/screepub-cli-macos-x64.tar.gz"
+    sha256 "X64_TARBALL_SHA"
+  end
+```
+
+and change `bin.install "screepub-macOS" => "screepub"` to
+`bin.install "screepub"` — the binary inside the tarballs is already
+named plain `screepub`. Do NOT push this before the assets exist; the
+0.3.0 formula keeps working until then.

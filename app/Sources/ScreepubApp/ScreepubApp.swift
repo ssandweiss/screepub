@@ -1,5 +1,6 @@
 import SwiftUI
 import ScreepubKit
+import KFXKit
 
 /// Open a pre-filled GitHub issue for feedback / bug reports, stamped with
 /// the app and OS versions. `context` seeds the "what happened" block
@@ -133,6 +134,7 @@ struct GeneralSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            KfxQualitySection()
             // The Kindle email address is Amazon's to know, not ours to
             // store — the send block's setup guide points at the page where
             // it lives. The Kobo KEPUB choice lives on the result page's send block,
@@ -159,6 +161,82 @@ struct GeneralSettings: View {
         if panel.runModal() == .OK, let url = panel.url {
             outputFolder = url.path
         }
+    }
+}
+
+/// The KFX setup story, told honestly: two things only the user can
+/// install (Calibre and Kindle Previewer — we may not redistribute either),
+/// one thing Screepub installs for them (the KFX plugin, one click). Until
+/// all three are green, USB transfers quietly fall back to AZW3 or MOBI.
+struct KfxQualitySection: View {
+    @State private var status: KFXToolchain.Status?
+    @State private var working = false
+    @State private var note: String?
+
+    var body: some View {
+        Section("Best Kindle quality (KFX)") {
+            if let status {
+                row("Calibre", ok: status.calibre,
+                    fix: Link("Get Calibre", destination: KFXToolchain.calibreDownloadURL))
+                row("Kindle Previewer", ok: status.previewer,
+                    fix: Link("Get Kindle Previewer", destination: KFXToolchain.previewerDownloadURL))
+                row("KFX plugin", ok: status.pluginInstalled, fix: pluginFix(status))
+                if let note {
+                    Text(note).font(.caption).foregroundStyle(.secondary)
+                }
+                Text(status.ready
+                     ? "Ready. USB transfers to a Kindle use KFX — the same modern rendering as books Amazon delivers, working fully offline."
+                     : "USB transfers fall back to \(EbookConvert.isAvailable ? "AZW3" : "MOBI") until all three are installed. Screepub installs the plugin for you; Calibre and Kindle Previewer are free and installed once.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Checking what's installed…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .task { await refresh() }
+    }
+
+    @ViewBuilder
+    private func pluginFix(_ status: KFXToolchain.Status) -> some View {
+        if !status.calibre {
+            Text("needs Calibre first").font(.caption).foregroundStyle(.secondary)
+        } else if working {
+            ProgressView().controlSize(.small)
+        } else {
+            Button("Install plugin") {
+                working = true
+                note = nil
+                Task.detached {
+                    do {
+                        try KFXToolchain.installPlugin()
+                        await MainActor.run { note = "Plugin installed." }
+                    } catch {
+                        await MainActor.run { note = error.localizedDescription }
+                    }
+                    await refresh()
+                    await MainActor.run { working = false }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ name: String, ok: Bool, fix: some View) -> some View {
+        LabeledContent(name) {
+            if ok {
+                Label("Installed", systemImage: "checkmark.circle.fill")
+                    .labelStyle(.titleAndIcon)
+                    .foregroundStyle(.green)
+            } else {
+                fix
+            }
+        }
+    }
+
+    private func refresh() async {
+        status = await Task.detached { KFXToolchain.status() }.value
     }
 }
 

@@ -98,6 +98,8 @@ jobs:
             "" \
             "DMG SHA-256: \`$SHA\`" > "$RUNNER_TEMP/notes.md"
           gh release create "$TAG" \
-            app/dist/Screepub-macOS.dmg app/dist/screepub-macOS \
+            app/dist/Screepub-macOS.dmg \
+            app/dist/screepub-cli-macos-arm64.tar.gz \
+            app/dist/screepub-cli-macos-x64.tar.gz \
             --title "Screepub $VERSION" \
             --notes-file "$RUNNER_TEMP/notes.md"

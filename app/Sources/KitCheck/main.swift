@@ -3,6 +3,7 @@
 // Run: swift run kit-check   (exits non-zero on failure)
 import Foundation
 import ScreepubKit
+import KFXKit
 
 var failures = 0
 @MainActor
@@ -621,6 +622,37 @@ if let books = AppleBooks.appURL {
     // no-op: send() returning false is what the views key off.
     let sent = await MainActor.run { AppleBooks.send(URL(fileURLWithPath: "/tmp/none.epub")) }
     check(sent == false, "send() reports failure when Books is absent")
+}
+
+// — KFX toolchain (environment-dependent, like the ebook-convert checks) —
+check(ExportFormat.kindle.fileExtension(calibreAvailable: true, kfxReady: true) == "kfx",
+      "kindle export prefers kfx when the toolchain is ready")
+check(ExportFormat.kindle.fileExtension(calibreAvailable: true, kfxReady: false) == "azw3",
+      "kindle export falls back to azw3 without the toolchain")
+check(ExportFormat.kindle.fileExtension(calibreAvailable: false, kfxReady: false) == "mobi",
+      "kindle export bottoms out at mobi")
+check(ExportFormat.kindle.label(calibreAvailable: true, kfxReady: true).contains("best quality"),
+      "kfx label says why it's preferred")
+check(KFXToolchain.bundledPluginURL() != nil,
+      "vendored plugin zip resolves from the package resources")
+
+let kfxStatus = KFXToolchain.status()
+check(kfxStatus.ready == (kfxStatus.calibre && kfxStatus.previewer && kfxStatus.pluginInstalled),
+      "toolchain readiness is exactly its three components")
+if kfxStatus.ready {
+    // The full chain, through the new Swift path: mini EPUB → plugin →
+    // Kindle Previewer → repack → .kfx. Slow (~20s) but this is the one
+    // assertion that proves the product code end to end.
+    let miniEpub = makeMiniScriptEpub()
+    if let kfx = try? KFXToolchain.convert(miniEpub) {
+        check(FileManager.default.fileExists(atPath: kfx.path), "KFX conversion produces a file")
+        let size = (try? FileManager.default.attributesOfItem(atPath: kfx.path)[.size] as? Int) ?? 0
+        check(size > 10_000, "KFX output is plausibly a book, not a stub")
+    } else {
+        check(false, "KFX conversion failed with a ready toolchain")
+    }
+} else {
+    print("  --  KFX toolchain incomplete on this machine; conversion untested here")
 }
 
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")

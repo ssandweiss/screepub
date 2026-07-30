@@ -162,17 +162,32 @@ future work; everything else is live.
 - **Code:** `src/fountain/serialize.ts` (`lastSpeaker` tracking).
 
 ### 8b. Cue keeps its first dialogue line (always on)
-- **Device verdict (2026-07-22, photo-confirmed, exhaustive):** the
-  legacy renderer used for USB-SIDELOADED books honors NO keep
+- **SUPERSEDED IN PART — device verdict (2026-07-29, same-day A/B on
+  device):** the 2026-07-22 conclusion below was a fact about a FORMAT,
+  recorded as a fact about the delivery route. Same script, same
+  Screepub EPUB, sideloaded over USB in both formats to the same Kindle
+  (fw 5.19.2): the **AZW3 strands cues** exactly as documented; the
+  **KFX holds every keep — no stranded cues**. Renderer selection
+  follows the FILE FORMAT, not how the file arrived. Sideloaded KFX
+  gets Enhanced Typesetting; "sideload = legacy renderer" is true only
+  of AZW3/MOBI. (The sideloaded .kfx also indexes — it appeared on the
+  shelf after a few seconds.) KFX chain: EPUB → jhowell's KFX Output
+  plugin ≥2.x in Calibre (drives Kindle Previewer ≥3.32, then repacks
+  KPF→KFX). A raw Previewer .kpf is NOT device-readable — it is a zip
+  around a SQLite .kdf; the plugin's repack is mandatory. Not verified
+  on pre-KFX hardware (< Paperwhite 3, 2015); AZW3 remains the fallback
+  there and wherever the plugin/Previewer toolchain is absent.
+- **Historical verdict (2026-07-22, photo-confirmed, AZW3 only):** the
+  legacy renderer used for USB-sideloaded AZW3/MOBI honors NO keep
   mechanism: page-break-*:avoid ignored; single-cell table wrappers
   split mid-cell; single-paragraph fusion still orphans the cue line
   (no widow/orphan control); display:inline-block overflows the text
-  horizontally off-screen. Do not re-attempt. THE actual fix: the
-  user's Kindle runs current firmware (5.19.2) — books delivered via
-  Send-to-Kindle (email/app/web) get Enhanced Typesetting, which
-  honors the CSS keeps. Sideload = legacy renderer regardless of
-  firmware; delivery route, not firmware, decides. Dual-dialogue
-  side-by-side tables photo-confirmed readable on device.
+  horizontally off-screen. Do not re-attempt IN AZW3. Books delivered
+  via Send-to-Kindle (email/app/web) get Enhanced Typesetting, which
+  honors the CSS keeps (and, 2026-07-29: arrive as KFX — observed on
+  device in documents/Downloads/Items01/). Dual-dialogue side-by-side
+  tables photo-confirmed readable on device in AZW3; not yet
+  re-verified in sideloaded KFX.
 - **What:** inside each dialogue block, cue + parentheticals + the first
   dialogue line share a `keep-together` wrapper (same KDP-documented
   container form as scene headings) so a cue never strands at a page

@@ -45,6 +45,11 @@ epubcheck <out.epub>        # validate output (brew-installed)
 - **Kindles never index sideloaded EPUBs.** USB = AZW3 via Calibre's
   ebook-convert (with flags that stop Calibre re-breaking scenes and
   stripping div margins — see EbookConvert.swift) or the engine's MOBI.
+  **2026-07-29: sideloaded KFX renders with Enhanced Typesetting** — keeps
+  hold, and it indexes — so KFX (Calibre + jhowell's KFX Output plugin +
+  Kindle Previewer) beats AZW3 whenever that toolchain is present. The
+  renderer follows the FORMAT, not the delivery route; registry §8b has
+  the full verdict. AZW3/MOBI stay as fallbacks.
 - **pdf.js:** getDocument TRANSFERS the buffer (never reuse bytes); modern
   build + DOMMatrix shim (legacy build breaks under bun test); fonts only
   resolve after getOperatorList (style detection needs it); the worker is

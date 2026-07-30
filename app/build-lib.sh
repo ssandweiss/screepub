@@ -42,6 +42,7 @@ sp_build_swift() {                 # -> echoes the ScreepubApp binary path
     echo "── shell (swift build -c release, arm64)" >&2
     (cd "$APP_DIR" && swift build -c release 2>&1 | tail -2 >&2)
     local arm_bin; arm_bin="$(cd "$APP_DIR" && swift build -c release --show-bin-path)/ScreepubApp"
+    sp_stage_resource_bundles "$(dirname "$arm_bin")"
     echo "── shell (swift build -c release, x86_64 via Rosetta)" >&2
     (cd "$APP_DIR" && arch -x86_64 swift build -c release 2>&1 | tail -2 >&2)
     local x64_bin; x64_bin="$(cd "$APP_DIR" && arch -x86_64 swift build -c release --show-bin-path)/ScreepubApp"
@@ -51,8 +52,24 @@ sp_build_swift() {                 # -> echoes the ScreepubApp binary path
   else
     echo "── shell (swift build -c release)" >&2
     (cd "$APP_DIR" && swift build -c release 2>&1 | tail -2 >&2)
-    echo "$(cd "$APP_DIR" && swift build -c release --show-bin-path)/ScreepubApp"
+    local bin_path; bin_path="$(cd "$APP_DIR" && swift build -c release --show-bin-path)"
+    sp_stage_resource_bundles "$bin_path"
+    echo "$bin_path/ScreepubApp"
   fi
+}
+
+sp_stage_resource_bundles() {       # $1 = a swift bin dir; -> copies into $BUILD
+  # SwiftPM packages with resources (KFXKit carries the vendored KFX plugin
+  # zip) emit <Package>_<Target>.bundle next to the binary. Bundle.module
+  # looks for that bundle beside the executable and in the main bundle's
+  # Resources — but this .app is assembled by hand, so unless we carry the
+  # bundle across, the shipped app throws at the first resource lookup.
+  local bin_dir="$1" b
+  for b in "$bin_dir"/*.bundle; do
+    [ -e "$b" ] || continue
+    rm -rf "$BUILD/$(basename "$b")"
+    cp -R "$b" "$BUILD/"
+  done
 }
 
 sp_assemble_bundle() {             # $1 = version string
@@ -66,6 +83,11 @@ sp_assemble_bundle() {             # $1 = version string
   # The AGPL requires the license to travel with the binary, and the
   # compiled sidecar embeds Apache-2.0 and MIT libraries whose terms
   # require attribution on redistribution. Both ship inside the bundle.
+  local rb
+  for rb in "$BUILD"/*.bundle; do
+    [ -e "$rb" ] || continue
+    cp -R "$rb" "$BUNDLE/Contents/Resources/"
+  done
   cp "$REPO_DIR/LICENSE" "$BUNDLE/Contents/Resources/LICENSE"
   cp "$REPO_DIR/THIRD-PARTY-NOTICES.md" \
      "$BUNDLE/Contents/Resources/THIRD-PARTY-NOTICES.md"
