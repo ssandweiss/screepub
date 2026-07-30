@@ -4,11 +4,12 @@ Every formatting behavior Screepub applies, logged as it was tuned
 (2026-07-22, initial build + two feedback rounds on a real script). The print
 geometry and Kindle CSS constraints behind these choices live in
 `docs/screenplay-format-reference.md` — read that first when adjusting. Each entry is
-written as a **toggle or slider in the Mac app** (Settings → Formatting;
-2026-07-22): the engine's FormatOptions (`src/options.ts`) is the single
-knob surface, reachable via `--options file.json` on the CLI and mirrored
-by `FormatSettings` in the app. Entries below marked "not built" remain
-future work; everything else is live.
+written as a **toggle or slider in the Mac app** (the reader window's rail;
+2026-07-22, moved out of Settings 2026-07-30): the engine's FormatOptions
+(`src/options.ts`) is the single knob surface, reachable via
+`--options file.json` on the CLI and mirrored by `FormatSettings` in the
+app. Entries below marked "not built" remain future work; everything else
+is live.
 
 ## Layout & flow
 
@@ -55,8 +56,8 @@ future work; everything else is live.
   2026-07-22: "centered items drooping left"). Default is now
   `text-align: center` within the dialogue column; `cueAlignment:
   'indented'` restores the % offsets (sliders apply only in that mode).
-- **Code:** `src/options.ts`, `src/epub/css.ts`; app picker in
-  Settings → Formatting.
+- **Code:** `src/options.ts`, `src/epub/css.ts`; app picker in the reader
+  rail's Dialogue group.
 
 ### 3. Vertical rhythm between elements
 - **What:** a full blank line (`1em`) between action paragraphs, dialogue
@@ -122,8 +123,8 @@ future work; everything else is live.
   prefer it. Cue/parenthetical alignment is governed separately (#2b);
   this knob is body text only.
 - **Default:** ragged-right (`justifyText: false`).
-- **App option:** "Justify body text" toggle (Settings → Formatting
-  Layout section, and the reader rail).
+- **App option:** "Justify body text" toggle (the reader rail's Text
+  group).
 - **Code:** `src/options.ts` (`justifyText`), `src/epub/css.ts`
   (`bodyAlign` → `p.action`, `p.dialogue`).
 
@@ -305,7 +306,7 @@ future work; everything else is live.
   page-break-inside avoid) — tables are the one column construct
   Kindle's renderer honors. Wider than the dialogue column by design.
   MOBI gets a plain width-50% table.
-- **App option:** Settings → Formatting → "Dual dialogue". Known
+- **App option:** the reader rail's Dialogue group → "Dual dialogue". Known
   limitation: a short action line immediately after a dual block with no
   intervening cue can absorb into the left speech.
 - **Code:** `src/parser/extract.ts` (`deinterleaveDualDialogue`).
@@ -408,14 +409,26 @@ future work; everything else is live.
   re-dropping a tuned script keeps its tuning (note: a NEW script whose
   filename stem matches an old one inherits that sidecar — treated as
   same-script-new-draft).
+- **One formatting surface (2026-07-30):** the Settings → Formatting tab
+  is gone. It carried all 15 knobs beside a hand-drawn schematic
+  (`LayoutPreview`, deleted with it) while the reader rail carried only 11
+  beside the real engine output — so the window that could show you a
+  change was the one that could not make four of them
+  (`keepSceneHeadingWithScene`, `includeTitlePage`, `rejoinSplitDialogue`,
+  `contdMode`). The rail now owns all 15, grouped Page / Dialogue / Text /
+  Content. Settings keeps General (library, updates) and Devices (default
+  preset, KFX toolchain, tolino/reMarkable notes). **Adding a knob means
+  adding one control to `ReaderRail.swift`** — there is deliberately no
+  second surface to keep in sync. Settings sets the coarse default via a
+  preset; per-script tuning belongs beside a live render.
 - **Device presets (2026-07-22):** `DevicePreset` (ScreepubKit) bundles
   a full FormatSettings per device class — "Kindle e-ink (6\")" is the
   baseline (== defaults); "Phone / narrow screen" flips dual dialogue to
   sequential (side-by-side halves are an unreadable sliver on a narrow
   screen) and widens the dialogue column (10% side margins). Applying a
   preset replaces the whole FormatSettings — globally via Settings →
-  Formatting "Load device preset", or per-script via the reader rail
-  "Apply device preset" (then persisted to the sidecar). Responsive
+  Devices "Load device preset", or per-script via the reader rail's own
+  "Load device preset" (then persisted to the sidecar). Responsive
   reflow is impossible in a fixed e-book, so a conversion-time preset is
   the mechanism. Adding a preset: extend the `DevicePreset` enum only —
   the two menus and kit-check iterate `allCases`.
