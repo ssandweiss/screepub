@@ -38,22 +38,19 @@ const RECUR_PAGE_FRACTION = 0.4;
 
 /**
  * Recurrence layer (the watermark killer): any candidate whose normalized
- * text appears on >= max(3, 40% of pages) distinct pages is re-typed.
- * Pure; never mutates its input. Idempotent for every type but one: a
- * demoted mini-slug lands on "action", which a SECOND call would go on to
- * suppress to "page-number". That is the price of demoting one step instead
- * of hiding outright, and it is safe because parseLines calls this exactly
- * once, on freshly classified elements.
+ * text appears on >= max(3, 40% of pages) distinct pages is re-typed to
+ * "page-number". Pure and idempotent; never mutates its input.
  *
- * Mini-slugs are candidates too, and they are the one type that demotes to
- * "action" instead of "page-number". Both halves matter. Counting them keeps
- * the pool exactly what it was before classify.ts learned to mint mini-slugs
- * — otherwise a left-flush all-caps watermark ("CONFIDENTIAL") classifies as
- * a mini-slug at priority 9, leaves this layer's view entirely, and renders
- * as a bold micro-heading on every page. Demoting rather than hiding is the
- * other side: mini-slugs repeat by design ("LATER", "THE FOYER"), so the
- * threshold is a likelier false positive here than anywhere else, and a
- * wrong guess must cost the heading, never the words. #5b.
+ * Mini-slugs go through the SAME rule as action, and must. Classification
+ * runs first, so a left-flush all-caps watermark ("CONFIDENTIAL") classifies
+ * as a mini-slug at priority 9 — outside this layer it would render as a
+ * bold micro-heading on every page. Counting them keeps the pool exactly
+ * what it was before classify.ts learned to mint mini-slugs, and hiding them
+ * on the same terms keeps ONE watermark verdict per document: a mark that
+ * happens to type action on one page and mini-slug on the next must not come
+ * out hidden in one place and visible in the other. Verbatim recurrence on
+ * 40%+ of pages is watermark-shaped, not slug-shaped — real slug families
+ * vary by location — so the threshold is doing the job it was built for. #5b.
  */
 export function suppressBoilerplate(
   elements: ScreenplayElement[],
@@ -78,10 +75,7 @@ export function suppressBoilerplate(
     (pagesByText.get(norm(e.text))?.size ?? 0) >= threshold;
 
   return elements.map((e) => {
-    if (e.type === 'mini-slug') {
-      return isCandidate(e) && recurs(e) ? { ...e, type: 'action' as const } : e;
-    }
-    if (e.type !== 'action') return e;
+    if (e.type !== 'action' && e.type !== 'mini-slug') return e;
     // Pattern layer: slugs embedding per-page-varying page marks never recur
     // verbatim, so the recurrence count alone misses them — catch directly.
     if (isBoilerplateLine(e.text)) return { ...e, type: 'page-number' as const };

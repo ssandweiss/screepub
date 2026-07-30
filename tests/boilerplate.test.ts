@@ -81,16 +81,15 @@ describe("suppressBoilerplate — recurrence", () => {
     const out = suppressBoilerplate(els, PAGES);
     expect(out.every((e) => e.type === "page-number")).toBe(true);
   });
-  test("a recurring mini-slug demotes to action, not page-number", () => {
+  test("a recurring mini-slug is suppressed exactly like action", () => {
     // Classification runs first, so a left-flush all-caps watermark can reach
-    // here already typed as a mini-slug. It has to lose the heading — but a
-    // mini-slug is the type most likely to repeat honestly, so a wrong guess
-    // must cost the bold, never the words. page-number is skipped by every
-    // consumer; action still reads. #5b.
+    // here already typed as a mini-slug. One rule for both types: a document
+    // gets ONE verdict per watermark, and a mark that types action on some
+    // pages and mini-slug on others cannot come out half hidden. #5b.
     const els = Array.from({ length: 50 }, (_, p) =>
       el({ id: `w${p}`, text: "CONFIDENTIAL", pageNum: p + 1, type: "mini-slug" }),
     );
-    expect(suppressBoilerplate(els, PAGES).every((e) => e.type === "action")).toBe(true);
+    expect(suppressBoilerplate(els, PAGES).every((e) => e.type === "page-number")).toBe(true);
   });
   test("a mini-slug under the threshold keeps its heading", () => {
     const els = Array.from({ length: 3 }, (_, p) =>
@@ -98,19 +97,27 @@ describe("suppressBoilerplate — recurrence", () => {
     );
     expect(suppressBoilerplate(els, PAGES).every((e) => e.type === "mini-slug")).toBe(true);
   });
-  test("a mini-slug still counts toward the recurrence pool", () => {
+  test("a mixed-type watermark gets one verdict, not two", () => {
     // The pool must see what it saw before classify.ts learned to mint
     // mini-slugs, or the same watermark typed action on one page and
-    // mini-slug on the next stops reaching the threshold.
+    // mini-slug on the next stops reaching the threshold — and both halves
+    // must land on the same type, or the same mark reads hidden on 39 pages
+    // and visible on the 40th.
     const els = [
       ...Array.from({ length: 39 }, (_, p) =>
         el({ id: `m${p}`, text: "PROPERTY OF THE STUDIO", pageNum: p + 1, type: "mini-slug" as const }),
       ),
       el({ id: "a1", text: "PROPERTY OF THE STUDIO", pageNum: 40 }),
     ];
-    const out = suppressBoilerplate(els, PAGES);
-    expect(out[39].type).toBe("page-number"); // the lone action instance
-    expect(out.slice(0, 39).every((e) => e.type === "action")).toBe(true);
+    expect(suppressBoilerplate(els, PAGES).every((e) => e.type === "page-number")).toBe(true);
+  });
+
+  test("idempotent for mini-slugs too", () => {
+    const els = Array.from({ length: 50 }, (_, p) =>
+      el({ id: `w${p}`, text: "CONFIDENTIAL", pageNum: p + 1, type: "mini-slug" as const }),
+    );
+    const once = suppressBoilerplate(els, PAGES);
+    expect(suppressBoilerplate(once, PAGES)).toEqual(once);
   });
   test("idempotent and index-preserving", () => {
     const pages = Array.from({ length: 40 }, (_, k) => k + 1);

@@ -79,16 +79,18 @@ describe('mini-slugs and the recurrence suppressor', () => {
     expect(typesOf(pages(10, 'CONFIDENTIAL', all(10)), 'CONFIDENTIAL')).not.toContain('mini-slug');
   });
 
-  test('a suppressed mini-slug is demoted to action, never deleted', () => {
-    // page-number is the suppressor's usual sink and every consumer skips it.
-    // A mini-slug demotes one step only, so the words stay in the book.
+  test('a suppressed mini-slug is hidden on the same terms as action', () => {
+    // page-number is the suppressor's sink and every consumer skips it. One
+    // rule for both types, so a mark that types action on one page and
+    // mini-slug on the next cannot come out hidden here and visible there.
     expect([...typesOf(pages(10, 'PROPERTY OF THE STUDIO', all(10)), 'PROPERTY OF THE STUDIO')])
-      .toEqual(['action']);
+      .toEqual(['page-number']);
   });
 
   test('a mini-slug that legitimately repeats under the threshold survives', () => {
-    // 3 of 20 pages against a threshold of 8. Mini-slugs repeat by design —
-    // this is the reason they demote to action instead of vanishing.
+    // 3 of 20 pages against a threshold of 8. Mini-slugs do repeat, so the
+    // threshold is what has to hold — and it does: the widest page-spread of
+    // any real mini-slug in the corpus is 14%, against a 40% bar.
     expect([...typesOf(pages(20, 'LATER', [4, 9, 15]), 'LATER')]).toEqual(['mini-slug']);
   });
 });

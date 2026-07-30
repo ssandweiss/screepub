@@ -189,27 +189,42 @@ is live.
   action → mini-slug — 79 / 7 / 4 / 2 / 0 / 0, plus 2 section headings in
   the non-screenplay prose fixture (which still trips the guard, since that
   keys on scenes and dialogue). epubcheck clean on the 79-slug output.
-- **The recurrence suppressor, and the two ways it can go wrong:**
-  classification runs BEFORE `suppressBoilerplate`, so every line the
-  mini-slug rule claims leaves the recurrence layer's view. That cuts both
-  ways. **Escape:** a left-flush all-caps per-page watermark
-  ("CONFIDENTIAL", "PROPERTY OF THE STUDIO") is exactly mini-slug-shaped,
-  and it recurs by definition — left outside the layer it renders as a bold
-  micro-heading on every page, where before this change it was suppressed.
-  **Deletion:** put mini-slugs back in and a legitimately repeated slug
-  ("LATER") that crosses the ≥40%-of-pages threshold in a short script
-  loses its text entirely. **Resolution:** mini-slug is a recurrence
-  candidate — it counts toward the pool, so the pool sees exactly what it
-  saw before the classifier existed — but it is the one type that demotes
-  to **`action`**, not `page-number`. The heading goes, the words stay, and
-  a false positive costs the bold only. Deletion risk was measured at zero
-  anyway: the widest page-spread of any mini-slug in the corpus is 14%,
-  against a 40% threshold. The pattern layer still runs first
-  (priority 1.5), so revision slugs, draft stamps and dates can never
-  become mini-slugs at all. One cost, on the record: `suppressBoilerplate`
-  is no longer idempotent for this type — a demoted mini-slug lands on
-  `action`, which a second call would suppress to `page-number`. parseLines
-  calls it exactly once, on freshly classified elements.
+- **The recurrence suppressor — mini-slugs go through the SAME rule as
+  action.** Classification runs BEFORE `suppressBoilerplate`, so every line
+  the mini-slug rule claims leaves the recurrence layer's view. Two risks
+  came out of that, and the trail is worth keeping:
+  - **Escape (real, fixed).** A left-flush all-caps per-page watermark
+    ("CONFIDENTIAL", "PROPERTY OF THE STUDIO") is exactly mini-slug-shaped
+    and recurs by definition. Outside the layer it renders as a bold
+    micro-heading on every page — reproduced on a 10-page document: ten
+    headings where the pre-classification parser suppressed them.
+  - **Deletion (theoretical, measured at zero).** Put mini-slugs back in
+    and a legitimately repeated slug that crosses the ≥40%-of-pages
+    threshold gets hidden. Measured across the corpus: the widest
+    page-spread of any mini-slug is chromium's 15 of 106 pages — **14%
+    against a 40% bar** (final-draft 2%, fade-in 1%, highland 2%). It is
+    not close, and that is structural rather than luck: a real slug family
+    varies by location ("IN THE KITCHEN", "IN THE DRIVEWAY"), so it never
+    recurs VERBATIM on 40% of pages. Text that does is watermark-shaped.
+  - **Resolution:** `mini-slug` is a recurrence candidate and suppresses to
+    `page-number`, identical to `action`. Counting them keeps the pool
+    exactly what it was before the classifier existed; hiding them on the
+    same terms restores the pre-classification watermark behavior verbatim.
+  - **Rejected variant — demote to `action` instead** (heading stripped,
+    words kept). It reads well as a never-delete principle and fails twice.
+    A watermark that types `action` on some pages and `mini-slug` on others
+    comes out **incoherent**: hidden where it typed one way, visible where
+    it typed the other, same mark, same document. And even in the pure case
+    it is a **visibility regression** — recurrence-confirmed watermarks are
+    hidden today, and demoting to action would start showing them. Hiding
+    confirmed recurrence is this layer's proven job, not a hazard to
+    engineer around.
+  - **Residual:** a mini-slug that genuinely recurs verbatim on ≥40% of a
+    script's pages would be hidden. Nothing in the corpus approaches it,
+    and the pattern layer still runs first (priority 1.5), so revision
+    slugs, draft stamps and dates can never become mini-slugs at all.
+  - One uniform sink keeps `suppressBoilerplate` pure and **idempotent**:
+    a suppressed mini-slug lands on `page-number` and stops there.
 - **Known residual — transitions:** a left-flush transition that is neither
   camera-prefixed nor `TO:`-terminated ("SMASH TO BLACK", "OVER BLACK:")
   reads as a mini-slug. It renders at the right visual weight for what it
