@@ -36,11 +36,19 @@ codesign --force --options runtime --timestamp \
   --sign "$SIGN_IDENTITY" "$BUNDLE"
 codesign --verify --strict --verbose=2 "$BUNDLE"
 
-echo "── standalone CLI binary"
-cp "$BUILD/screepub-engine" "$DIST/screepub-macOS"
-codesign --force --options runtime --timestamp \
-  --entitlements "$APP_DIR/screepub-engine.entitlements" \
-  --sign "$SIGN_IDENTITY" "$DIST/screepub-macOS"
+# Per-arch, not universal: bun embeds its whole runtime in every slice, so
+# a lipo'd CLI is the sum of two ~65MB binaries — 133MB raw on the release
+# page, of which any given machine can run half. Browsers can't pick an
+# arch but Homebrew can (on_arm/on_intel), so the CLI ships as two gzipped
+# tarballs (~25MB each) and the DMG stays universal for the download
+# button, where asking a human "which CPU?" costs more than 25MB.
+echo "── standalone CLI binaries (per-arch)"
+for ARCH in arm64 x64; do
+  cp "$BUILD/screepub-engine-$ARCH" "$BUILD/screepub-cli-$ARCH"
+  codesign --force --options runtime --timestamp \
+    --entitlements "$APP_DIR/screepub-engine.entitlements" \
+    --sign "$SIGN_IDENTITY" "$BUILD/screepub-cli-$ARCH"
+done
 
 notarize() {   # $1 = path to submit
   xcrun notarytool submit "$1" \
@@ -63,12 +71,15 @@ if (( NOTARIZE )); then
   ZIP="$BUILD/Screepub-notarize.zip"
   rm -f "$ZIP"
   ditto -c -k --keepParent "$BUNDLE" "$ZIP"
-  ditto -c -k "$DIST/screepub-macOS" "$BUILD/screepub-cli.zip"
   notarize "$ZIP"
-  notarize "$BUILD/screepub-cli.zip"
+  for ARCH in arm64 x64; do
+    ditto -c -k "$BUILD/screepub-cli-$ARCH" "$BUILD/screepub-cli-$ARCH.zip"
+    notarize "$BUILD/screepub-cli-$ARCH.zip"
+    rm -f "$BUILD/screepub-cli-$ARCH.zip"
+  done
   xcrun stapler staple "$BUNDLE"
   xcrun stapler validate "$BUNDLE"
-  rm -f "$ZIP" "$BUILD/screepub-cli.zip"
+  rm -f "$ZIP"
 fi
 
 echo "── dmg (stable name)"
@@ -96,5 +107,15 @@ else
   echo "⚠︎ notarization skipped (AC_API_* not set) — artifacts are signed but not notarized"
 fi
 
-shasum -a 256 "$DMG" "$DIST/screepub-macOS"
+# The binary inside every tarball is named plain `screepub`, so the
+# Homebrew formula's bin.install and a user's tar -xzf agree on the name.
+echo "── package CLI tarballs"
+for ARCH in arm64 x64; do
+  TARDIR="$(mktemp -d)"
+  cp "$BUILD/screepub-cli-$ARCH" "$TARDIR/screepub"
+  tar -czf "$DIST/screepub-cli-macos-$ARCH.tar.gz" -C "$TARDIR" screepub
+  rm -rf "$TARDIR"
+done
+
+shasum -a 256 "$DMG" "$DIST"/screepub-cli-macos-*.tar.gz
 echo "release artifacts in $DIST"
