@@ -264,7 +264,10 @@ public enum UpdateInstaller {
 
     /// Task-level delegate that forwards download progress. The async
     /// download API owns the file handling; this only watches the bytes.
-    private final class DownloadProgress: NSObject, URLSessionDownloadDelegate {
+    /// @unchecked Sendable is carried by the serialization argument below:
+    /// `lastPercent` is only ever touched from the session's delegate
+    /// queue, which delivers callbacks one at a time.
+    private final class DownloadProgress: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
         private let callback: @Sendable (Double) -> Void
         init(_ callback: @escaping @Sendable (Double) -> Void) { self.callback = callback }
 
