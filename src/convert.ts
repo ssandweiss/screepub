@@ -1,5 +1,6 @@
 // Orchestration: PDF/Fountain input → parsed screenplay → Fountain text →
 // fountain-js tokens → XHTML chapters → EPUB bytes.
+import { createHash } from 'node:crypto';
 import { Fountain } from 'fountain-js';
 import { extractDocument } from './parser/extract';
 import { parseLines } from './parser/index';
@@ -69,7 +70,16 @@ async function renderBooks(
   format: FormatOptions,
 ) {
   const { tokens } = new Fountain().parse(fountainText, true);
-  const epub = await buildEpub(meta, tokensToBody(tokens, { format }), format);
+  // The book's identity is its CONTENT, not the moment of rendering. The
+  // app rewrites the library EPUB on every options change; a fresh
+  // urn:uuid each time would hand readers a "new" book to re-index on
+  // every tweak. The .fountain is already the cache boundary, so its
+  // text is the identity.
+  const withId: BookMeta = {
+    identifier: `urn:screepub:${createHash('sha256').update(fountainText).digest('hex').slice(0, 32)}`,
+    ...meta,
+  };
+  const epub = await buildEpub(withId, tokensToBody(tokens, { format }), format);
   const previewHtml = tokensToPreviewHtml(tokens, format);
   const mobi = wantMobi
     ? buildMobi({ title: meta.title, author: meta.author, html: tokensToMobiHtml(tokens, meta) })

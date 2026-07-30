@@ -1,7 +1,8 @@
 import { afterAll, describe, test, expect } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mapConversionError } from '../src/cli-errors';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const FIXTURES = new URL('./fixtures/', import.meta.url).pathname;
@@ -96,4 +97,107 @@ describe('cli --json contract', () => {
     expect(exitCode).toBe(1);
     expect(JSON.parse(stdout).error.code).toBe('scanned');
   }, 60000);
+
+  // --json is the app's only channel: EVERY exit in that mode must be a
+  // parseable JSON object on stdout, or the app shows the user a raw
+  // stack trace (or "engine produced no output").
+
+  test('an unknown flag with --json still emits JSON, not a stack trace', async () => {
+    const { stdout, exitCode } = await runCli([
+      `${FIXTURES}screenplay.pdf`, '--json', '--no-such-flag',
+    ]);
+    expect(exitCode).toBe(1);
+    const result = JSON.parse(stdout);
+    expect(result.ok).toBe(false);
+    expect(result.error.code).toBe('usage');
+  });
+
+  test('no input with --json emits JSON, not help text on stdout', async () => {
+    const { stdout, exitCode } = await runCli(['--json']);
+    expect(exitCode).toBe(1);
+    const result = JSON.parse(stdout);
+    expect(result.ok).toBe(false);
+    expect(result.error.code).toBe('usage');
+  });
+
+  test('two inputs is a usage error, not an internal one', async () => {
+    const { stdout } = await runCli([
+      `${FIXTURES}screenplay.pdf`, `${FIXTURES}prose.pdf`, '--json',
+    ]);
+    expect(JSON.parse(stdout).error.code).toBe('usage');
+  });
+
+  test('a directory named .pdf reports unreadable', async () => {
+    const dir = `${SCRATCH}/a-folder.pdf`;
+    mkdirSync(dir);
+    const { stdout, exitCode } = await runCli([dir, '--json']);
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout).error.code).toBe('unreadable');
+  });
+
+  test('a malformed options file reports bad-options', async () => {
+    const opts = `${SCRATCH}/bad-options.json`;
+    writeFileSync(opts, 'not json');
+    const { stdout } = await runCli([
+      `${FIXTURES}screenplay.pdf`, '--options', opts, '--json',
+    ]);
+    expect(JSON.parse(stdout).error.code).toBe('bad-options');
+  });
+
+  test('a corrupt PDF emits pure JSON on stdout, never a stack trace', async () => {
+    const p = `${SCRATCH}/garbage.pdf`;
+    writeFileSync(p, 'not a pdf at all');
+    const { stdout, exitCode } = await runCli([p, '--json']);
+    expect(exitCode).toBe(1);
+    const result = JSON.parse(stdout); // throws if anything non-JSON leaked
+    expect(result.ok).toBe(false);
+    expect(typeof result.error.code).toBe('string');
+  }, 60000);
+
+  test('an unreadable-permissions file emits JSON with a code', async () => {
+    const p = `${SCRATCH}/locked.pdf`;
+    writeFileSync(p, 'x');
+    chmodSync(p, 0o000);
+    const { stdout, exitCode } = await runCli([p, '--json']);
+    chmodSync(p, 0o644);
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout).error.code).toBe('unreadable');
+  });
+
+  test('the success payload keys match the committed contract sample', async () => {
+    // Every optional output is requested so every key is present; the
+    // sample is the SAME file kit-check decodes into EngineResult, so a
+    // key rename must break one suite or the other before it breaks the
+    // app.
+    const out = `${SCRATCH}/contract.epub`;
+    const { stdout } = await runCli([
+      `${FIXTURES}screenplay.pdf`, '-o', out, '--json', '--mobi', '--debug',
+      '--preview-html', `${SCRATCH}/contract.html`,
+    ]);
+    const result = JSON.parse(stdout);
+    const sample = await Bun.file(`${FIXTURES}engine-result-sample.json`).json();
+    expect(Object.keys(result).sort()).toEqual(Object.keys(sample).sort());
+  }, 60000);
+});
+
+describe('conversion error mapping', () => {
+  test('password detection is typed, not substring', () => {
+    expect(mapConversionError({ name: 'PasswordException', message: 'No password given' })?.code)
+      .toBe('password');
+    // A message that merely CONTAINS "password" (a file path, say) must
+    // not classify — the old substring check did.
+    expect(mapConversionError(new Error('/scripts/password-notes/x.pdf broke'))).toBeNull();
+  });
+
+  test('missing, directory, and permission errors are all unreadable', () => {
+    for (const code of ['ENOENT', 'EISDIR', 'EACCES']) {
+      const err = Object.assign(new Error(code), { code });
+      expect(mapConversionError(err)?.code).toBe('unreadable');
+    }
+  });
+
+  test('a corrupt PDF maps to unreadable with pdf.js named exceptions', () => {
+    expect(mapConversionError({ name: 'InvalidPDFException', message: 'Invalid PDF structure.' })?.code)
+      .toBe('unreadable');
+  });
 });

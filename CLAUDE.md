@@ -28,7 +28,9 @@ epubcheck <out.epub>        # validate output (brew-installed)
 - `src/epub/` + `src/mobi/` — fountain-js tokens → EPUB3 (jszip) / MOBI 6
   (hand-built PalmDB container for dependency-free USB sideload).
 - `src/options.ts` — FormatOptions, the single knob surface: CLI
-  `--options file.json` ↔ app `FormatSettings` (keep defaults in sync!).
+  `--options file.json` ↔ app `FormatSettings`. Defaults are pinned to
+  root `format-defaults.json` by BOTH suites (options.test.ts,
+  kit-check) — change all three together or a suite fails.
 - `src/convert.ts` — orchestration + scanned/non-screenplay guards.
 - `app/` — SwiftPM (NO Xcode project; CommandLineTools only, so no
   XCTest/swift-testing — `kit-check` executable instead). ScreepubKit =

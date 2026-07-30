@@ -13,6 +13,7 @@ import {
   NotAScreenplayError,
   type ConvertResult,
 } from './convert';
+import { mapConversionError, type JsonError } from './cli-errors';
 
 const USAGE = `screepub — screenplay PDF → reflowable EPUB3 (via Fountain)
 
@@ -36,12 +37,11 @@ Options:
       --version          print the version and exit
 `;
 
-interface JsonError {
-  code: 'scanned' | 'not-screenplay' | 'unreadable' | 'password' | 'unsupported-type' | 'internal';
-  message: string;
-}
-
-let jsonMode = false;
+// --json is the app's only channel: EVERY exit in that mode must be one
+// parseable JSON object on stdout. jsonMode is therefore pre-scanned from
+// raw argv — parseArgs itself can throw (unknown flag) before it would
+// have told us the mode.
+let jsonMode = process.argv.includes('--json');
 
 /// Write to a temp file then rename into place, so a reader (e.g. the app's
 /// reader window mid-render) never observes a partially-written output.
@@ -64,8 +64,8 @@ function fail(error: JsonError): never {
   process.exit(1);
 }
 
-async function main() {
-  const { values, positionals } = parseArgs({
+function parseCliArgs() {
+  return parseArgs({
     args: process.argv.slice(2),
     allowPositionals: true,
     options: {
@@ -84,18 +84,35 @@ async function main() {
       version: { type: 'boolean', default: false },
     },
   });
+}
+
+async function main() {
+  let parsed: ReturnType<typeof parseCliArgs>;
+  try {
+    parsed = parseCliArgs();
+  } catch (err) {
+    fail({ code: 'usage', message: (err as Error).message });
+  }
+  const { values, positionals } = parsed;
   jsonMode = values.json;
 
   if (values.version) {
     console.log(`screepub ${pkg.version}`);
     process.exit(0);
   }
-  if (values.help || positionals.length === 0) {
+  if (values.help) {
     console.log(USAGE);
-    process.exit(values.help ? 0 : 1);
+    process.exit(0);
+  }
+  if (positionals.length === 0) {
+    if (jsonMode) {
+      fail({ code: 'usage', message: 'expected exactly one input file (see --help)' });
+    }
+    console.log(USAGE);
+    process.exit(1);
   }
   if (positionals.length > 1) {
-    fail({ code: 'internal', message: 'expected exactly one input file' });
+    fail({ code: 'usage', message: 'expected exactly one input file' });
   }
 
   const input = positionals[0];
@@ -110,8 +127,11 @@ async function main() {
   if (values.options) {
     try {
       format = JSON.parse(await readFile(values.options, 'utf8'));
-    } catch (err) {
-      fail({ code: 'internal', message: `cannot read options file ${values.options}: ${err}` });
+    } catch {
+      // Its own code: "your options file is bad" and "the engine crashed"
+      // demand different reactions from the caller, and the raw error
+      // would leak a temp path into a user-facing message.
+      fail({ code: 'bad-options', message: `cannot read options file ${values.options}` });
     }
   }
 
@@ -137,12 +157,8 @@ async function main() {
     if (err instanceof NotAScreenplayError) {
       fail({ code: 'not-screenplay', message: err.message });
     }
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      fail({ code: 'unreadable', message: `cannot read ${input}` });
-    }
-    if (String(err).includes('password')) {
-      fail({ code: 'password', message: 'this PDF is password-protected — remove the password first' });
-    }
+    const mapped = mapConversionError(err);
+    if (mapped) fail(mapped);
     throw err;
   }
 
@@ -209,4 +225,19 @@ async function main() {
   }
 }
 
-await main();
+// The last line of defense for the app contract: an error nobody
+// anticipated (disk full, a pdf.js internal, an OOM-adjacent throw) must
+// still come out as JSON on stdout, or the app surfaces a stack trace.
+try {
+  await main();
+} catch (err) {
+  if (jsonMode) {
+    console.log(JSON.stringify({
+      ok: false,
+      error: { code: 'internal', message: String(err) },
+    }));
+  } else {
+    console.error(err);
+  }
+  process.exit(1);
+}

@@ -1,0 +1,22 @@
+# kit-check's Calibre-dependent regression checks (AZW3 keeps the
+# dialogue column's margins; KEPUB carries koboSpan markup) are gated on
+# an installed Calibre and previously ran only on the maintainer's Mac.
+# Weekly is the right cadence: they guard against CALIBRE behavior
+# changes, which arrive on brew's schedule, not this repo's.
+# Least privilege + pinned actions, matching ci.yml.
+name: weekly-toolchain
+on:
+  schedule:
+    - cron: '0 14 * * 1' # Mondays 14:00 UTC
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  calibre-kit-check:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Calibre
+        run: brew install --cask calibre
+      - run: swift run -c release kit-check
+        working-directory: app

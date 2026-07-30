@@ -178,6 +178,39 @@ func linkedDialogueRules(html: URL, stylesDir: URL) -> String {
     return rules
 }
 
+// — the --json contract, from the SHARED committed sample: bun test pins
+// the producer's key set against this exact file, kit-check proves the
+// consumer decodes it — a key rename must break a suite before the app.
+// (Regression 2026-07-30: the CLI emitted previewHtmlPath/debugPath that
+// EngineResult silently couldn't read.)
+let repoRoot = URL(fileURLWithPath: #filePath) // app/Sources/KitCheck/main.swift
+    .deletingLastPathComponent().deletingLastPathComponent()
+    .deletingLastPathComponent().deletingLastPathComponent()
+let contractSample = repoRoot.appendingPathComponent("tests/fixtures/engine-result-sample.json")
+if let sampleData = try? Data(contentsOf: contractSample) {
+    let decoded = try? JSONDecoder().decode(EngineResult.self, from: sampleData)
+    check(decoded != nil, "the committed contract sample decodes into EngineResult")
+    check(decoded?.title == "Sample Script", "sample fields survive the decode")
+    check(decoded?.previewHtmlPath != nil, "EngineResult reads previewHtmlPath")
+    check(decoded?.debugPath != nil, "EngineResult reads debugPath")
+    check(decoded?.topCharacters == ["MARGO", "DEV", "NIECE"], "arrays decode intact")
+} else {
+    print("  --  contract sample not found (partial checkout); decode untested here")
+}
+
+// — format defaults, from the SAME canonical file the engine suite pins:
+// FormatSettings has non-optional fields, so a key renamed or missing on
+// either side fails the decode, and a value drifted fails the equality —
+let defaultsFile = repoRoot.appendingPathComponent("format-defaults.json")
+if let defaultsData = try? Data(contentsOf: defaultsFile) {
+    let canonical = try? JSONDecoder().decode(FormatSettings.self, from: defaultsData)
+    check(canonical != nil, "canonical format-defaults.json decodes into FormatSettings")
+    check(canonical == FormatSettings.defaults,
+          "FormatSettings.defaults matches the canonical file the engine pins")
+} else {
+    print("  --  format-defaults.json not found (partial checkout); sync untested here")
+}
+
 // — reMarkable endpoint sanity (regression: an IP literal in source once
 // arrived empty and the force-unwrapped URL(string:) crashed at launch) —
 check(RemarkableDevice.endpoint.absoluteString == "http://" + [10, 11, 99, 1].map(String.init).joined(separator: "."),

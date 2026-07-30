@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "title": "Sample Script",
+  "author": "A. N. Placeholder",
+  "pages": 5,
+  "scenes": 5,
+  "characters": 3,
+  "topCharacters": ["MARGO", "DEV", "NIECE"],
+  "warnings": ["an example warning"],
+  "epubPath": "/tmp/sample/Sample Script.epub",
+  "mobiPath": "/tmp/sample/Sample Script.mobi",
+  "fountainPath": "/tmp/sample/Sample Script.fountain",
+  "previewHtmlPath": "/tmp/sample/Sample Script.html",
+  "debugPath": "/tmp/sample/Sample Script.elements.json"
+}

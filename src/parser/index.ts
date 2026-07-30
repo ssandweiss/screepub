@@ -5,21 +5,11 @@ import type {
   SceneInfo,
   RawLine,
 } from './types';
-import { extractLines } from './extract';
 import { groupBlocks } from './group';
 import { classifyBlock, attachSceneNumbers } from './classify';
 import { detectTitlePages } from './title-page';
 import { suppressBoilerplate } from './boilerplate';
 import { rescueCues } from './rescue';
-
-/**
- * Parse a PDF buffer into a structured screenplay.
- * Pipeline: extract lines -> group blocks -> classify elements -> detect title pages -> build metadata.
- */
-export async function parse(pdfBytes: Uint8Array): Promise<ParsedScreenplay> {
-  const lines = await extractLines(pdfBytes);
-  return parseLines(lines);
-}
 
 /**
  * Classify already-extracted lines into a structured screenplay — the pure
@@ -86,6 +76,10 @@ function extractCharacters(elements: ScreenplayElement[]): CharacterInfo[] {
 
   for (let i = 0; i < elements.length; i++) {
     const el = elements[i];
+    // A centered title lands at ~38% indent — inside the cue band — and
+    // classifies as a character. detectTitlePages already flagged it;
+    // the roster must honor the flag or the title becomes a "speaker".
+    if (el.isTitlePage) continue;
     if (el.type === 'character' && el.baseCharacter) {
       const base = el.baseCharacter;
       const existing = charMap.get(base);

@@ -78,5 +78,4 @@ export const INDENT_RANGES = {
   CHARACTER_MIN: 35,
   CHARACTER_MAX: 50,
   TRANSITION_MIN: 55,
-  PAGE_NUMBER_MIN: 65,
 } as const;

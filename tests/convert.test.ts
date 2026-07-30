@@ -44,6 +44,24 @@ describe('convertPdf', () => {
       .rejects.toThrow(NotAScreenplayError);
   }, 60000);
 
+  test('rebuilding the same script keeps the same dc:identifier', async () => {
+    // The app rewrites the library EPUB on every options change; a fresh
+    // urn:uuid each render would make readers treat the same book as a
+    // new one (and re-index it) every time. Identity follows CONTENT.
+    const fountain = 'Title: Stable Book\n\nINT. ROOM - DAY\n\nAction holds.\n';
+    const idOf = async (epub: Uint8Array) => {
+      const zip = await JSZip.loadAsync(epub);
+      const opf = await zip.file('OEBPS/package.opf')!.async('string');
+      return opf.match(/<dc:identifier[^>]*>([^<]+)</)![1];
+    };
+    const a = await convertFountain(fountain);
+    const b = await convertFountain(fountain);
+    expect(await idOf(a.epub)).toBe(await idOf(b.epub));
+
+    const c = await convertFountain(fountain + '\nMore action arrives.\n');
+    expect(await idOf(c.epub)).not.toBe(await idOf(a.epub));
+  });
+
   test('title/author overrides win over detection', async () => {
     const result = await convertPdf(await bytes(`${PUBLIC}screenplay.pdf`), {
       title: 'Override Title',

@@ -258,21 +258,25 @@ struct KfxQualitySection: View {
 }
 
 struct FormattingSettings: View {
-    @AppStorage("fmtScenePageBreaks") private var scenePageBreaks = false
-    @AppStorage("fmtDialogueMargin") private var dialogueMargin = 20.0
-    @AppStorage("fmtCueIndent") private var cueIndent = 33.0
-    @AppStorage("fmtParenIndent") private var parenIndent = 17.0
-    @AppStorage("fmtSpacing") private var spacing = 1.0
-    @AppStorage("fmtKeepHeading") private var keepHeading = true
-    @AppStorage("fmtFont") private var font = "courier"
-    @AppStorage("fmtRejoin") private var rejoin = true
-    @AppStorage("fmtContd") private var contd = "auto"
-    @AppStorage("fmtCueAlign") private var cueAlign = "centered"
-    @AppStorage("fmtTitlePage") private var titlePage = true
-    @AppStorage("fmtSceneNumbers") private var sceneNumbers = false
-    @AppStorage("fmtPageMarkers") private var pageMarkers = false
-    @AppStorage("fmtDual") private var dualDialogue = "sideBySide"
-    @AppStorage("fmtJustify") private var justifyText = false
+    // Initial values come from FormatSettings.defaults — which kit-check
+    // pins to the canonical format-defaults.json the engine suite also
+    // pins — so the Settings UI cannot show one default while the
+    // conversion applies another.
+    @AppStorage("fmtScenePageBreaks") private var scenePageBreaks = FormatSettings.defaults.scenePageBreaks
+    @AppStorage("fmtDialogueMargin") private var dialogueMargin = FormatSettings.defaults.dialogueSideMarginPct
+    @AppStorage("fmtCueIndent") private var cueIndent = FormatSettings.defaults.cueIndentPct
+    @AppStorage("fmtParenIndent") private var parenIndent = FormatSettings.defaults.parentheticalIndentPct
+    @AppStorage("fmtSpacing") private var spacing = FormatSettings.defaults.elementSpacingEm
+    @AppStorage("fmtKeepHeading") private var keepHeading = FormatSettings.defaults.keepSceneHeadingWithScene
+    @AppStorage("fmtFont") private var font = FormatSettings.defaults.fontFamily
+    @AppStorage("fmtRejoin") private var rejoin = FormatSettings.defaults.rejoinSplitDialogue
+    @AppStorage("fmtContd") private var contd = FormatSettings.defaults.contdMode
+    @AppStorage("fmtCueAlign") private var cueAlign = FormatSettings.defaults.cueAlignment
+    @AppStorage("fmtTitlePage") private var titlePage = FormatSettings.defaults.includeTitlePage
+    @AppStorage("fmtSceneNumbers") private var sceneNumbers = FormatSettings.defaults.showSceneNumbers
+    @AppStorage("fmtPageMarkers") private var pageMarkers = FormatSettings.defaults.showPageMarkers
+    @AppStorage("fmtDual") private var dualDialogue = FormatSettings.defaults.dualDialogue
+    @AppStorage("fmtJustify") private var justifyText = FormatSettings.defaults.justifyText
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {

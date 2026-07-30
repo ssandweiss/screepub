@@ -123,9 +123,12 @@ export async function buildEpub(
   body: BookBody,
   format: FormatOptions = DEFAULT_FORMAT_OPTIONS,
 ): Promise<Uint8Array> {
+  // ?? rather than spread-with-default: a caller passing an explicit
+  // `identifier: undefined` would clobber a spread default and crash the
+  // non-null assertion downstream.
   const resolved: BookMeta = {
-    identifier: `urn:uuid:${crypto.randomUUID()}`,
     ...meta,
+    identifier: meta.identifier ?? `urn:uuid:${crypto.randomUUID()}`,
   };
   const modified = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 

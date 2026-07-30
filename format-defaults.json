@@ -1,0 +1,17 @@
+{
+  "scenePageBreaks": false,
+  "dialogueSideMarginPct": 20,
+  "cueIndentPct": 33,
+  "parentheticalIndentPct": 17,
+  "elementSpacingEm": 1,
+  "keepSceneHeadingWithScene": true,
+  "fontFamily": "courier",
+  "rejoinSplitDialogue": true,
+  "contdMode": "auto",
+  "cueAlignment": "centered",
+  "includeTitlePage": true,
+  "showSceneNumbers": false,
+  "showPageMarkers": false,
+  "dualDialogue": "sideBySide",
+  "justifyText": false
+}

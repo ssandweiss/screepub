@@ -18,6 +18,8 @@ public struct EngineResult: Codable, Sendable {
     public let epubPath: String?
     public let mobiPath: String?
     public let fountainPath: String?
+    public let previewHtmlPath: String?
+    public let debugPath: String?
     public let error: EngineError?
 }
 

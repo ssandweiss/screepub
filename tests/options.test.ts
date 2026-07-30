@@ -33,6 +33,14 @@ describe('resolveFormatOptions', () => {
     expect(resolveFormatOptions(undefined)).toEqual(DEFAULT_FORMAT_OPTIONS);
   });
 
+  test('defaults match the canonical format-defaults.json both suites pin', async () => {
+    // The same file kit-check decodes into FormatSettings and compares to
+    // FormatSettings.defaults — the two languages can no longer drift
+    // silently. Fifteen literals, one source of truth.
+    const canonical = await Bun.file(new URL('../format-defaults.json', import.meta.url)).json();
+    expect(DEFAULT_FORMAT_OPTIONS).toEqual(canonical);
+  });
+
   test('numeric knobs are clamped to sane ranges', () => {
     const opts = resolveFormatOptions({
       dialogueSideMarginPct: 90,

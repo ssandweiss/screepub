@@ -9,12 +9,7 @@ import { getDocument } from 'pdfjs-dist/build/pdf.mjs';
  * Each line has: text, indent (0-100%), y position, page number.
  * Indent is normalized as percentage of page width — this makes the
  * parser work across different PDF generators and page sizes.
- *
- * @param maxPages - if set, only the first N pages are parsed.
  */
-export async function extractLines(pdfBytes: Uint8Array, maxPages?: number): Promise<RawLine[]> {
-  return (await extractDocument(pdfBytes, maxPages)).lines;
-}
 
 /**
  * Extract lines AND the true page count in a single document load.
@@ -376,7 +371,3 @@ function deinterleaveDualDialogue(
   return out;
 }
 
-export async function getPageCount(pdfBytes: Uint8Array): Promise<number> {
-  const pdf = await getDocument({ data: pdfBytes }).promise;
-  return pdf.numPages;
-}

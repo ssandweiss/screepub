@@ -1,7 +1,10 @@
 import Foundation
 
 /// Mirror of the engine's FormatOptions (src/options.ts) — encoded to JSON
-/// and passed via --options. Defaults must match DEFAULT_FORMAT_OPTIONS.
+/// and passed via --options. Defaults must match DEFAULT_FORMAT_OPTIONS;
+/// both are pinned to the repo's canonical format-defaults.json (kit-check
+/// on this side, tests/options.test.ts on the engine's), so drift fails a
+/// suite instead of shipping.
 public struct FormatSettings: Codable, Sendable, Equatable {
     // Adding a field? Also update PartialFormatSettings + its merge in
     // ScriptSettings.swift, AppSettings.swift's formatSettings() /
