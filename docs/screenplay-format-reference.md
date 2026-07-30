@@ -3,6 +3,8 @@
 Collected 2026-07-22 as the ground truth for Screepub's CSS decisions and
 the planned Mac app's formatting options. Two halves: what print format
 actually is, and what Kindle's renderer actually honors.
+Pagination — page-break rules, (MORE)/(CONT'D)/CONTINUED artifacts, and
+what each tool emits — lives in `pagination-reference.md` (2026-07-30).
 
 ## 1. Print format (US feature standard)
 
@@ -80,9 +82,11 @@ within a point of print's 58%.
 - Whether `%` margins inside a `%`-margined parent compound acceptably
   at phone widths + max font size (worst case: cue wraps). If so, the
   app's cue-indent option may need a phone-profile preset.
-- Whether pushed-chunk gaps persist with the minimal avoid chain; if so,
-  expose "keep scene heading with scene" as a toggle and default it off
-  on e-ink.
+- Whether pushed-chunk gaps persist with the minimal avoid chain. (The
+  toggle half of this item shipped: `keepSceneHeadingWithScene` exists
+  and defaults ON — registry #5a. The e-ink pushed-chunk observation
+  itself is still unverified on hardware; 2026-07-30 note: keeps only
+  bind on KFX anyway, sideloaded AZW3/MOBI ignore them — registry #8b.)
 
 Sources: [KDP Text Guidelines (reflowable)](https://kdp.amazon.com/en_US/help/topic/GH4DRT75GWWAGBTU),
 [KDP Enhanced Typesetting](https://kdp.amazon.com/en_US/help/topic/G202087570),
