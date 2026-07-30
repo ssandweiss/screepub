@@ -276,10 +276,6 @@ struct ContentView: View {
                     Rectangle().fill(Theme.ink).frame(height: 1.4).offset(y: 4),
                     alignment: .bottom
                 )
-            Text("screenplay · to · kindle")
-                .font(Theme.courier(12))
-                .foregroundStyle(Theme.inkFaint)
-                .padding(.top, 14)
 
             Spacer(minLength: 30)
 
@@ -311,14 +307,8 @@ struct ContentView: View {
 
             Spacer(minLength: 40)
 
-            HStack(alignment: .bottom) {
-                Text("also accepts\n.fountain files")
-                    .font(Theme.courier(10))
-                    .foregroundStyle(Theme.inkFaint)
-                    .lineSpacing(2)
-                Spacer()
-                deviceStamps
-            }
+            deviceStamps
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 
