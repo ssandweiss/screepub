@@ -1,4 +1,5 @@
 import Foundation
+import KFXKit
 
 /// What a converted script can be saved as. Labeled by *purpose*, because
 /// the file you email is not the file you sideload: Amazon stopped
@@ -8,21 +9,25 @@ public enum ExportFormat: Sendable {
     case epub
     case kindle
 
-    /// Kindle resolves the same way the USB route does — AZW3 via Calibre
-    /// when installed, else the engine's own MOBI.
-    public func fileExtension(calibreAvailable: Bool) -> String {
+    /// The Kindle sideload ladder, best rung first: KFX (Enhanced
+    /// Typesetting — keeps hold, device-verified 2026-07-29) when the full
+    /// toolchain is present; AZW3 with Calibre alone; the engine's own
+    /// MOBI with nothing. Registry §8b has the verdict behind the order.
+    public func fileExtension(calibreAvailable: Bool, kfxReady: Bool = false) -> String {
         switch self {
         case .epub:   return "epub"
-        case .kindle: return calibreAvailable ? "azw3" : "mobi"
+        case .kindle: return kfxReady ? "kfx" : calibreAvailable ? "azw3" : "mobi"
         }
     }
 
-    public func label(calibreAvailable: Bool) -> String {
+    public func label(calibreAvailable: Bool, kfxReady: Bool = false) -> String {
         switch self {
         case .epub:
             return "EPUB — for emailing to Kindle, and most e-readers"
         case .kindle:
-            return "\(fileExtension(calibreAvailable: calibreAvailable).uppercased()) — for USB sideload to Kindle"
+            let ext = fileExtension(calibreAvailable: calibreAvailable, kfxReady: kfxReady)
+            let hint = kfxReady ? " (best quality)" : ""
+            return "\(ext.uppercased()) — for USB sideload to Kindle\(hint)"
         }
     }
 }
@@ -108,8 +113,12 @@ public enum Export {
         for epub: URL,
         fountainPath: String?,
         format: FormatSettings,
-        calibreAvailable: Bool
+        calibreAvailable: Bool,
+        kfxReady: Bool = false
     ) throws -> URL {
+        if kfxReady {
+            return try KFXToolchain.convert(epub)
+        }
         if calibreAvailable {
             return try EbookConvert.toAzw3(epub)
         }

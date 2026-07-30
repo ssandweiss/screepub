@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import UniformTypeIdentifiers
 import ScreepubKit
+import KFXKit
 
 enum AppState {
     case idle
@@ -19,6 +20,10 @@ struct ContentView: View {
     @State private var transferNote: String?
     @AppStorage("kindleEmail") private var kindleEmail = ""
     @AppStorage("koboKepub") private var koboKepub = false
+    /// Probed once at launch, off-main (status() spawns calibre-customize).
+    /// The save panel needs it synchronously for its filename extension;
+    /// the USB path re-probes live inside its own background task.
+    @State private var kfxReady = false
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
 
@@ -54,6 +59,7 @@ struct ContentView: View {
             devices = DeviceDetect.mounted()
         }
         .task {
+            kfxReady = await Task.detached { KFXToolchain.status().ready }.value
             // reMarkable never mounts — poll its USB web interface instead.
             while !Task.isCancelled {
                 remarkableUp = await RemarkableDevice.probe()
@@ -500,7 +506,9 @@ struct ContentView: View {
 
         switch device.kind {
         case .kindle where EbookConvert.isAvailable:
-            transferNote = "converting to AZW3 for Kindle…"
+            // KFX vs AZW3 is decided in the background task — the check
+            // spawns calibre-customize, too slow for this thread.
+            transferNote = "converting for Kindle…"
         case .kindle where mobiPath == nil:
             transferNote = "no Kindle-native file available — use Email to Kindle instead"
             return
@@ -517,6 +525,14 @@ struct ContentView: View {
                 Result {
                     switch device.kind {
                     case .kindle:
+                        // Ladder, best rung first — registry §8b for why
+                        // KFX outranks AZW3 (Enhanced Typesetting; keeps
+                        // hold on device; AZW3's renderer strands cues).
+                        if KFXToolchain.status().ready {
+                            let kfx = try KFXToolchain.convert(epub)
+                            try DeviceTransfer.copy(kfx, to: device)
+                            return "KFX"
+                        }
                         if EbookConvert.isAvailable {
                             let azw3 = try EbookConvert.toAzw3(epub)
                             try DeviceTransfer.copy(azw3, to: device)
@@ -580,7 +596,8 @@ struct ContentView: View {
                                 fallback: AppSettings.formatSettings())
         } ?? AppSettings.formatSettings()
         let calibre = EbookConvert.isAvailable
-        ExportPanel.present(epub: epub, stem: stem) { destination, format in
+        let kfx = kfxReady
+        ExportPanel.present(epub: epub, stem: stem, kfxReady: kfx) { destination, format in
             transferNote = "saving…"
             // freshKindleArtifact spawns Calibre or the engine — keep it off
             // the main actor or the whole UI stalls behind it.
@@ -595,7 +612,8 @@ struct ContentView: View {
                             for: epub,
                             fountainPath: fountainPath,
                             format: settings,
-                            calibreAvailable: calibre)
+                            calibreAvailable: calibre,
+                            kfxReady: kfx)
                     }
                     try Export.copy(source, to: destination)
                     await MainActor.run {
