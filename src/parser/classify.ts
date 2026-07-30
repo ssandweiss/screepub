@@ -10,6 +10,15 @@ const SCENE_HEADING = /^(INT\.|EXT\.|INT\.\/EXT\.|I\/E\.)/;
 // pair is stripped here and attached as the scene number. The same-token
 // requirement keeps false positives out.
 const DUAL_MARGIN_HEADING = /^(\d{1,3}[A-Z]?)\s+(.*\S)\s+\1$/;
+// Wider than SCENE_HEADING above: the openers fountain-js accepts for an
+// UNFORCED heading (EST., the space forms, bare I/E). Mini-slugs serialize
+// as FORCED sluglines (".LATER"), and fountain-js promotes a forced line
+// back to a full scene heading — section, TOC entry and all — when its text
+// also matches this shape. So a block matching it must never classify as a
+// mini-slug; it falls through to action instead. The identical literal
+// lives in src/epub/html.ts as the renderer's discriminator, and
+// tests/epub.test.ts pins the two together and against fountain-js itself.
+export const PRIMARY_SLUG = /^(?:\*{0,3}_?)?(?:(?:int|i)\.?\/(?:ext|e)|int|ext|est)[. ]/i;
 const TRANSITION = /^[A-Z\s]+:$/;
 const PAGE_NUMBER_BARE = /^\d+\.?$/;
 const PAGE_NUMBER_DASHED = /^-\s*\d+\s*-$/;
@@ -141,9 +150,10 @@ export function classifyBlock(
     return { ...base, type: 'dialogue', character: currentCharacter };
   }
 
-  // Priority 9: Mini-slug
+  // Priority 9: Mini-slug. Excluded by PRIMARY_SLUG, not SCENE_HEADING: the
+  // serializer's forced slugline would promote those back to full headings.
   if (indent < 5 && text === text.toUpperCase() && text.length >= 2 && text.length <= 40 &&
-    !SCENE_HEADING.test(text) && !PARENTHETICAL.test(text)) {
+    !PRIMARY_SLUG.test(text) && !PARENTHETICAL.test(text)) {
     return { ...base, type: 'mini-slug' };
   }
 

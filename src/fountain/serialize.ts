@@ -216,10 +216,18 @@ export function toFountain(
         // "LATER" re-parses as action (the mini-slug styling never applied)
         // and "BACK TO:" as a transition. Stays PLAIN — emphasis markers
         // would break slug recognition, same rule as cues and parentheticals.
-        // Text already starting with a Fountain marker can't take the dot
-        // ("..45" is not a forced slug), so it falls back to forced action.
+        //
+        // A LEADING DOT is the only text the dot-force can't carry
+        // (fountain-js's rule is `^\s*\.(?!\.+)`), so ".45 ON THE COUNTER"
+        // falls back to forced action; every other marker rides through the
+        // dot intact and keeps its heading treatment.
+        //
+        // Resets lastSpeaker like scene and transition do: a mini-slug is a
+        // cut in time or place, so the speaker after it is starting fresh
+        // and must not inherit a (CONT'D) from before it (#8a).
         closeBlock();
-        out.push(NEEDS_FORCE.test(text) ? `!${text}` : `.${text}`);
+        lastSpeaker = null;
+        out.push(/^\./.test(text) ? `!${text}` : `.${text}`);
         break;
       default: {
         // action — the only type left, and the only one here allowed to

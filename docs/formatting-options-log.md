@@ -105,15 +105,36 @@ is live.
   a right-flush *transition*. `p.mini-slug` was styled from the first
   commit but no path ever emitted the class, because serialize.ts wrote
   mini-slugs plain — fixed 2026-07-30 by forcing the dot. Mini-slug text
-  stays PLAIN (no emphasis markers), same rule as cues and parentheticals;
-  text that already starts with a Fountain marker can't take the dot and
-  falls back to forced action (`!.45 ON THE COUNTER`).
+  stays PLAIN (no emphasis markers), same rule as cues and parentheticals.
+  A **leading dot** is the one thing the force can't carry (fountain-js's
+  rule is `^\s*\.(?!\.+)`), so ".45 ON THE COUNTER" falls back to forced
+  action; every other marker rides through the dot intact. The cue chain
+  resets here as it does at a scene or transition — a mini-slug is a cut in
+  time or place, so the next speaker never inherits a (CONT'D) (#8a).
 - **Renderer side:** a `scene_heading` token whose text fails fountain-js's
   own unforced-heading pattern (`PRIMARY_SLUG` — a copy of its
   `rules.scene_heading` first alternative) could only have come from the
-  forced form, so that is the exact discriminator. Applies to hand-written
-  Fountain input too. MOBI has no third weight in its dialect: mini-slug
-  and slugline are both `<p><b>`.
+  forced form, so that is the exact discriminator. A numbered mini-slug
+  (`.LATER #5#`) keeps its number exactly as a slugline does. MOBI has no
+  third weight in its dialect: mini-slug and slugline are both `<p><b>`.
+- **Classification must agree (2026-07-30):** `classify.ts` carries the
+  same `PRIMARY_SLUG` literal and excludes it from priority 9, replacing
+  the narrower `SCENE_HEADING`. Otherwise the two ends disagree: "EST. THE
+  HOUSE" or "I/E CAR" classified as a mini-slug, serialized as `.EST. THE
+  HOUSE`, and promoted straight back to a full scene heading with a TOC
+  entry. `tests/epub.test.ts` pins the two literals to each other and the
+  renderer's verdict to fountain-js's own tokenizer, so an upstream rule
+  change fails a table instead of quietly reshuffling headings.
+- **THE TRADE — hand-written Fountain (2026-07-30):** Screepub owns the
+  dot-force as its mini-slug carrier, so a hand-written `.BLACK` or
+  `.THE BRIDGE` from another tool renders as a **mini-slug, not a scene**:
+  bold line, no section, no TOC entry. A dot-forced line that also matches
+  a real slug opener (`.INT. …`, `.EST. …`) still promotes. This is a cost
+  accepted, not a feature: Fountain has exactly one forcing character for
+  headings and two things need it. Recorded in the README's Fountain-input
+  divergence table. Building a marker to tell the two apart was considered
+  and rejected — any marker either pollutes the durable `.fountain` for
+  other tools or hides the line from them entirely.
 - **KNOWN GAP (2026-07-30):** PDF input still produces **zero** mini-slug
   elements. `classify.ts`'s mini-slug branch requires `indent < 5`, but
   extraction measures indent from the PAGE edge, where action sits at
@@ -125,7 +146,8 @@ is live.
   already vetoes the common "THE KITCHEN" shape at priority 7.
 - **Code:** `src/fountain/serialize.ts` (`mini-slug` case),
   `src/epub/html.ts` (`PRIMARY_SLUG`, `isMiniSlug`), `src/epub/css.ts`
-  (`p.mini-slug`), `src/parser/classify.ts` (priority 9, the gap).
+  (`p.mini-slug`), `src/parser/classify.ts` (`PRIMARY_SLUG`, priority 9 —
+  also where the gap lives).
 
 ### 5. Keep-with-next — minimal chain (v2)
 - **What:** `break-after: avoid` on scene headings, mini-slugs (#5b) and

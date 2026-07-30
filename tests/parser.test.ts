@@ -422,6 +422,29 @@ describe('classifyBlock', () => {
       const result = classifyBlock(block, null);
       expect(result.type).toBe('scene');
     });
+
+    // A mini-slug serializes as a forced slugline (".LATER"). fountain-js
+    // promotes a forced line back to a FULL scene heading — section, TOC
+    // entry and all — whenever the text also matches its unforced-heading
+    // shape, which is wider than this file's SCENE_HEADING (EST., the space
+    // forms, bare I/E). Minting a mini-slug from one of those would round-trip
+    // into a scene. See PRIMARY_SLUG.
+    test('an EST. slug is not a mini-slug — it would promote on re-parse', () => {
+      expect(classifyBlock(makeBlock({ text: 'EST. THE HOUSE', indent: 2 }), null).type).toBe('action');
+    });
+
+    test('the space forms and bare I/E are not mini-slugs either', () => {
+      expect(classifyBlock(makeBlock({ text: 'INT HOUSE - DAY', indent: 2 }), null).type).toBe('action');
+      expect(classifyBlock(makeBlock({ text: 'EXT YARD - NIGHT', indent: 2 }), null).type).toBe('action');
+      expect(classifyBlock(makeBlock({ text: 'I/E CAR - DAY', indent: 2 }), null).type).toBe('action');
+      expect(classifyBlock(makeBlock({ text: 'INT/EXT CAR - DAY', indent: 2 }), null).type).toBe('action');
+    });
+
+    test('a word that merely starts with those letters stays a mini-slug', () => {
+      // The opener needs its dot or space: ESTABLISHING is not EST.
+      expect(classifyBlock(makeBlock({ text: 'ESTABLISHING SHOT', indent: 2 }), null).type).toBe('mini-slug');
+      expect(classifyBlock(makeBlock({ text: 'INTO THE WOODS', indent: 2 }), null).type).toBe('mini-slug');
+    });
   });
 
   describe('element IDs', () => {

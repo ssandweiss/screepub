@@ -137,10 +137,32 @@ describe('toFountain', () => {
   });
 
   test('a mini-slug Fountain cannot force stays an action line', () => {
-    // ".45 ON THE COUNTER" would become "..45 …", which fountain-js reads as
-    // action anyway — the dot form is only reachable for text that has none.
+    // A LEADING DOT is the one thing the dot-force can't carry: fountain-js
+    // reads "..45 …" as action (its rule is `^\s*\.(?!\.+)`), so the marker
+    // would just leak into the text. Nothing else is excluded.
     const out = toFountain(screenplay([el({ text: '.45 ON THE COUNTER', type: 'mini-slug' })]));
     expect(out).toBe('!.45 ON THE COUNTER\n');
+  });
+
+  test('other Fountain markers ride through the dot-force intact', () => {
+    // ".#2 CAMERA" tokenizes as a scene heading whose text keeps the "#".
+    const out = toFountain(screenplay([el({ text: '#2 CAMERA', type: 'mini-slug' })]));
+    expect(out).toBe('.#2 CAMERA\n');
+    const { tokens } = new Fountain().parse(out, true);
+    expect(tokens.map((t) => [t.type, t.text])).toEqual([['scene_heading', '#2 CAMERA']]);
+  });
+
+  test("a mini-slug cuts the (CONT'D) chain — it is a cut in time or place", () => {
+    const out = toFountain(
+      screenplay([
+        el({ text: 'MARGO', type: 'character', character: 'MARGO' }),
+        el({ text: 'Go home.', type: 'dialogue', character: 'MARGO' }),
+        el({ text: 'LATER', type: 'mini-slug' }),
+        el({ text: 'MARGO', type: 'character', character: 'MARGO' }),
+        el({ text: 'Still here.', type: 'dialogue', character: 'MARGO' }),
+      ]),
+    );
+    expect(out).not.toContain("(CONT'D)");
   });
 
   test('a mini-slug never becomes a transition on re-parse', () => {
