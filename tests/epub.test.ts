@@ -79,7 +79,7 @@ describe('tokensToBody', () => {
     );
   });
 
-  test('opening content without a heading gets no keep-together wrapper', () => {
+  test('opening content without a heading renders directly in its section', () => {
     const tokens = new Fountain().parse('Cold open action.\n\nINT. LAB - DAY\n\nWork.\n', true).tokens;
     const [file] = tokensToBody(tokens).files;
     expect(file.xhtml).toMatch(/<section class="scene" id="sc-001">\s*<p class="action">Cold open action\.<\/p>/);
@@ -155,7 +155,9 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
     const paren = SCREENPLAY_CSS.match(/p\.parenthetical\s*{[^}]*}/)![0];
     expect(paren).not.toContain('break-after');
     const heading = SCREENPLAY_CSS.match(/h2\.scene-heading\s*{[^}]*}/)![0];
-    expect(heading).toContain('break-after: avoid');
+    // both spellings: the legacy prefixed property AND the modern standalone
+    expect(heading).toContain('page-break-after: avoid');
+    expect(heading).toMatch(/[^-]break-after: avoid/);
   });
 
   test('page markers float out of the flow so they cost no line', () => {

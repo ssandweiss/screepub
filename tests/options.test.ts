@@ -121,13 +121,16 @@ describe('screenplayCss with options', () => {
 
 describe('tokensToBody with options', () => {
   test('keepSceneHeadingWithScene gates the heading break-after rule', () => {
-    const on = screenplayCss(resolveFormatOptions({}));
-    expect(on.match(/h2\.scene-heading\s*{[^}]*}/)![0]).toContain('break-after: avoid');
+    const heading = screenplayCss(resolveFormatOptions({})).match(/h2\.scene-heading\s*{[^}]*}/)![0];
+    // both spellings: the legacy prefixed property AND the modern standalone
+    expect(heading).toContain('page-break-after: avoid');
+    expect(heading).toMatch(/[^-]break-after: avoid/);
     const off = screenplayCss(resolveFormatOptions({ keepSceneHeadingWithScene: false }));
     expect(off.match(/h2\.scene-heading\s*{[^}]*}/)![0]).not.toContain('break-after');
     // markup carries no wrapper either way
-    const body = tokensToBody(tokens(), { format: resolveFormatOptions({}) });
-    expect(body.files[0].xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
+    for (const format of [resolveFormatOptions({}), resolveFormatOptions({ keepSceneHeadingWithScene: false })]) {
+      expect(tokensToBody(tokens(), { format }).files[0].xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
+    }
   });
 
   test('scene numbers render in headings when enabled', () => {

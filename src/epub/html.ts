@@ -107,7 +107,8 @@ function renderBlocks(
   };
   // The cue (+ parentheticals) and the FIRST dialogue line share an
   // unbreakable wrapper so a cue never strands at a page bottom with its
-  // speech on the next page — same mechanism as scene headings.
+  // speech on the next page — the wrapper form, which scene headings no
+  // longer need.
   const closeSpeech = () => {
     if (!speech) return;
     const firstLine = speech.findIndex((c) => c.kind === 'dialogue');
