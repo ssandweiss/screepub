@@ -4,11 +4,12 @@ Every formatting behavior Screepub applies, logged as it was tuned
 (2026-07-22, initial build + two feedback rounds on a real script). The print
 geometry and Kindle CSS constraints behind these choices live in
 `docs/screenplay-format-reference.md` — read that first when adjusting. Each entry is
-written as a **toggle or slider in the Mac app** (Settings → Formatting;
-2026-07-22): the engine's FormatOptions (`src/options.ts`) is the single
-knob surface, reachable via `--options file.json` on the CLI and mirrored
-by `FormatSettings` in the app. Entries below marked "not built" remain
-future work; everything else is live.
+written as a **toggle or slider in the Mac app** (the reader window's rail;
+2026-07-22, moved out of Settings 2026-07-30): the engine's FormatOptions
+(`src/options.ts`) is the single knob surface, reachable via
+`--options file.json` on the CLI and mirrored by `FormatSettings` in the
+app. Entries below marked "not built" remain future work; everything else
+is live.
 
 ## Layout & flow
 
@@ -55,8 +56,8 @@ future work; everything else is live.
   2026-07-22: "centered items drooping left"). Default is now
   `text-align: center` within the dialogue column; `cueAlignment:
   'indented'` restores the % offsets (sliders apply only in that mode).
-- **Code:** `src/options.ts`, `src/epub/css.ts`; app picker in
-  Settings → Formatting.
+- **Code:** `src/options.ts`, `src/epub/css.ts`; app picker in the reader
+  rail's Dialogue group.
 
 ### 3. Vertical rhythm between elements
 - **What:** a full blank line (`1em`) between action paragraphs, dialogue
@@ -114,8 +115,8 @@ future work; everything else is live.
   the chain, so it cannot tell the two apart; the heading was wrapped
   then too. The verdict lands in this entry.
 - **Default:** on.
-- **App option:** "Keep scene headings with their scene" toggle (Settings
-  → Formatting → Pages).
+- **App option:** "Keep headings with scene" toggle (the reader rail's
+  Page group).
 - **Code:** `src/options.ts` (`keepSceneHeadingWithScene`),
   `src/epub/css.ts` (`headingKeep` → `h2.scene-heading`).
 
@@ -154,8 +155,8 @@ future work; everything else is live.
   prefer it. Cue/parenthetical alignment is governed separately (#2b);
   this knob is body text only.
 - **Default:** ragged-right (`justifyText: false`).
-- **App option:** "Justify body text" toggle (Settings → Formatting
-  Layout section, and the reader rail).
+- **App option:** "Justify body text" toggle (the reader rail's Text
+  group).
 - **Code:** `src/options.ts` (`justifyText`), `src/epub/css.ts`
   (`bodyAlign` → `p.action`, `p.dialogue`).
 
@@ -212,7 +213,22 @@ future work; everything else is live.
   (default) strips source cues' (CONT'D) and re-adds it exactly where
   the rule applies (same speaker continues, reset at scene/transition);
   **strip** removes all; **keep** preserves the source.
-- **Code:** `src/fountain/serialize.ts` (`lastSpeaker` tracking).
+- **Stage-1 only (2026-07-30):** this and #8 are the ONLY two knobs
+  consumed in `fountain/serialize.ts` rather than in `epub/`. They are
+  written INTO the `.fountain`, which is the app's cache boundary, so on
+  **Fountain input they cannot apply** — the decision is already frozen
+  into the cue text. Rendering a fountain that carries `@MARGO (CONT'D)`
+  with `contdMode: strip` keeps the (CONT'D); the same PDF converted with
+  `strip` does not. This used to exit 0 and silently change nothing;
+  `convertFountain` now returns a warning for the provable case (strip
+  requested, `(CONT'D)` cues present), which reaches `--json`, the CLI's
+  human output, and the app. #8 gets no runtime warning because
+  `serialize.ts` drops `(MORE)` unconditionally, so an unrejoined split is
+  indistinguishable from an ordinary same-speaker continuation — a guessed
+  warning would be worse than this note. The reader rail groups both under
+  "From the PDF" and says they apply on the next conversion.
+- **Code:** `src/fountain/serialize.ts` (`lastSpeaker` tracking);
+  `src/convert.ts` (`stageOneWarnings`, `CONTD_CUE`).
 
 ### 8b. Cue keeps its first dialogue line (always on)
 - **SUPERSEDED IN PART — device verdict (2026-07-29, same-day A/B on
@@ -265,9 +281,9 @@ future work; everything else is live.
   to land. The cue keep is untouched by this option and stays on in both
   modes — it remains the degradation layer when the whole-block keep
   cannot be honored.
-- **App option:** "Keep each speech on one page" (Settings → Formatting →
-  Pages), with the tradeoff and the oversize caveat stated in the
-  toggle's caption.
+- **App option:** "Keep each speech on one page" (the reader rail's Page
+  group), with the tradeoff and the oversize caveat stated in the
+  caption beneath it.
 - **Device verdict: pending 2026-07-30 —** does a kept speech actually
   move whole, and how big is the gap it leaves? Same Kindle
   Previewer/KFX + Apple Books pass as #5a. Note the interaction with
@@ -393,7 +409,7 @@ future work; everything else is live.
   the EPUB falls back to sequential speeches (see #10b)**. Wider than the
   dialogue column by design. MOBI gets a plain width-50% table, at any
   height.
-- **App option:** Settings → Formatting → "Dual dialogue". Known
+- **App option:** the reader rail's Dialogue group → "Dual dialogue". Known
   limitation: a short action line immediately after a dual block with no
   intervening cue can absorb into the left speech.
 - **Code:** `src/parser/extract.ts` (`deinterleaveDualDialogue`).
@@ -536,14 +552,27 @@ future work; everything else is live.
   re-dropping a tuned script keeps its tuning (note: a NEW script whose
   filename stem matches an old one inherits that sidecar — treated as
   same-script-new-draft).
+- **One formatting surface (2026-07-30):** the Settings → Formatting tab
+  is gone. It carried all 15 knobs beside a hand-drawn schematic
+  (`LayoutPreview`, deleted with it) while the reader rail carried only 11
+  beside the real engine output — so the window that could show you a
+  change was the one that could not make four of them
+  (`keepSceneHeadingWithScene`, `includeTitlePage`, `rejoinSplitDialogue`,
+  `contdMode`). The rail now owns all 16 (15 at the move, plus #8c's
+  `keepSpeechesWhole`), grouped Page / Dialogue / Text / Content / From
+  the PDF. Settings keeps General (library, updates) and Devices (default
+  preset, KFX toolchain, tolino/reMarkable notes). **Adding a knob means
+  adding one control to `ReaderRail.swift`** — there is deliberately no
+  second surface to keep in sync. Settings sets the coarse default via a
+  preset; per-script tuning belongs beside a live render.
 - **Device presets (2026-07-22):** `DevicePreset` (ScreepubKit) bundles
   a full FormatSettings per device class — "Kindle e-ink (6\")" is the
   baseline (== defaults); "Phone / narrow screen" flips dual dialogue to
   sequential (side-by-side halves are an unreadable sliver on a narrow
   screen) and widens the dialogue column (10% side margins). Applying a
   preset replaces the whole FormatSettings — globally via Settings →
-  Formatting "Load device preset", or per-script via the reader rail
-  "Apply device preset" (then persisted to the sidecar). Responsive
+  Devices "Load device preset", or per-script via the reader rail's own
+  "Load device preset" (then persisted to the sidecar). Responsive
   reflow is impossible in a fixed e-book, so a conversion-time preset is
   the mechanism. Adding a preset: extend the `DevicePreset` enum only —
   the two menus and kit-check iterate `allCases`.

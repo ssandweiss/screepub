@@ -33,4 +33,13 @@ public enum DevicePreset: String, CaseIterable, Identifiable, Sendable {
             return s
         }
     }
+
+    /// The preset whose settings exactly match `settings`, or nil when they
+    /// have been tuned away from every preset. Applying a preset overwrites
+    /// FormatSettings and stores no identity, so equality is the only honest
+    /// answer to "which preset am I on?" — a remembered name would keep
+    /// claiming "Kindle e-ink" after the first knob moved.
+    public static func matching(_ settings: FormatSettings) -> DevicePreset? {
+        allCases.first { $0.settings == settings }
+    }
 }

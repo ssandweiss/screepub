@@ -112,10 +112,15 @@ struct SettingsView: View {
         TabView {
             GeneralSettings()
                 .tabItem { Label("General", systemImage: "gearshape") }
-            FormattingSettings()
-                .tabItem { Label("Formatting", systemImage: "text.alignleft") }
+            DevicesSettings()
+                .tabItem { Label("Devices", systemImage: "externaldrive") }
         }
-        .frame(width: 720)
+        // Width is definite on purpose: a grouped Form reports a fitting width
+        // near 900pt for these captions, and only a definite value overrides
+        // it. Height is deliberately absent here and set on the taller tab
+        // instead (see DevicesSettings) — a TabView adopts its largest child's
+        // height, so one number there sizes the window for both.
+        .frame(width: 520)
         .padding(.bottom, 8)
     }
 }
@@ -149,16 +154,6 @@ struct GeneralSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            KfxQualitySection()
-            // The Kindle email address is Amazon's to know, not ours to
-            // store — the send block's setup guide points at the page where
-            // it lives. The Kobo KEPUB choice lives on the result page's send block,
-            // shown only while a Kobo is the chosen destination.
-            Section("Other devices") {
-                Text("tolino: books are copied into the Books folder. reMarkable: enable Settings → Storage → USB web interface on the tablet, then dock it over USB.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
         .formStyle(.grouped)
     }
@@ -176,6 +171,68 @@ struct GeneralSettings: View {
         if panel.runModal() == .OK, let url = panel.url {
             outputFolder = url.path
         }
+    }
+}
+
+/// Machine-level concerns: what this Mac talks to, and the coarse formatting
+/// default new conversions start from. Per-script tuning lives in the reader
+/// window's rail, beside a live render of the actual output.
+struct DevicesSettings: View {
+    @State private var currentDefault: DevicePreset?
+
+    var body: some View {
+        Form {
+            Section("Default formatting") {
+                LabeledContent("Current default") {
+                    Text(currentDefault?.displayName ?? "Customized")
+                        .foregroundStyle(.secondary)
+                }
+                Menu("Load device preset") {
+                    ForEach(DevicePreset.allCases) { preset in
+                        Button(preset.displayName) {
+                            AppSettings.setFormatSettings(preset.settings)
+                        }
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Button("Reset to Defaults") { AppSettings.resetFormatting() }
+                }
+                Text("The starting point for new conversions. Fine-tune a single script in its preview window, then use Save as app defaults there to promote it here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            KfxQualitySection()
+            // The Kindle email address is Amazon's to know, not ours to
+            // store — the send block's setup guide points at the page where
+            // it lives. The Kobo KEPUB choice lives on the result page's send
+            // block, shown only while a Kobo is the chosen destination.
+            Section("Other devices") {
+                Text("tolino: books are copied into the Books folder. reMarkable: enable Settings → Storage → USB web interface on the tablet, then dock it over USB.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        // A grouped Form scrolls, so it reports the same modest ideal height
+        // whatever it holds; without this the tab opened with a scrollbar over
+        // content that fits fine once given the room. Since a TabView adopts
+        // its largest child's height, this one number sizes the whole Settings
+        // window and General carries the spare space — the cheaper half of the
+        // trade, and the reason no height is set on the TabView itself.
+        .frame(minHeight: 560)
+        .onAppear { refreshCurrentDefault() }
+        // AppSettings reads UserDefaults directly rather than through
+        // @AppStorage, so nothing here republishes on its own. This also
+        // catches the reader rail's Save as app defaults landing while this
+        // window is open.
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            refreshCurrentDefault()
+        }
+    }
+
+    private func refreshCurrentDefault() {
+        currentDefault = DevicePreset.matching(AppSettings.formatSettings())
     }
 }
 
@@ -257,128 +314,3 @@ struct KfxQualitySection: View {
     }
 }
 
-struct FormattingSettings: View {
-    // Initial values come from FormatSettings.defaults — which kit-check
-    // pins to the canonical format-defaults.json the engine suite also
-    // pins — so the Settings UI cannot show one default while the
-    // conversion applies another.
-    @AppStorage("fmtScenePageBreaks") private var scenePageBreaks = FormatSettings.defaults.scenePageBreaks
-    @AppStorage("fmtDialogueMargin") private var dialogueMargin = FormatSettings.defaults.dialogueSideMarginPct
-    @AppStorage("fmtCueIndent") private var cueIndent = FormatSettings.defaults.cueIndentPct
-    @AppStorage("fmtParenIndent") private var parenIndent = FormatSettings.defaults.parentheticalIndentPct
-    @AppStorage("fmtSpacing") private var spacing = FormatSettings.defaults.elementSpacingEm
-    @AppStorage("fmtKeepHeading") private var keepHeading = FormatSettings.defaults.keepSceneHeadingWithScene
-    @AppStorage("fmtKeepSpeeches") private var keepSpeeches = FormatSettings.defaults.keepSpeechesWhole
-    @AppStorage("fmtFont") private var font = FormatSettings.defaults.fontFamily
-    @AppStorage("fmtRejoin") private var rejoin = FormatSettings.defaults.rejoinSplitDialogue
-    @AppStorage("fmtContd") private var contd = FormatSettings.defaults.contdMode
-    @AppStorage("fmtCueAlign") private var cueAlign = FormatSettings.defaults.cueAlignment
-    @AppStorage("fmtTitlePage") private var titlePage = FormatSettings.defaults.includeTitlePage
-    @AppStorage("fmtSceneNumbers") private var sceneNumbers = FormatSettings.defaults.showSceneNumbers
-    @AppStorage("fmtPageMarkers") private var pageMarkers = FormatSettings.defaults.showPageMarkers
-    @AppStorage("fmtDual") private var dualDialogue = FormatSettings.defaults.dualDialogue
-    @AppStorage("fmtJustify") private var justifyText = FormatSettings.defaults.justifyText
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            formColumn
-            VStack(alignment: .leading, spacing: 6) {
-                Text("PREVIEW")
-                    .font(Theme.courier(10, .bold))
-                    .kerning(1.2)
-                    .foregroundStyle(Theme.inkFaint)
-                LayoutPreview()
-            }
-            .padding(.vertical, 18)
-            .padding(.trailing, 18)
-            .frame(width: 264)
-        }
-    }
-
-    private var formColumn: some View {
-        Form {
-            Section {
-                Menu("Load device preset") {
-                    ForEach(DevicePreset.allCases) { preset in
-                        Button(preset.displayName) {
-                            AppSettings.setFormatSettings(preset.settings)
-                        }
-                    }
-                }
-                Text("A starting point for a device class — overwrites the settings below, which you can then fine-tune.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Section("Layout") {
-                slider("Dialogue column margins", value: $dialogueMargin, range: 0...30, unit: "%")
-                Picker("Cue & parenthetical alignment", selection: $cueAlign) {
-                    Text("Centered in column").tag("centered")
-                    Text("Print-style indent").tag("indented")
-                }
-                slider("Character cue indent", value: $cueIndent, range: 0...60, unit: "% of column")
-                    .disabled(cueAlign == "centered")
-                slider("Parenthetical indent", value: $parenIndent, range: 0...40, unit: "% of column")
-                    .disabled(cueAlign == "centered")
-                slider("Space between elements", value: $spacing, range: 0.4...1.6, unit: "em", step: 0.1)
-                Picker("Typeface", selection: $font) {
-                    Text("Courier (screenplay)").tag("courier")
-                    Text("Serif (reader default)").tag("serif")
-                    Text("Sans-serif").tag("sans")
-                }
-                Toggle("Justify body text", isOn: $justifyText)
-            }
-            Section("Pages") {
-                Toggle("Start each scene on a new page", isOn: $scenePageBreaks)
-                Toggle("Keep scene headings with their scene", isOn: $keepHeading)
-                Toggle(isOn: $keepSpeeches) {
-                    Text("Keep each speech on one page")
-                    Text("Avoids mid-speech page turns; long speeches may leave white space at page bottoms. Speeches taller than a full page still break.")
-                }
-            }
-            Section("Content") {
-                Toggle("Generate a title page", isOn: $titlePage)
-                Toggle("Show shooting-script scene numbers", isOn: $sceneNumbers)
-                Toggle("Show original page numbers", isOn: $pageMarkers)
-                Toggle("Rejoin dialogue split by page breaks", isOn: $rejoin)
-                Picker("Dual dialogue", selection: $dualDialogue) {
-                    Text("Side by side (full width)").tag("sideBySide")
-                    Text("Sequential speeches").tag("sequential")
-                }
-                Picker("(CONT'D) on character cues", selection: $contd) {
-                    Text("Automatic (standard rule)").tag("auto")
-                    Text("Remove all").tag("strip")
-                    Text("Keep as written").tag("keep")
-                }
-            }
-            Section {
-                HStack {
-                    Spacer()
-                    Button("Reset to Defaults") { AppSettings.resetFormatting() }
-                }
-                Text("Changes apply to the next conversion.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-    }
-
-    private func slider(
-        _ label: String,
-        value: Binding<Double>,
-        range: ClosedRange<Double>,
-        unit: String,
-        step: Double = 1
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(label)
-                Spacer()
-                Text("\(value.wrappedValue, specifier: step < 1 ? "%.1f" : "%.0f") \(unit)")
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            Slider(value: value, in: range, step: step)
-        }
-    }
-}

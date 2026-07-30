@@ -143,7 +143,7 @@ struct ReaderView: View {
                 .frame(minWidth: 380)
                 .background(Color.white)
             ReaderRail(model: model)
-                .frame(minWidth: 210, maxWidth: 240)
+                .frame(minWidth: 240, maxWidth: 300)
         }
         .frame(minWidth: 600, minHeight: 500)
         .navigationTitle(model.ref.title)

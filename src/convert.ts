@@ -117,6 +117,30 @@ export async function convertPdf(
   return { epub, mobi, previewHtml, fountainText, screenplay, meta, warnings };
 }
 
+/** A forced cue line still carrying a (CONT'D) — the shape serialize.ts
+ * writes. Same apostrophe tolerance as its CONTD, since the marker may have
+ * come from the source PDF rather than from us. */
+const CONTD_CUE = /^@.*\(\s*CONT['’]?D\.?\s*\)/im;
+
+/** Stage-1 options are consumed in fountain/serialize.ts, upstream of the
+ * .fountain — the app's cache boundary. On Fountain input that stage has
+ * already run, so the request cannot be honored and the caller deserves to
+ * hear about it rather than get a clean exit and unchanged output.
+ *
+ * Only the provable case is reported. `keep` and `auto` promise no removal
+ * here, and `rejoinSplitDialogue` leaves nothing to detect: serialize.ts
+ * drops (MORE) markers unconditionally, so an unrejoined split is not
+ * distinguishable from an ordinary same-speaker continuation. That one is a
+ * documented limitation (registry §8) rather than a guessed warning. */
+function stageOneWarnings(fountainText: string, format: FormatOptions): string[] {
+  if (format.contdMode !== 'strip' || !CONTD_CUE.test(fountainText)) return [];
+  return [
+    "contdMode \"strip\" was not applied: (CONT'D) is written into the .fountain " +
+      'when the PDF is read, so it cannot be removed from Fountain input. ' +
+      'Re-convert the original PDF with this setting to strip it.',
+  ];
+}
+
 /** Pipeline for Fountain text input (stage 1 skipped). */
 export async function convertFountain(
   fountainText: string,
@@ -131,5 +155,13 @@ export async function convertFountain(
   const meta = resolveMeta(detected, opts);
   const { epub, mobi, previewHtml } = await renderBooks(fountainText, meta, opts.mobi ?? false, format);
 
-  return { epub, mobi, previewHtml, fountainText, screenplay: null, meta, warnings: [] };
+  return {
+    epub,
+    mobi,
+    previewHtml,
+    fountainText,
+    screenplay: null,
+    meta,
+    warnings: stageOneWarnings(fountainText, format),
+  };
 }

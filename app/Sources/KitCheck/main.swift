@@ -317,6 +317,14 @@ let phone = DevicePreset.phone.settings
 check(phone.dualDialogue == "sequential", "phone preset uses sequential dual dialogue")
 check(phone.dialogueSideMarginPct < FormatSettings.defaults.dialogueSideMarginPct, "phone preset widens the dialogue column")
 check(DevicePreset.allCases.count == 2, "two device presets ship")
+check(DevicePreset.matching(FormatSettings.defaults) == .kindleEink,
+      "baseline defaults are recognised as the Kindle e-ink preset")
+check(DevicePreset.matching(DevicePreset.phone.settings) == .phone,
+      "phone preset settings are recognised as the phone preset")
+var tuned = FormatSettings.defaults
+tuned.dialogueSideMarginPct = 7
+check(DevicePreset.matching(tuned) == nil,
+      "settings tuned away from every preset match none")
 
 // — export formats —
 let exDir = tempDir("export")
