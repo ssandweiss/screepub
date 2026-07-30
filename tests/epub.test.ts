@@ -171,6 +171,12 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
     expect(keep).toContain('page-break-inside: avoid');
     expect(keep).toContain('break-inside: avoid');
   });
+
+  test('transitions may end a page but never begin one', () => {
+    const t = SCREENPLAY_CSS.match(/p\.transition\s*{[^}]*}/)![0];
+    expect(t).toContain('page-break-before: avoid');
+    expect(t).toContain('break-before: avoid');
+  });
 });
 
 // ── buildEpub ────────────────────────────────────────────

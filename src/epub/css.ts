@@ -147,10 +147,14 @@ table.dual-dialogue td {
   padding: 0 2%;
 }
 
+/* A transition belongs to the shot before it: it may end a page, never
+   begin one (the universal print rule, docs/pagination-reference.md). */
 p.transition {
   text-align: right;
   text-transform: uppercase;
   margin: ${em(gap)} 0;
+  page-break-before: avoid;
+  break-before: avoid;
 }
 
 p.centered {
