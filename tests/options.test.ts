@@ -120,13 +120,14 @@ describe('screenplayCss with options', () => {
 // ── tokensToBody(options) ────────────────────────────────
 
 describe('tokensToBody with options', () => {
-  test('scene-heading keep-together wrapper can be disabled', () => {
-    // Governs the HEADING wrapper only — the cue-keeps-dialogue wrapper
-    // inside dialogue blocks is always on.
-    const off = tokensToBody(tokens(), { format: resolveFormatOptions({ keepSceneHeadingWithScene: false }) });
-    expect(off.files[0].xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
-    const on = tokensToBody(tokens(), { format: resolveFormatOptions({}) });
-    expect(on.files[0].xhtml).toMatch(/<div class="keep-together">\s*<h2/);
+  test('keepSceneHeadingWithScene gates the heading break-after rule', () => {
+    const on = screenplayCss(resolveFormatOptions({}));
+    expect(on.match(/h2\.scene-heading\s*{[^}]*}/)![0]).toContain('break-after: avoid');
+    const off = screenplayCss(resolveFormatOptions({ keepSceneHeadingWithScene: false }));
+    expect(off.match(/h2\.scene-heading\s*{[^}]*}/)![0]).not.toContain('break-after');
+    // markup carries no wrapper either way
+    const body = tokensToBody(tokens(), { format: resolveFormatOptions({}) });
+    expect(body.files[0].xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
   });
 
   test('scene numbers render in headings when enabled', () => {

@@ -54,28 +54,28 @@ describe('tokensToBody', () => {
     expect(body.toc[1].href).toContain('body002.xhtml#sc-002');
   });
 
-  test('scene heading + first block are wrapped to keep together across page breaks', () => {
+  test('scene heading leads its scene bare — the keep is the CSS chain, not a wrapper', () => {
     const [file] = tokensToBody(sampleTokens()).files;
-    // Heading and the scene's first paragraph share an unbreakable wrapper
-    // so a heading never strands at a page bottom.
     expect(file.xhtml).toMatch(
-      /<div class="keep-together">\s*<h2 class="scene-heading">INT\. KITCHEN - DAY<\/h2>\s*<p class="action">Jack enters, exhausted\.<\/p>\s*<\/div>/,
+      /<section class="scene" id="sc-001">\s*<h2 class="scene-heading">INT\. KITCHEN - DAY<\/h2>\s*<p class="action">Jack enters, exhausted\.<\/p>/,
     );
+    expect(file.xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
   });
 
-  test('a dialogue block directly after a heading keeps together as one unit', () => {
+  test('a dialogue block follows its heading directly — no outer wrapper', () => {
     const tokens = new Fountain().parse('INT. CAR - DAY\n\n@DEV\nDrive.\n\nThey drive.\n', true).tokens;
     const [file] = tokensToBody(tokens).files;
     expect(file.xhtml).toMatch(
-      /<div class="keep-together">\s*<h2 class="scene-heading">INT\. CAR - DAY<\/h2>\s*<div class="dialogue-block">[\s\S]*?<\/div>\s*<\/div>\s*<p class="action">They drive\.<\/p>/,
+      /<h2 class="scene-heading">INT\. CAR - DAY<\/h2>\s*<div class="dialogue-block">/,
     );
+    expect(file.xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
   });
 
-  test('heading-only scene wraps without error', () => {
+  test('heading-only scene renders bare without error', () => {
     const tokens = new Fountain().parse('INT. VOID - DAY\n\nEXT. VOID - NIGHT\n\nStars.\n', true).tokens;
     const [file] = tokensToBody(tokens).files;
     expect(file.xhtml).toMatch(
-      /<div class="keep-together">\s*<h2 class="scene-heading">INT\. VOID - DAY<\/h2>\s*<\/div>/,
+      /<section class="scene" id="sc-001">\s*<h2 class="scene-heading">INT\. VOID - DAY<\/h2>\s*<\/section>/,
     );
   });
 

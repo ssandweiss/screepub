@@ -35,6 +35,12 @@ export function screenplayCss(o: FormatOptions): string {
   const speechKeep = o.keepSpeechesWhole
     ? '\n  page-break-inside: avoid;\n  break-inside: avoid;'
     : '';
+  // The heading keep is a CHAIN, not a wrapper: break-after on the h2
+  // holds it to whatever follows, without making the whole first block
+  // unbreakable (the old wrapper pushed half-page chunks; registry #5a).
+  const headingKeep = o.keepSceneHeadingWithScene
+    ? '\n  page-break-after: avoid;\n  break-after: avoid;'
+    : '';
 
   return `
 html, body {
@@ -46,8 +52,8 @@ body {
   font-family: ${FONT_STACKS[o.fontFamily]};
 }
 ${sceneBreak}
-/* Slugline + the scene's first block ride together across page breaks —
-   if the pair doesn't fit at a page bottom, both move to the next page.
+/* The cue keep: cue + parentheticals + first dialogue line share this
+   unbreakable wrapper so a cue never strands at a page bottom.
    Container-level inside-avoid is the KDP-documented keep-together form. */
 .keep-together {
   page-break-inside: avoid;
@@ -58,9 +64,7 @@ h2.scene-heading {
   font-size: 1em;
   font-weight: bold;
   text-transform: uppercase;
-  margin: ${em(gap * 1.6)} 0 ${em(gap)} 0;
-  page-break-after: avoid;
-  break-after: avoid;
+  margin: ${em(gap * 1.6)} 0 ${em(gap)} 0;${headingKeep}
 }
 
 span.scene-number {

@@ -78,8 +78,7 @@ interface MarkerState {
 
 /**
  * Render body tokens (no title-page tokens) as discrete blocks — one string
- * per paragraph, with a complete dialogue block as a single string. Discrete
- * blocks let the section assembler wrap heading + first block together.
+ * per paragraph, with a complete dialogue block as a single string.
  */
 function renderBlocks(
   tokens: Token[],
@@ -201,27 +200,6 @@ function renderBlocks(
   return blocks;
 }
 
-/**
- * A scene's heading and its first block share an unbreakable wrapper so a
- * slugline never strands at a page bottom — the pair moves to the next page
- * together. `page-break-inside: avoid` on a container is the form Amazon
- * documents for exactly this ("headlines with paragraphs to keep together").
- */
-function renderScene(
-  tokens: Token[],
-  startsWithHeading: boolean,
-  format: FormatOptions,
-  markers?: MarkerState,
-): string {
-  const blocks = renderBlocks(tokens, format, markers);
-  if (!startsWithHeading || !format.keepSceneHeadingWithScene || blocks.length === 0) {
-    return blocks.join('');
-  }
-  const kept = blocks.slice(0, 2).join('');
-  const rest = blocks.slice(2).join('');
-  return `<div class="keep-together">\n${kept}</div>\n${rest}`;
-}
-
 interface SceneSection {
   anchor: string;
   title: string;
@@ -264,9 +242,8 @@ export function tokensToBody(
   const markers: MarkerState = { pending: null, landed: [] };
   const sections: SceneSection[] = groups.map((g, i) => {
     const anchor = `sc-${String(i + 1).padStart(3, '0')}`;
-    const startsWithHeading = g.tokens[0]?.type === 'scene_heading';
     markers.landed = [];
-    const html = `<section class="scene" id="${anchor}">\n${renderScene(g.tokens, startsWithHeading, format, markers)}</section>\n`;
+    const html = `<section class="scene" id="${anchor}">\n${renderBlocks(g.tokens, format, markers).join('')}</section>\n`;
     return { anchor, title: g.title, html, pageLabels: markers.landed };
   });
 
