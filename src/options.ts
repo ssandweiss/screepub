@@ -13,7 +13,7 @@ export interface FormatOptions {
   parentheticalIndentPct: number;
   /** blank space between elements, em (registry #3) */
   elementSpacingEm: number;
-  /** slugline + first block ride together across page breaks (registry #5a) */
+  /** heading holds to what follows via break-after: avoid (registry #5a) */
   keepSceneHeadingWithScene: boolean;
   /** whole speeches ride one page: dialogue blocks become unbreakable;
    * off = the proven default, cue + first line keep only (registry #8c) */

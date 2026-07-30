@@ -226,9 +226,10 @@ future work; everything else is live.
   tables photo-confirmed readable on device in AZW3; not yet
   re-verified in sideloaded KFX.
 - **What:** inside each dialogue block, cue + parentheticals + the first
-  dialogue line share a `keep-together` wrapper (same KDP-documented
-  container form as scene headings) so a cue never strands at a page
-  bottom with its speech overleaf (user-requested 2026-07-22).
+  dialogue line share a `keep-together` wrapper (the KDP-documented
+  container form; scene headings no longer use it — see #5a) so a cue
+  never strands at a page bottom with its speech overleaf
+  (user-requested 2026-07-22).
 - **Code:** `src/epub/html.ts` (`closeSpeech`).
 
 ### 8c. Whole-speech keep (option, default OFF; 2026-07-30)
