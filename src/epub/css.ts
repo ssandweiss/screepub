@@ -18,6 +18,9 @@
 //     break-inside: avoid  .keep-together (the cue keep)
 //     break-inside: avoid  table.dual-dialogue
 //     break-inside: avoid  .dialogue-block (gated: keepSpeechesWhole, off)
+//   Plus the one FORCED break, which is not an avoid link and so grows no
+//   chunk — it ends a page rather than refusing to:
+//     page-break-before: always  section.scene (gated: scenePageBreaks, off)
 import type { FormatOptions } from '../options';
 import { DEFAULT_FORMAT_OPTIONS } from '../options';
 
@@ -162,7 +165,8 @@ table.dual-dialogue td {
 }
 
 /* A transition belongs to the shot before it: it may end a page, never
-   begin one (the universal print rule, docs/pagination-reference.md). */
+   begin one (the universal print rule, docs/pagination-reference.md §2 —
+   that doc lands from branch worktree-device-map). */
 p.transition {
   text-align: right;
   text-transform: uppercase;

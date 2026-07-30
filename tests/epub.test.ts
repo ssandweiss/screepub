@@ -218,6 +218,30 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
     expect(t).toContain('page-break-before: avoid');
     expect(t).toContain('break-before: avoid');
   });
+
+  // Every avoid link grows the chunk a renderer pushes, so the inventory is
+  // deliberately closed and written out in the css.ts header. Pin it: a new
+  // keep cannot slip in without this failing and sending its author to the
+  // header comment. Both spellings are emitted for each rule, hence 2 per
+  // selector. Default options, so the two gated-off entries
+  // (`.dialogue-block`, `section.scene`) are absent by design.
+  test('the avoid inventory is closed — six selectors, twelve declarations', () => {
+    const declarations =
+      SCREENPLAY_CSS.match(/^\s*(?:page-)?break-(?:after|before|inside):\s*avoid;/gm) ?? [];
+    expect(declarations).toHaveLength(12);
+
+    const carrying = [...SCREENPLAY_CSS.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+      .filter(([, , body]) => /:\s*avoid;/.test(body))
+      .map(([, selector]) => selector.trim().split('\n').pop()!.trim());
+    expect(carrying).toEqual([
+      '.keep-together',
+      'h2.scene-heading',
+      'p.mini-slug',
+      'p.character',
+      'table.dual-dialogue',
+      'p.transition',
+    ]);
+  });
 });
 
 // ── buildEpub ────────────────────────────────────────────
