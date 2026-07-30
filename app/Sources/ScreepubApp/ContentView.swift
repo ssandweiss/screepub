@@ -19,6 +19,9 @@ struct ContentView: View {
     @State private var transferNote: String?
     @AppStorage("kindleEmail") private var kindleEmail = ""
     @AppStorage("koboKepub") private var koboKepub = false
+    /// Last destination the user actually sent to. Empty on first run, when
+    /// the ordering in ResultActions.routes supplies the opening guess.
+    @AppStorage("lastDestination") private var lastDestination = ""
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
 
@@ -303,19 +306,24 @@ struct ContentView: View {
         }
     }
 
-    /// Exactly one emphasized route OUT of the app. A mounted volume device
-    /// owns that slot when there is one (its own button is already brass), so
-    /// SAVE takes it whenever no volume is mounted — including with a
-    /// reMarkable docked, which never mounts and so never enters `devices`.
-    ///
-    /// PREVIEW SCRIPT is also brass and deliberately stays that way: it opens
-    /// the in-app reader rather than sending the book anywhere, so it competes
-    /// for attention but not for this slot. Two brass buttons on screen is
-    /// expected — verified on device 2026-07-26 and accepted.
-    private var saveACopyStyle: AnyButtonStyle {
-        ResultActions.primary(devices: devices) == .saveCopy
-            ? AnyButtonStyle(BradButtonStyle())
-            : AnyButtonStyle(OutlineButtonStyle())
+    /// Perform a route chosen from the send menu. One switch so the menu and
+    /// its default action can't drift apart.
+    private func run(route: RouteOption, result: EngineResult, epub: URL, title: String?) {
+        switch route.destination {
+        case .device(let device):
+            copyToDevice(result: result, epub: epub, device: device)
+        case .remarkable:
+            sendToRemarkable(epub: epub)
+        case .appleBooks:
+            AppleBooks.send(epub)
+            transferNote = "added to Apple Books — it syncs to your iPhone and iPad if Books iCloud is on"
+        case .sendToKindle:
+            SendToKindle.sendViaAmazon(epub)
+        case .emailToKindle:
+            emailToKindle(epub, title: title)
+        case .saveCopy:
+            saveACopy(result: result, epub: epub)
+        }
     }
 
     private var kindleAddress: String {
@@ -338,67 +346,58 @@ struct ContentView: View {
                 }
                 .buttonStyle(BradButtonStyle())
             }
-            ForEach(devices) { device in
-                Button("COPY TO \(device.name.uppercased()) — USB") {
-                    copyToDevice(result: result, epub: epub, device: device)
-                }
-                .buttonStyle(BradButtonStyle())
-            }
-            Button("SAVE") {
-                saveACopy(result: result, epub: epub)
-            }
-            .buttonStyle(saveACopyStyle)
+            // One decision — where is this going? — instead of a stack of
+            // peers. The best route is the button; everything else is one
+            // click away in its menu, named by destination with the
+            // mechanism demoted to the detail line.
+            let routes = ResultActions.routes(
+                devices: devices,
+                remarkableDocked: remarkableUp,
+                booksAvailable: AppleBooks.isAvailable,
+                canEmailToKindle: SendToKindle.defaultMailClientIsAppleMail)
 
-            Button(SendToKindle.appIsInstalled ? "SEND TO KINDLE APP" : "SEND TO KINDLE — WEB") {
-                SendToKindle.sendViaAmazon(epub)
-            }
-            .buttonStyle(OutlineButtonStyle())
+            let chosen = ResultActions.preselected(in: routes, lastChosen: lastDestination.isEmpty ? nil : lastDestination)
 
-            // Books reads the EPUB as-is — no conversion, and WebKit honours
-            // the page-break rules a Kindle sideload ignores. Adding it here
-            // is also how a script reaches an iPhone or iPad: Books syncs the
-            // library through the user's own iCloud account.
-            if AppleBooks.isAvailable {
-                Button("OPEN IN APPLE BOOKS") {
-                    AppleBooks.send(epub)
-                    transferNote = "added to Apple Books — it syncs to your iPhone and iPad if Books iCloud is on"
+            // The destination is picked, not guessed at. Every route is one
+            // click away in the popup and the current one is readable
+            // without opening anything, so a wrong pre-selection costs a
+            // click rather than an unwanted send.
+            Picker("Send to", selection: Binding(
+                get: { chosen.destination.storageKey },
+                set: { lastDestination = $0 }
+            )) {
+                ForEach(routes) { route in
+                    Text(route.title).tag(route.destination.storageKey)
                 }
-                .buttonStyle(OutlineButtonStyle())
             }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .font(Theme.courier(12))
 
-            // Only Apple Mail actually attaches the file: with a third-party
-            // default client macOS degrades the compose to a mailto: URL,
-            // which carries no attachment (RFC 6068) and still reports
-            // success. Offer the route only where it works.
-            if SendToKindle.defaultMailClientIsAppleMail {
-                Button("EMAIL TO KINDLE…") {
-                    emailToKindle(epub, title: title)
-                }
-                .buttonStyle(OutlineButtonStyle())
-            }
+            Text(chosen.detail)
+                .font(Theme.courier(10))
+                .foregroundStyle(Theme.inkFaint)
+                .frame(maxWidth: .infinity, alignment: .center)
 
-            // reMarkable uploads over its USB web interface rather than being
-            // copied to, so ResultActions never gives it the primary slot.
-            if remarkableUp {
-                Button("SEND TO REMARKABLE — USB") {
-                    sendToRemarkable(epub: epub)
-                }
-                .buttonStyle(OutlineButtonStyle())
+            Button("SEND") {
+                lastDestination = chosen.destination.storageKey
+                run(route: chosen, result: result, epub: epub, title: title)
             }
+            .buttonStyle(BradButtonStyle())
 
             if !kindleAddress.isEmpty {
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(kindleAddress, forType: .string)
-                    transferNote = "copied \(kindleAddress) — attach the file to a new message and send"
+                    transferNote = "copied \(kindleAddress) — Amazon discards mail from senders you haven't approved"
                 } label: {
-                    Text("Or email it to \(kindleAddress)")
+                    Text("Copy my Kindle address")
                         .font(Theme.courier(10))
                         .foregroundStyle(Theme.inkFaint)
                         .underline()
                 }
                 .buttonStyle(.plain)
-                .help("Copies the address. Amazon only accepts documents sent FROM an address on your Approved Personal Document E-mail List — mail from anywhere else is discarded silently, with no bounce. Add your sender address at amazon.com → Manage Your Content and Devices → Preferences.")
+                .help("Amazon only accepts documents sent FROM an address on your Approved Personal Document E-mail List — mail from anywhere else is discarded silently, with no bounce.")
             }
 
             HStack(spacing: 22) {

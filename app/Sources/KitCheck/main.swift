@@ -357,17 +357,71 @@ try! Data("v2".utf8).write(to: copySrc)
 try! Export.copy(copySrc, to: copyDest)
 check((try? String(contentsOf: copyDest, encoding: .utf8)) == "v2", "Export.copy re-copy overwrites")
 
-// — which action owns the primary slot —
+// — route ordering: this IS the send menu, so it is checked here rather
+//   than re-derived as conditionals in two views —
 let kindleDev = ConnectedDevice(kind: .kindle, name: "Kindle", volume: URL(fileURLWithPath: "/Volumes/Kindle"))
 let rmDev = ConnectedDevice(kind: .remarkable, name: "reMarkable", volume: nil)
-check(ResultActions.primary(devices: []) == .saveCopy,
-      "no devices -> Save a Copy is promoted to primary")
-check(ResultActions.primary(devices: [kindleDev]) == .transfer(kindleDev),
-      "a mounted Kindle takes the primary slot")
-check(ResultActions.primary(devices: [rmDev]) == .saveCopy,
-      "reMarkable alone does not take primary (it lives under More ways)")
-check(ResultActions.primary(devices: [rmDev, kindleDev]) == .transfer(kindleDev),
-      "a volume device wins over a docked reMarkable")
+
+check(ResultActions.primary(devices: [kindleDev]).destination == .device(kindleDev),
+      "a plugged-in Kindle is the default route")
+check(ResultActions.primary(devices: [], booksAvailable: true).destination == .appleBooks,
+      "no device -> Apple Books leads, being local and instant")
+check(ResultActions.primary(devices: [], booksAvailable: false).destination == .sendToKindle,
+      "no device and no Books -> Send to Kindle leads")
+check(ResultActions.primary(devices: [rmDev]).destination != .device(rmDev),
+      "reMarkable never arrives as a volume device")
+check(ResultActions.primary(devices: [], remarkableDocked: true).destination == .remarkable,
+      "a docked reMarkable outranks Books")
+check(ResultActions.primary(devices: [kindleDev], remarkableDocked: true).destination == .device(kindleDev),
+      "a plugged-in volume still wins over a docked reMarkable")
+
+// Save is the floor: some route is always offered, whatever is connected.
+for books in [true, false] {
+    for mail in [true, false] {
+        let r = ResultActions.routes(devices: [], booksAvailable: books, canEmailToKindle: mail)
+        check(!r.isEmpty, "routes never empty (books:\(books) mail:\(mail))")
+        check(r.contains { $0.destination == .saveCopy },
+              "Save is always offered (books:\(books) mail:\(mail))")
+        check(Set(r.map(\.id)).count == r.count,
+              "no duplicate routes (books:\(books) mail:\(mail))")
+    }
+}
+check(!ResultActions.routes(devices: [], canEmailToKindle: false)
+        .contains { $0.destination == .emailToKindle },
+      "email route hidden when Apple Mail can't attach")
+check(!ResultActions.routes(devices: [], booksAvailable: false)
+        .contains { $0.destination == .appleBooks },
+      "Books route hidden when Books is absent")
+
+// — a remembered choice outranks the ordering heuristic —
+let allRoutes = ResultActions.routes(devices: [kindleDev], booksAvailable: true)
+check(ResultActions.preselected(in: allRoutes, lastChosen: nil).destination == .device(kindleDev),
+      "first run falls back to the ordering")
+check(ResultActions.preselected(in: allRoutes, lastChosen: "sendToKindle").destination == .sendToKindle,
+      "a remembered choice wins over a plugged-in device")
+check(ResultActions.preselected(in: allRoutes, lastChosen: "appleBooks").destination == .appleBooks,
+      "remembered Apple Books survives a connected Kindle")
+// A remembered route that is no longer offered must not strand the user.
+let noBooks = ResultActions.routes(devices: [], booksAvailable: false)
+check(ResultActions.preselected(in: noBooks, lastChosen: "appleBooks").destination == .sendToKindle,
+      "an unavailable remembered route falls back instead of vanishing")
+check(ResultActions.preselected(in: noBooks, lastChosen: "device:kindle").destination == .sendToKindle,
+      "a remembered device that is unplugged falls back")
+check(Destination.device(kindleDev).storageKey == "device:kindle",
+      "device key is by kind, not volume path")
+
+// — version comparison for the updater —
+check(UpdateCheck.isNewer("v0.4.0", than: "0.3.0"), "tag with a v prefix compares cleanly")
+check(UpdateCheck.isNewer("0.10.0", than: "0.9.0"),
+      "0.10.0 beats 0.9.0 — string ordering would get this backwards")
+check(!UpdateCheck.isNewer("0.3.0", than: "0.3.0"), "same version is not an update")
+check(!UpdateCheck.isNewer("0.2.9", than: "0.3.0"), "older version is not an update")
+check(UpdateCheck.isNewer("0.3.0", than: "0.3.0-dev"),
+      "a dev build is offered the matching stable release")
+check(!UpdateCheck.isNewer("0.3.0-beta.1", than: "0.3.0"),
+      "a pre-release does not supersede the release")
+check(UpdateCheck.isNewer("1.0.0", than: "0.99.99"), "major bump wins")
+check(!UpdateCheck.isNewer("0.3.0+ci.7", than: "0.3.0"), "build metadata is not a version bump")
 
 // — default mail client detection (value is machine-dependent) —
 let isAppleMail = await MainActor.run { SendToKindle.defaultMailClientIsAppleMail }
