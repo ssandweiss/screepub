@@ -13,7 +13,7 @@
 #
 #   tools/kfx-experiment.sh <script.pdf|script.fountain>
 #
-# Needs: Kindle Previewer 3 (>= 3.32) for KFX, Calibre for the AZW3 arm,
+# Needs: Calibre + KFX Output plugin (which needs Kindle Previewer 3),
 # and a Kindle mounted as a USB volume.
 set -euo pipefail
 
@@ -38,24 +38,17 @@ bun "$ROOT/src/cli.ts" "$INPUT" -o "$WORK/kfx-arm.epub"  --no-fountain --title "
 bun "$ROOT/src/cli.ts" "$INPUT" -o "$WORK/azw3-arm.epub" --no-fountain --title "AAA AZW3 TEST"
 [ -f "$WORK/kfx-arm.epub" ] || { echo "engine produced no EPUB" >&2; exit 1; }
 
-# 2 ── arm A: KFX, via Amazon's own converter
-say "arm A — KFX (Kindle Previewer)"
-if [ ! -x "$PREVIEWER" ]; then
-  echo "Kindle Previewer 3 not found — install it, then re-run." >&2
-  exit 1
-fi
-mkdir -p "$WORK/kpf"
-# Same argv the calibre KFX Output plugin uses. Previewer emits a .kpf, which
-# is a KFX package; recent firmware reads it directly when sideloaded.
-"$PREVIEWER" "$WORK/kfx-arm.epub" -convert -locale en -output "$WORK/kpf" \
-  >"$WORK/previewer.log" 2>&1 || true
-KPF="$(find "$WORK/kpf" -name '*.kpf' -type f 2>/dev/null | head -1)"
-if [ -z "$KPF" ]; then
-  echo "Previewer produced no .kpf — tail of its log:" >&2
-  tail -25 "$WORK/previewer.log" >&2
-  exit 1
-fi
-echo "kpf: $(basename "$KPF")  ($(du -h "$KPF" | cut -f1))"
+# 2 ── arm A: a real .kfx, via the KFX Output plugin (which drives Kindle
+# Previewer internally, then repacks the KPF into device-ready KFX — copying
+# the raw .kpf was tried first and the device never indexed it).
+say "arm A — KFX (ebook-convert + KFX Output plugin)"
+EBOOK_CONVERT="/Applications/calibre.app/Contents/MacOS/ebook-convert"
+[ -x "$EBOOK_CONVERT" ] || { echo "calibre required for both arms" >&2; exit 1; }
+"$EBOOK_CONVERT" "$WORK/kfx-arm.epub" "$WORK/AAA KFX TEST.kfx" \
+  --disable-remove-fake-margins >"$WORK/kfx.log" 2>&1 \
+  || { echo "KFX conversion failed:" >&2; tail -8 "$WORK/kfx.log" >&2; exit 1; }
+KPF="$WORK/AAA KFX TEST.kfx"
+echo "kfx: $(du -h "$KPF" | cut -f1)"
 
 # 3 ── arm B: AZW3, the current sideload route, as control
 say "arm B — AZW3 (current route)"
