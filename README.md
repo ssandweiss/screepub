@@ -226,7 +226,7 @@ bun src/cli.ts <input.pdf | input.fountain> [options]
 ### Fountain input — partial support
 
 PDF is the primary path. `.fountain` input is **partially supported**: the
-render pipeline runs in full and 13 of the 15 formatting options apply
+render pipeline runs in full and 14 of the 16 formatting options apply
 normally, but two do not, because they are consumed in
 `src/fountain/serialize.ts` — upstream of the `.fountain` itself, where the
 pipeline's durable artifact begins.
