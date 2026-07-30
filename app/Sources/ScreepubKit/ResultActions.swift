@@ -49,11 +49,20 @@ public struct RouteOption: Equatable, Sendable, Identifiable {
     /// carries the plug-it-in instruction while it does.
     public let available: Bool
 
-    /// One identity, the same one the picker keys rows and remembered
-    /// choices by. Unique in any list `routes()` builds: placeholders
-    /// exclude connected kinds, and the remarkable/email rows are
-    /// available-XOR-placeholder.
-    public var id: String { destination.storageKey }
+    /// Row identity for pickers and ForEach — NOT the remembered-choice key
+    /// (that stays `destination.storageKey`, by kind). A connected device
+    /// appends its volume path so two same-kind devices are two rows: keyed
+    /// by kind alone, the second Kindle's row would collide with the first
+    /// and a send aimed at it would land on the first one's volume.
+    /// Placeholders (no volume) fall back to the storage key, which stays
+    /// unique because placeholders exclude connected kinds and the
+    /// remarkable/email rows are available-XOR-placeholder.
+    public var id: String {
+        if case .device(let d) = destination, let volume = d.volume {
+            return "\(destination.storageKey)#\(volume.path)"
+        }
+        return destination.storageKey
+    }
 
     public init(destination: Destination, title: String, detail: String, button: String,
                 available: Bool = true) {
@@ -90,7 +99,9 @@ public enum ResultActions {
         devices: [ConnectedDevice],
         remarkableDocked: Bool = false,
         booksAvailable: Bool = true,
-        canEmailToKindle: Bool = false
+        canEmailToKindle: Bool = false,
+        sendToKindleApp: Bool = false,
+        inputIsPDF: Bool = true
     ) -> [RouteOption] {
         var routes: [RouteOption] = []
 
@@ -102,10 +113,14 @@ public enum ResultActions {
                 button: "Copy to \(device.name)"))
         }
         if remarkableDocked {
+            // The slip names the actual payload: fountain input has no
+            // original PDF, and the upload falls back to the EPUB.
             routes.append(RouteOption(
                 destination: .remarkable,
                 title: "reMarkable",
-                detail: "the original PDF, over its USB connection",
+                detail: inputIsPDF
+                    ? "the original PDF, over its USB connection"
+                    : "the EPUB, over its USB connection",
                 button: "Upload to reMarkable"))
         }
         if booksAvailable {
@@ -115,11 +130,15 @@ public enum ResultActions {
                 detail: "syncs to your iPhone and iPad",
                 button: "Add to Apple Books"))
         }
+        // Same executor either way (sendViaAmazon), but the label follows
+        // what will actually open: the native app when installed, the web
+        // uploader otherwise. "The click is never a surprise" includes this.
+        let sendToKindleName = sendToKindleApp ? "Send to Kindle app" : "Send to Kindle web"
         routes.append(RouteOption(
             destination: .sendToKindle,
-            title: "Send to Kindle web",
+            title: sendToKindleName,
             detail: "via Amazon, the best-looking Kindle result",
-            button: "Send to Kindle web"))
+            button: sendToKindleName))
         if canEmailToKindle {
             routes.append(RouteOption(
                 destination: .emailToKindle,

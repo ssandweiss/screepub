@@ -37,16 +37,54 @@ public enum KFXToolchain {
         public var ready: Bool { calibre && previewer && pluginInstalled }
     }
 
-    /// Blocking (spawns `calibre-customize` to list plugins, ~1s of Python
-    /// startup) — call from a background task, never the main thread.
-    nonisolated public static func status() -> Status {
+    /// Blocking on a cache miss (spawns `calibre-customize` to list
+    /// plugins, ~1s of Python startup) — call from a background task,
+    /// never the main thread. The answer changes when the user installs
+    /// or removes a tool, not between two sends in the same minute, so
+    /// it is cached briefly: `installPlugin()` invalidates, and
+    /// `maxAge: 0` forces a fresh probe (the Settings pane wants truth,
+    /// not a cache, right after the user installed something).
+    nonisolated public static func status(maxAge: TimeInterval = 60) -> Status {
+        statusCacheLock.lock()
+        if let cached = cachedStatus, Date().timeIntervalSince(cached.at) < maxAge {
+            let value = cached.value
+            statusCacheLock.unlock()
+            return value
+        }
+        statusCacheLock.unlock()
         let calibre = calibreCustomizeURL() != nil
-        return Status(
+        let fresh = Status(
             calibre: calibre,
             previewer: previewerURL() != nil,
             pluginInstalled: calibre && pluginInstalled()
         )
+        statusCacheLock.lock()
+        cachedStatus = (fresh, Date())
+        statusCacheLock.unlock()
+        return fresh
     }
+
+    /// Forget the cached probe — after anything that changes the toolchain.
+    nonisolated public static func invalidateStatusCache() {
+        statusCacheLock.lock()
+        cachedStatus = nil
+        statusCacheLock.unlock()
+    }
+
+    private static let statusCacheLock = NSLock()
+    nonisolated(unsafe) private static var cachedStatus: (value: Status, at: Date)?
+
+    /// The three flags that stop Calibre's PREPROCESSING (which runs
+    /// before any output plugin) from undoing Screepub's formatting on ANY
+    /// Calibre-driven conversion, AZW3 and KFX alike: page-break insertion
+    /// on every h2 (scene-per-page again) and remove-fake-margins deleting
+    /// the dialogue column's side margins. Device-verified 2026-07-29 —
+    /// change them in one place or not at all.
+    public static let calibreFormatGuards = [
+        "--page-breaks-before=/",
+        "--chapter-mark=none",
+        "--disable-remove-fake-margins",
+    ]
 
     nonisolated public static func previewerURL() -> URL? {
         existing("/Applications/Kindle Previewer 3.app")
@@ -127,6 +165,7 @@ public enum KFXToolchain {
         guard pluginInstalled() else {
             throw SetupError.installFailed("calibre-customize succeeded but the plugin doesn't list")
         }
+        invalidateStatusCache()
     }
 
     // MARK: - Conversion
@@ -165,17 +204,15 @@ public enum KFXToolchain {
     @discardableResult
     nonisolated public static func convert(
         _ epub: URL,
-        precheckedReady: Bool = false,
         onStage: (@Sendable (String) -> Void)? = nil
     ) throws -> URL {
-        // status() spawns calibre-customize (~1s); a caller that just
-        // probed can vouch instead of paying for the same fact twice.
-        if !precheckedReady {
-            let current = status()
-            guard current.ready else { throw ConvertError.toolchainNotReady(current) }
-        }
+        // status() is cached, so validating here is ~free for a caller
+        // that just probed — and no caller-vouched bypass flag exists to
+        // pass trust instead of fact.
+        let current = status()
+        guard current.ready else { throw ConvertError.toolchainNotReady(current) }
         guard let tool = ebookConvertURL() else {
-            throw ConvertError.toolchainNotReady(status())
+            throw ConvertError.toolchainNotReady(status(maxAge: 0))
         }
         let kfx = epub.deletingPathExtension().appendingPathExtension("kfx")
         var lineHandler: (@Sendable (String) -> Void)? = nil
@@ -184,20 +221,44 @@ public enum KFXToolchain {
                 if let named = stage(for: line) { report(named) }
             }
         }
+        // ebook-convert (and the KFX plugin inside it) writes the output
+        // path truncate-then-write. Aimed at the final path, a kill or
+        // disk-full mid-write would leave a partial .kfx NEWER than its
+        // EPUB — which the ladder's staleness reuse would trust forever.
+        // So the tool writes into a scratch sibling, and only a completed
+        // conversion is renamed into place.
+        let scratch = scratchURL(for: epub)
+        try? FileManager.default.removeItem(at: scratch)
         do {
-            _ = try run(tool: tool, arguments: [
-                epub.path, kfx.path,
-                "--page-breaks-before=/",
-                "--chapter-mark=none",
-                "--disable-remove-fake-margins",
-            ], onLine: lineHandler)
+            _ = try run(tool: tool,
+                        arguments: [epub.path, scratch.path] + calibreFormatGuards,
+                        onLine: lineHandler)
         } catch let error as ToolRunError {
+            try? FileManager.default.removeItem(at: scratch)
             throw ConvertError.failed(error.detail)
         }
-        guard FileManager.default.fileExists(atPath: kfx.path) else {
+        guard FileManager.default.fileExists(atPath: scratch.path) else {
             throw ConvertError.failed("ebook-convert exited cleanly but produced no .kfx")
         }
+        do {
+            try? FileManager.default.removeItem(at: kfx)
+            try FileManager.default.moveItem(at: scratch, to: kfx)
+        } catch {
+            try? FileManager.default.removeItem(at: scratch)
+            throw ConvertError.failed("couldn't move the finished KFX into place: \(error.localizedDescription)")
+        }
         return kfx
+    }
+
+    /// Hidden same-directory scratch the conversion writes into. Same
+    /// directory means same volume, so the final promote is a rename; the
+    /// .kfx extension survives (calibre derives the output format from
+    /// it); the leading dot keeps Finder, library scans, and the
+    /// staleness rung blind to it.
+    public nonisolated static func scratchURL(for epub: URL) -> URL {
+        let stem = epub.deletingPathExtension().lastPathComponent
+        return epub.deletingLastPathComponent()
+            .appendingPathComponent(".\(stem).partial.kfx")
     }
 
     /// Map ebook-convert's stdout to something a person waiting can read.
@@ -226,7 +287,7 @@ public enum KFXToolchain {
     private final class LineStream: @unchecked Sendable {
         private let lock = NSLock()
         private var buffer = Data()
-        private(set) var all = Data()
+        private var all = Data()
         private let onLine: @Sendable (String) -> Void
 
         init(onLine: @escaping @Sendable (String) -> Void) {
@@ -247,6 +308,14 @@ public enum KFXToolchain {
             lock.unlock()
             for line in lines { onLine(line) }
         }
+
+        /// The full collected stream, under the lock — a bare stored
+        /// property here was an unsynchronized read racing a locked append.
+        func snapshot() -> Data {
+            lock.lock()
+            defer { lock.unlock() }
+            return all
+        }
     }
 
     /// Run a tool to completion, streaming stdout line-by-line as it
@@ -254,6 +323,13 @@ public enum KFXToolchain {
     /// runner: it drains both pipes concurrently (a chatty child fills a
     /// 64KB pipe buffer and deadlocks against waitUntilExit otherwise),
     /// and callers should inherit that guard rather than re-derive it.
+    ///
+    /// Each pipe gets its own blocking drain loop, and both are JOINED at
+    /// EOF before anything reads the streams. The previous
+    /// readabilityHandler teardown had no happens-before with an in-flight
+    /// callback: the final chunk could still be mid-append while the
+    /// caller read the result — a truncated "KFX Output" listing reads as
+    /// a missing plugin, and a working toolchain silently fell to AZW3.
     @discardableResult
     public nonisolated static func run(
         tool: URL,
@@ -268,21 +344,26 @@ public enum KFXToolchain {
         process.standardError = err
         let stdout = LineStream(onLine: onLine ?? { _ in })
         let stderr = LineStream(onLine: { _ in })
-        out.fileHandleForReading.readabilityHandler = { stdout.consume($0.availableData) }
-        err.fileHandleForReading.readabilityHandler = { stderr.consume($0.availableData) }
         try process.run()
+        let drains = DispatchGroup()
+        for (handle, stream) in [(out.fileHandleForReading, stdout),
+                                 (err.fileHandleForReading, stderr)] {
+            DispatchQueue.global(qos: .utility).async(group: drains) {
+                while true {
+                    let chunk = handle.availableData   // blocks; empty means EOF
+                    if chunk.isEmpty { break }
+                    stream.consume(chunk)
+                }
+            }
+        }
+        drains.wait()
         process.waitUntilExit()
-        out.fileHandleForReading.readabilityHandler = nil
-        err.fileHandleForReading.readabilityHandler = nil
-        // Handlers can lag exit; scoop whatever's left in the pipes.
-        stdout.consume(out.fileHandleForReading.readDataToEndOfFile())
-        stderr.consume(err.fileHandleForReading.readDataToEndOfFile())
         guard process.terminationStatus == 0 else {
-            let detail = String(data: stderr.all, encoding: .utf8)?
+            let detail = String(data: stderr.snapshot(), encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? "no error output"
             throw ToolRunError(detail: String(detail.suffix(300)))
         }
-        return String(data: stdout.all, encoding: .utf8) ?? ""
+        return String(data: stdout.snapshot(), encoding: .utf8) ?? ""
     }
 
     private nonisolated static func existing(_ path: String) -> URL? {

@@ -20,13 +20,24 @@ import KFXKit
     let alert = NSAlert()
     switch await UpdateController.shared.checkNow() {
     case .success(let update?):
+        // An install may already be running from the footer popover; a
+        // second Install button here would be silently swallowed by
+        // install()'s busy guard — offer only what can actually happen.
+        let installRunning = UpdateController.shared.busy
         alert.messageText = "Screepub \(update.version) is available"
-        alert.informativeText = "You're running \(current). " + UpdateController.installConsentText
-        alert.addButton(withTitle: "Install and Relaunch")
-        alert.addButton(withTitle: "View Release")
-        alert.addButton(withTitle: "Later")
+        alert.informativeText = installRunning
+            ? "You're running \(current). This update is already downloading — the app will relaunch when it finishes."
+            : "You're running \(current). " + UpdateController.installConsentText
+        if installRunning {
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "View Release")
+        } else {
+            alert.addButton(withTitle: "Install and Relaunch")
+            alert.addButton(withTitle: "View Release")
+            alert.addButton(withTitle: "Later")
+        }
         switch alert.runModal() {
-        case .alertFirstButtonReturn:
+        case .alertFirstButtonReturn where !installRunning:
             await UpdateController.shared.install()
         case .alertSecondButtonReturn:
             NSWorkspace.shared.open(update.releaseNotesURL)
@@ -111,7 +122,7 @@ struct SettingsView: View {
 
 struct GeneralSettings: View {
     @AppStorage(AppSettings.outputFolderKey) private var outputFolder = ""
-    @AppStorage("updateOptIn") private var updateOptIn = false
+    @AppStorage(AppSettings.updateOptInKey) private var updateOptIn = false
 
     var body: some View {
         Form {
@@ -240,7 +251,9 @@ struct KfxQualitySection: View {
     }
 
     private func refresh() async {
-        status = await Task.detached { KFXToolchain.status() }.value
+        // The Settings pane exists to answer "did my install take?" —
+        // bypass the cache and probe for real.
+        status = await Task.detached { KFXToolchain.status(maxAge: 0) }.value
     }
 }
 

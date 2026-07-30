@@ -25,12 +25,16 @@ struct ContentView: View {
     @AppStorage("welcomed") private var welcomed = false
     /// Consent for the launch-time update check. Off until the user says
     /// otherwise — the welcome page asks once, Settings can change it.
-    @AppStorage("updateOptIn") private var updateOptIn = false
+    @AppStorage(AppSettings.updateOptInKey) private var updateOptIn = false
     @ObservedObject private var updates = UpdateController.shared
     @State private var showUpdatePopover = false
     /// Last destination the user actually sent to. Empty on first run, when
     /// the ordering in ResultActions.routes supplies the opening guess.
     @AppStorage("lastDestination") private var lastDestination = ""
+    /// Session-scoped row selection, keyed by `RouteOption.id` so two
+    /// same-kind devices stay distinguishable; `lastDestination` persists
+    /// only the kind-level storage key across launches.
+    @State private var pickedRouteID: String?
     @Environment(\.openWindow) private var openWindow
 
     private let volumeEvents = NSWorkspace.shared.notificationCenter
@@ -455,8 +459,12 @@ struct ContentView: View {
         case .remarkable:
             sendToRemarkable(epub: epub)
         case .appleBooks:
-            AppleBooks.send(epub)
-            transferNote = "added to Apple Books. It syncs to your iPhone and iPad if Books iCloud is on"
+            // send() reports Books structurally absent; kit-check pins that
+            // return exactly so callers don't announce an add that never
+            // happened.
+            transferNote = AppleBooks.send(epub)
+                ? "added to Apple Books. It syncs to your iPhone and iPad if Books iCloud is on"
+                : "Apple Books isn't available on this Mac"
         case .sendToKindle:
             SendToKindle.sendViaAmazon(epub)
         case .emailToKindle:
@@ -488,9 +496,15 @@ struct ContentView: View {
                 devices: devices,
                 remarkableDocked: remarkableUp,
                 booksAvailable: AppleBooks.isAvailable,
-                canEmailToKindle: SendToKindle.defaultMailClientIsAppleMail)
+                canEmailToKindle: SendToKindle.defaultMailClientIsAppleMail,
+                sendToKindleApp: SendToKindle.appIsInstalled,
+                inputIsPDF: lastInput?.pathExtension.lowercased() == "pdf")
 
-            let chosen = ResultActions.preselected(in: routes, lastChosen: lastDestination.isEmpty ? nil : lastDestination)
+            // A row picked this session wins (it can name a SPECIFIC device
+            // among same-kind twins); if it vanished — device unplugged,
+            // new conversion — fall back to the remembered kind.
+            let chosen = pickedRouteID.flatMap { id in routes.first { $0.id == id } }
+                ?? ResultActions.preselected(in: routes, lastChosen: lastDestination.isEmpty ? nil : lastDestination)
 
             // The destination is picked, not guessed at. Every route is one
             // click away in the popup and the current one is readable
@@ -501,11 +515,16 @@ struct ContentView: View {
             VStack(spacing: 5) {
                 Menu {
                     Picker("Send to", selection: Binding(
-                        get: { chosen.destination.storageKey },
-                        set: { lastDestination = $0 }
+                        get: { chosen.id },
+                        set: { id in
+                            pickedRouteID = id
+                            if let route = routes.first(where: { $0.id == id }) {
+                                lastDestination = route.destination.storageKey
+                            }
+                        }
                     )) {
                         ForEach(routes.filter(\.available)) { route in
-                            Text(route.title).tag(route.destination.storageKey)
+                            Text(route.title).tag(route.id)
                         }
                         // Disconnected hardware is still a destination —
                         // choosing it states intent, and SEND waits for
@@ -513,7 +532,7 @@ struct ContentView: View {
                         if routes.contains(where: { !$0.available }) {
                             Section("Not connected") {
                                 ForEach(routes.filter { !$0.available }) { route in
-                                    Text(route.title).tag(route.destination.storageKey)
+                                    Text(route.title).tag(route.id)
                                 }
                             }
                         }
@@ -604,6 +623,7 @@ struct ContentView: View {
                 }
                 Button("CONVERT ANOTHER") {
                     transferNote = nil
+                    pickedRouteID = nil
                     state = .idle
                 }
             }
@@ -803,7 +823,9 @@ struct ContentView: View {
 
     private func emailToKindle(_ epub: URL, title: String?) {
         if SendToKindle.email(epub, title: title) {
-            transferNote = "compose opened. Address it to your @kindle.com address, from a sender Amazon has approved"
+            transferNote = SendToKindle.legacyStoredAddress.map {
+                "compose opened, addressed to \($0) — send from a sender Amazon has approved"
+            } ?? "compose opened. Address it to your @kindle.com address, from a sender Amazon has approved"
         } else {
             transferNote = "no mail account available. Configure Mail.app, or use Send to Kindle web"
         }

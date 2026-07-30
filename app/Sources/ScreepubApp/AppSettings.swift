@@ -6,6 +6,12 @@ import ScreepubKit
 /// conversion time.
 enum AppSettings {
     static let outputFolderKey = "outputFolder"
+    /// The consent gate for the app's only self-initiated network request.
+    /// One constant, used by every reader and writer: a typo'd literal in
+    /// any one site would silently split the Settings toggle from the
+    /// launch check that obeys it.
+    static let updateOptInKey = "updateOptIn"
+    static let updateLastCheckedKey = "updateLastChecked"
 
     /// Default library folder: ~/Documents/Screepub
     static var defaultOutputFolder: URL {

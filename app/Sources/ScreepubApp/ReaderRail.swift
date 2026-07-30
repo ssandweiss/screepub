@@ -66,8 +66,13 @@ struct ReaderRail: View {
                 Button("Save") { saveACopy() }
                 if AppleBooks.isAvailable {
                     Button("Open in Apple Books") {
-                        AppleBooks.send(URL(fileURLWithPath: model.ref.epubPath))
-                        model.statusLine = "added to Apple Books — syncs to iPhone and iPad via iCloud"
+                        if AppleBooks.send(URL(fileURLWithPath: model.ref.epubPath)) {
+                            model.errorLine = nil
+                            model.statusLine = "added to Apple Books — syncs to iPhone and iPad via iCloud"
+                        } else {
+                            model.statusLine = nil
+                            model.errorLine = "Apple Books isn't available on this Mac"
+                        }
                     }
                 }
                 // Only Apple Mail actually attaches the file: with a
@@ -129,8 +134,11 @@ struct ReaderRail: View {
         if SendToKindle.email(URL(fileURLWithPath: model.ref.epubPath),
                               title: model.ref.title) {
             model.errorLine = nil
-            model.statusLine = "compose opened. Address it to your @kindle.com address"
+            model.statusLine = SendToKindle.legacyStoredAddress.map {
+                "compose opened, addressed to \($0)"
+            } ?? "compose opened. Address it to your @kindle.com address"
         } else {
+            model.statusLine = nil
             model.errorLine = "Mail couldn't open a compose window"
         }
     }
@@ -177,6 +185,10 @@ struct ReaderRail: View {
                 model.errorLine = nil
                 model.statusLine = "copied to \(device.name) — eject before unplugging"
             case .failure(let error):
+                // Drop the stage narration too — the rail renders statusLine
+                // and errorLine together, so leaving it would show the copy
+                // as still in progress AND failed.
+                model.statusLine = nil
                 model.errorLine = error.localizedDescription
             }
         }

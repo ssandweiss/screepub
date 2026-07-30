@@ -83,12 +83,32 @@ public enum UpdateCheck {
         }
         // Numerically equal: a release beats a pre-release of the same
         // numbers, and two pre-releases fall back to comparing their tags.
+        // EXCEPT a git-describe suffix ("1-g965cb10", "-dirty"): that marks
+        // a build AT or PAST the tag, so the tag is never an update for it —
+        // treating it as a pre-release would install a downgrade on every
+        // post-tag dev build.
         switch (candPre, currPre) {
         case (nil, nil):     return false
-        case (nil, _?):      return true
+        case (nil, let r?): return !isDescribeSuffix(r)
         case (_?, nil):      return false
-        case let (c?, r?):   return c.compare(r, options: .numeric) == .orderedDescending
+        case let (c?, r?):
+            if isDescribeSuffix(r) { return false }
+            return c.compare(r, options: .numeric) == .orderedDescending
         }
+    }
+
+    /// git describe output after the tag: "N-g<hex>", optionally "-dirty",
+    /// or bare "dirty" for an at-tag build with local changes.
+    private static func isDescribeSuffix(_ pre: String) -> Bool {
+        if pre == "dirty" { return true }
+        var body = pre
+        if body.hasSuffix("-dirty") { body.removeLast("-dirty".count) }
+        let pieces = body.split(separator: "-", maxSplits: 1)
+        guard pieces.count == 2,
+              !pieces[0].isEmpty, pieces[0].allSatisfy(\.isNumber),
+              pieces[1].first == "g", pieces[1].count >= 5,
+              pieces[1].dropFirst().allSatisfy(\.isHexDigit) else { return false }
+        return true
     }
 
     /// -> (numeric components, pre-release tag if any)

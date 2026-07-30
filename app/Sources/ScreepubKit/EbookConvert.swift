@@ -44,12 +44,10 @@ public enum EbookConvert {
         guard let tool = toolURL() else { throw ConvertError.calibreMissing }
         let azw3 = epub.deletingPathExtension().appendingPathExtension("azw3")
         do {
-            _ = try KFXToolchain.run(tool: tool, arguments: [
-                epub.path, azw3.path,
-                "--page-breaks-before=/",
-                "--chapter-mark=none",
-                "--disable-remove-fake-margins",
-            ])
+            // Same guard trio as the KFX recipe, from the same constant —
+            // a device-validated flag change lands on both rungs or neither.
+            _ = try KFXToolchain.run(tool: tool,
+                                     arguments: [epub.path, azw3.path] + KFXToolchain.calibreFormatGuards)
         } catch let error as ToolRunError {
             throw ConvertError.failed(error.detail)
         }

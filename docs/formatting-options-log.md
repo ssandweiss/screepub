@@ -381,8 +381,12 @@ future work; everything else is live.
 - Validation habit worth keeping in the app: `epubcheck` after every
   render config change (all tweaks above shipped at 0 errors/0 warnings
   across the five-generator fixture set + additional real-world scripts).
-- **Device routes (2026-07-22, not formatting knobs but adjacent):**
-  Kindle → AZW3/MOBI to documents/; Kobo → EPUB to volume root, or
+- **Device routes (2026-07-22, KFX rung added 2026-07-29, not formatting
+  knobs but adjacent):**
+  Kindle → KFX to documents/ when the full toolchain is present (Calibre
+  + KFX plugin + Kindle Previewer, §8b), AZW3 with Calibre alone, MOBI
+  with neither — one ladder shared by the result page, the reader rail,
+  and the save flow; Kobo → EPUB to volume root, or
   KEPUB via Calibre when the "as KEPUB" checkbox on the result page's
   send block is on — shown only while Kobo is the chosen destination
   (default OFF — Kobo's kepub renderer mis-justifies em-dashes/

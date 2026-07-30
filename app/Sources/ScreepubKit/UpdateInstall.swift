@@ -7,6 +7,8 @@ public enum UpdateInstallError: Error, Equatable {
     case appMissingInDMG
     /// Translocated bundle, read-only destination: places a swap can't reach.
     case notInstallable(String)
+    /// Genuine signature, wrong release: the version pin caught a replay.
+    case versionMismatch(found: String, expected: String)
     case swapFailed(String)
 }
 
@@ -104,18 +106,49 @@ public enum UpdateInstaller {
         bundleURL.path.contains("/AppTranslocation/")
     }
 
-    /// Verify the DMG, mount it, verify the app inside, stage a copy next
-    /// to `destination`, verify the staged bytes, then swap. The mount is
-    /// always detached, success or failure.
-    public static func install(dmg: URL, over destination: URL) throws {
+    /// The two conditions that make a swap impossible, answerable BEFORE
+    /// any bytes download: a translocated bundle and a read-only install
+    /// directory. Callers run this first so a doomed install fails in
+    /// milliseconds instead of after a full DMG download.
+    public static func preflight(destination: URL) throws {
         guard !isTranslocated(destination) else {
             throw UpdateInstallError.notInstallable(
-                "running translocated; open the DMG and drag Screepub to Applications instead")
+                "running translocated; download the release DMG and drag Screepub to Applications instead")
         }
         let parent = destination.deletingLastPathComponent()
         guard FileManager.default.isWritableFile(atPath: parent.path) else {
             throw UpdateInstallError.notInstallable("\(parent.path) is not writable")
         }
+    }
+
+    /// CFBundleShortVersionString straight off the plist file — Bundle(url:)
+    /// caches by path, which is exactly wrong for freshly staged copies.
+    public static func bundleShortVersion(of appURL: URL) -> String? {
+        let plist = appURL.appendingPathComponent("Contents/Info.plist")
+        guard let data = try? Data(contentsOf: plist),
+              let dict = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { return nil }
+        return dict["CFBundleShortVersionString"] as? String
+    }
+
+    /// The signature proves the bundle is OURS; this proves it is the
+    /// RELEASE THE USER WAS PROMISED. Without it any genuine older DMG
+    /// passes every pinned requirement and installs as a downgrade replay.
+    public static func requireVersion(_ appURL: URL, expected: String) throws {
+        guard let found = bundleShortVersion(of: appURL),
+              UpdateCheck.normalized(found) == UpdateCheck.normalized(expected) else {
+            throw UpdateInstallError.versionMismatch(
+                found: bundleShortVersion(of: appURL) ?? "unknown",
+                expected: expected)
+        }
+    }
+
+    /// Verify the DMG, mount it, verify the app inside (identity AND
+    /// version when the caller states one), stage a copy next to
+    /// `destination`, verify the staged bytes, then swap. The mount is
+    /// always detached, success or failure.
+    public static func install(dmg: URL, over destination: URL, expectedVersion: String?) throws {
+        try preflight(destination: destination)
 
         try verify(dmg, requirement: dmgRequirement)
 
@@ -125,7 +158,11 @@ public enum UpdateInstaller {
             throw UpdateInstallError.appMissingInDMG
         }
         try verify(newApp, requirement: appRequirement)
+        if let expectedVersion {
+            try requireVersion(newApp, expected: expectedVersion)
+        }
 
+        let parent = destination.deletingLastPathComponent()
         let staged = parent.appendingPathComponent(".\(destination.lastPathComponent).staged")
         try? FileManager.default.removeItem(at: staged)
         do {

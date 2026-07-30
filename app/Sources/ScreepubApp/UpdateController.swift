@@ -38,7 +38,8 @@ final class UpdateController: ObservableObject {
     /// throttle — but it still lands in `available` and stamps the clock,
     /// so the silent launch check doesn't immediately repeat the work.
     func checkNow() async -> Result<AvailableUpdate?, Error> {
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "updateLastChecked")
+        clearStaleFailure()
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: AppSettings.updateLastCheckedKey)
         do {
             let update = try await UpdateCheck.latest(currentVersion: Self.currentVersion)
             available = update
@@ -49,16 +50,28 @@ final class UpdateController: ObservableObject {
     }
 
     /// Launch-time check, gated twice: the opt-in, then the daily throttle.
-    /// Failures are silent; a background courtesy must never nag.
+    /// Failures are silent; a background courtesy must never nag — and it
+    /// must never DESTROY state either: a throw here leaves a previously
+    /// discovered update in place rather than wiping the footer notice.
     func checkIfDue() async {
+        clearStaleFailure()
         let defaults = UserDefaults.standard
-        let stamp = defaults.double(forKey: "updateLastChecked")
+        let stamp = defaults.double(forKey: AppSettings.updateLastCheckedKey)
         guard UpdateCheck.shouldCheck(
-            optedIn: defaults.bool(forKey: "updateOptIn"),
+            optedIn: defaults.bool(forKey: AppSettings.updateOptInKey),
             lastChecked: stamp > 0 ? Date(timeIntervalSince1970: stamp) : nil,
             now: Date()) else { return }
-        defaults.set(Date().timeIntervalSince1970, forKey: "updateLastChecked")
-        available = try? await UpdateCheck.latest(currentVersion: Self.currentVersion)
+        defaults.set(Date().timeIntervalSince1970, forKey: AppSettings.updateLastCheckedKey)
+        if let update = try? await UpdateCheck.latest(currentVersion: Self.currentVersion) {
+            available = update
+        }
+    }
+
+    /// A failed download or install must not brand the footer forever:
+    /// any fresh look at updates (window reappearing, manual check)
+    /// returns the phase to idle so the available affordance can render.
+    private func clearStaleFailure() {
+        if case .failed = phase { phase = .idle }
     }
 
     /// Download, verify, swap, relaunch. Every failure lands in `phase`
@@ -67,6 +80,11 @@ final class UpdateController: ObservableObject {
         guard let update = available, !busy else { return }
         let destination = Bundle.main.bundleURL
         do {
+            // Translocation and a read-only install dir are knowable NOW —
+            // failing after the download would waste ~100MB and then delete
+            // the DMG the failure message points the user at.
+            try UpdateInstaller.preflight(destination: destination)
+
             phase = .downloading(nil)
             // The delegate already thins chunks to whole-percent steps.
             let dmg = try await UpdateInstaller.downloadDMG(from: update.downloadURL) { [weak self] fraction in
@@ -77,8 +95,10 @@ final class UpdateController: ObservableObject {
             phase = .installing
             // Verification and the swap are blocking Process work; keep it
             // off the main actor so the page doesn't freeze mid-install.
+            // The version pin means the DMG must carry the release the
+            // popover promised, not merely a genuine Screepub.
             try await Task.detached(priority: .userInitiated) {
-                try UpdateInstaller.install(dmg: dmg, over: destination)
+                try UpdateInstaller.install(dmg: dmg, over: destination, expectedVersion: update.version)
             }.value
 
             relaunch(destination)
@@ -92,8 +112,20 @@ final class UpdateController: ObservableObject {
     private func relaunch(_ appURL: URL) {
         let config = NSWorkspace.OpenConfiguration()
         config.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: appURL, configuration: config) { _, _ in
-            DispatchQueue.main.async { NSApp.terminate(nil) }
+        NSWorkspace.shared.openApplication(at: appURL, configuration: config) { [weak self] app, error in
+            DispatchQueue.main.async {
+                // Terminate ONLY when the new instance actually launched;
+                // otherwise "relaunch" silently becomes "quit" and the
+                // error dies in a discarded closure parameter.
+                if app != nil {
+                    NSApp.terminate(nil)
+                } else {
+                    self?.phase = .failed(
+                        "the update installed, but relaunching failed"
+                        + (error.map { ": \($0.localizedDescription)" } ?? "")
+                        + ". Quit and reopen Screepub to run the new version.")
+                }
+            }
         }
     }
 
@@ -109,6 +141,8 @@ final class UpdateController: ObservableObject {
             return "the update image carries no app"
         case .notInstallable(let detail):
             return detail
+        case .versionMismatch(let found, let expected):
+            return "the update image carries \(found), not the promised \(expected) — nothing was installed"
         case .swapFailed(let detail):
             return "couldn't replace the app: \(detail)"
         }
