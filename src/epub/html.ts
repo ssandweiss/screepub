@@ -29,6 +29,21 @@ export interface BookBody {
 /** Keep each body file comfortably under Kindle's per-flow size warnings. */
 const DEFAULT_MAX_FILE_BYTES = 250_000;
 
+/** A dual exchange whose taller column exceeds this many estimated
+ * rendered lines is taller than the space typically left at a page
+ * bottom; the unbreakable table then pushes whole, wasting up to its own
+ * height, so it degrades to sequential speeches. Twelve lines is roughly
+ * half a typical device page — past that the odds of a costly push climb
+ * faster than the side-by-side reading is worth. The estimate assumes
+ * ~30 chars per half-width line and counts each cell's tag-stripped
+ * text, including its trailing newline. */
+const DUAL_SEQUENTIAL_LINE_THRESHOLD = 12;
+const EST_CHARS_PER_DUAL_LINE = 30;
+
+/** One rendered paragraph inside a speech. `kind` drives the cue keep, so
+ * it is a closed set — a typo'd literal would silently wrap every speech. */
+type Cell = { kind: 'character' | 'parenthetical' | 'dialogue' | 'other'; html: string };
+
 export function escapeXml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -78,8 +93,7 @@ interface MarkerState {
 
 /**
  * Render body tokens (no title-page tokens) as discrete blocks — one string
- * per paragraph, with a complete dialogue block as a single string. Discrete
- * blocks let the section assembler wrap heading + first block together.
+ * per paragraph, with a complete dialogue block as a single string.
  */
 function renderBlocks(
   tokens: Token[],
@@ -87,12 +101,12 @@ function renderBlocks(
   markers: MarkerState = { pending: null, landed: [] },
 ): string[] {
   const blocks: string[] = [];
-  let speech: { kind: string; html: string }[] | null = null;
+  let speech: Cell[] | null = null;
   // Simultaneous speech renders as a two-cell table — the one column
   // construct Kindle's renderer honors (floats/inline-block are not
   // reliable under Enhanced Typesetting).
-  let dual: { left: string[]; right: string[]; side: 'left' | 'right' } | null = null;
-  const emit = (s: string, kind = 'other') => {
+  let dual: { left: Cell[]; right: Cell[]; side: 'left' | 'right' } | null = null;
+  const emit = (s: string, kind: Cell['kind'] = 'other') => {
     // A pending page marker slips inside this block's opening tag — costing
     // no line of its own — and is consumed once it lands.
     if (markers.pending) {
@@ -108,14 +122,18 @@ function renderBlocks(
   };
   // The cue (+ parentheticals) and the FIRST dialogue line share an
   // unbreakable wrapper so a cue never strands at a page bottom with its
-  // speech on the next page — same mechanism as scene headings.
+  // speech on the next page — the wrapper form, which scene headings no
+  // longer need.
+  const speechBlock = (cells: Cell[]): string => {
+    const firstLine = cells.findIndex((c) => c.kind === 'dialogue');
+    const cut = firstLine === -1 ? cells.length : firstLine + 1;
+    const head = cells.slice(0, cut).map((c) => c.html).join('');
+    const tail = cells.slice(cut).map((c) => c.html).join('');
+    return `<div class="dialogue-block">\n<div class="keep-together">\n${head}</div>\n${tail}</div>\n`;
+  };
   const closeSpeech = () => {
     if (!speech) return;
-    const firstLine = speech.findIndex((c) => c.kind === 'dialogue');
-    const cut = firstLine === -1 ? speech.length : firstLine + 1;
-    const head = speech.slice(0, cut).map((c) => c.html).join('');
-    const tail = speech.slice(cut).map((c) => c.html).join('');
-    blocks.push(`<div class="dialogue-block">\n<div class="keep-together">\n${head}</div>\n${tail}</div>\n`);
+    blocks.push(speechBlock(speech));
     speech = null;
   };
 
@@ -137,9 +155,19 @@ function renderBlocks(
         break;
       case 'dual_dialogue_end':
         if (dual) {
-          blocks.push(
-            `<table class="dual-dialogue">\n<tr>\n<td>\n${dual.left.join('')}</td>\n<td>\n${dual.right.join('')}</td>\n</tr>\n</table>\n`,
-          );
+          const estLines = (col: Cell[]) =>
+            col.reduce((n, c) => {
+              const len = c.html.replace(/<[^>]*>/g, '').length;
+              return n + Math.max(1, Math.ceil(len / EST_CHARS_PER_DUAL_LINE));
+            }, 0);
+          if (Math.max(estLines(dual.left), estLines(dual.right)) > DUAL_SEQUENTIAL_LINE_THRESHOLD) {
+            if (dual.left.length) blocks.push(speechBlock(dual.left));
+            if (dual.right.length) blocks.push(speechBlock(dual.right));
+          } else {
+            blocks.push(
+              `<table class="dual-dialogue">\n<tr>\n<td>\n${dual.left.map((c) => c.html).join('')}</td>\n<td>\n${dual.right.map((c) => c.html).join('')}</td>\n</tr>\n</table>\n`,
+            );
+          }
           dual = null;
         }
         break;
@@ -149,7 +177,7 @@ function renderBlocks(
         break;
       case 'dialogue_end':
         if (dual && speech) {
-          dual[dual.side].push(...speech.map((c) => c.html));
+          dual[dual.side].push(...speech);
           speech = null;
         } else {
           closeSpeech();
@@ -201,27 +229,6 @@ function renderBlocks(
   return blocks;
 }
 
-/**
- * A scene's heading and its first block share an unbreakable wrapper so a
- * slugline never strands at a page bottom — the pair moves to the next page
- * together. `page-break-inside: avoid` on a container is the form Amazon
- * documents for exactly this ("headlines with paragraphs to keep together").
- */
-function renderScene(
-  tokens: Token[],
-  startsWithHeading: boolean,
-  format: FormatOptions,
-  markers?: MarkerState,
-): string {
-  const blocks = renderBlocks(tokens, format, markers);
-  if (!startsWithHeading || !format.keepSceneHeadingWithScene || blocks.length === 0) {
-    return blocks.join('');
-  }
-  const kept = blocks.slice(0, 2).join('');
-  const rest = blocks.slice(2).join('');
-  return `<div class="keep-together">\n${kept}</div>\n${rest}`;
-}
-
 interface SceneSection {
   anchor: string;
   title: string;
@@ -264,9 +271,8 @@ export function tokensToBody(
   const markers: MarkerState = { pending: null, landed: [] };
   const sections: SceneSection[] = groups.map((g, i) => {
     const anchor = `sc-${String(i + 1).padStart(3, '0')}`;
-    const startsWithHeading = g.tokens[0]?.type === 'scene_heading';
     markers.landed = [];
-    const html = `<section class="scene" id="${anchor}">\n${renderScene(g.tokens, startsWithHeading, format, markers)}</section>\n`;
+    const html = `<section class="scene" id="${anchor}">\n${renderBlocks(g.tokens, format, markers).join('')}</section>\n`;
     return { anchor, title: g.title, html, pageLabels: markers.landed };
   });
 

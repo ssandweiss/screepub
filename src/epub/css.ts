@@ -8,8 +8,19 @@
 //   one-blank-Courier-line between elements = 1em.
 // - No line-height/font-size overrides on body text — Enhanced Typesetting
 //   owns within-paragraph spacing (the reader's own setting).
-// - Keep-with-next chain kept minimal (heading, cue) — every avoid link
-//   grows the unbreakable chunk renderers push, causing bottom-of-page gaps.
+// - Break control kept deliberately small — every avoid link grows the
+//   unbreakable chunk renderers push, causing bottom-of-page gaps. The
+//   whole inventory, one line each:
+//     break-after: avoid   h2.scene-heading (gated: keepSceneHeadingWithScene)
+//     break-after: avoid   p.character
+//     break-after: avoid   p.mini-slug (inert — no such class is emitted)
+//     break-before: avoid  p.transition
+//     break-inside: avoid  .keep-together (the cue keep)
+//     break-inside: avoid  table.dual-dialogue
+//     break-inside: avoid  .dialogue-block (gated: keepSpeechesWhole, off)
+//   Plus the one FORCED break, which is not an avoid link and so grows no
+//   chunk — it ends a page rather than refusing to:
+//     page-break-before: always  section.scene (gated: scenePageBreaks, off)
 import type { FormatOptions } from '../options';
 import { DEFAULT_FORMAT_OPTIONS } from '../options';
 
@@ -29,6 +40,20 @@ export function screenplayCss(o: FormatOptions): string {
   // Screenplays are traditionally ragged-right; explicit `left` overrides
   // a reader that justifies body text by default (stretchy word gaps).
   const bodyAlign = o.justifyText ? 'justify' : 'left';
+  // Atomic speeches (registry #8c): opt-in, because an unbreakable block
+  // taller than the space left on a page gets pushed whole — bounded
+  // white space traded for never splitting a speech. `avoid` yields where
+  // it cannot be honored, so a speech taller than a full page still
+  // breaks bare even with this on.
+  const speechKeep = o.keepSpeechesWhole
+    ? '\n  page-break-inside: avoid;\n  break-inside: avoid;'
+    : '';
+  // The heading keep is a CHAIN, not a wrapper: break-after on the h2
+  // holds it to whatever follows, without making the whole first block
+  // unbreakable (the old wrapper pushed half-page chunks; registry #5a).
+  const headingKeep = o.keepSceneHeadingWithScene
+    ? '\n  page-break-after: avoid;\n  break-after: avoid;'
+    : '';
 
   return `
 html, body {
@@ -40,8 +65,8 @@ body {
   font-family: ${FONT_STACKS[o.fontFamily]};
 }
 ${sceneBreak}
-/* Slugline + the scene's first block ride together across page breaks —
-   if the pair doesn't fit at a page bottom, both move to the next page.
+/* The cue keep: cue + parentheticals + first dialogue line share this
+   unbreakable wrapper so a cue never strands at a page bottom.
    Container-level inside-avoid is the KDP-documented keep-together form. */
 .keep-together {
   page-break-inside: avoid;
@@ -52,9 +77,7 @@ h2.scene-heading {
   font-size: 1em;
   font-weight: bold;
   text-transform: uppercase;
-  margin: ${em(gap * 1.6)} 0 ${em(gap)} 0;
-  page-break-after: avoid;
-  break-after: avoid;
+  margin: ${em(gap * 1.6)} 0 ${em(gap)} 0;${headingKeep}
 }
 
 span.scene-number {
@@ -100,7 +123,7 @@ p.mini-slug {
   margin-top: ${em(gap)};
   margin-bottom: ${em(gap)};
   margin-left: ${o.dialogueSideMarginPct}%;
-  margin-right: ${o.dialogueSideMarginPct}%;
+  margin-right: ${o.dialogueSideMarginPct}%;${speechKeep}
 }
 
 /* A cue must never orphan from its dialogue at a page break. Centered
@@ -141,10 +164,15 @@ table.dual-dialogue td {
   padding: 0 2%;
 }
 
+/* A transition belongs to the shot before it: it may end a page, never
+   begin one (the universal print rule, docs/pagination-reference.md §2 —
+   that doc lands from branch worktree-device-map). */
 p.transition {
   text-align: right;
   text-transform: uppercase;
   margin: ${em(gap)} 0;
+  page-break-before: avoid;
+  break-before: avoid;
 }
 
 p.centered {

@@ -54,32 +54,32 @@ describe('tokensToBody', () => {
     expect(body.toc[1].href).toContain('body002.xhtml#sc-002');
   });
 
-  test('scene heading + first block are wrapped to keep together across page breaks', () => {
+  test('scene heading leads its scene bare — the keep is the CSS chain, not a wrapper', () => {
     const [file] = tokensToBody(sampleTokens()).files;
-    // Heading and the scene's first paragraph share an unbreakable wrapper
-    // so a heading never strands at a page bottom.
     expect(file.xhtml).toMatch(
-      /<div class="keep-together">\s*<h2 class="scene-heading">INT\. KITCHEN - DAY<\/h2>\s*<p class="action">Jack enters, exhausted\.<\/p>\s*<\/div>/,
+      /<section class="scene" id="sc-001">\s*<h2 class="scene-heading">INT\. KITCHEN - DAY<\/h2>\s*<p class="action">Jack enters, exhausted\.<\/p>/,
     );
+    expect(file.xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
   });
 
-  test('a dialogue block directly after a heading keeps together as one unit', () => {
+  test('a dialogue block follows its heading directly — no outer wrapper', () => {
     const tokens = new Fountain().parse('INT. CAR - DAY\n\n@DEV\nDrive.\n\nThey drive.\n', true).tokens;
     const [file] = tokensToBody(tokens).files;
     expect(file.xhtml).toMatch(
-      /<div class="keep-together">\s*<h2 class="scene-heading">INT\. CAR - DAY<\/h2>\s*<div class="dialogue-block">[\s\S]*?<\/div>\s*<\/div>\s*<p class="action">They drive\.<\/p>/,
+      /<h2 class="scene-heading">INT\. CAR - DAY<\/h2>\s*<div class="dialogue-block">/,
     );
+    expect(file.xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
   });
 
-  test('heading-only scene wraps without error', () => {
+  test('heading-only scene renders bare without error', () => {
     const tokens = new Fountain().parse('INT. VOID - DAY\n\nEXT. VOID - NIGHT\n\nStars.\n', true).tokens;
     const [file] = tokensToBody(tokens).files;
     expect(file.xhtml).toMatch(
-      /<div class="keep-together">\s*<h2 class="scene-heading">INT\. VOID - DAY<\/h2>\s*<\/div>/,
+      /<section class="scene" id="sc-001">\s*<h2 class="scene-heading">INT\. VOID - DAY<\/h2>\s*<\/section>/,
     );
   });
 
-  test('opening content without a heading gets no keep-together wrapper', () => {
+  test('opening content without a heading renders directly in its section', () => {
     const tokens = new Fountain().parse('Cold open action.\n\nINT. LAB - DAY\n\nWork.\n', true).tokens;
     const [file] = tokensToBody(tokens).files;
     expect(file.xhtml).toMatch(/<section class="scene" id="sc-001">\s*<p class="action">Cold open action\.<\/p>/);
@@ -115,6 +115,45 @@ describe('tokensToBody', () => {
     expect(body.files).toHaveLength(1);
     expect(body.files[0].xhtml).toContain('Just action.');
     expect(body.toc).toHaveLength(1);
+  });
+});
+
+// ── dual dialogue height fallback ────────────────────────
+
+describe('dual dialogue height fallback', () => {
+  const dualScript = (line: string) =>
+    `INT. HALL - DAY\n\n@JACK\n${line}\n\n@JILL ^\nAlso talking here.\n`;
+
+  test('a short exchange stays a side-by-side table', () => {
+    const tokens = new Fountain().parse(dualScript('Quick word.'), true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toContain('<table class="dual-dialogue">');
+  });
+
+  test('a tall exchange emits sequential speeches instead of an unbreakable table', () => {
+    const tokens = new Fountain().parse(dualScript('word '.repeat(120).trim()), true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).not.toContain('<table class="dual-dialogue">');
+    expect(file.xhtml).toContain('<p class="character">JACK</p>');
+    expect(file.xhtml).toContain('<p class="character">JILL</p>');
+    // each speech is a full dialogue block whose cue opens the keep, and
+    // JACK's speech still precedes JILL's
+    expect(file.xhtml).toMatch(
+      /<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JACK<\/p>[\s\S]*?<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JILL<\/p>/,
+    );
+    const blocks = file.xhtml.match(/<div class="dialogue-block">/g) ?? [];
+    expect(blocks.length).toBe(2);
+  });
+
+  // Measured against this script shape: the taller column costs one line for
+  // the cue plus ceil((N + 1) / EST_CHARS_PER_DUAL_LINE) for the dialogue
+  // (the + 1 is the cell's trailing newline), so the flip lands between 329
+  // and 330. Change either constant and this pair fails.
+  test('the table/sequential flip sits exactly where the constants put it', () => {
+    const render = (n: number) =>
+      tokensToBody(new Fountain().parse(dualScript('x'.repeat(n)), true).tokens).files[0].xhtml;
+    expect(render(329)).toContain('<table class="dual-dialogue">');
+    expect(render(330)).not.toContain('<table class="dual-dialogue">');
   });
 });
 
@@ -155,7 +194,9 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
     const paren = SCREENPLAY_CSS.match(/p\.parenthetical\s*{[^}]*}/)![0];
     expect(paren).not.toContain('break-after');
     const heading = SCREENPLAY_CSS.match(/h2\.scene-heading\s*{[^}]*}/)![0];
-    expect(heading).toContain('break-after: avoid');
+    // both spellings: the legacy prefixed property AND the modern standalone
+    expect(heading).toContain('page-break-after: avoid');
+    expect(heading).toMatch(/[^-]break-after: avoid/);
   });
 
   test('page markers float out of the flow so they cost no line', () => {
@@ -170,6 +211,36 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
     const keep = SCREENPLAY_CSS.match(/\.keep-together\s*{[^}]*}/)![0];
     expect(keep).toContain('page-break-inside: avoid');
     expect(keep).toContain('break-inside: avoid');
+  });
+
+  test('transitions may end a page but never begin one', () => {
+    const t = SCREENPLAY_CSS.match(/p\.transition\s*{[^}]*}/)![0];
+    expect(t).toContain('page-break-before: avoid');
+    expect(t).toContain('break-before: avoid');
+  });
+
+  // Every avoid link grows the chunk a renderer pushes, so the inventory is
+  // deliberately closed and written out in the css.ts header. Pin it: a new
+  // keep cannot slip in without this failing and sending its author to the
+  // header comment. Both spellings are emitted for each rule, hence 2 per
+  // selector. Default options, so the two gated-off entries
+  // (`.dialogue-block`, `section.scene`) are absent by design.
+  test('the avoid inventory is closed — six selectors, twelve declarations', () => {
+    const declarations =
+      SCREENPLAY_CSS.match(/^\s*(?:page-)?break-(?:after|before|inside):\s*avoid;/gm) ?? [];
+    expect(declarations).toHaveLength(12);
+
+    const carrying = [...SCREENPLAY_CSS.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+      .filter(([, , body]) => /:\s*avoid;/.test(body))
+      .map(([, selector]) => selector.trim().split('\n').pop()!.trim());
+    expect(carrying).toEqual([
+      '.keep-together',
+      'h2.scene-heading',
+      'p.mini-slug',
+      'p.character',
+      'table.dual-dialogue',
+      'p.transition',
+    ]);
   });
 });
 

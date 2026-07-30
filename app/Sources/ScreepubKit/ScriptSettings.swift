@@ -20,6 +20,7 @@ public enum ScriptSettings {
         var parentheticalIndentPct: Double?
         var elementSpacingEm: Double?
         var keepSceneHeadingWithScene: Bool?
+        var keepSpeechesWhole: Bool?
         var fontFamily: String?
         var rejoinSplitDialogue: Bool?
         var contdMode: String?
@@ -44,6 +45,7 @@ public enum ScriptSettings {
         if let v = partial.parentheticalIndentPct { merged.parentheticalIndentPct = v }
         if let v = partial.elementSpacingEm { merged.elementSpacingEm = v }
         if let v = partial.keepSceneHeadingWithScene { merged.keepSceneHeadingWithScene = v }
+        if let v = partial.keepSpeechesWhole { merged.keepSpeechesWhole = v }
         if let v = partial.fontFamily { merged.fontFamily = v }
         if let v = partial.rejoinSplitDialogue { merged.rejoinSplitDialogue = v }
         if let v = partial.contdMode { merged.contdMode = v }

@@ -36,7 +36,7 @@ describe('resolveFormatOptions', () => {
   test('defaults match the canonical format-defaults.json both suites pin', async () => {
     // The same file kit-check decodes into FormatSettings and compares to
     // FormatSettings.defaults — the two languages can no longer drift
-    // silently. Fifteen literals, one source of truth.
+    // silently. Sixteen literals, one source of truth.
     const canonical = await Bun.file(new URL('../format-defaults.json', import.meta.url)).json();
     expect(DEFAULT_FORMAT_OPTIONS).toEqual(canonical);
   });
@@ -92,6 +92,15 @@ describe('screenplayCss with options', () => {
     expect(on).toContain('section.scene { page-break-before: always; }');
   });
 
+  test('keepSpeechesWhole makes dialogue blocks unbreakable only when enabled', () => {
+    const off = screenplayCss(resolveFormatOptions({}));
+    expect(off.match(/\.dialogue-block\s*{[^}]*}/)![0]).not.toContain('break-inside');
+    const on = screenplayCss(resolveFormatOptions({ keepSpeechesWhole: true }));
+    const block = on.match(/\.dialogue-block\s*{[^}]*}/)![0];
+    expect(block).toContain('page-break-inside: avoid');
+    expect(block).toContain('break-inside: avoid');
+  });
+
   test('font family option switches the body stack', () => {
     expect(screenplayCss(resolveFormatOptions({ fontFamily: 'serif' }))).toMatch(/body\s*{[^}]*font-family:\s*serif/);
     expect(screenplayCss(resolveFormatOptions({ fontFamily: 'courier' }))).toContain('"Courier Prime"');
@@ -111,13 +120,17 @@ describe('screenplayCss with options', () => {
 // ── tokensToBody(options) ────────────────────────────────
 
 describe('tokensToBody with options', () => {
-  test('scene-heading keep-together wrapper can be disabled', () => {
-    // Governs the HEADING wrapper only — the cue-keeps-dialogue wrapper
-    // inside dialogue blocks is always on.
-    const off = tokensToBody(tokens(), { format: resolveFormatOptions({ keepSceneHeadingWithScene: false }) });
-    expect(off.files[0].xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
-    const on = tokensToBody(tokens(), { format: resolveFormatOptions({}) });
-    expect(on.files[0].xhtml).toMatch(/<div class="keep-together">\s*<h2/);
+  test('keepSceneHeadingWithScene gates the heading break-after rule', () => {
+    const heading = screenplayCss(resolveFormatOptions({})).match(/h2\.scene-heading\s*{[^}]*}/)![0];
+    // both spellings: the legacy prefixed property AND the modern standalone
+    expect(heading).toContain('page-break-after: avoid');
+    expect(heading).toMatch(/[^-]break-after: avoid/);
+    const off = screenplayCss(resolveFormatOptions({ keepSceneHeadingWithScene: false }));
+    expect(off.match(/h2\.scene-heading\s*{[^}]*}/)![0]).not.toContain('break-after');
+    // markup carries no wrapper either way
+    for (const format of [resolveFormatOptions({}), resolveFormatOptions({ keepSceneHeadingWithScene: false })]) {
+      expect(tokensToBody(tokens(), { format }).files[0].xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
+    }
   });
 
   test('scene numbers render in headings when enabled', () => {
@@ -327,5 +340,15 @@ describe('dualDialogue mode', () => {
     const out = toFountain(sp4(), undefined, resolveFormatOptions({ dualDialogue: 'sequential' }));
     expect(out).toContain('@INFORMANT\n');
     expect(out).not.toContain('^');
+  });
+});
+
+// ── keepSpeechesWhole option ─────────────────────────────
+
+describe('keepSpeechesWhole option', () => {
+  test('defaults off and resolves from partials', () => {
+    expect(resolveFormatOptions({}).keepSpeechesWhole).toBe(false);
+    expect(resolveFormatOptions({ keepSpeechesWhole: true }).keepSpeechesWhole).toBe(true);
+    expect(resolveFormatOptions({ keepSpeechesWhole: 'yes' }).keepSpeechesWhole).toBe(false);
   });
 });

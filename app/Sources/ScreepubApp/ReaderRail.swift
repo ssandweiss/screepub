@@ -26,6 +26,10 @@ struct ReaderRail: View {
                 slider("Spacing (em)", value: binding(\.elementSpacingEm), range: 0.4...1.6, step: 0.1)
                 Toggle("Scene page breaks", isOn: binding(\.scenePageBreaks))
                 Toggle("Keep headings with scene", isOn: binding(\.keepSceneHeadingWithScene))
+                Toggle("Keep each speech on one page", isOn: binding(\.keepSpeechesWhole))
+                Text("Avoids mid-speech page turns; long speeches may leave white space at page bottoms. Speeches taller than a full page still break.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("Dialogue") {
                 slider("Dialogue margins", value: binding(\.dialogueSideMarginPct), range: 0...30)
