@@ -281,6 +281,21 @@ is live.
   correctly adds `(CONT'D)` to the second.
 - **Not changed:** `(CONT'D)`/`(CONT.)` keep requiring their existing
   spellings — no reported miss, and loosening them buys nothing.
+- **2026-07-30 — dotted names pass the period guard.** "Periods only in
+  ellipsis" rejected every bare dotted cue (`MR. SMITH`, `J.J.`,
+  `ANNA B.`, `E.B. WHITE`) while the extension branch admitted
+  `MR. SMITH (V.O.)` — recognition depended on incidental punctuation,
+  the same asymmetry as 9e's own bug. The guard now accepts periods in
+  abbreviation position only: mid-name a period may cap a 1-4 letter run
+  (`MR.`, `CAPT.`, `E.B.`), and at the end of the name only
+  single-letter initials qualify (`ANNA B.`, `J.J.`). A period closing a
+  longer final word (`HE STOPS.`, `STOP.`) is still sentence punctuation
+  and still vetoes — the terminal rule protects the dialogue/cue band
+  overlap, where a shouted `STOP.` becoming a phantom speaker would
+  swallow the next line as its speech. `CHARACTER_NAME` admits `.` in
+  its body to match. Verified: character-element counts across all five
+  generator fixtures are byte-identical (none contains a dotted cue),
+  so the corpus is untouched; the new shapes are pinned by unit tests.
 - **Code:** `src/parser/classify.ts` (`DIALOGUE_EXTENSIONS`).
 
 ### 9f. Cue rescue from the character roster

@@ -123,6 +123,58 @@ describe('classifyBlock', () => {
       expect(result.character).toBe('DETECTIVE JONES');
     });
 
+    // Dotted names: a period in abbreviation position is part of the name,
+    // not sentence punctuation. The old "periods only in ellipsis" guard
+    // rejected every bare dotted cue ("MR. SMITH") while the extension
+    // branch let "MR. SMITH (V.O.)" through — recognition depended on
+    // incidental punctuation, the same asymmetry as the (O.S) bug below.
+    test('honorific with a period is a character name', () => {
+      const block = makeBlock({ text: 'MR. HENDERSON', indent: 40 });
+      const result = classifyBlock(block, null);
+      expect(result.type).toBe('character');
+      expect(result.character).toBe('MR. HENDERSON');
+    });
+
+    test('dotted initials are a character name', () => {
+      const block = makeBlock({ text: 'J.J.', indent: 40 });
+      const result = classifyBlock(block, null);
+      expect(result.type).toBe('character');
+    });
+
+    test('trailing single-letter initial is a character name', () => {
+      const block = makeBlock({ text: 'ANNA B.', indent: 40 });
+      const result = classifyBlock(block, null);
+      expect(result.type).toBe('character');
+    });
+
+    test('initials plus surname are a character name', () => {
+      const block = makeBlock({ text: 'E.B. WHITE', indent: 40 });
+      const result = classifyBlock(block, null);
+      expect(result.type).toBe('character');
+    });
+
+    test('dotted honorific with an extension still works', () => {
+      const block = makeBlock({ text: 'DR. WHO (V.O.)', indent: 40 });
+      const result = classifyBlock(block, null);
+      expect(result.type).toBe('character');
+      expect(result.character).toBe('DR. WHO');
+    });
+
+    // The guard's real job survives: a period closing a longer final word
+    // is sentence punctuation — all-caps action prose that drifted into
+    // the cue band must not become a phantom speaker (registry §9e).
+    test('an all-caps sentence at cue indent is not a character', () => {
+      const block = makeBlock({ text: 'HE STOPS.', indent: 40 });
+      const result = classifyBlock(block, null);
+      expect(result.type).not.toBe('character');
+    });
+
+    test('a shouted word with a period is not a character', () => {
+      const block = makeBlock({ text: 'STOP.', indent: 40 });
+      const result = classifyBlock(block, null);
+      expect(result.type).not.toBe('character');
+    });
+
     // Writers routinely drop the closing period — THE LAST VIDEO STORE
     // has the same speaker as both "RADIO VOICE (O.S)" and "RADIO VOICE
     // (O.S.)". The

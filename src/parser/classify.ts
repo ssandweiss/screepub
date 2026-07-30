@@ -19,7 +19,7 @@ const SCENE_NUMBER = /^\d+[A-Z]?(?:[.\-](?:\d+[A-Z]?|[A-Z]))*\.?$/;
 const PARENTHETICAL = /^\([^)]+\)$/;
 const PARENTHETICAL_TRUNCATED = /^\([^)]+\)\.{3}$/;
 // Allows shared cues (MARGO/DEV), numbered (COP #2), and paired (MOM & DAD).
-const CHARACTER_NAME = /^[A-Z][A-Z0-9\s'’\/&#-]*(\s*\([^)]+\))*\.{0,3}$/;
+const CHARACTER_NAME = /^[A-Z][A-Z0-9\s'’\/&#.-]*(\s*\([^)]+\))*\.{0,3}$/;
 const COMPANY_NAME = /\b(LLC|LLP|INC|CORP|CO|LTD)\.?$/i;
 const PUNCTUATION_EXCLUDE = /[!?;,]/;
 // The closing period is optional: writers routinely type "(O.S)" for
@@ -201,9 +201,26 @@ function isLikelyCharacterName(text: string, indent: number): boolean {
   const letterCount = (text.match(/[A-Za-z]/g) || []).length;
   if (letterCount === 0 || upperCount / letterCount < 0.8) return false;
 
-  // Periods only in ellipsis
-  const periodCount = (text.match(/\./g) || []).length;
-  if (periodCount > 0 && !text.includes('...') && !DIALOGUE_EXTENSIONS.test(text)) return false;
+  // Periods: legitimate only in abbreviation position. Mid-name, a
+  // period may cap a 1-4 letter run ("MR. SMITH", "E.B. WHITE",
+  // "CAPT. MILLER"); at the END of the name only single-letter initials
+  // qualify ("ANNA B.", "J.J.") — a period closing a longer final word
+  // is sentence punctuation, i.e. all-caps action prose drifting into
+  // the cue band, which is what this guard exists to stop. Terminal
+  // discrimination matters at the dialogue/cue band overlap: a shouted
+  // "STOP." must not become a phantom speaker that swallows the next
+  // line as its speech (registry §9e).
+  const undotted = text.replace(/\.{3}/g, ' ');
+  if (undotted.includes('.')) {
+    const tokens = undotted.trim().split(/\s+/);
+    const abbrevChain = /^(?:[A-Z0-9]{1,4}\.)+$/;
+    const initialsOnly = /^(?:[A-Z0-9]\.)+$/;
+    for (let i = 0; i < tokens.length; i++) {
+      if (!tokens[i].includes('.')) continue;
+      const shape = i === tokens.length - 1 ? initialsOnly : abbrevChain;
+      if (!shape.test(tokens[i])) return false;
+    }
+  }
 
   if (!CHARACTER_NAME.test(text)) return false;
   if (COMPANY_NAME.test(text)) return false;
