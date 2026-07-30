@@ -6,14 +6,71 @@ import KFXKit
 /// the app and OS versions. `context` seeds the "what happened" block
 /// (e.g. a conversion error) when reporting from a failure.
 @MainActor func openFeedback(context: String? = nil) {
-    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+    let appVersion = UpdateController.currentVersion
     let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
     NSWorkspace.shared.open(
         Feedback.newIssueURL(appVersion: appVersion, osVersion: osVersion, context: context))
 }
 
+/// Menu-driven check: user-initiated, so it runs regardless of the opt-in,
+/// and unlike the silent launch check it reports every outcome — including
+/// "you're current", which is the answer the user opened the menu for.
+@MainActor func manualUpdateCheck() async {
+    let current = UpdateController.currentVersion
+    let alert = NSAlert()
+    switch await UpdateController.shared.checkNow() {
+    case .success(let update?):
+        // An install may already be running from the footer popover; a
+        // second Install button here would be silently swallowed by
+        // install()'s busy guard — offer only what can actually happen.
+        let installRunning = UpdateController.shared.busy
+        alert.messageText = "Screepub \(update.version) is available"
+        alert.informativeText = installRunning
+            ? "You're running \(current). This update is already downloading — the app will relaunch when it finishes."
+            : "You're running \(current). " + UpdateController.installConsentText
+        if installRunning {
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "View Release")
+        } else {
+            alert.addButton(withTitle: "Install and Relaunch")
+            alert.addButton(withTitle: "View Release")
+            alert.addButton(withTitle: "Later")
+        }
+        switch alert.runModal() {
+        case .alertFirstButtonReturn where !installRunning:
+            await UpdateController.shared.install()
+        case .alertSecondButtonReturn:
+            NSWorkspace.shared.open(update.releaseNotesURL)
+        default:
+            break
+        }
+        return
+    case .success(nil):
+        alert.messageText = "You're up to date"
+        alert.informativeText = "Screepub \(current) is the newest release."
+    case .failure(UpdateCheckError.rateLimited):
+        alert.messageText = "GitHub declined the request"
+        alert.informativeText = "Unauthenticated checks are limited to 60 an hour per network. Try again in a little while."
+    case .failure(let error):
+        alert.messageText = "Couldn't check for updates"
+        alert.informativeText = "The request didn't go through. Check your connection and try again. (\(error.localizedDescription))"
+    }
+    alert.runModal()
+}
+
 @main
 struct ScreepubApp: App {
+    init() {
+        // A previous self-update may have parked the old bundle beside this
+        // one; the running binary kept it alive until now. Deleting a full
+        // parked bundle (~100MB, thousands of files) is not first-frame
+        // work, and nothing downstream reads the result.
+        let bundleURL = Bundle.main.bundleURL
+        Task.detached(priority: .utility) {
+            UpdateInstaller.cleanupLeftovers(near: bundleURL)
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -28,6 +85,9 @@ struct ScreepubApp: App {
         .windowResizability(.contentSize)
         .windowStyle(.hiddenTitleBar)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { Task { await manualUpdateCheck() } }
+            }
             CommandGroup(replacing: .help) {
                 Button("Send Feedback on GitHub…") { openFeedback() }
             }
@@ -61,9 +121,8 @@ struct SettingsView: View {
 }
 
 struct GeneralSettings: View {
-    @AppStorage("kindleEmail") private var kindleEmail = ""
-    @AppStorage("koboKepub") private var koboKepub = false
     @AppStorage(AppSettings.outputFolderKey) private var outputFolder = ""
+    @AppStorage(AppSettings.updateOptInKey) private var updateOptIn = false
 
     var body: some View {
         Form {
@@ -84,20 +143,18 @@ struct GeneralSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("Kindle") {
-                TextField("Send-to-Kindle email", text: $kindleEmail, prompt: Text("yourname_123@kindle.com"))
-                    .textContentType(.emailAddress)
-                    .autocorrectionDisabled()
-                Text("Find it under Amazon → Manage Your Content and Devices → Devices. Your own email address must be on Amazon's approved sender list.")
+            Section("Updates") {
+                Toggle("Check for updates at launch", isOn: $updateOptIn)
+                Text("At most one anonymous request a day to GitHub's public API: app name and version, nothing else. Off by default. Screepub → Check for Updates… always works regardless.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             KfxQualitySection()
+            // The Kindle email address is Amazon's to know, not ours to
+            // store — the send block's setup guide points at the page where
+            // it lives. The Kobo KEPUB choice lives on the result page's send block,
+            // shown only while a Kobo is the chosen destination.
             Section("Other devices") {
-                Toggle("Convert to KEPUB for Kobo", isOn: $koboKepub)
-                Text("KEPUB unlocks Kobo's page-turn counts and reading stats, but its renderer has justification quirks around dashes and ellipses — common in dialogue. Off sends a plain EPUB (recommended).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Text("tolino: books are copied into the Books folder. reMarkable: enable Settings → Storage → USB web interface on the tablet, then dock it over USB.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -194,7 +251,9 @@ struct KfxQualitySection: View {
     }
 
     private func refresh() async {
-        status = await Task.detached { KFXToolchain.status() }.value
+        // The Settings pane exists to answer "did my install take?" —
+        // bypass the cache and probe for real.
+        status = await Task.detached { KFXToolchain.status(maxAge: 0) }.value
     }
 }
 

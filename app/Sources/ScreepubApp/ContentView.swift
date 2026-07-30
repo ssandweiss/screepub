@@ -18,13 +18,23 @@ struct ContentView: View {
     @State private var remarkableUp = false
     @State private var lastInput: URL?
     @State private var transferNote: String?
-    @AppStorage("kindleEmail") private var kindleEmail = ""
     @AppStorage("koboKepub") private var koboKepub = false
-    /// Probed once at launch, off-main (status() spawns calibre-customize).
-    /// The save panel needs it synchronously for its filename extension;
-    /// the USB path re-probes live inside its own background task.
-    @State private var kfxReady = false
-    @Environment(\.openSettings) private var openSettings
+    @State private var showEmailGuide = false
+    /// First-launch gate: false shows the welcome page in place of the
+    /// title page. Converting a script also counts as being welcomed.
+    @AppStorage("welcomed") private var welcomed = false
+    /// Consent for the launch-time update check. Off until the user says
+    /// otherwise — the welcome page asks once, Settings can change it.
+    @AppStorage(AppSettings.updateOptInKey) private var updateOptIn = false
+    @ObservedObject private var updates = UpdateController.shared
+    @State private var showUpdatePopover = false
+    /// Last destination the user actually sent to. Empty on first run, when
+    /// the ordering in ResultActions.routes supplies the opening guess.
+    @AppStorage("lastDestination") private var lastDestination = ""
+    /// Session-scoped row selection, keyed by `RouteOption.id` so two
+    /// same-kind devices stay distinguishable; `lastDestination` persists
+    /// only the kind-level storage key across launches.
+    @State private var pickedRouteID: String?
     @Environment(\.openWindow) private var openWindow
 
     private let volumeEvents = NSWorkspace.shared.notificationCenter
@@ -41,7 +51,7 @@ struct ContentView: View {
             Group {
                 switch state {
                 case .idle:
-                    titlePage
+                    if welcomed { titlePage } else { welcomePage }
                 case .converting(let name):
                     convertingPage(name)
                 case .done(let result):
@@ -59,12 +69,17 @@ struct ContentView: View {
             devices = DeviceDetect.mounted()
         }
         .task {
-            kfxReady = await Task.detached { KFXToolchain.status().ready }.value
             // reMarkable never mounts — poll its USB web interface instead.
             while !Task.isCancelled {
                 remarkableUp = await RemarkableDevice.probe()
                 try? await Task.sleep(for: .seconds(6))
             }
+        }
+        .task { await updates.checkIfDue() }
+        .onChange(of: updateOptIn) { _, on in
+            // Opting in IS the request to check — do the first one right
+            // away rather than making the user relaunch to see it work.
+            if on { Task { await updates.checkIfDue() } }
         }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             guard let provider = providers.first else { return false }
@@ -119,6 +134,80 @@ struct ContentView: View {
             .padding(.horizontal, 22)
             .padding(.top, 26)
             Spacer()
+            // Footer margins: a newer revision announces itself bottom-left,
+            // and the draft-revision mark prints bottom-right — dev builds
+            // stamp git-describe there, so two running builds are tellable
+            // apart at a glance.
+            HStack(alignment: .firstTextBaseline) {
+                updateNote
+                Spacer()
+                Text("rev. \(appVersion)")
+                    .font(Theme.courier(9))
+                    .kerning(0.4)
+                    .foregroundStyle(Theme.inkFaint)
+                    .textSelection(.enabled)
+            }
+            .padding(.horizontal, 22)
+            .padding(.bottom, 8)
+        }
+    }
+
+    /// The bottom-left footer narrates the updater: an available revision,
+    /// install progress, or the failure and its fallback.
+    @ViewBuilder
+    private var updateNote: some View {
+        switch updates.phase {
+        case .idle:
+            if let update = updates.available {
+                Button {
+                    showUpdatePopover = true
+                } label: {
+                    Text("rev. \(update.version) available")
+                        .font(Theme.courier(9, .bold))
+                        .kerning(0.4)
+                        .foregroundStyle(Theme.brass)
+                        .underline()
+                }
+                .buttonStyle(.plain)
+                .help("Install the update, or read the release notes")
+                .popover(isPresented: $showUpdatePopover, arrowEdge: .top) {
+                    UpdatePopover(update: update)
+                }
+            }
+        case .downloading(let fraction):
+            HStack(spacing: 7) {
+                FooterProgressBar(fraction: fraction)
+                Text(footerDownloadLabel(fraction))
+                    .font(Theme.courier(9, .bold))
+                    .kerning(0.4)
+                    .foregroundStyle(Theme.brass)
+                    .monospacedDigit()
+            }
+        case .installing:
+            HStack(spacing: 7) {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(Theme.brass)
+                Text("verifying and installing…")
+                    .font(Theme.courier(9, .bold))
+                    .kerning(0.4)
+                    .foregroundStyle(Theme.brass)
+            }
+        case .failed(let message):
+            Button {
+                if let update = updates.available {
+                    NSWorkspace.shared.open(update.releaseNotesURL)
+                }
+            } label: {
+                Text("\(message). Get it from the release page instead")
+                    .font(Theme.courier(9))
+                    .kerning(0.2)
+                    .foregroundStyle(Theme.alarm)
+                    .underline()
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -128,6 +217,49 @@ struct ContentView: View {
         case .converting: return "…"
         case .done(let r): return r.pages.map { "\($0)." } ?? "1."
         case .failed: return "1."
+        }
+    }
+
+    // MARK: - First launch: the cold open
+
+    /// Shown once, in place of the title page: a personal note and the one
+    /// consent decision the app ever asks for. The story starts when the
+    /// user clicks FADE IN.
+    private var welcomePage: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Slugline(text: "INT. SCREEPUB - FIRST LAUNCH")
+            Text("Welcome. I built Screepub because reading screenplays on an e-reader shouldn't be harder than reading anything else. Drop a script PDF on this page and it becomes a real e-book, built entirely on this Mac. Scripts are confidential; nothing you drop here is ever uploaded.")
+                .font(Theme.courier(13))
+                .foregroundStyle(Theme.ink)
+                .lineSpacing(4)
+                .padding(.top, 18)
+            Text("Glad to share it with you.")
+                .font(Theme.courier(13))
+                .foregroundStyle(Theme.ink)
+                .padding(.top, 14)
+            Text("SAM")
+                .font(Theme.courier(13, .bold))
+                .kerning(1)
+                .foregroundStyle(Theme.ink)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.top, 10)
+
+            Spacer(minLength: 24)
+
+            VStack(alignment: .leading, spacing: 7) {
+                Toggle("tell me when an update is available", isOn: $updateOptIn)
+                    .toggleStyle(MarginToggleStyle(size: 12, color: Theme.ink))
+                Text("(one anonymous request to GitHub, at most daily: app name and version, nothing else. Stays off unless you check this; change your mind anytime in Settings.)")
+                    .font(Theme.courier(10))
+                    .foregroundStyle(Theme.inkFaint)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button("FADE IN") { welcomed = true }
+                .buttonStyle(BradButtonStyle())
+                .frame(maxWidth: .infinity)
+                .padding(.top, 22)
         }
     }
 
@@ -166,7 +298,6 @@ struct ContentView: View {
                 Button("CHOOSE PDF…  ⌘O") { choose() }
                     .buttonStyle(OutlineButtonStyle())
                     .keyboardShortcut("o")
-                    .frame(width: 190)
             }
             .padding(.vertical, 24)
             .frame(maxWidth: .infinity)
@@ -209,6 +340,16 @@ struct ContentView: View {
         }
         .animation(.spring(duration: 0.35), value: stampLabels)
     }
+
+    private func footerDownloadLabel(_ fraction: Double?) -> String {
+        let version = updates.available?.version ?? ""
+        if let fraction {
+            return "downloading rev. \(version) (\(Int(fraction * 100))%)"
+        }
+        return "downloading rev. \(version)…"
+    }
+
+    private var appVersion: String { UpdateController.currentVersion }
 
     private var stampLabels: [String] {
         var labels = devices.map { "\($0.name.uppercased()) CONNECTED" }
@@ -309,103 +450,172 @@ struct ContentView: View {
         }
     }
 
-    /// Exactly one emphasized route OUT of the app. A mounted volume device
-    /// owns that slot when there is one (its own button is already brass), so
-    /// SAVE takes it whenever no volume is mounted — including with a
-    /// reMarkable docked, which never mounts and so never enters `devices`.
-    ///
-    /// PREVIEW SCRIPT is also brass and deliberately stays that way: it opens
-    /// the in-app reader rather than sending the book anywhere, so it competes
-    /// for attention but not for this slot. Two brass buttons on screen is
-    /// expected — verified on device 2026-07-26 and accepted.
-    private var saveACopyStyle: AnyButtonStyle {
-        ResultActions.primary(devices: devices) == .saveCopy
-            ? AnyButtonStyle(BradButtonStyle())
-            : AnyButtonStyle(OutlineButtonStyle())
-    }
-
-    private var kindleAddress: String {
-        kindleEmail.trimmingCharacters(in: .whitespaces)
+    /// Perform a route chosen from the send menu. One switch so the menu and
+    /// its default action can't drift apart.
+    private func run(route: RouteOption, result: EngineResult, epub: URL, title: String?) {
+        switch route.destination {
+        case .device(let device):
+            copyToDevice(result: result, epub: epub, device: device)
+        case .remarkable:
+            sendToRemarkable(epub: epub)
+        case .appleBooks:
+            // send() reports Books structurally absent; kit-check pins that
+            // return exactly so callers don't announce an add that never
+            // happened.
+            transferNote = AppleBooks.send(epub)
+                ? "added to Apple Books. It syncs to your iPhone and iPad if Books iCloud is on"
+                : "Apple Books isn't available on this Mac"
+        case .sendToKindle:
+            SendToKindle.sendViaAmazon(epub)
+        case .emailToKindle:
+            emailToKindle(epub, title: title)
+        case .saveCopy:
+            saveACopy(result: result, epub: epub)
+        }
     }
 
     @ViewBuilder
     private func transferButtons(result: EngineResult, epub: URL, title: String?) -> some View {
         VStack(spacing: 9) {
-            // result.fountainPath (--json's fountainPath) is only set for PDF
-            // input — the engine doesn't re-emit a .fountain for .fountain
-            // input, so fall back to the input file itself in that case.
-            if let fountainPath = result.fountainPath
-                ?? (lastInput?.pathExtension.lowercased() == "fountain" ? lastInput?.path : nil) {
+            if let fountainPath = fountainPath(for: result) {
+                // Outlined, not brass: SEND is the page's one primary action,
+                // and preview shouldn't compete with it.
                 Button("PREVIEW SCRIPT") {
                     openWindow(value: ScriptRef(
                         title: result.title ?? "Script",
                         fountainPath: fountainPath,
                         epubPath: epub.path))
                 }
-                .buttonStyle(BradButtonStyle())
-            }
-            ForEach(devices) { device in
-                Button("COPY TO \(device.name.uppercased()) — USB") {
-                    copyToDevice(result: result, epub: epub, device: device)
-                }
-                .buttonStyle(BradButtonStyle())
-            }
-            Button("SAVE") {
-                saveACopy(result: result, epub: epub)
-            }
-            .buttonStyle(saveACopyStyle)
-
-            Button(SendToKindle.appIsInstalled ? "SEND TO KINDLE APP" : "SEND TO KINDLE — WEB") {
-                SendToKindle.sendViaAmazon(epub)
-            }
-            .buttonStyle(OutlineButtonStyle())
-
-            // Books reads the EPUB as-is — no conversion, and WebKit honours
-            // the page-break rules a Kindle sideload ignores. Adding it here
-            // is also how a script reaches an iPhone or iPad: Books syncs the
-            // library through the user's own iCloud account.
-            if AppleBooks.isAvailable {
-                Button("OPEN IN APPLE BOOKS") {
-                    AppleBooks.send(epub)
-                    transferNote = "added to Apple Books — it syncs to your iPhone and iPad if Books iCloud is on"
-                }
                 .buttonStyle(OutlineButtonStyle())
             }
+            // One decision — where is this going? — instead of a stack of
+            // peers. The best route is the button; everything else is one
+            // click away in its menu, named by destination with the
+            // mechanism demoted to the detail line.
+            let routes = ResultActions.routes(
+                devices: devices,
+                remarkableDocked: remarkableUp,
+                booksAvailable: AppleBooks.isAvailable,
+                canEmailToKindle: SendToKindle.defaultMailClientIsAppleMail,
+                sendToKindleApp: SendToKindle.appIsInstalled,
+                inputIsPDF: lastInput?.pathExtension.lowercased() == "pdf")
 
-            // Only Apple Mail actually attaches the file: with a third-party
-            // default client macOS degrades the compose to a mailto: URL,
-            // which carries no attachment (RFC 6068) and still reports
-            // success. Offer the route only where it works.
-            if SendToKindle.defaultMailClientIsAppleMail {
-                Button("EMAIL TO KINDLE…") {
-                    emailToKindle(epub, title: title)
-                }
-                .buttonStyle(OutlineButtonStyle())
-            }
+            // A row picked this session wins (it can name a SPECIFIC device
+            // among same-kind twins); if it vanished — device unplugged,
+            // new conversion — fall back to the remembered kind.
+            let chosen = pickedRouteID.flatMap { id in routes.first { $0.id == id } }
+                ?? ResultActions.preselected(in: routes, lastChosen: lastDestination.isEmpty ? nil : lastDestination)
 
-            // reMarkable uploads over its USB web interface rather than being
-            // copied to, so ResultActions never gives it the primary slot.
-            if remarkableUp {
-                Button("SEND TO REMARKABLE — USB") {
-                    sendToRemarkable(epub: epub)
-                }
-                .buttonStyle(OutlineButtonStyle())
-            }
-
-            if !kindleAddress.isEmpty {
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(kindleAddress, forType: .string)
-                    transferNote = "copied \(kindleAddress) — attach the file to a new message and send"
+            // The destination is picked, not guessed at. Every route is one
+            // click away in the popup and the current one is readable
+            // without opening anything, so a wrong pre-selection costs a
+            // click rather than an unwanted send. Styled as the routing
+            // slip it is: the destination typed onto a fill-in-the-blank
+            // rule, its mechanism as the parenthetical underneath.
+            VStack(spacing: 5) {
+                Menu {
+                    Picker("Send to", selection: Binding(
+                        get: { chosen.id },
+                        set: { id in
+                            pickedRouteID = id
+                            if let route = routes.first(where: { $0.id == id }) {
+                                lastDestination = route.destination.storageKey
+                            }
+                        }
+                    )) {
+                        ForEach(routes.filter(\.available)) { route in
+                            Text(route.title).tag(route.id)
+                        }
+                        // Disconnected hardware is still a destination —
+                        // choosing it states intent, and SEND waits for
+                        // the device to show up.
+                        if routes.contains(where: { !$0.available }) {
+                            Section("Not connected") {
+                                ForEach(routes.filter { !$0.available }) { route in
+                                    Text(route.title).tag(route.id)
+                                }
+                            }
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
                 } label: {
-                    Text("Or email it to \(kindleAddress)")
-                        .font(Theme.courier(10))
-                        .foregroundStyle(Theme.inkFaint)
-                        .underline()
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("SEND TO:")
+                            .font(Theme.courier(12, .bold))
+                            .kerning(0.8)
+                            .foregroundStyle(Theme.inkFaint)
+                        HStack(spacing: 6) {
+                            Text(chosen.title.uppercased())
+                                .font(Theme.courier(13, .bold))
+                                .kerning(1)
+                                .foregroundStyle(Theme.ink)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(Theme.brass)
+                        }
+                        .overlay(
+                            Rectangle().fill(Theme.brass).frame(height: 1.2).offset(y: 4),
+                            alignment: .bottom
+                        )
+                    }
+                    .contentShape(Rectangle())
                 }
+                .menuStyle(.button)
                 .buttonStyle(.plain)
-                .help("Copies the address. Amazon only accepts documents sent FROM an address on your Approved Personal Document E-mail List — mail from anywhere else is discarded silently, with no bounce. Add your sender address at amazon.com → Manage Your Content and Devices → Preferences.")
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Every place this script can go")
+
+                // While the chosen hardware is unplugged the detail line IS
+                // the instruction, so it steps forward in brass.
+                Text("(\(chosen.detail))")
+                    .font(Theme.courier(10))
+                    .foregroundStyle(chosen.available ? Theme.inkFaint : Theme.brass)
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                // Kobo's format choice lives here, at the moment it applies,
+                // not in Settings. Only shown when Calibre can actually
+                // produce a KEPUB — otherwise plain EPUB is the only truth.
+                if case .device(let d) = chosen.destination, d.kind == .kobo,
+                   EbookConvert.isAvailable {
+                    Toggle("as KEPUB, for page numbers & reading stats", isOn: $koboKepub)
+                        .toggleStyle(MarginToggleStyle())
+                        .padding(.top, 2)
+                        .help("KEPUB unlocks Kobo's page-turn counts and reading stats, but its renderer has justification quirks around dashes and ellipses, which are common in dialogue. Off sends a plain EPUB (recommended).")
+                }
+
+                // The email route needs two one-time steps on Amazon's side
+                // that the app can't do for the user — the guide names them
+                // and links straight to the page where both happen.
+                if chosen.destination == .emailToKindle {
+                    Button {
+                        showEmailGuide.toggle()
+                    } label: {
+                        Text("first time? the two-step Amazon setup")
+                            .font(Theme.courier(10))
+                            .foregroundStyle(Theme.inkFaint)
+                            .underline()
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 2)
+                    .popover(isPresented: $showEmailGuide, arrowEdge: .bottom) {
+                        EmailSetupGuide()
+                    }
+                }
             }
+            .padding(.top, 4)
+
+            // The button reads the route's own verb, so what happens on
+            // click is written on the thing that does it. It holds, dimmed,
+            // while the chosen hardware is unplugged — the volume events and
+            // reMarkable probe light it up the moment the device appears.
+            Button(chosen.button.uppercased()) {
+                lastDestination = chosen.destination.storageKey
+                run(route: chosen, result: result, epub: epub, title: title)
+            }
+            .buttonStyle(BradButtonStyle())
+            .disabled(!chosen.available)
 
             HStack(spacing: 22) {
                 Button("SHOW IN FINDER") {
@@ -413,6 +623,7 @@ struct ContentView: View {
                 }
                 Button("CONVERT ANOTHER") {
                     transferNote = nil
+                    pickedRouteID = nil
                     state = .idle
                 }
             }
@@ -462,6 +673,9 @@ struct ContentView: View {
     // MARK: - Actions
 
     private func convert(_ url: URL, force: Bool) {
+        // Dropping a script straight onto the welcome page is as welcomed
+        // as anyone needs to be — don't replay the cold open afterwards.
+        welcomed = true
         transferNote = nil
         lastInput = url
         state = .converting(url.lastPathComponent)
@@ -500,20 +714,29 @@ struct ContentView: View {
         }
     }
 
+    /// result.fountainPath (--json's fountainPath) is only set for PDF
+    /// input — the engine doesn't re-emit a .fountain for .fountain input,
+    /// so fall back to the input file itself in that case.
+    private func fountainPath(for result: EngineResult) -> String? {
+        result.fountainPath
+            ?? (lastInput?.pathExtension.lowercased() == "fountain" ? lastInput?.path : nil)
+    }
+
     private func copyToDevice(result: EngineResult, epub: URL, device: ConnectedDevice) {
-        let mobiPath = result.mobiPath
         let wantKepub = koboKepub
+        // The MOBI rung can re-run the engine, which rebuilds the library
+        // EPUB — it must use this script's own sidecar settings, exactly
+        // as saveACopy does.
+        let fountainPath = fountainPath(for: result)
+        let settings = fountainPath.map {
+            ScriptSettings.load(forFountain: URL(fileURLWithPath: $0),
+                                fallback: AppSettings.formatSettings())
+        } ?? AppSettings.formatSettings()
+        let note: @Sendable (String) -> Void = { s in Task { @MainActor in transferNote = s } }
 
         switch device.kind {
-        case .kindle where EbookConvert.isAvailable:
-            // KFX vs AZW3 is decided in the background task — the check
-            // spawns calibre-customize, too slow for this thread.
-            transferNote = "converting for Kindle…"
-        case .kindle where mobiPath == nil:
-            transferNote = "no Kindle-native file available — use Email to Kindle instead"
-            return
         case .kindle:
-            transferNote = "copying MOBI to \(device.name)…"
+            transferNote = "preparing for \(device.name)…"
         case .kobo where wantKepub && EbookConvert.isAvailable:
             transferNote = "converting to KEPUB for Kobo…"
         default:
@@ -525,21 +748,20 @@ struct ContentView: View {
                 Result {
                     switch device.kind {
                     case .kindle:
-                        // Ladder, best rung first — registry §8b for why
-                        // KFX outranks AZW3 (Enhanced Typesetting; keeps
-                        // hold on device; AZW3's renderer strands cues).
-                        if KFXToolchain.status().ready {
-                            let kfx = try KFXToolchain.convert(epub)
-                            try DeviceTransfer.copy(kfx, to: device)
-                            return "KFX"
-                        }
-                        if EbookConvert.isAvailable {
-                            let azw3 = try EbookConvert.toAzw3(epub)
-                            try DeviceTransfer.copy(azw3, to: device)
-                            return "AZW3"
-                        }
-                        try DeviceTransfer.copy(URL(fileURLWithPath: mobiPath!), to: device)
-                        return "MOBI"
+                        // ONE ladder for every Kindle path — Export owns
+                        // KFX → AZW3 → MOBI, the staleness reuse, and the
+                        // stage narration. Re-deriving it here is exactly
+                        // how the reader window fell a rung behind.
+                        let artifact = try Export.freshKindleArtifact(
+                            for: epub,
+                            fountainPath: fountainPath,
+                            format: settings,
+                            calibreAvailable: EbookConvert.isAvailable,
+                            kfxReady: KFXToolchain.status().ready,
+                            onStage: { note("Kindle: \($0)") })
+                        note("copying to \(device.name)…")
+                        try DeviceTransfer.copy(artifact, to: device)
+                        return artifact.pathExtension.uppercased()
                     case .kobo where wantKepub && EbookConvert.isAvailable:
                         let kepub = try EbookConvert.toKepub(epub)
                         try DeviceTransfer.copy(kepub, to: device)
@@ -579,78 +801,131 @@ struct ContentView: View {
     /// pick — the route that works regardless of mail client, device, or
     /// Amazon account state.
     private func saveACopy(result: EngineResult, epub: URL) {
-        let stem = epub.deletingPathExtension().lastPathComponent
         // Everything the save depends on is captured HERE, not inside the
         // completion: `panel.begin` is modeless, so CONVERT ANOTHER can move
         // `lastInput` to a different script while the sheet is still open.
-        let fountainPath = result.fountainPath
-            ?? (lastInput?.pathExtension.lowercased() == "fountain" ? lastInput?.path : nil)
-        // The export must reproduce the settings the library EPUB was built
-        // from — the same per-script sidecar, globals only as fallback, that
-        // convert() resolves. It isn't just the exported file at stake: the
-        // Kindle branch can re-run the engine, which rewrites <stem>.epub in
-        // place, so exporting under any other settings would silently desync
-        // the library EPUB from its own <Stem>.screepub.json.
+        // Settings come from the script's own sidecar — the Kindle branch
+        // can re-run the engine, which rewrites <stem>.epub in place, so any
+        // other settings would silently desync the library EPUB from its
+        // own <Stem>.screepub.json.
+        let fountainPath = fountainPath(for: result)
         let settings = fountainPath.map {
             ScriptSettings.load(forFountain: URL(fileURLWithPath: $0),
                                 fallback: AppSettings.formatSettings())
         } ?? AppSettings.formatSettings()
-        let calibre = EbookConvert.isAvailable
-        let kfx = kfxReady
-        ExportPanel.present(epub: epub, stem: stem, kfxReady: kfx) { destination, format in
-            transferNote = "saving…"
-            // freshKindleArtifact spawns Calibre or the engine — keep it off
-            // the main actor or the whole UI stalls behind it.
-            Task.detached {
-                do {
-                    let source: URL
-                    switch format {
-                    case .epub:
-                        source = epub
-                    case .kindle:
-                        source = try Export.freshKindleArtifact(
-                            for: epub,
-                            fountainPath: fountainPath,
-                            format: settings,
-                            calibreAvailable: calibre,
-                            kfxReady: kfx)
-                    }
-                    try Export.copy(source, to: destination)
-                    await MainActor.run {
-                        transferNote = "saved to \(destination.deletingLastPathComponent().lastPathComponent)"
-                    }
-                } catch {
-                    await MainActor.run {
-                        transferNote = "save failed: \(error.localizedDescription)"
-                    }
-                }
-            }
-        }
+        SaveFlow.present(
+            epub: epub,
+            fountainPath: fountainPath,
+            settings: settings,
+            status: { transferNote = $0 },
+            failure: { transferNote = $0 })
     }
 
     private func emailToKindle(_ epub: URL, title: String?) {
-        let address = kindleAddress
-        guard !address.isEmpty else {
-            transferNote = "set your @kindle.com address first — Screepub → Settings"
-            openSettings()
-            return
-        }
-        if SendToKindle.email(epub, to: address, title: title) {
-            transferNote = "Mail compose opened — send from an address you've approved in Amazon, or it's discarded silently"
+        if SendToKindle.email(epub, title: title) {
+            transferNote = SendToKindle.legacyStoredAddress.map {
+                "compose opened, addressed to \($0) — send from a sender Amazon has approved"
+            } ?? "compose opened. Address it to your @kindle.com address, from a sender Amazon has approved"
         } else {
-            transferNote = "no mail account available — configure Mail.app, or use the web uploader"
+            transferNote = "no mail account available. Configure Mail.app, or use Send to Kindle web"
         }
     }
 }
 
-/// Type-erased ButtonStyle so Save a Copy can flip between primary and
-/// secondary depending on whether a device holds the brass slot.
-struct AnyButtonStyle: ButtonStyle {
-    private let make: (Configuration) -> AnyView
-    init<S: ButtonStyle>(_ style: S) {
-        make = { AnyView(style.makeBody(configuration: $0)) }
+/// A thin brass thermometer for the footer: determinate when the server
+/// declared a size, empty track while it hasn't.
+private struct FooterProgressBar: View {
+    let fraction: Double?
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            Rectangle()
+                .fill(Theme.inkFaint.opacity(0.35))
+            Rectangle()
+                .fill(Theme.brass)
+                .scaleEffect(x: fraction ?? 0, y: 1, anchor: .leading)
+        }
+        .frame(width: 110, height: 3)
+        .animation(.linear(duration: 0.15), value: fraction)
     }
-    func makeBody(configuration: Configuration) -> some View {
-        make(configuration)
+}
+
+/// The install decision, anchored to the footer note that announced it.
+/// States plainly what will happen before anything happens.
+private struct UpdatePopover: View {
+    let update: AvailableUpdate
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("REV. \(update.version) IS READY")
+                .font(Theme.courier(12, .bold))
+                .kerning(0.8)
+                .foregroundStyle(Theme.ink)
+            Text(UpdateController.installConsentText)
+                .font(Theme.courier(10))
+                .foregroundStyle(Theme.inkFaint)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("INSTALL AND RELAUNCH") {
+                dismiss()
+                Task { await UpdateController.shared.install() }
+            }
+            .buttonStyle(BradButtonStyle())
+            Button("VIEW RELEASE NOTES") {
+                NSWorkspace.shared.open(update.releaseNotesURL)
+            }
+            .buttonStyle(MarginButtonStyle())
+        }
+        .padding(16)
+        .frame(width: 300)
+        .background(Theme.paper)
+    }
+}
+
+/// The two Amazon-side steps the app can't perform, plus what happens next —
+/// a page insert anchored to the email route.
+private struct EmailSetupGuide: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("SEND TO KINDLE EMAIL: ONE-TIME SETUP")
+                .font(Theme.courier(12, .bold))
+                .kerning(0.8)
+                .foregroundStyle(Theme.ink)
+
+            step("1. FIND YOUR KINDLE'S ADDRESS",
+                 "Amazon → Manage Your Content & Devices → Preferences → Personal Document Settings. It ends in @kindle.com.")
+            step("2. APPROVE YOUR OWN ADDRESS",
+                 "Same page, \u{201C}Approved Personal Document E-mail List\u{201D}: add the address you send from. Amazon silently discards mail from anyone else. No bounce, no error.")
+            step("3. SEND",
+                 "The compose window opens with the script attached. Address it to your @kindle.com address.")
+
+            Divider()
+
+            step("ANOTHER MAIL APP?",
+                 "Only Apple Mail attaches the file from here. With Superhuman, Outlook, or webmail, drag the script's title block into your compose window instead; the file rides along.")
+
+            Button("OPEN AMAZON'S SETTINGS PAGE") {
+                NSWorkspace.shared.open(SendToKindle.personalDocumentSettings)
+            }
+            .buttonStyle(OutlineButtonStyle())
+            .frame(maxWidth: .infinity)
+        }
+        .padding(18)
+        .frame(width: 340)
+        .background(Theme.paper)
+    }
+
+    private func step(_ title: String, _ body: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(Theme.courier(11, .bold))
+                .foregroundStyle(Theme.ink)
+            Text(body)
+                .font(Theme.courier(11))
+                .foregroundStyle(Theme.inkFaint)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

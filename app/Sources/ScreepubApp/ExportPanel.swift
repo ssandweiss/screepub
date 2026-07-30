@@ -54,7 +54,7 @@ enum ExportPanel {
     /// probing it here would block the main thread on a spawned process.
     static func present(epub: URL,
                         stem: String,
-                        kfxReady: Bool = false,
+                        kfxReady: Bool,
                         completion: @escaping (URL, ExportFormat) -> Void) {
         let calibre = EbookConvert.isAvailable
         let formats = Export.available(for: epub, calibreAvailable: calibre)

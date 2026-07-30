@@ -95,13 +95,9 @@ public enum DeviceTransfer {
         case .remarkable:
             throw TransferError.noVolume
         }
-        let fm = FileManager.default
-        try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
         let dest = destDir.appendingPathComponent(file.lastPathComponent)
-        if fm.fileExists(atPath: dest.path) {
-            try fm.removeItem(at: dest)
-        }
-        try fm.copyItem(at: file, to: dest)
+        try Export.copy(file, to: dest)
         return dest
     }
 }

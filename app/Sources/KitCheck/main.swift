@@ -284,15 +284,15 @@ let exDir = tempDir("export")
 let exEpub = exDir.appendingPathComponent("Script.epub")
 try! Data("epub".utf8).write(to: exEpub)
 
-check(ExportFormat.epub.fileExtension(calibreAvailable: false) == "epub",
+check(ExportFormat.epub.fileExtension(calibreAvailable: false, kfxReady: false) == "epub",
       "epub format uses .epub")
-check(ExportFormat.kindle.fileExtension(calibreAvailable: true) == "azw3",
+check(ExportFormat.kindle.fileExtension(calibreAvailable: true, kfxReady: false) == "azw3",
       "kindle format is azw3 when Calibre is available")
-check(ExportFormat.kindle.fileExtension(calibreAvailable: false) == "mobi",
+check(ExportFormat.kindle.fileExtension(calibreAvailable: false, kfxReady: false) == "mobi",
       "kindle format falls back to mobi without Calibre")
-check(ExportFormat.epub.label(calibreAvailable: false).contains("email"),
+check(ExportFormat.epub.label(calibreAvailable: false, kfxReady: false).contains("email"),
       "epub label states its purpose")
-check(ExportFormat.kindle.label(calibreAvailable: true).contains("sideload"),
+check(ExportFormat.kindle.label(calibreAvailable: true, kfxReady: false).contains("sideload"),
       "kindle label states its purpose")
 
 check(Export.available(for: exEpub, calibreAvailable: true) == [.epub, .kindle],
@@ -358,17 +358,369 @@ try! Data("v2".utf8).write(to: copySrc)
 try! Export.copy(copySrc, to: copyDest)
 check((try? String(contentsOf: copyDest, encoding: .utf8)) == "v2", "Export.copy re-copy overwrites")
 
-// — which action owns the primary slot —
+// — route ordering: this IS the send menu, so it is checked here rather
+//   than re-derived as conditionals in two views —
 let kindleDev = ConnectedDevice(kind: .kindle, name: "Kindle", volume: URL(fileURLWithPath: "/Volumes/Kindle"))
 let rmDev = ConnectedDevice(kind: .remarkable, name: "reMarkable", volume: nil)
-check(ResultActions.primary(devices: []) == .saveCopy,
-      "no devices -> Save a Copy is promoted to primary")
-check(ResultActions.primary(devices: [kindleDev]) == .transfer(kindleDev),
-      "a mounted Kindle takes the primary slot")
-check(ResultActions.primary(devices: [rmDev]) == .saveCopy,
-      "reMarkable alone does not take primary (it lives under More ways)")
-check(ResultActions.primary(devices: [rmDev, kindleDev]) == .transfer(kindleDev),
-      "a volume device wins over a docked reMarkable")
+
+check(ResultActions.routes(devices: [kindleDev])[0].destination == .device(kindleDev),
+      "a plugged-in Kindle is the default route")
+check(ResultActions.routes(devices: [], booksAvailable: true)[0].destination == .appleBooks,
+      "no device -> Apple Books leads, being local and instant")
+check(ResultActions.routes(devices: [], booksAvailable: false)[0].destination == .sendToKindle,
+      "no device and no Books -> Send to Kindle leads")
+check(ResultActions.routes(devices: [rmDev])[0].destination != .device(rmDev),
+      "reMarkable never arrives as a volume device")
+check(ResultActions.routes(devices: [], remarkableDocked: true)[0].destination == .remarkable,
+      "a docked reMarkable outranks Books")
+check(ResultActions.routes(devices: [kindleDev], remarkableDocked: true)[0].destination == .device(kindleDev),
+      "a plugged-in volume still wins over a docked reMarkable")
+
+// Save is the floor: some route is always offered, whatever is connected.
+for books in [true, false] {
+    for mail in [true, false] {
+        let r = ResultActions.routes(devices: [], booksAvailable: books, canEmailToKindle: mail)
+        check(!r.isEmpty, "routes never empty (books:\(books) mail:\(mail))")
+        check(r.contains { $0.destination == .saveCopy },
+              "Save is always offered (books:\(books) mail:\(mail))")
+        check(Set(r.map(\.id)).count == r.count,
+              "no duplicate routes (books:\(books) mail:\(mail))")
+    }
+}
+// Email stays in the catalog when Apple Mail isn't the default client —
+// that's fixable at the desk — but flagged unavailable, because the
+// degraded mailto: hand-off would silently drop the attachment.
+let emailAbsent = ResultActions.routes(devices: [], canEmailToKindle: false)
+    .first(where: { $0.destination == .emailToKindle })
+check(emailAbsent?.available == false,
+      "email route listed but unavailable when Apple Mail can't attach")
+check(emailAbsent?.detail.contains("Apple Mail") == true,
+      "email placeholder's detail names the fix")
+check(ResultActions.routes(devices: [], canEmailToKindle: true)
+        .first(where: { $0.destination == .emailToKindle })?.available == true,
+      "email route sendable when Apple Mail is the default")
+check(!ResultActions.routes(devices: [], booksAvailable: false)
+        .contains { $0.destination == .appleBooks },
+      "Books route hidden when Books is absent")
+
+// — a remembered choice outranks the ordering heuristic —
+let allRoutes = ResultActions.routes(devices: [kindleDev], booksAvailable: true)
+check(ResultActions.preselected(in: allRoutes, lastChosen: nil).destination == .device(kindleDev),
+      "first run falls back to the ordering")
+check(ResultActions.preselected(in: allRoutes, lastChosen: "sendToKindle").destination == .sendToKindle,
+      "a remembered choice wins over a plugged-in device")
+check(ResultActions.preselected(in: allRoutes, lastChosen: "appleBooks").destination == .appleBooks,
+      "remembered Apple Books survives a connected Kindle")
+// A remembered route that is structurally gone (Books not installed) must
+// not strand the user.
+let noBooks = ResultActions.routes(devices: [], booksAvailable: false)
+check(ResultActions.preselected(in: noBooks, lastChosen: "appleBooks").destination == .sendToKindle,
+      "a structurally absent remembered route falls back instead of vanishing")
+check(Destination.device(kindleDev).storageKey == "device:kindle",
+      "device key is by kind, not volume path")
+
+// — the menu is a catalog, not a status display: every physical
+//   destination is always listed; detection only flips availability —
+let bare = ResultActions.routes(devices: [])
+for kindName in ["Kindle", "Kobo", "tolino", "reMarkable"] {
+    check(bare.contains { $0.title == kindName && !$0.available },
+          "\(kindName) is listed while disconnected, flagged unavailable")
+}
+check(bare[0].available, "the first route is always sendable")
+check(bare.prefix(while: \.available).count == bare.filter(\.available).count,
+      "unavailable routes sink below every available one")
+check(bare.filter { !$0.available }.allSatisfy { $0.detail.contains("USB") || $0.detail.contains("Apple Mail") },
+      "every placeholder's detail says how to make it available")
+let koboDev = ConnectedDevice(kind: .kobo, name: "KOBOeReader", volume: kobo)
+let withKobo = ResultActions.routes(devices: [koboDev])
+check(withKobo.filter { $0.destination.storageKey == "device:kobo" }.count == 1,
+      "a connected Kobo replaces its placeholder rather than joining it")
+check(withKobo.first { $0.destination.storageKey == "device:kobo" }?.available == true,
+      "the connected Kobo row is sendable")
+
+// Two same-kind devices must stay individually addressable. The old UI
+// keyed its buttons by volume path; if the picker's row identity is only
+// the kind, the second Kindle's row collides with the first, selection
+// resolves first-match, and a send aimed at the second device lands on
+// the first one's volume.
+let kindleTwin = ConnectedDevice(kind: .kindle, name: "KINDLE2", volume: URL(fileURLWithPath: "/Volumes/KINDLE2"))
+let twins = ResultActions.routes(devices: [kindleDev, kindleTwin])
+check(Set(twins.map(\.id)).count == twins.count,
+      "route ids stay unique with two same-kind devices connected")
+let twinRow = twins.first { $0.title == "KINDLE2" }
+check(twinRow.map { row in
+        if case .device(let d) = row.destination { return d.volume?.path == "/Volumes/KINDLE2" }
+        return false
+      } == true,
+      "the second device's row carries the second device's volume")
+check(ResultActions.preselected(in: twins, lastChosen: "device:kindle").available,
+      "a remembered kindle with twins connected resolves to a sendable row")
+
+// The button names exactly what fires. With Amazon's Send to Kindle app
+// installed the executor launches the APP — the consolidation dropped
+// main's adaptive label and froze the wording on "web".
+check(ResultActions.routes(devices: [], sendToKindleApp: true)
+        .first(where: { $0.destination == .sendToKindle })?.button == "Send to Kindle app",
+      "send-to-kindle button says app when the app will launch")
+check(ResultActions.routes(devices: [], sendToKindleApp: false)
+        .first(where: { $0.destination == .sendToKindle })?.button == "Send to Kindle web",
+      "send-to-kindle button says web when the browser uploader fires")
+
+// The reMarkable slip must name the actual payload: fountain input has no
+// original PDF, and the executor falls back to uploading the EPUB.
+check(ResultActions.routes(devices: [], remarkableDocked: true, inputIsPDF: false)
+        .first(where: { $0.destination == .remarkable })?.detail.contains("EPUB") == true,
+      "reMarkable detail names the EPUB when there is no original PDF")
+check(ResultActions.routes(devices: [], remarkableDocked: true, inputIsPDF: true)
+        .first(where: { $0.destination == .remarkable })?.detail.contains("original PDF") == true,
+      "reMarkable detail names the PDF when one exists")
+
+// A pre-0.4 Screepub stored the user's @kindle.com address. The Settings
+// field is gone by design, but an address the user already gave us must
+// keep pre-addressing the compose — deleting the field must not demote
+// existing users from zero-typing to lookup-and-type on every send.
+UserDefaults.standard.set("  someone_123@kindle.com  ", forKey: "kindleEmail")
+check(SendToKindle.legacyStoredAddress == "someone_123@kindle.com",
+      "a stored kindle address is honored, trimmed")
+UserDefaults.standard.set("   ", forKey: "kindleEmail")
+check(SendToKindle.legacyStoredAddress == nil, "a blank stored address reads as absent")
+UserDefaults.standard.removeObject(forKey: "kindleEmail")
+check(SendToKindle.legacyStoredAddress == nil, "no stored address reads as absent")
+
+// A remembered device stays chosen while unplugged — the routing slip keeps
+// the user's intent and SEND waits for the hardware — but a first run never
+// guesses at something that isn't there.
+check(ResultActions.preselected(in: bare, lastChosen: "device:kobo").destination.storageKey == "device:kobo",
+      "a remembered Kobo stays chosen while unplugged")
+check(!ResultActions.preselected(in: bare, lastChosen: "device:kobo").available,
+      "…and is flagged unavailable so the view can hold SEND")
+check(ResultActions.preselected(in: bare, lastChosen: nil).available,
+      "first run never preselects an unavailable route")
+
+// — the SEND button reads the route's own verb, so the click is never a
+//   surprise: Copy is USB-offline, Add is local, Upload/Send/Email name
+//   exactly what fires —
+check(ResultActions.routes(devices: [kindleDev]).first?.button == "Copy to Kindle",
+      "device route's button verb is Copy, named for the device")
+check(ResultActions.routes(devices: [], remarkableDocked: true).first?.button == "Upload to reMarkable",
+      "reMarkable route's button verb is Upload")
+check(ResultActions.routes(devices: []).first?.button == "Add to Apple Books",
+      "Books route's button verb is Add")
+check(ResultActions.routes(devices: [], booksAvailable: false).first?.button == "Send to Kindle web",
+      "web route's button carries its mechanism, since the pair exists")
+check(ResultActions.routes(devices: [], canEmailToKindle: true)
+        .first(where: { $0.destination == .emailToKindle })?.button == "Send to Kindle email",
+      "email route's button carries its mechanism")
+// The two wireless Kindle routes read as siblings — same name, different
+// mechanism — so the menu shows them as a matched pair.
+check(ResultActions.routes(devices: []).first(where: { $0.destination == .sendToKindle })?.title == "Send to Kindle web",
+      "web route title names the mechanism")
+check(ResultActions.routes(devices: [], canEmailToKindle: true)
+        .first(where: { $0.destination == .emailToKindle })?.title == "Send to Kindle email",
+      "email route title names the mechanism")
+check(ResultActions.routes(devices: []).first(where: { $0.destination == .saveCopy })?.button == "Save a Copy…",
+      "save route's button stays an ellipsis action")
+
+// — version comparison for the updater —
+check(UpdateCheck.isNewer("v0.4.0", than: "0.3.0"), "tag with a v prefix compares cleanly")
+check(UpdateCheck.isNewer("0.10.0", than: "0.9.0"),
+      "0.10.0 beats 0.9.0 — string ordering would get this backwards")
+check(!UpdateCheck.isNewer("0.3.0", than: "0.3.0"), "same version is not an update")
+check(!UpdateCheck.isNewer("0.2.9", than: "0.3.0"), "older version is not an update")
+check(UpdateCheck.isNewer("0.3.0", than: "0.3.0-dev"),
+      "a dev build is offered the matching stable release")
+check(!UpdateCheck.isNewer("0.3.0-beta.1", than: "0.3.0"),
+      "a pre-release does not supersede the release")
+check(UpdateCheck.isNewer("1.0.0", than: "0.99.99"), "major bump wins")
+check(!UpdateCheck.isNewer("0.3.0+ci.7", than: "0.3.0"), "build metadata is not a version bump")
+
+// git describe stamps dev builds "0.3.0-1-g<sha>" — one commit PAST the
+// tag. Semver would read that suffix as a pre-release BELOW 0.3.0, and the
+// updater would then offer (and install) a genuine downgrade on every dev
+// build. Describe suffixes mean at-or-past the tag, never before it.
+check(!UpdateCheck.isNewer("0.3.0", than: "0.3.0-1-g965cb10"),
+      "a describe-distance build is not offered its own tag (downgrade)")
+check(!UpdateCheck.isNewer("v0.3.0", than: "0.3.0-1-g965cb10-dirty"),
+      "a dirty describe-distance build is not offered its own tag")
+check(!UpdateCheck.isNewer("0.3.0", than: "0.3.0-dirty"),
+      "an at-tag dirty build is not offered its own tag")
+check(UpdateCheck.isNewer("0.3.1", than: "0.3.0-1-g965cb10"),
+      "a genuinely newer release still reaches a describe-distance build")
+
+// — update checks are opt-in and throttled: no consent, no request —
+let checkNow = Date(timeIntervalSince1970: 1_800_000_000)
+check(!UpdateCheck.shouldCheck(optedIn: false, lastChecked: nil, now: checkNow),
+      "never checks without opt-in, even on a first launch")
+check(UpdateCheck.shouldCheck(optedIn: true, lastChecked: nil, now: checkNow),
+      "first opted-in launch checks")
+check(!UpdateCheck.shouldCheck(optedIn: true, lastChecked: checkNow.addingTimeInterval(-3600), now: checkNow),
+      "an hour-old check is fresh enough — one request a day at most")
+check(UpdateCheck.shouldCheck(optedIn: true, lastChecked: checkNow.addingTimeInterval(-25 * 3600), now: checkNow),
+      "a day-old check re-checks")
+check(!UpdateCheck.shouldCheck(optedIn: true, lastChecked: checkNow.addingTimeInterval(3600), now: checkNow),
+      "a clock set backwards does not trigger a check storm")
+
+// — self-update installer: requirement pinning and swap mechanics —
+check(UpdateInstaller.appRequirement
+        == "anchor apple generic and identifier \"com.darkwell.screepub\""
+         + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
+         + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+         + " and certificate leaf[subject.OU] = \"XSRB3D643J\"",
+      "app requirement pins anchor, Developer ID chain, bundle id, and team")
+check(UpdateInstaller.dmgRequirement
+        == "anchor apple generic"
+         + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
+         + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+         + " and certificate leaf[subject.OU] = \"XSRB3D643J\"",
+      "dmg requirement pins the chain and team (a dmg's identifier is its filename)")
+
+// Verification must REJECT everything that isn't ours. /bin/ls is Apple-
+// signed with the wrong everything; a text file has no signature at all.
+check((try? UpdateInstaller.verify(URL(fileURLWithPath: "/bin/ls"),
+                                   requirement: UpdateInstaller.appRequirement)) == nil,
+      "an Apple-signed binary that isn't ours fails verification")
+let unsigned = tempDir("unsigned").appendingPathComponent("not-an-app.txt")
+try! Data("hello".utf8).write(to: unsigned)
+check((try? UpdateInstaller.verify(unsigned, requirement: UpdateInstaller.dmgRequirement)) == nil,
+      "an unsigned file fails verification")
+
+// Positive verification needs a real Developer ID build. The installed
+// /Applications/Screepub.app is one on the maintainer's machine; skip
+// gracefully anywhere it isn't.
+let installedApp = URL(fileURLWithPath: "/Applications/Screepub.app")
+if FileManager.default.fileExists(atPath: installedApp.path) {
+    let info = Process()
+    info.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+    info.arguments = ["-dvv", installedApp.path]
+    let infoErr = Pipe()
+    info.standardError = infoErr
+    info.standardOutput = Pipe()
+    try! info.run()
+    info.waitUntilExit()
+    let signInfo = String(data: infoErr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    if signInfo.contains("TeamIdentifier=\(UpdateInstaller.teamID)") {
+        check((try? UpdateInstaller.verify(installedApp, requirement: UpdateInstaller.appRequirement)) != nil,
+              "the installed Developer ID Screepub passes the pinned requirement")
+    } else {
+        print("  --  /Applications/Screepub.app is not a Developer ID build; positive verify untested here")
+    }
+} else {
+    print("  --  no /Applications/Screepub.app; positive verify untested here")
+}
+
+// Swap mechanics, no signing involved: the new bundle lands, the old one
+// is parked then cleaned, and a failed commit leaves the original alone.
+let swapDir = tempDir("swap")
+let swapDest = swapDir.appendingPathComponent("Fake.app")
+try! FileManager.default.createDirectory(at: swapDest, withIntermediateDirectories: true)
+try! Data("v1".utf8).write(to: swapDest.appendingPathComponent("marker"))
+let stagedNew = swapDir.appendingPathComponent("staged-new")
+try! FileManager.default.createDirectory(at: stagedNew, withIntermediateDirectories: true)
+try! Data("v2".utf8).write(to: stagedNew.appendingPathComponent("marker"))
+try! UpdateInstaller.commit(staged: stagedNew, into: swapDest)
+check((try? String(contentsOf: swapDest.appendingPathComponent("marker"), encoding: .utf8)) == "v2",
+      "commit swaps the new bundle into place")
+check(!FileManager.default.fileExists(atPath: stagedNew.path),
+      "commit consumes the staged copy")
+
+let ghostStaged = swapDir.appendingPathComponent("never-existed")
+check((try? UpdateInstaller.commit(staged: ghostStaged, into: swapDest)) == nil,
+      "a commit with nothing staged throws")
+check((try? String(contentsOf: swapDest.appendingPathComponent("marker"), encoding: .utf8)) == "v2",
+      "...and leaves the installed bundle untouched")
+
+// The rollback branch itself: the park succeeds, the staged move fails
+// (an immutable staged bundle makes rename return EPERM), and the parked
+// original MUST come back — this path is all that stands between a failed
+// swap and an empty /Applications.
+let rbDir = tempDir("rollback")
+let rbDest = rbDir.appendingPathComponent("Fake.app")
+try! FileManager.default.createDirectory(at: rbDest, withIntermediateDirectories: true)
+try! Data("original".utf8).write(to: rbDest.appendingPathComponent("marker"))
+let rbStaged = rbDir.appendingPathComponent("staged-locked")
+try! FileManager.default.createDirectory(at: rbStaged, withIntermediateDirectories: true)
+run(URL(fileURLWithPath: "/usr/bin/chflags"), ["uchg", rbStaged.path])
+let rbOutcome = try? UpdateInstaller.commit(staged: rbStaged, into: rbDest)
+run(URL(fileURLWithPath: "/usr/bin/chflags"), ["nouchg", rbStaged.path])
+check(rbOutcome == nil, "a commit whose staged move fails throws")
+check((try? String(contentsOf: rbDest.appendingPathComponent("marker"), encoding: .utf8)) == "original",
+      "…and the parked original is restored to the destination")
+
+let leftoverDir = tempDir("leftovers")
+let leftoverApp = leftoverDir.appendingPathComponent("Fake.app")
+try! FileManager.default.createDirectory(at: leftoverApp, withIntermediateDirectories: true)
+let parked = leftoverDir.appendingPathComponent(".Fake.app.old-999")
+let staleStage = leftoverDir.appendingPathComponent(".Fake.app.staged")
+try! FileManager.default.createDirectory(at: parked, withIntermediateDirectories: true)
+try! FileManager.default.createDirectory(at: staleStage, withIntermediateDirectories: true)
+UpdateInstaller.cleanupLeftovers(near: leftoverApp)
+check(!FileManager.default.fileExists(atPath: parked.path),
+      "cleanup removes parked old bundles")
+check(!FileManager.default.fileExists(atPath: staleStage.path),
+      "cleanup removes a stale staged copy")
+check(FileManager.default.fileExists(atPath: leftoverApp.path),
+      "cleanup never touches the installed bundle")
+
+check(UpdateInstaller.isTranslocated(URL(fileURLWithPath: "/private/var/folders/x/AppTranslocation/ABC/d/Screepub.app")),
+      "a translocated bundle path is recognized")
+check(!UpdateInstaller.isTranslocated(URL(fileURLWithPath: "/Applications/Screepub.app")),
+      "a normal install location is not translocated")
+
+// Preflight answers "can a swap land here?" BEFORE any bytes download —
+// discovering translocation only after a full DMG download wastes the
+// download and then deletes the very DMG the failure message points at.
+check((try? UpdateInstaller.preflight(
+        destination: URL(fileURLWithPath: "/private/var/folders/x/AppTranslocation/ABC/d/Screepub.app"))) == nil,
+      "preflight rejects a translocated bundle before any download")
+let preflightDir = tempDir("preflight")
+let preflightApp = preflightDir.appendingPathComponent("Fake.app")
+try! FileManager.default.createDirectory(at: preflightApp, withIntermediateDirectories: true)
+check((try? UpdateInstaller.preflight(destination: preflightApp)) != nil,
+      "preflight passes a writable install location")
+
+// The signature proves a bundle is OURS; the version pin proves it is the
+// RELEASE THE USER WAS PROMISED. Without it, any genuine older DMG passes
+// every requirement and installs as a downgrade replay.
+let vDir = tempDir("version-pin")
+let vApp = vDir.appendingPathComponent("Fake.app")
+try! FileManager.default.createDirectory(at: vApp.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+try! """
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+</dict></plist>
+""".write(to: vApp.appendingPathComponent("Contents/Info.plist"), atomically: true, encoding: .utf8)
+check(UpdateInstaller.bundleShortVersion(of: vApp) == "0.1.0",
+      "bundleShortVersion reads the app's Info.plist")
+check((try? UpdateInstaller.requireVersion(vApp, expected: "0.4.0")) == nil,
+      "a genuine older bundle fails the version pin (downgrade replay)")
+check((try? UpdateInstaller.requireVersion(vApp, expected: "0.1.0")) != nil,
+      "the promised version passes the pin")
+check((try? UpdateInstaller.requireVersion(vApp, expected: "v0.1.0")) != nil,
+      "the pin normalizes tag prefixes")
+let vNoPlist = vDir.appendingPathComponent("Empty.app")
+try! FileManager.default.createDirectory(at: vNoPlist, withIntermediateDirectories: true)
+check((try? UpdateInstaller.requireVersion(vNoPlist, expected: "0.1.0")) == nil,
+      "a bundle with no readable version fails the pin rather than passing")
+
+// End-to-end against a real release DMG, when one is provided:
+//   SCREEPUB_UPDATE_DMG=path/to/Screepub-macOS.dmg swift run kit-check
+if let dmgPath = ProcessInfo.processInfo.environment["SCREEPUB_UPDATE_DMG"] {
+    let dmg = URL(fileURLWithPath: dmgPath)
+    let e2eDest = tempDir("e2e").appendingPathComponent("Screepub.app")
+    do {
+        try UpdateInstaller.install(dmg: dmg, over: e2eDest, expectedVersion: nil)
+        check(FileManager.default.fileExists(atPath: e2eDest.appendingPathComponent("Contents/MacOS/Screepub").path),
+              "install(dmg:over:) lands a complete app bundle")
+        check((try? UpdateInstaller.verify(e2eDest, requirement: UpdateInstaller.appRequirement)) != nil,
+              "the installed bundle still passes the pinned requirement")
+    } catch {
+        check(false, "install(dmg:over:) succeeds on the release DMG (got: \(error))")
+    }
+} else {
+    print("  --  SCREEPUB_UPDATE_DMG not set; full install flow untested here")
+}
 
 // — default mail client detection (value is machine-dependent) —
 let isAppleMail = await MainActor.run { SendToKindle.defaultMailClientIsAppleMail }
@@ -389,6 +741,12 @@ if let books = AppleBooks.appURL {
     check(sent == false, "send() reports failure when Books is absent")
 }
 
+final class ErrLines: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var lines: [String] = []
+    func append(_ s: String) { lock.lock(); lines.append(s); lock.unlock() }
+}
+
 // — KFX toolchain (environment-dependent, like the ebook-convert checks) —
 check(ExportFormat.kindle.fileExtension(calibreAvailable: true, kfxReady: true) == "kfx",
       "kindle export prefers kfx when the toolchain is ready")
@@ -401,6 +759,36 @@ check(ExportFormat.kindle.label(calibreAvailable: true, kfxReady: true).contains
 check(KFXToolchain.bundledPluginURL() != nil,
       "vendored plugin zip resolves from the package resources")
 
+// Both Calibre rungs draw their preprocessing guards from ONE constant —
+// pin the trio so an accidental edit is loud (the values are the
+// device-verified 2026-07-29 recipe).
+check(KFXToolchain.calibreFormatGuards ==
+        ["--page-breaks-before=/", "--chapter-mark=none", "--disable-remove-fake-margins"],
+      "the calibre format guards are the device-verified trio")
+
+// The runner must deliver COMPLETE output even when a child floods both
+// pipes past the 64KB buffer: the drains join on EOF before anything reads
+// the streams, so no tail chunk can be lost to a torn-down handler
+// mid-flight. A lost stdout tail here is how "KFX Output" goes missing
+// from --list-plugins and a working toolchain silently falls to AZW3.
+let flood = (try? KFXToolchain.run(
+    tool: URL(fileURLWithPath: "/bin/sh"),
+    arguments: ["-c",
+        "dd if=/dev/zero bs=1024 count=200 2>/dev/null | tr '\\0' 'x'; printf 'END-OF-STDOUT'; dd if=/dev/zero bs=1024 count=200 2>/dev/null | cat >&2"])) ?? ""
+check(flood.hasSuffix("END-OF-STDOUT"), "runner captures the stdout tail under a two-pipe flood")
+check(flood.count == 200 * 1024 + 13, "runner loses no stdout bytes under flood")
+
+// An interrupted conversion must never leave a partial file at the final
+// .kfx path — the ladder's staleness reuse would trust it forever (mtime
+// newer than the EPUB) and copy a corrupt book on every later send. The
+// tool writes into a hidden same-directory scratch instead, and only a
+// COMPLETED conversion is renamed into place.
+let kfxScratch = KFXToolchain.scratchURL(for: URL(fileURLWithPath: "/tmp/lib/Script.epub"))
+check(kfxScratch.lastPathComponent == ".Script.partial.kfx",
+      "KFX scratch is hidden, same-stem, and keeps the .kfx extension")
+check(kfxScratch.deletingLastPathComponent().path == "/tmp/lib",
+      "KFX scratch stays in the output directory (promote is a same-volume rename)")
+
 let kfxStatus = KFXToolchain.status()
 check(kfxStatus.ready == (kfxStatus.calibre && kfxStatus.previewer && kfxStatus.pluginInstalled),
       "toolchain readiness is exactly its three components")
@@ -409,10 +797,16 @@ if kfxStatus.ready {
     // Kindle Previewer → repack → .kfx. Slow (~20s) but this is the one
     // assertion that proves the product code end to end.
     let miniEpub = makeMiniScriptEpub()
-    if let kfx = try? KFXToolchain.convert(miniEpub) {
+    let stages = ErrLines()
+    if let kfx = try? KFXToolchain.convert(miniEpub, onStage: { stages.append($0) }) {
         check(FileManager.default.fileExists(atPath: kfx.path), "KFX conversion produces a file")
         let size = (try? FileManager.default.attributesOfItem(atPath: kfx.path)[.size] as? Int) ?? 0
         check(size > 10_000, "KFX output is plausibly a book, not a stub")
+        check(!stages.lines.isEmpty, "conversion reported progress stages while running")
+        check(stages.lines.contains { $0.contains("Amazon") },
+              "the long Previewer wait is named as a stage")
+        check(!FileManager.default.fileExists(atPath: KFXToolchain.scratchURL(for: miniEpub).path),
+              "no scratch remains after a completed conversion")
     } else {
         check(false, "KFX conversion failed with a ready toolchain")
     }

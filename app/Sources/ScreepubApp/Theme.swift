@@ -67,20 +67,28 @@ struct Transition: View {
 }
 
 /// Primary action: brass-filled, ink caps — the brad of the page.
+/// Buttons hug their text (plus a typewriter margin) rather than spanning
+/// the column: sized like typed words on a page, not toolbar slabs.
 struct BradButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(Theme.courier(12, .bold))
             .kerning(0.8)
             .foregroundStyle(Color.black.opacity(0.82))
             .padding(.vertical, 6)
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 26)
+            .frame(minWidth: 150)
             .background(
                 RoundedRectangle(cornerRadius: 3)
                     .fill(Theme.brass.opacity(configuration.isPressed ? 0.75 : 1))
             )
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
             .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+            // Held, not hidden: dimmed while it waits for its hardware.
+            .opacity(isEnabled ? 1 : 0.35)
+            .animation(.easeOut(duration: 0.2), value: isEnabled)
     }
 }
 
@@ -92,13 +100,46 @@ struct OutlineButtonStyle: ButtonStyle {
             .kerning(0.8)
             .foregroundStyle(Theme.ink)
             .padding(.vertical, 6)
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 26)
+            .frame(minWidth: 150)
             .background(
                 RoundedRectangle(cornerRadius: 3)
                     .stroke(Theme.ink.opacity(configuration.isPressed ? 0.4 : 0.8), lineWidth: 1.2)
             )
             .contentShape(RoundedRectangle(cornerRadius: 3))
             .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+/// Inline checkbox in the page's own hand: a penciled box that takes a
+/// brass check, with margin-note text. Defaults suit a footnote; pass a
+/// larger size and ink when the choice is the point of the page.
+struct MarginToggleStyle: ToggleStyle {
+    var size: CGFloat = 10
+    var color: Color = Theme.inkFaint
+
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                RoundedRectangle(cornerRadius: 2)
+                    .stroke(Theme.inkFaint, lineWidth: 1.2)
+                    .frame(width: size + 1, height: size + 1)
+                    .overlay {
+                        if configuration.isOn {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: size - 2, weight: .heavy))
+                                .foregroundStyle(Theme.brass)
+                        }
+                    }
+                configuration.label
+                    .font(Theme.courier(size))
+                    .foregroundStyle(color)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

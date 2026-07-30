@@ -1,4 +1,5 @@
 import Foundation
+import KFXKit
 
 /// EPUB → AZW3 via Calibre's ebook-convert. Kindles do NOT index sideloaded
 /// EPUBs — a USB copy must be AZW3 (Calibre's "Send to Device" does exactly
@@ -18,16 +19,10 @@ public enum EbookConvert {
         }
     }
 
+    /// Delegates to KFXKit's single Calibre-location scanner so this and
+    /// KFXToolchain.status() can never disagree about Calibre's presence.
     nonisolated public static func toolURL() -> URL? {
-        let candidates = [
-            "/Applications/calibre.app/Contents/MacOS/ebook-convert",
-            "/opt/homebrew/bin/ebook-convert",
-            "/usr/local/bin/ebook-convert",
-        ]
-        for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
-            return URL(fileURLWithPath: path)
-        }
-        return nil
+        KFXToolchain.calibreTool("ebook-convert")
     }
 
     nonisolated public static var isAvailable: Bool { toolURL() != nil }
@@ -48,25 +43,16 @@ public enum EbookConvert {
     nonisolated public static func toAzw3(_ epub: URL) throws -> URL {
         guard let tool = toolURL() else { throw ConvertError.calibreMissing }
         let azw3 = epub.deletingPathExtension().appendingPathExtension("azw3")
-
-        let process = Process()
-        process.executableURL = tool
-        process.arguments = [
-            epub.path, azw3.path,
-            "--page-breaks-before=/",
-            "--chapter-mark=none",
-            "--disable-remove-fake-margins",
-        ]
-        let stderr = Pipe()
-        process.standardOutput = Pipe()
-        process.standardError = stderr
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0, FileManager.default.fileExists(atPath: azw3.path) else {
-            let detail = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? "no error output"
-            throw ConvertError.failed(String(detail.suffix(300)))
+        do {
+            // Same guard trio as the KFX recipe, from the same constant —
+            // a device-validated flag change lands on both rungs or neither.
+            _ = try KFXToolchain.run(tool: tool,
+                                     arguments: [epub.path, azw3.path] + KFXToolchain.calibreFormatGuards)
+        } catch let error as ToolRunError {
+            throw ConvertError.failed(error.detail)
+        }
+        guard FileManager.default.fileExists(atPath: azw3.path) else {
+            throw ConvertError.failed("ebook-convert exited cleanly but produced no .azw3")
         }
         return azw3
     }
@@ -82,20 +68,13 @@ public enum EbookConvert {
         let base = epub.deletingPathExtension()
         let raw = base.appendingPathExtension("kepub")
         let kepub = URL(fileURLWithPath: base.path + ".kepub.epub")
-
-        let process = Process()
-        process.executableURL = tool
-        process.arguments = [epub.path, raw.path]
-        let stderr = Pipe()
-        process.standardOutput = Pipe()
-        process.standardError = stderr
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0, FileManager.default.fileExists(atPath: raw.path) else {
-            let detail = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? "no error output"
-            throw ConvertError.failed(String(detail.suffix(300)))
+        do {
+            _ = try KFXToolchain.run(tool: tool, arguments: [epub.path, raw.path])
+        } catch let error as ToolRunError {
+            throw ConvertError.failed(error.detail)
+        }
+        guard FileManager.default.fileExists(atPath: raw.path) else {
+            throw ConvertError.failed("ebook-convert exited cleanly but produced no .kepub")
         }
         if FileManager.default.fileExists(atPath: kepub.path) {
             try FileManager.default.removeItem(at: kepub)

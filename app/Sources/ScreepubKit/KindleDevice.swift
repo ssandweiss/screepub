@@ -34,14 +34,10 @@ public enum KindleDevice {
     /// previous copy). Returns the destination URL.
     @discardableResult
     nonisolated public static func copy(_ file: URL, to volume: URL) throws -> URL {
-        let fm = FileManager.default
         let dest = volume
             .appendingPathComponent("documents")
             .appendingPathComponent(file.lastPathComponent)
-        if fm.fileExists(atPath: dest.path) {
-            try fm.removeItem(at: dest)
-        }
-        try fm.copyItem(at: file, to: dest)
+        try Export.copy(file, to: dest)
         return dest
     }
 

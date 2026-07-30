@@ -8,24 +8,46 @@ public enum SendToKindle {
 
     public static var appURL: URL? {
         NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.amazon.sendtokindle")
-            ?? existing("/Applications/Send to Kindle.app")
+            ?? existingApp(atPath: "/Applications/Send to Kindle.app")
     }
 
+    /// Feeds the route catalog's label: `sendViaAmazon` opens the native
+    /// app when installed, and the button must say which one fires.
     public static var appIsInstalled: Bool { appURL != nil }
 
-    /// Open a Mail compose addressed to the user's @kindle.com address with
-    /// the EPUB attached. Returns false when no compose service is
+    /// The @kindle.com address a pre-0.4 Screepub stored. The app no
+    /// longer ASKS for it (the setup guide explains where Amazon keeps
+    /// it), but an address the user already gave us keeps working —
+    /// removing the Settings field must not demote existing users from
+    /// zero-typing to lookup-and-type on every send.
+    public static var legacyStoredAddress: String? {
+        let stored = UserDefaults.standard.string(forKey: "kindleEmail")?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+        return stored.isEmpty ? nil : stored
+    }
+
+    /// Open a Mail compose with the EPUB attached — pre-addressed when a
+    /// previously stored @kindle.com address exists, otherwise ready to be
+    /// addressed by hand. Returns false when no compose service is
     /// available (no mail account configured).
     @MainActor
     @discardableResult
-    public static func email(_ epub: URL, to kindleAddress: String, title: String?) -> Bool {
+    public static func email(_ epub: URL, title: String?) -> Bool {
         guard let service = NSSharingService(named: .composeEmail) else { return false }
-        service.recipients = [kindleAddress]
+        if let address = legacyStoredAddress {
+            service.recipients = [address]
+        }
         service.subject = title ?? epub.deletingPathExtension().lastPathComponent
         guard service.canPerform(withItems: [epub]) else { return false }
         service.perform(withItems: [epub])
         return true
     }
+
+    /// Amazon's Personal Document Settings — where the @kindle.com address
+    /// lives and where the sender allow-list is edited. One page for both
+    /// steps of the email setup.
+    public static let personalDocumentSettings =
+        URL(string: "https://www.amazon.com/hz/mycd/myx#/home/settings/pdoc")!
 
     /// Native app when installed, else web uploader with the file revealed
     /// in Finder for drag-in.
@@ -38,10 +60,6 @@ public enum SendToKindle {
             NSWorkspace.shared.activateFileViewerSelecting([epub])
             NSWorkspace.shared.open(webUploader)
         }
-    }
-
-    private static func existing(_ path: String) -> URL? {
-        FileManager.default.fileExists(atPath: path) ? URL(fileURLWithPath: path) : nil
     }
 
     /// True when Apple Mail handles `mailto:`. The compose handoff attaches

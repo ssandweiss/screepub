@@ -13,14 +13,14 @@ public enum ExportFormat: Sendable {
     /// Typesetting — keeps hold, device-verified 2026-07-29) when the full
     /// toolchain is present; AZW3 with Calibre alone; the engine's own
     /// MOBI with nothing. Registry §8b has the verdict behind the order.
-    public func fileExtension(calibreAvailable: Bool, kfxReady: Bool = false) -> String {
+    public func fileExtension(calibreAvailable: Bool, kfxReady: Bool) -> String {
         switch self {
         case .epub:   return "epub"
         case .kindle: return kfxReady ? "kfx" : calibreAvailable ? "azw3" : "mobi"
         }
     }
 
-    public func label(calibreAvailable: Bool, kfxReady: Bool = false) -> String {
+    public func label(calibreAvailable: Bool, kfxReady: Bool) -> String {
         switch self {
         case .epub:
             return "EPUB — for emailing to Kindle, and most e-readers"
@@ -114,17 +114,34 @@ public enum Export {
         fountainPath: String?,
         format: FormatSettings,
         calibreAvailable: Bool,
-        kfxReady: Bool = false
+        kfxReady: Bool,
+        onStage: (@Sendable (String) -> Void)? = nil
     ) throws -> URL {
+        // kfxReady has no default on purpose: a call site that forgot it
+        // would compile and silently drop the best rung — the exact
+        // "reader window fell a rung behind" drift this ladder exists to
+        // prevent.
         if kfxReady {
-            return try KFXToolchain.convert(epub)
+            // Same staleness rule as the MOBI branch below: the EPUB is the
+            // sole input and the flags are constant, so a sibling .kfx no
+            // older than its EPUB is the previous run's answer — reusing it
+            // turns a ~20s Kindle Previewer cold start into a file stat.
+            // (KFXToolchain.convert writes scratch-then-rename, so a partial
+            // file never appears at this path to be trusted.)
+            let kfx = epub.deletingPathExtension().appendingPathExtension("kfx")
+            guard needsRegeneration(kfx, freshRelativeTo: epub) else { return kfx }
+            // convert re-validates via the cached status() — ~free after
+            // the caller's own probe.
+            return try KFXToolchain.convert(epub, onStage: onStage)
         }
         if calibreAvailable {
+            onStage?("converting to AZW3 for Kindle…")
             return try EbookConvert.toAzw3(epub)
         }
         let mobi = mobiSibling(for: epub)
         guard needsRegeneration(mobi, freshRelativeTo: epub) else { return mobi }
         guard let fountainPath else { throw ExportError.cannotRegenerate }
+        onStage?("rebuilding the Kindle file…")
         let result = try Engine.convert(
             input: URL(fileURLWithPath: fountainPath),
             force: false,

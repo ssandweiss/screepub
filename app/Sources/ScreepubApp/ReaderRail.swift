@@ -1,5 +1,6 @@
 import SwiftUI
 import ScreepubKit
+import KFXKit
 
 /// The reader's side rail: this script's formatting knobs (persisted to its
 /// sidecar, re-rendered live), promotion to app defaults, and send actions.
@@ -65,8 +66,13 @@ struct ReaderRail: View {
                 Button("Save") { saveACopy() }
                 if AppleBooks.isAvailable {
                     Button("Open in Apple Books") {
-                        AppleBooks.send(URL(fileURLWithPath: model.ref.epubPath))
-                        model.statusLine = "added to Apple Books — syncs to iPhone and iPad via iCloud"
+                        if AppleBooks.send(URL(fileURLWithPath: model.ref.epubPath)) {
+                            model.errorLine = nil
+                            model.statusLine = "added to Apple Books — syncs to iPhone and iPad via iCloud"
+                        } else {
+                            model.statusLine = nil
+                            model.errorLine = "Apple Books isn't available on this Mac"
+                        }
                     }
                 }
                 // Only Apple Mail actually attaches the file: with a
@@ -74,7 +80,7 @@ struct ReaderRail: View {
                 // mailto: URL, which carries no attachment (RFC 6068) and
                 // still reports success. Offer the route only where it works.
                 if SendToKindle.defaultMailClientIsAppleMail {
-                    Button("Email to Kindle…") { composeInAppleMail() }
+                    Button("Send to Kindle email…") { composeInAppleMail() }
                 }
             }
             .disabled(model.rendering)
@@ -107,60 +113,32 @@ struct ReaderRail: View {
     /// pick — the route that works regardless of mail client or device.
     private func saveACopy() {
         let epub = URL(fileURLWithPath: model.ref.epubPath)
-        let stem = epub.deletingPathExtension().lastPathComponent
-        let fountainPath = model.ref.fountainPath
         // The reader's PER-SCRIPT sidecar settings, not AppSettings' globals.
         // This rail is where the user tunes THIS script, so a global here
         // would silently export formatting they never chose.
-        let settings = model.settings
-        let calibre = EbookConvert.isAvailable
-        ExportPanel.present(epub: epub, stem: stem) { destination, format in
-            model.errorLine = nil
-            model.statusLine = "saving…"
-            // freshKindleArtifact spawns Calibre or the engine — keep it off
-            // the main actor or the whole UI stalls behind it.
-            Task.detached {
-                do {
-                    let source: URL
-                    switch format {
-                    case .epub:
-                        source = epub
-                    case .kindle:
-                        source = try Export.freshKindleArtifact(
-                            for: epub,
-                            fountainPath: fountainPath,
-                            format: settings,
-                            calibreAvailable: calibre)
-                    }
-                    try Export.copy(source, to: destination)
-                    await MainActor.run {
-                        model.statusLine = "saved to \(destination.deletingLastPathComponent().lastPathComponent)"
-                    }
-                } catch {
-                    await MainActor.run {
-                        // Drop "saving…" — the rail renders statusLine and
-                        // errorLine together, so leaving it would show the
-                        // save as still in progress AND failed.
-                        model.statusLine = nil
-                        model.errorLine = "save failed: \(error.localizedDescription)"
-                    }
-                }
-            }
-        }
+        SaveFlow.present(
+            epub: epub,
+            fountainPath: model.ref.fountainPath,
+            settings: model.settings,
+            status: { model.errorLine = nil; model.statusLine = $0 },
+            failure: {
+                // Drop "saving…" — the rail renders statusLine and errorLine
+                // together, so leaving it would show the save as still in
+                // progress AND failed.
+                model.statusLine = nil
+                model.errorLine = $0
+            })
     }
 
     private func composeInAppleMail() {
-        let address = (UserDefaults.standard.string(forKey: "kindleEmail") ?? "")
-            .trimmingCharacters(in: .whitespaces)
-        guard !address.isEmpty else {
-            model.statusLine = "set your @kindle.com address in Settings first"
-            return
-        }
         if SendToKindle.email(URL(fileURLWithPath: model.ref.epubPath),
-                              to: address, title: model.ref.title) {
+                              title: model.ref.title) {
             model.errorLine = nil
-            model.statusLine = "Mail compose opened"
+            model.statusLine = SendToKindle.legacyStoredAddress.map {
+                "compose opened, addressed to \($0)"
+            } ?? "compose opened. Address it to your @kindle.com address"
         } else {
+            model.statusLine = nil
             model.errorLine = "Mail couldn't open a compose window"
         }
     }
@@ -183,19 +161,20 @@ struct ReaderRail: View {
             let outcome: Result<Void, Error> = await Task.detached {
                 Result {
                     if device.kind == .kindle {
-                        if calibre {
-                            let azw3 = try EbookConvert.toAzw3(epub)
-                            try DeviceTransfer.copy(azw3, to: device)
-                        } else {
-                            // Throws rather than copying anything when no
-                            // Kindle file can be produced.
-                            let mobi = try Export.freshKindleArtifact(
-                                for: epub,
-                                fountainPath: fountainPath,
-                                format: settings,
-                                calibreAvailable: false)
-                            try DeviceTransfer.copy(mobi, to: device)
-                        }
+                        // The ONE Kindle ladder — Export owns KFX → AZW3 →
+                        // MOBI, staleness reuse, and stage narration.
+                        // Throws rather than copying anything when no
+                        // Kindle file can be produced.
+                        let artifact = try Export.freshKindleArtifact(
+                            for: epub,
+                            fountainPath: fountainPath,
+                            format: settings,
+                            calibreAvailable: calibre,
+                            kfxReady: KFXToolchain.status().ready,
+                            onStage: { stage in
+                                Task { @MainActor in model.statusLine = "Kindle: \(stage)" }
+                            })
+                        try DeviceTransfer.copy(artifact, to: device)
                     } else {
                         try DeviceTransfer.copy(epub, to: device)
                     }
@@ -206,6 +185,10 @@ struct ReaderRail: View {
                 model.errorLine = nil
                 model.statusLine = "copied to \(device.name) — eject before unplugging"
             case .failure(let error):
+                // Drop the stage narration too — the rail renders statusLine
+                // and errorLine together, so leaving it would show the copy
+                // as still in progress AND failed.
+                model.statusLine = nil
                 model.errorLine = error.localizedDescription
             }
         }
