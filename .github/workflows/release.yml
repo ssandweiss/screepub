@@ -6,10 +6,30 @@ name: release
 on:
   push:
     tags: ['v*']
+  # Re-run entry point: a transient notarization or Rosetta failure used
+  # to mean deleting and re-pushing the tag. Dispatch runs against the
+  # chosen ref; the version comes from the tag that ref carries.
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  # The tag trigger is independent of ci.yml, so without this a tag could
+  # ship a DMG from a commit whose suite fails. Same checks, same runner
+  # family, gating the release job directly.
+  checks:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - run: bun install --frozen-lockfile
+      - run: bunx tsc --noEmit
+      - run: bun test
+      - run: swift build -c release
+        working-directory: app
+      - run: swift run -c release kit-check
+        working-directory: app
   release:
+    needs: checks
     runs-on: macos-15   # Apple Silicon; Swift 6 toolchain
     permissions:
       contents: write   # create the GitHub Release + upload assets

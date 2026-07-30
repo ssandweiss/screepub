@@ -135,6 +135,25 @@ describe('buildMobi', () => {
     expect([...mobi.slice(offsets[n - 1], offsets[n - 1] + 4)]).toEqual([0xe9, 0x8e, 0x0d, 0x0a]);
   });
 
+  test('record unique ids stay unique past 128 text records', () => {
+    // >512KB of HTML forces >128 4KB text records — the length of a
+    // feature shooting script with dual dialogue. A unique id written as
+    // a single byte wraps at record 128 and collides from there on.
+    const long = Array.from(
+      { length: 20000 },
+      (_, i) => `<p>Scene line ${i}, padding the record count well past the byte boundary.</p>`
+    ).join('\n');
+    const mobi = buildMobi({ title: 'Very Long', author: 'A', html: long });
+    const count = u16(mobi, 76);
+    expect(count).toBeGreaterThan(128);
+    const uids: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const o = 78 + i * 8 + 5; // entry: offset u32, attributes u8, uid u24
+      uids.push((mobi[o] << 16) | (mobi[o + 1] << 8) | mobi[o + 2]);
+    }
+    expect(new Set(uids).size).toBe(count);
+  }, 20000);
+
   test('multi-record text never splits a UTF-8 codepoint', () => {
     // >4096 bytes of curly-quoted text forces multiple records.
     const long = Array.from({ length: 300 }, (_, i) => `<p>Line ${i} — “quoted” he said.</p>`).join('\n');

@@ -33,12 +33,14 @@ describe('convertPdf', () => {
   }, 60000);
 
   test('image-only PDF raises ScannedPdfError', async () => {
-    expect(convertPdf(await bytes(`${PUBLIC}blank-pages.pdf`)))
+    // The await is load-bearing: unawaited, .rejects resolves after the
+    // test body and the assertion can never fail the test.
+    await expect(convertPdf(await bytes(`${PUBLIC}blank-pages.pdf`)))
       .rejects.toThrow(ScannedPdfError);
   }, 60000);
 
   test('non-screenplay PDF raises NotAScreenplayError', async () => {
-    expect(convertPdf(await bytes(`${PUBLIC}prose.pdf`)))
+    await expect(convertPdf(await bytes(`${PUBLIC}prose.pdf`)))
       .rejects.toThrow(NotAScreenplayError);
   }, 60000);
 
