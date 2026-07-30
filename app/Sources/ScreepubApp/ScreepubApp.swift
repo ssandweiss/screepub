@@ -330,10 +330,10 @@ struct FormattingSettings: View {
             Section("Pages") {
                 Toggle("Start each scene on a new page", isOn: $scenePageBreaks)
                 Toggle("Keep scene headings with their scene", isOn: $keepHeading)
-                Toggle("Keep each speech on one page", isOn: $keepSpeeches)
-                Text("Avoids mid-speech page turns; long speeches may leave white space at page bottoms. Speeches taller than a full page still break.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Toggle(isOn: $keepSpeeches) {
+                    Text("Keep each speech on one page")
+                    Text("Avoids mid-speech page turns; long speeches may leave white space at page bottoms. Speeches taller than a full page still break.")
+                }
             }
             Section("Content") {
                 Toggle("Generate a title page", isOn: $titlePage)

@@ -199,8 +199,10 @@ if let sampleData = try? Data(contentsOf: contractSample) {
 }
 
 // — format defaults, from the SAME canonical file the engine suite pins:
-// FormatSettings has non-optional fields, so a key renamed or missing on
-// either side fails the decode, and a value drifted fails the equality —
+// FormatSettings has non-optional fields, so a key renamed or missing in
+// the JSON fails the decode and a value drifted fails the equality; a
+// field the Swift mirror never grew is invisible to both (the decoder
+// ignores unknown keys), so per-field assertions below cover that side —
 let defaultsFile = repoRoot.appendingPathComponent("format-defaults.json")
 if let defaultsData = try? Data(contentsOf: defaultsFile) {
     let canonical = try? JSONDecoder().decode(FormatSettings.self, from: defaultsData)
@@ -275,6 +277,7 @@ check(ScriptSettings.sidecarURL(forFountain: fountain).lastPathComponent == "Tes
       "sidecar path derives from fountain stem")
 var fs = FormatSettings.defaults
 fs.dialogueSideMarginPct = 27
+fs.keepSpeechesWhole = true
 try! ScriptSettings.save(fs, forFountain: fountain)
 let loaded = ScriptSettings.load(forFountain: fountain, fallback: FormatSettings.defaults)
 check(loaded == fs, "sidecar round-trips settings")

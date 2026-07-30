@@ -79,9 +79,9 @@ enum AppSettings {
     /// Reset all formatting keys so @AppStorage bindings fall back to defaults.
     static func resetFormatting() {
         for key in ["fmtScenePageBreaks", "fmtDialogueMargin", "fmtCueIndent", "fmtParenIndent",
-                    "fmtSpacing", "fmtKeepHeading", "fmtKeepSpeeches", "fmtFont", "fmtRejoin", "fmtContd",
-                    "fmtCueAlign", "fmtTitlePage", "fmtSceneNumbers", "fmtPageMarkers",
-                    "fmtDual", "fmtJustify"] {
+                    "fmtSpacing", "fmtKeepHeading", "fmtKeepSpeeches", "fmtFont", "fmtRejoin",
+                    "fmtContd", "fmtCueAlign", "fmtTitlePage", "fmtSceneNumbers",
+                    "fmtPageMarkers", "fmtDual", "fmtJustify"] {
             UserDefaults.standard.removeObject(forKey: key)
         }
     }
