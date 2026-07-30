@@ -8,8 +8,14 @@
 //   one-blank-Courier-line between elements = 1em.
 // - No line-height/font-size overrides on body text — Enhanced Typesetting
 //   owns within-paragraph spacing (the reader's own setting).
-// - Keep-with-next chain kept minimal (heading, cue) — every avoid link
-//   grows the unbreakable chunk renderers push, causing bottom-of-page gaps.
+// - Break control kept deliberately small — every avoid link grows the
+//   unbreakable chunk renderers push, causing bottom-of-page gaps. The
+//   whole inventory: keep-with-next chains on the scene heading (gated by
+//   keepSceneHeadingWithScene), the mini-slug and the character cue;
+//   inside-avoid on the cue's keep-together wrapper and the dual-dialogue
+//   table; the opt-in whole-speech keep (keepSpeechesWhole, off by
+//   default); and break-before: avoid on transitions, which may end a
+//   page but never begin one.
 import type { FormatOptions } from '../options';
 import { DEFAULT_FORMAT_OPTIONS } from '../options';
 
@@ -31,7 +37,9 @@ export function screenplayCss(o: FormatOptions): string {
   const bodyAlign = o.justifyText ? 'justify' : 'left';
   // Atomic speeches (registry #8c): opt-in, because an unbreakable block
   // taller than the space left on a page gets pushed whole — bounded
-  // white space traded for never splitting a speech.
+  // white space traded for never splitting a speech. `avoid` yields where
+  // it cannot be honored, so a speech taller than a full page still
+  // breaks bare even with this on.
   const speechKeep = o.keepSpeechesWhole
     ? '\n  page-break-inside: avoid;\n  break-inside: avoid;'
     : '';
