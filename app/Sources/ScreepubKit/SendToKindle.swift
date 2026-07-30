@@ -13,19 +13,26 @@ public enum SendToKindle {
 
     public static var appIsInstalled: Bool { appURL != nil }
 
-    /// Open a Mail compose addressed to the user's @kindle.com address with
-    /// the EPUB attached. Returns false when no compose service is
-    /// available (no mail account configured).
+    /// Open a Mail compose with the EPUB attached, ready to be addressed to
+    /// the user's @kindle.com address. The app doesn't store that address —
+    /// the setup guide in the send block explains where Amazon keeps it.
+    /// Returns false when no compose service is available (no mail account
+    /// configured).
     @MainActor
     @discardableResult
-    public static func email(_ epub: URL, to kindleAddress: String, title: String?) -> Bool {
+    public static func email(_ epub: URL, title: String?) -> Bool {
         guard let service = NSSharingService(named: .composeEmail) else { return false }
-        service.recipients = [kindleAddress]
         service.subject = title ?? epub.deletingPathExtension().lastPathComponent
         guard service.canPerform(withItems: [epub]) else { return false }
         service.perform(withItems: [epub])
         return true
     }
+
+    /// Amazon's Personal Document Settings — where the @kindle.com address
+    /// lives and where the sender allow-list is edited. One page for both
+    /// steps of the email setup.
+    public static let personalDocumentSettings =
+        URL(string: "https://www.amazon.com/hz/mycd/myx#/home/settings/pdoc")!
 
     /// Native app when installed, else web uploader with the file revealed
     /// in Finder for drag-in.

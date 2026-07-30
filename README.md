@@ -123,12 +123,25 @@ Scripts are confidential. Screepub is built accordingly.
   transmitted, or used to train anything — by us or anyone else. There is
   no server to send them to.
 - **No accounts, no telemetry, no analytics.** Screepub does not track
-  usage, report crashes, or phone home. It works fully offline.
+  usage, report crashes, or phone home. It works fully offline. The one
+  exception is one you switch on yourself: the update check below.
 
-The app touches the network in exactly three places, all of which need
-your click: uploading to a **docked reMarkable** over its USB connection
-(your own hardware, not the internet), opening **Amazon's Send-to-Kindle
-page** in your browser, and opening **GitHub** if you report a bug.
+The app touches the network in exactly four places, each needing your
+click or your consent: uploading to a **docked reMarkable** over its USB
+connection (your own hardware, not the internet), opening **Amazon's
+Send-to-Kindle page** in your browser, opening **GitHub** if you report a
+bug, and, **only if you opt in**, asking GitHub whether a newer release
+exists.
+
+About that update check, since "does not phone home" deserves precision:
+it is **off by default**. The first-launch page asks once; Settings can
+change your answer any time. When on, it is a single unauthenticated
+request to GitHub's public API (`api.github.com`), at most once a day,
+carrying the app name and version and nothing else: no machine, account,
+or user identifier. *Screepub → Check for Updates…* makes the same single
+request on the spot, opted in or not, because you asked. Nothing
+downloads or installs without you clicking through to the release page
+yourself.
 
 The one thing worth being clear about: **you** can choose to send a script
 somewhere — to your Kindle, over USB, or by email. If you email it to your

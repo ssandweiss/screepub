@@ -74,7 +74,7 @@ struct ReaderRail: View {
                 // mailto: URL, which carries no attachment (RFC 6068) and
                 // still reports success. Offer the route only where it works.
                 if SendToKindle.defaultMailClientIsAppleMail {
-                    Button("Email to Kindle…") { composeInAppleMail() }
+                    Button("Send to Kindle email…") { composeInAppleMail() }
                 }
             }
             .disabled(model.rendering)
@@ -150,16 +150,10 @@ struct ReaderRail: View {
     }
 
     private func composeInAppleMail() {
-        let address = (UserDefaults.standard.string(forKey: "kindleEmail") ?? "")
-            .trimmingCharacters(in: .whitespaces)
-        guard !address.isEmpty else {
-            model.statusLine = "set your @kindle.com address in Settings first"
-            return
-        }
         if SendToKindle.email(URL(fileURLWithPath: model.ref.epubPath),
-                              to: address, title: model.ref.title) {
+                              title: model.ref.title) {
             model.errorLine = nil
-            model.statusLine = "Mail compose opened"
+            model.statusLine = "compose opened. Address it to your @kindle.com address"
         } else {
             model.errorLine = "Mail couldn't open a compose window"
         }

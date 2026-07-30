@@ -27,10 +27,28 @@ public enum UpdateCheckError: Error, Equatable {
 /// Apple's frameworks and it's worth keeping that true.
 ///
 /// This is the ONLY network request Screepub's app makes on its own behalf,
-/// it carries no identifying information, and it happens when the user asks
-/// for it. The conversion engine still makes none at all.
+/// it carries no identifying information, and it happens only with consent:
+/// either the user opted in on the welcome page (throttled to one request a
+/// day, see `shouldCheck`), or they chose Check for Updates… themselves.
+/// The conversion engine still makes none at all.
 public enum UpdateCheck {
     public static let defaultRepository = "ssandweiss/screepub"
+
+    // MARK: - Consent and cadence
+
+    /// At most one automatic request a day — a release cadence measured in
+    /// weeks doesn't justify more.
+    public static let checkInterval: TimeInterval = 24 * 60 * 60
+
+    /// Whether a launch-time check may fire. No opt-in, no request — the
+    /// opt-in is the entire authorization, and it defaults to off. A
+    /// `lastChecked` in the future (clock set backwards) counts as fresh
+    /// rather than triggering a storm of retries.
+    public static func shouldCheck(optedIn: Bool, lastChecked: Date?, now: Date) -> Bool {
+        guard optedIn else { return false }
+        guard let lastChecked else { return true }
+        return now.timeIntervalSince(lastChecked) >= checkInterval
+    }
 
     // MARK: - Version comparison
 

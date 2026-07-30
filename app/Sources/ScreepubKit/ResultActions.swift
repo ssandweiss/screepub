@@ -39,21 +39,35 @@ public struct RouteOption: Equatable, Sendable, Identifiable {
     public let destination: Destination
     public let title: String
     public let detail: String
+    /// What the action button reads while this route is chosen. The verb
+    /// carries the mechanism — Copy is USB-offline, Add is local, Upload/
+    /// Send/Email name exactly what fires — so the click is never a surprise.
+    public let button: String
+    /// Whether the route can fire right now. Physical destinations stay
+    /// listed while disconnected (the menu is a catalog, not a status
+    /// display); this flag is what waits for the hardware, and `detail`
+    /// carries the plug-it-in instruction while it does.
+    public let available: Bool
 
     public var id: String { title + detail }
 
-    public init(destination: Destination, title: String, detail: String) {
+    public init(destination: Destination, title: String, detail: String, button: String,
+                available: Bool = true) {
         self.destination = destination
         self.title = title
         self.detail = detail
+        self.button = button
+        self.available = available
     }
 }
 
-/// Where a converted script can go, best route first.
+/// Where a converted script can go — every destination, best route first,
+/// with hardware that isn't currently connected listed last and flagged
+/// unavailable.
 ///
-/// The view renders `routes.first` as the single emphasized button and the
-/// rest inside its menu, so this ordering *is* the interface — which is why
-/// it lives here, in one kit-checkable place, rather than being re-derived
+/// The view renders this list as the send picker and `preselected` as its
+/// opening choice, so the ordering *is* the interface — which is why it
+/// lives here, in one kit-checkable place, rather than being re-derived
 /// as a pile of conditionals across two views.
 ///
 /// Ordering rationale, strongest claim first:
@@ -80,46 +94,89 @@ public enum ResultActions {
             routes.append(RouteOption(
                 destination: .device(device),
                 title: device.name,
-                detail: "over USB — works offline, nothing leaves your Mac"))
+                detail: "over USB, offline, nothing leaves your Mac",
+                button: "Copy to \(device.name)"))
         }
         if remarkableDocked {
             routes.append(RouteOption(
                 destination: .remarkable,
                 title: "reMarkable",
-                detail: "the original PDF, over its USB connection"))
+                detail: "the original PDF, over its USB connection",
+                button: "Upload to reMarkable"))
         }
         if booksAvailable {
             routes.append(RouteOption(
                 destination: .appleBooks,
                 title: "Apple Books",
-                detail: "syncs to your iPhone and iPad"))
+                detail: "syncs to your iPhone and iPad",
+                button: "Add to Apple Books"))
         }
         routes.append(RouteOption(
             destination: .sendToKindle,
-            title: "Send to Kindle",
-            detail: "via Amazon — the best-looking Kindle result"))
+            title: "Send to Kindle web",
+            detail: "via Amazon, the best-looking Kindle result",
+            button: "Send to Kindle web"))
         if canEmailToKindle {
             routes.append(RouteOption(
                 destination: .emailToKindle,
-                title: "Email to Kindle",
-                detail: "opens a message with the book attached"))
+                title: "Send to Kindle email",
+                detail: "a Mail message with the book attached",
+                button: "Send to Kindle email"))
         }
         routes.append(RouteOption(
             destination: .saveCopy,
             title: "Save a copy…",
-            detail: "choose a folder"))
+            detail: "choose a folder",
+            button: "Save a Copy…"))
+
+        // Anything the user could fix at the desk stays listed — absent
+        // hardware or a non-Apple-Mail default is a state, not a missing
+        // feature, and hiding the row hides the capability. Placeholders
+        // sink below every sendable route, carry the fix as their detail,
+        // and become the real row (same storage key) the moment the state
+        // changes. Only truly structural absence — no Books.app — is hidden.
+        let connectedKinds = Set(devices.map(\.kind))
+        for kind in [DeviceKind.kindle, .kobo, .tolino] where !connectedKinds.contains(kind) {
+            routes.append(RouteOption(
+                destination: .device(ConnectedDevice(kind: kind, name: kind.displayName, volume: nil)),
+                title: kind.displayName,
+                detail: "plug in over USB to send",
+                button: "Copy to \(kind.displayName)",
+                available: false))
+        }
+        if !remarkableDocked {
+            routes.append(RouteOption(
+                destination: .remarkable,
+                title: "reMarkable",
+                detail: "dock over USB to send",
+                button: "Upload to reMarkable",
+                available: false))
+        }
+        if !canEmailToKindle {
+            routes.append(RouteOption(
+                destination: .emailToKindle,
+                title: "Send to Kindle email",
+                detail: "needs Apple Mail as the default mail app, the one client the attachment survives",
+                button: "Send to Kindle email",
+                available: false))
+        }
         return routes
     }
 
     /// The route to pre-select. Always present — Save is the floor.
     ///
     /// What the user chose last time wins, whenever that route is still
-    /// available. A remembered choice beats any ordering heuristic: someone
+    /// listed. A remembered choice beats any ordering heuristic: someone
     /// who always sends to Apple Books shouldn't have the list guess at
     /// them every time because a Kindle happens to be plugged in, and the
     /// guess only has to be wrong once to be annoying. The ordering above
     /// is the fallback for a first run, not a policy about what people
     /// ought to want.
+    ///
+    /// A remembered device that is merely unplugged stays chosen: the slip
+    /// keeps the user's intent, the detail line says to plug it in, and the
+    /// view holds SEND until detection makes it real. A first run, by
+    /// contrast, never guesses at hardware that isn't there.
     public static func preselected(
         in routes: [RouteOption],
         lastChosen: String?
@@ -128,7 +185,7 @@ public enum ResultActions {
            let remembered = routes.first(where: { $0.destination.storageKey == key }) {
             return remembered
         }
-        return routes[0]
+        return routes.first(where: \.available) ?? routes[0]
     }
 
     public static func primary(

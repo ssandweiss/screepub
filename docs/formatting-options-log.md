@@ -368,7 +368,8 @@ future work; everything else is live.
   across the five-generator fixture set + additional real-world scripts).
 - **Device routes (2026-07-22, not formatting knobs but adjacent):**
   Kindle → AZW3/MOBI to documents/; Kobo → EPUB to volume root, or
-  KEPUB via Calibre when the app's "Convert to KEPUB" toggle is on
+  KEPUB via Calibre when the "as KEPUB" checkbox on the result page's
+  send block is on — shown only while Kobo is the chosen destination
   (default OFF — Kobo's kepub renderer mis-justifies em-dashes/
   ellipses, endemic in dialogue; kit-check verifies koboSpan markup);
   tolino → EPUB into root `Books/`; reMarkable → original PDF over the

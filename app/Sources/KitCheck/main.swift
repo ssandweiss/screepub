@@ -386,9 +386,18 @@ for books in [true, false] {
               "no duplicate routes (books:\(books) mail:\(mail))")
     }
 }
-check(!ResultActions.routes(devices: [], canEmailToKindle: false)
-        .contains { $0.destination == .emailToKindle },
-      "email route hidden when Apple Mail can't attach")
+// Email stays in the catalog when Apple Mail isn't the default client —
+// that's fixable at the desk — but flagged unavailable, because the
+// degraded mailto: hand-off would silently drop the attachment.
+let emailAbsent = ResultActions.routes(devices: [], canEmailToKindle: false)
+    .first(where: { $0.destination == .emailToKindle })
+check(emailAbsent?.available == false,
+      "email route listed but unavailable when Apple Mail can't attach")
+check(emailAbsent?.detail.contains("Apple Mail") == true,
+      "email placeholder's detail names the fix")
+check(ResultActions.routes(devices: [], canEmailToKindle: true)
+        .first(where: { $0.destination == .emailToKindle })?.available == true,
+      "email route sendable when Apple Mail is the default")
 check(!ResultActions.routes(devices: [], booksAvailable: false)
         .contains { $0.destination == .appleBooks },
       "Books route hidden when Books is absent")
@@ -401,14 +410,66 @@ check(ResultActions.preselected(in: allRoutes, lastChosen: "sendToKindle").desti
       "a remembered choice wins over a plugged-in device")
 check(ResultActions.preselected(in: allRoutes, lastChosen: "appleBooks").destination == .appleBooks,
       "remembered Apple Books survives a connected Kindle")
-// A remembered route that is no longer offered must not strand the user.
+// A remembered route that is structurally gone (Books not installed) must
+// not strand the user.
 let noBooks = ResultActions.routes(devices: [], booksAvailable: false)
 check(ResultActions.preselected(in: noBooks, lastChosen: "appleBooks").destination == .sendToKindle,
-      "an unavailable remembered route falls back instead of vanishing")
-check(ResultActions.preselected(in: noBooks, lastChosen: "device:kindle").destination == .sendToKindle,
-      "a remembered device that is unplugged falls back")
+      "a structurally absent remembered route falls back instead of vanishing")
 check(Destination.device(kindleDev).storageKey == "device:kindle",
       "device key is by kind, not volume path")
+
+// — the menu is a catalog, not a status display: every physical
+//   destination is always listed; detection only flips availability —
+let bare = ResultActions.routes(devices: [])
+for kindName in ["Kindle", "Kobo", "tolino", "reMarkable"] {
+    check(bare.contains { $0.title == kindName && !$0.available },
+          "\(kindName) is listed while disconnected, flagged unavailable")
+}
+check(bare[0].available, "the first route is always sendable")
+check(bare.prefix(while: \.available).count == bare.filter(\.available).count,
+      "unavailable routes sink below every available one")
+check(bare.filter { !$0.available }.allSatisfy { $0.detail.contains("USB") || $0.detail.contains("Apple Mail") },
+      "every placeholder's detail says how to make it available")
+let koboDev = ConnectedDevice(kind: .kobo, name: "KOBOeReader", volume: kobo)
+let withKobo = ResultActions.routes(devices: [koboDev])
+check(withKobo.filter { $0.destination.storageKey == "device:kobo" }.count == 1,
+      "a connected Kobo replaces its placeholder rather than joining it")
+check(withKobo.first { $0.destination.storageKey == "device:kobo" }?.available == true,
+      "the connected Kobo row is sendable")
+
+// A remembered device stays chosen while unplugged — the routing slip keeps
+// the user's intent and SEND waits for the hardware — but a first run never
+// guesses at something that isn't there.
+check(ResultActions.preselected(in: bare, lastChosen: "device:kobo").destination.storageKey == "device:kobo",
+      "a remembered Kobo stays chosen while unplugged")
+check(!ResultActions.preselected(in: bare, lastChosen: "device:kobo").available,
+      "…and is flagged unavailable so the view can hold SEND")
+check(ResultActions.preselected(in: bare, lastChosen: nil).available,
+      "first run never preselects an unavailable route")
+
+// — the SEND button reads the route's own verb, so the click is never a
+//   surprise: Copy is USB-offline, Add is local, Upload/Send/Email name
+//   exactly what fires —
+check(ResultActions.routes(devices: [kindleDev]).first?.button == "Copy to Kindle",
+      "device route's button verb is Copy, named for the device")
+check(ResultActions.routes(devices: [], remarkableDocked: true).first?.button == "Upload to reMarkable",
+      "reMarkable route's button verb is Upload")
+check(ResultActions.routes(devices: []).first?.button == "Add to Apple Books",
+      "Books route's button verb is Add")
+check(ResultActions.routes(devices: [], booksAvailable: false).first?.button == "Send to Kindle web",
+      "web route's button carries its mechanism, since the pair exists")
+check(ResultActions.routes(devices: [], canEmailToKindle: true)
+        .first(where: { $0.destination == .emailToKindle })?.button == "Send to Kindle email",
+      "email route's button carries its mechanism")
+// The two wireless Kindle routes read as siblings — same name, different
+// mechanism — so the menu shows them as a matched pair.
+check(ResultActions.routes(devices: []).first(where: { $0.destination == .sendToKindle })?.title == "Send to Kindle web",
+      "web route title names the mechanism")
+check(ResultActions.routes(devices: [], canEmailToKindle: true)
+        .first(where: { $0.destination == .emailToKindle })?.title == "Send to Kindle email",
+      "email route title names the mechanism")
+check(ResultActions.routes(devices: []).first(where: { $0.destination == .saveCopy })?.button == "Save a Copy…",
+      "save route's button stays an ellipsis action")
 
 // — version comparison for the updater —
 check(UpdateCheck.isNewer("v0.4.0", than: "0.3.0"), "tag with a v prefix compares cleanly")
@@ -422,6 +483,19 @@ check(!UpdateCheck.isNewer("0.3.0-beta.1", than: "0.3.0"),
       "a pre-release does not supersede the release")
 check(UpdateCheck.isNewer("1.0.0", than: "0.99.99"), "major bump wins")
 check(!UpdateCheck.isNewer("0.3.0+ci.7", than: "0.3.0"), "build metadata is not a version bump")
+
+// — update checks are opt-in and throttled: no consent, no request —
+let checkNow = Date(timeIntervalSince1970: 1_800_000_000)
+check(!UpdateCheck.shouldCheck(optedIn: false, lastChecked: nil, now: checkNow),
+      "never checks without opt-in, even on a first launch")
+check(UpdateCheck.shouldCheck(optedIn: true, lastChecked: nil, now: checkNow),
+      "first opted-in launch checks")
+check(!UpdateCheck.shouldCheck(optedIn: true, lastChecked: checkNow.addingTimeInterval(-3600), now: checkNow),
+      "an hour-old check is fresh enough — one request a day at most")
+check(UpdateCheck.shouldCheck(optedIn: true, lastChecked: checkNow.addingTimeInterval(-25 * 3600), now: checkNow),
+      "a day-old check re-checks")
+check(!UpdateCheck.shouldCheck(optedIn: true, lastChecked: checkNow.addingTimeInterval(3600), now: checkNow),
+      "a clock set backwards does not trigger a check storm")
 
 // — default mail client detection (value is machine-dependent) —
 let isAppleMail = await MainActor.run { SendToKindle.defaultMailClientIsAppleMail }

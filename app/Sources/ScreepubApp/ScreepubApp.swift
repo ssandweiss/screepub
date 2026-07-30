@@ -11,6 +11,35 @@ import ScreepubKit
         Feedback.newIssueURL(appVersion: appVersion, osVersion: osVersion, context: context))
 }
 
+/// Menu-driven check: user-initiated, so it runs regardless of the opt-in,
+/// and unlike the silent launch check it reports every outcome — including
+/// "you're current", which is the answer the user opened the menu for.
+@MainActor func manualUpdateCheck() async {
+    let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+    let alert = NSAlert()
+    do {
+        if let update = try await UpdateCheck.latest(currentVersion: current) {
+            alert.messageText = "Screepub \(update.version) is available"
+            alert.informativeText = "You're running \(current). The release notes and download are on GitHub."
+            alert.addButton(withTitle: "View Release")
+            alert.addButton(withTitle: "Later")
+            if alert.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.open(update.releaseNotesURL)
+            }
+            return
+        }
+        alert.messageText = "You're up to date"
+        alert.informativeText = "Screepub \(current) is the newest release."
+    } catch UpdateCheckError.rateLimited {
+        alert.messageText = "GitHub declined the request"
+        alert.informativeText = "Unauthenticated checks are limited to 60 an hour per network. Try again in a little while."
+    } catch {
+        alert.messageText = "Couldn't check for updates"
+        alert.informativeText = "The request didn't go through. Check your connection and try again. (\(error.localizedDescription))"
+    }
+    alert.runModal()
+}
+
 @main
 struct ScreepubApp: App {
     var body: some Scene {
@@ -27,6 +56,9 @@ struct ScreepubApp: App {
         .windowResizability(.contentSize)
         .windowStyle(.hiddenTitleBar)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { Task { await manualUpdateCheck() } }
+            }
             CommandGroup(replacing: .help) {
                 Button("Send Feedback on GitHub…") { openFeedback() }
             }
@@ -60,9 +92,8 @@ struct SettingsView: View {
 }
 
 struct GeneralSettings: View {
-    @AppStorage("kindleEmail") private var kindleEmail = ""
-    @AppStorage("koboKepub") private var koboKepub = false
     @AppStorage(AppSettings.outputFolderKey) private var outputFolder = ""
+    @AppStorage("updateOptIn") private var updateOptIn = false
 
     var body: some View {
         Form {
@@ -83,19 +114,17 @@ struct GeneralSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("Kindle") {
-                TextField("Send-to-Kindle email", text: $kindleEmail, prompt: Text("yourname_123@kindle.com"))
-                    .textContentType(.emailAddress)
-                    .autocorrectionDisabled()
-                Text("Find it under Amazon → Manage Your Content and Devices → Devices. Your own email address must be on Amazon's approved sender list.")
+            Section("Updates") {
+                Toggle("Check for updates at launch", isOn: $updateOptIn)
+                Text("At most one anonymous request a day to GitHub's public API: app name and version, nothing else. Off by default. Screepub → Check for Updates… always works regardless.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            // The Kindle email address is Amazon's to know, not ours to
+            // store — the send block's setup guide points at the page where
+            // it lives. The Kobo KEPUB choice lives on the result page's send block,
+            // shown only while a Kobo is the chosen destination.
             Section("Other devices") {
-                Toggle("Convert to KEPUB for Kobo", isOn: $koboKepub)
-                Text("KEPUB unlocks Kobo's page-turn counts and reading stats, but its renderer has justification quirks around dashes and ellipses — common in dialogue. Off sends a plain EPUB (recommended).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Text("tolino: books are copied into the Books folder. reMarkable: enable Settings → Storage → USB web interface on the tablet, then dock it over USB.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
