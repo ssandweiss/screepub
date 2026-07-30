@@ -114,10 +114,11 @@ public enum Export {
         fountainPath: String?,
         format: FormatSettings,
         calibreAvailable: Bool,
-        kfxReady: Bool = false
+        kfxReady: Bool = false,
+        onStage: (@Sendable (String) -> Void)? = nil
     ) throws -> URL {
         if kfxReady {
-            return try KFXToolchain.convert(epub)
+            return try KFXToolchain.convert(epub, onStage: onStage)
         }
         if calibreAvailable {
             return try EbookConvert.toAzw3(epub)

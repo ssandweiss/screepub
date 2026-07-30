@@ -624,6 +624,12 @@ if let books = AppleBooks.appURL {
     check(sent == false, "send() reports failure when Books is absent")
 }
 
+final class ErrLines: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var lines: [String] = []
+    func append(_ s: String) { lock.lock(); lines.append(s); lock.unlock() }
+}
+
 // — KFX toolchain (environment-dependent, like the ebook-convert checks) —
 check(ExportFormat.kindle.fileExtension(calibreAvailable: true, kfxReady: true) == "kfx",
       "kindle export prefers kfx when the toolchain is ready")
@@ -644,10 +650,14 @@ if kfxStatus.ready {
     // Kindle Previewer → repack → .kfx. Slow (~20s) but this is the one
     // assertion that proves the product code end to end.
     let miniEpub = makeMiniScriptEpub()
-    if let kfx = try? KFXToolchain.convert(miniEpub) {
+    let stages = ErrLines()
+    if let kfx = try? KFXToolchain.convert(miniEpub, onStage: { stages.append($0) }) {
         check(FileManager.default.fileExists(atPath: kfx.path), "KFX conversion produces a file")
         let size = (try? FileManager.default.attributesOfItem(atPath: kfx.path)[.size] as? Int) ?? 0
         check(size > 10_000, "KFX output is plausibly a book, not a stub")
+        check(!stages.lines.isEmpty, "conversion reported progress stages while running")
+        check(stages.lines.contains { $0.contains("Amazon") },
+              "the long Previewer wait is named as a stage")
     } else {
         check(false, "KFX conversion failed with a ready toolchain")
     }

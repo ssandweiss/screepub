@@ -143,28 +143,42 @@ public enum KFXToolchain {
         }
     }
 
-    /// EPUB → sibling `.kfx`. Blocking and slow (the plugin runs Kindle
-    /// Previewer under the hood — tens of seconds for a feature-length
-    /// script) — call from a background task.
+    /// EPUB → sibling `.kfx`. Blocking and slow — measured 16–24s, and
+    /// almost all of it is Kindle Previewer cold-starting, so short and
+    /// long scripts cost about the same. Call from a background task.
+    ///
+    /// `onStage` fires on a background thread as the conversion crosses
+    /// its phases — hop to the main actor before touching UI. Without it
+    /// the 20-second wait is indistinguishable from a hang, which is why
+    /// it exists.
     ///
     /// Flags mirror the AZW3 recipe and for the same reason: they stop
     /// Calibre's PREPROCESSING (which runs before any output plugin) from
     /// re-breaking scenes and stripping the dialogue column's margins. The
     /// 2026-07-29 device verdict was produced with this recipe.
     @discardableResult
-    nonisolated public static func convert(_ epub: URL) throws -> URL {
+    nonisolated public static func convert(
+        _ epub: URL,
+        onStage: (@Sendable (String) -> Void)? = nil
+    ) throws -> URL {
         let current = status()
         guard current.ready, let tool = ebookConvertURL() else {
             throw ConvertError.toolchainNotReady(current)
         }
         let kfx = epub.deletingPathExtension().appendingPathExtension("kfx")
+        var lineHandler: (@Sendable (String) -> Void)? = nil
+        if let report = onStage {
+            lineHandler = { line in
+                if let named = stage(for: line) { report(named) }
+            }
+        }
         do {
             _ = try run(tool, [
                 epub.path, kfx.path,
                 "--page-breaks-before=/",
                 "--chapter-mark=none",
                 "--disable-remove-fake-margins",
-            ])
+            ], onLine: lineHandler)
         } catch let error as RunError {
             throw ConvertError.failed(error.detail)
         }
@@ -174,18 +188,93 @@ public enum KFXToolchain {
         return kfx
     }
 
+    /// Map ebook-convert's stdout to something a person waiting can read.
+    /// The long silence lives inside "Running KFX Output" — that's the
+    /// Previewer cold start — so that stage names the wait and its size.
+    private nonisolated static func stage(for line: String) -> String? {
+        if line.contains("Converting input") {
+            return "preparing the book…"
+        }
+        if line.contains("Running transforms") {
+            return "formatting for Kindle…"
+        }
+        if line.contains("Running KFX Output") || line.contains("Creating KFX Output") {
+            return "Amazon's converter is running — usually about 20 seconds…"
+        }
+        if line.contains("converted EPUB to KPF") {
+            return "repacking for the device…"
+        }
+        return nil
+    }
+
     // MARK: - Process plumbing
 
     private struct RunError: Error { let detail: String }
 
+    /// Line-buffers a pipe as data arrives, instead of after exit — the
+    /// difference between progress and a post-mortem.
+    private final class LineStream: @unchecked Sendable {
+        private let lock = NSLock()
+        private var buffer = Data()
+        private(set) var all = Data()
+        private let onLine: (String) -> Void
+
+        init(onLine: @escaping @Sendable (String) -> Void) {
+            self.onLine = onLine
+        }
+
+        func consume(_ chunk: Data) {
+            guard !chunk.isEmpty else { return }
+            lock.lock()
+            all.append(chunk)
+            buffer.append(chunk)
+            var lines: [String] = []
+            while let nl = buffer.firstIndex(of: UInt8(ascii: "\n")) {
+                let lineData = buffer.subdata(in: buffer.startIndex..<nl)
+                buffer.removeSubrange(buffer.startIndex...nl)
+                if let line = String(data: lineData, encoding: .utf8) { lines.append(line) }
+            }
+            lock.unlock()
+            for line in lines { onLine(line) }
+        }
+    }
+
     @discardableResult
-    private nonisolated static func run(_ tool: URL, _ arguments: [String]) throws -> String {
+    private nonisolated static func run(
+        _ tool: URL,
+        _ arguments: [String],
+        onLine: (@Sendable (String) -> Void)? = nil
+    ) throws -> String {
         let process = Process()
         process.executableURL = tool
         process.arguments = arguments
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
+
+        if let onLine {
+            let stream = LineStream(onLine: onLine)
+            out.fileHandleForReading.readabilityHandler = { handle in
+                stream.consume(handle.availableData)
+            }
+            let errData = ErrBox()
+            err.fileHandleForReading.readabilityHandler = { handle in
+                errData.append(handle.availableData)
+            }
+            try process.run()
+            process.waitUntilExit()
+            out.fileHandleForReading.readabilityHandler = nil
+            err.fileHandleForReading.readabilityHandler = nil
+            // Handlers can lag exit; scoop whatever's left in the pipes.
+            stream.consume(out.fileHandleForReading.readDataToEndOfFile())
+            errData.append(err.fileHandleForReading.readDataToEndOfFile())
+            guard process.terminationStatus == 0 else {
+                let detail = String(data: errData.data, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? "no error output"
+                throw RunError(detail: String(detail.suffix(300)))
+            }
+            return String(data: stream.all, encoding: .utf8) ?? ""
+        }
         try process.run()
         // Drain before waiting: a chatty child (ebook-convert logs every
         // stage) fills a 64KB pipe buffer and deadlocks against waitUntilExit.
@@ -198,6 +287,15 @@ public enum KFXToolchain {
             throw RunError(detail: String(detail.suffix(300)))
         }
         return String(data: outData, encoding: .utf8) ?? ""
+    }
+
+    private final class ErrBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private(set) var data = Data()
+        func append(_ chunk: Data) {
+            guard !chunk.isEmpty else { return }
+            lock.lock(); data.append(chunk); lock.unlock()
+        }
     }
 
     private nonisolated static func existing(_ path: String) -> URL? {

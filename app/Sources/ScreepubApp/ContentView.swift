@@ -734,7 +734,10 @@ struct ContentView: View {
                         // KFX outranks AZW3 (Enhanced Typesetting; keeps
                         // hold on device; AZW3's renderer strands cues).
                         if KFXToolchain.status().ready {
-                            let kfx = try KFXToolchain.convert(epub)
+                            let kfx = try KFXToolchain.convert(epub) { stage in
+                                Task { @MainActor in transferNote = "Kindle: \(stage)" }
+                            }
+                            Task { @MainActor in transferNote = "copying to \(device.name)…" }
                             try DeviceTransfer.copy(kfx, to: device)
                             return "KFX"
                         }
@@ -818,7 +821,9 @@ struct ContentView: View {
                             fountainPath: fountainPath,
                             format: settings,
                             calibreAvailable: calibre,
-                            kfxReady: kfx)
+                            kfxReady: kfx) { stage in
+                                Task { @MainActor in transferNote = "Kindle: \(stage)" }
+                            }
                     }
                     try Export.copy(source, to: destination)
                     await MainActor.run {
