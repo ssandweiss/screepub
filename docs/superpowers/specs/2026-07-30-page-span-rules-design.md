@@ -20,26 +20,41 @@ itself is UNDER-protected: only cue + first line are held, so a speech can
 split mid-speech with no marker — dialogue continuing at a page top with
 its cue stranded on the previous page.
 
-## Governing rule (the user's line in the sand)
+## Governing rules
 
-**A speech is atomic.** Dialogue must never appear at the top of a page
-while its character cue sits on the previous page, and a speech should not
-split bare mid-flow. Reflow cannot inject `(MORE)`/`(CONT'D)` at the seam
-(the break position is decided per-reader at render time; EPUB offers no
-hook; Kindle strips scripting; fixed layout would forfeit reflow), so the
-only honest mechanism is keeping the whole speech together and accepting
-occasional white space. Exception, physics-imposed: a speech taller than a
-full page must break somewhere — CSS `avoid` yields when impossible — and
-then it breaks bare. Rare; accepted.
+**The cue is sacred; the default stays proven.** A character cue never
+strands at a page bottom: the existing keep (cue + parentheticals +
+first dialogue line) is the default and remains unchanged — it has been
+working in practice. Beyond that first line, dialogue may flow across
+the break like prose, because reflow cannot inject `(MORE)`/`(CONT'D)`
+at the seam (the break position is decided per-reader at render time;
+EPUB offers no hook; Kindle strips scripting; fixed layout would forfeit
+reflow).
+
+**Atomic speeches are a choice, not the default.** For readers who
+prefer a speech never to split — accepting occasional white space as the
+price — a new format option makes whole dialogue blocks unbreakable.
+Physics still wins: a speech taller than a full page must break
+somewhere (CSS `avoid` yields when impossible) and then breaks bare.
 
 ## Changes
 
-1. **Dialogue blocks become atomic.** `.dialogue-block` gains
-   `page-break-inside: avoid; break-inside: avoid`. The existing inner
+1. **New option: `keepSpeechesWhole` (bool, default false).** When on,
+   `.dialogue-block` gains `page-break-inside: avoid; break-inside:
+   avoid`, making each speech atomic. (The dual-dialogue table is
+   ALREADY unconditionally unbreakable today — that stays as existing
+   behavior, bounded by change 5, independent of this option.) When off
+   (default), behavior is exactly today's: the inner
    keep (cue + parentheticals + first line, epub/html.ts closeSpeech)
-   REMAINS as a degradation layer for renderers that ignore block-level
-   avoid but honor the smaller chunk. Same for dual-dialogue tables:
-   already unbreakable, consistent with the rule.
+   protects the cue and speeches may flow. The inner keep also remains
+   when the option is on, as a degradation layer for renderers that
+   ignore block-level avoid. Full knob protocol: `src/options.ts`
+   interface + defaults + resolve, `format-defaults.json`,
+   `FormatSettings.swift`, app Formatting settings UI (a toggle beside
+   the existing keep option), per-script sidecar picks it up via
+   FormatSettings coding, and BOTH pinned suites (options.test.ts,
+   kit-check) gain the key in the same change — the three-way default
+   pinning demands it. Registry entry in formatting-options-log.md.
 2. **Scene-heading keep shrinks to the CSS chain.** Remove the
    heading-plus-first-block `div.keep-together` wrapper in renderScene
    (epub/html.ts:210-223). `keepSceneHeadingWithScene` (name and default
@@ -70,8 +85,9 @@ then it breaks bare. Rare; accepted.
 
 ## Non-changes
 
-- No new FormatOptions; `format-defaults.json` untouched (all three
-  pinned suites unaffected on defaults).
+- All existing option defaults unchanged; the one NEW option
+  (`keepSpeechesWhole`) defaults false, so default output changes only
+  via changes 2-5, never via dialogue handling.
 - Parser and serializer untouched.
 - MOBI path untouched (no stylesheet in the dialect; documented in the
   registry as a structural limitation).
@@ -94,13 +110,19 @@ then it breaks bare. Rare; accepted.
 
 ## Test changes (TDD order)
 
-- epub.test.ts: dialogue-block carries break-inside avoid; heading
-  wrapper GONE (assertions at :57-:82 change); h2 avoid present when
-  option on, absent when off; transition rule present; tall dual emits
-  sequential markup while a short dual stays a table.
-- options.test.ts: keepSceneHeadingWithScene toggle now asserts the CSS
-  gate instead of the wrapper (:114).
-- css.ts assertions updated accordingly.
+- options.test.ts: `keepSpeechesWhole` defaults false and round-trips;
+  format-defaults.json gains the key (pinning assertion at :36 keeps
+  passing only when both move together); keepSceneHeadingWithScene
+  toggle now asserts the CSS gate instead of the wrapper (:114).
+- kit-check: FormatSettings decodes the new key; defaults still match
+  the canonical file (main.swift:205-212).
+- epub.test.ts: dialogue-block carries break-inside avoid ONLY when
+  `keepSpeechesWhole` is on; heading wrapper GONE (assertions at
+  :57-:82 change); h2 avoid present when its option is on, absent when
+  off; transition rule present; tall dual emits sequential markup while
+  a short dual stays a table.
+- App: FormattingSettings pane gains the toggle; sidecar round-trip
+  covered by existing ScriptSettings checks once the field exists.
 
 ## Risks
 
