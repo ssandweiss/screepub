@@ -118,6 +118,30 @@ describe('tokensToBody', () => {
   });
 });
 
+// ── dual dialogue height fallback ────────────────────────
+
+describe('dual dialogue height fallback', () => {
+  const dualScript = (line: string) =>
+    `INT. HALL - DAY\n\n@JACK\n${line}\n\n@JILL ^\nAlso talking here.\n`;
+
+  test('a short exchange stays a side-by-side table', () => {
+    const tokens = new Fountain().parse(dualScript('Quick word.'), true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toContain('<table class="dual-dialogue">');
+  });
+
+  test('a tall exchange emits sequential speeches instead of an unbreakable table', () => {
+    const tokens = new Fountain().parse(dualScript('word '.repeat(120).trim()), true).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).not.toContain('<table class="dual-dialogue">');
+    expect(file.xhtml).toContain('<p class="character">JACK</p>');
+    expect(file.xhtml).toContain('<p class="character">JILL</p>');
+    // both speeches render as ordinary dialogue blocks, each with the cue keep
+    const blocks = file.xhtml.match(/<div class="dialogue-block">/g) ?? [];
+    expect(blocks.length).toBe(2);
+  });
+});
+
 // ── screenplay CSS geometry ──────────────────────────────
 
 describe('screenplay CSS (Kindle-safe geometry)', () => {

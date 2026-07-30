@@ -29,6 +29,13 @@ export interface BookBody {
 /** Keep each body file comfortably under Kindle's per-flow size warnings. */
 const DEFAULT_MAX_FILE_BYTES = 250_000;
 
+/** A dual exchange whose taller column exceeds this many estimated
+ * rendered lines cannot fit beside itself on one page; the unbreakable
+ * table would push whole and leave a page-sized gap, so it degrades to
+ * sequential speeches. Estimate assumes ~30 chars per half-width line. */
+const DUAL_SEQUENTIAL_LINE_THRESHOLD = 12;
+const EST_CHARS_PER_DUAL_LINE = 30;
+
 export function escapeXml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -90,7 +97,11 @@ function renderBlocks(
   // Simultaneous speech renders as a two-cell table — the one column
   // construct Kindle's renderer honors (floats/inline-block are not
   // reliable under Enhanced Typesetting).
-  let dual: { left: string[]; right: string[]; side: 'left' | 'right' } | null = null;
+  let dual: {
+    left: { kind: string; html: string }[];
+    right: { kind: string; html: string }[];
+    side: 'left' | 'right';
+  } | null = null;
   const emit = (s: string, kind = 'other') => {
     // A pending page marker slips inside this block's opening tag — costing
     // no line of its own — and is consumed once it lands.
@@ -109,13 +120,16 @@ function renderBlocks(
   // unbreakable wrapper so a cue never strands at a page bottom with its
   // speech on the next page — the wrapper form, which scene headings no
   // longer need.
+  const speechBlock = (cells: { kind: string; html: string }[]): string => {
+    const firstLine = cells.findIndex((c) => c.kind === 'dialogue');
+    const cut = firstLine === -1 ? cells.length : firstLine + 1;
+    const head = cells.slice(0, cut).map((c) => c.html).join('');
+    const tail = cells.slice(cut).map((c) => c.html).join('');
+    return `<div class="dialogue-block">\n<div class="keep-together">\n${head}</div>\n${tail}</div>\n`;
+  };
   const closeSpeech = () => {
     if (!speech) return;
-    const firstLine = speech.findIndex((c) => c.kind === 'dialogue');
-    const cut = firstLine === -1 ? speech.length : firstLine + 1;
-    const head = speech.slice(0, cut).map((c) => c.html).join('');
-    const tail = speech.slice(cut).map((c) => c.html).join('');
-    blocks.push(`<div class="dialogue-block">\n<div class="keep-together">\n${head}</div>\n${tail}</div>\n`);
+    blocks.push(speechBlock(speech));
     speech = null;
   };
 
@@ -137,9 +151,19 @@ function renderBlocks(
         break;
       case 'dual_dialogue_end':
         if (dual) {
-          blocks.push(
-            `<table class="dual-dialogue">\n<tr>\n<td>\n${dual.left.join('')}</td>\n<td>\n${dual.right.join('')}</td>\n</tr>\n</table>\n`,
-          );
+          const estLines = (col: { html: string }[]) =>
+            col.reduce((n, c) => {
+              const len = c.html.replace(/<[^>]*>/g, '').length;
+              return n + Math.max(1, Math.ceil(len / EST_CHARS_PER_DUAL_LINE));
+            }, 0);
+          if (Math.max(estLines(dual.left), estLines(dual.right)) > DUAL_SEQUENTIAL_LINE_THRESHOLD) {
+            if (dual.left.length) blocks.push(speechBlock(dual.left));
+            if (dual.right.length) blocks.push(speechBlock(dual.right));
+          } else {
+            blocks.push(
+              `<table class="dual-dialogue">\n<tr>\n<td>\n${dual.left.map((c) => c.html).join('')}</td>\n<td>\n${dual.right.map((c) => c.html).join('')}</td>\n</tr>\n</table>\n`,
+            );
+          }
           dual = null;
         }
         break;
@@ -149,7 +173,7 @@ function renderBlocks(
         break;
       case 'dialogue_end':
         if (dual && speech) {
-          dual[dual.side].push(...speech.map((c) => c.html));
+          dual[dual.side].push(...speech);
           speech = null;
         } else {
           closeSpeech();
