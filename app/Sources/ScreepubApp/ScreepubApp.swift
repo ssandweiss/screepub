@@ -115,6 +115,11 @@ struct SettingsView: View {
             DevicesSettings()
                 .tabItem { Label("Devices", systemImage: "externaldrive") }
         }
+        // Width is definite on purpose: a grouped Form reports a fitting width
+        // near 900pt for these captions, and only a definite value overrides
+        // it. Height is deliberately absent here and set on the taller tab
+        // instead (see DevicesSettings) — a TabView adopts its largest child's
+        // height, so one number there sizes the window for both.
         .frame(width: 520)
         .padding(.bottom, 8)
     }
@@ -209,6 +214,13 @@ struct DevicesSettings: View {
             }
         }
         .formStyle(.grouped)
+        // A grouped Form scrolls, so it reports the same modest ideal height
+        // whatever it holds; without this the tab opened with a scrollbar over
+        // content that fits fine once given the room. Since a TabView adopts
+        // its largest child's height, this one number sizes the whole Settings
+        // window and General carries the spare space — the cheaper half of the
+        // trade, and the reason no height is set on the TabView itself.
+        .frame(minHeight: 560)
         .onAppear { refreshCurrentDefault() }
         // AppSettings reads UserDefaults directly rather than through
         // @AppStorage, so nothing here republishes on its own. This also
