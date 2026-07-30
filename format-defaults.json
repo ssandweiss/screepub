@@ -5,6 +5,7 @@
   "parentheticalIndentPct": 17,
   "elementSpacingEm": 1,
   "keepSceneHeadingWithScene": true,
+  "keepSpeechesWhole": false,
   "fontFamily": "courier",
   "rejoinSplitDialogue": true,
   "contdMode": "auto",

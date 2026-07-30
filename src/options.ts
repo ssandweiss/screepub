@@ -15,6 +15,9 @@ export interface FormatOptions {
   elementSpacingEm: number;
   /** slugline + first block ride together across page breaks (registry #5a) */
   keepSceneHeadingWithScene: boolean;
+  /** whole speeches ride one page: dialogue blocks become unbreakable;
+   * off = the proven default, cue + first line keep only (registry #8c) */
+  keepSpeechesWhole: boolean;
   /** body typeface (registry #6) */
   fontFamily: 'courier' | 'serif' | 'sans';
   /** merge (MORE)/(CONT'D) page-break splits into one speech (registry #8) */
@@ -47,6 +50,7 @@ export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
   parentheticalIndentPct: 17,
   elementSpacingEm: 1,
   keepSceneHeadingWithScene: true,
+  keepSpeechesWhole: false,
   fontFamily: 'courier',
   rejoinSplitDialogue: true,
   contdMode: 'auto',
@@ -82,6 +86,7 @@ export function resolveFormatOptions(partial?: Record<string, unknown>): FormatO
     parentheticalIndentPct: num('parentheticalIndentPct', 0, 40),
     elementSpacingEm: num('elementSpacingEm', 0.4, 2),
     keepSceneHeadingWithScene: bool('keepSceneHeadingWithScene'),
+    keepSpeechesWhole: bool('keepSpeechesWhole'),
     fontFamily: font === 'serif' || font === 'sans' || font === 'courier' ? font : d.fontFamily,
     rejoinSplitDialogue: bool('rejoinSplitDialogue'),
     contdMode: contd === 'strip' || contd === 'keep' || contd === 'auto' ? contd : d.contdMode,

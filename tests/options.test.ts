@@ -36,7 +36,7 @@ describe('resolveFormatOptions', () => {
   test('defaults match the canonical format-defaults.json both suites pin', async () => {
     // The same file kit-check decodes into FormatSettings and compares to
     // FormatSettings.defaults — the two languages can no longer drift
-    // silently. Fifteen literals, one source of truth.
+    // silently. Sixteen literals, one source of truth.
     const canonical = await Bun.file(new URL('../format-defaults.json', import.meta.url)).json();
     expect(DEFAULT_FORMAT_OPTIONS).toEqual(canonical);
   });
@@ -327,5 +327,15 @@ describe('dualDialogue mode', () => {
     const out = toFountain(sp4(), undefined, resolveFormatOptions({ dualDialogue: 'sequential' }));
     expect(out).toContain('@INFORMANT\n');
     expect(out).not.toContain('^');
+  });
+});
+
+// ── keepSpeechesWhole option ─────────────────────────────
+
+describe('keepSpeechesWhole option', () => {
+  test('defaults off and resolves from partials', () => {
+    expect(resolveFormatOptions({}).keepSpeechesWhole).toBe(false);
+    expect(resolveFormatOptions({ keepSpeechesWhole: true }).keepSpeechesWhole).toBe(true);
+    expect(resolveFormatOptions({ keepSpeechesWhole: 'yes' }).keepSpeechesWhole).toBe(false);
   });
 });
