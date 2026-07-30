@@ -109,11 +109,16 @@ is live.
   line beneath it? If `break-after: avoid` proves not to bind, the
   recorded fallback is a wrapper holding the heading + the first ELEMENT
   only — never the whole first block, which is the bug this replaced.
-- **Device verdict: pending 2026-07-30 —** nothing on record isolates
-  `break-after: avoid` binding on its own. #8b's 2026-07-29 KFX pass
-  ("holds every keep") was measured on CUES, which carry the wrapper AND
-  the chain, so it cannot tell the two apart; the heading was wrapped
-  then too. The verdict lands in this entry.
+- **Device verdict 2026-07-30: BINDS — the chain holds without the
+  wrapper.** First isolated evidence (nothing prior could tell the two
+  mechanisms apart: #8b's 2026-07-29 pass measured cues wearing both):
+  a real script sent via Send-to-Kindle web (Amazon server conversion →
+  KFX, Enhanced Typesetting) read on device — no heading stranded at any
+  page bottom, and page fill is markedly improved over the wrapper era
+  (the half-empty-pages complaint that drove the rewrite). Evidence
+  grade: one script, one route, owner-observed; a stranded heading on
+  any future script reopens this, and the fallback (wrapper holding
+  heading + first ELEMENT only) stays recorded above.
 - **Default:** on.
 - **App option:** "Keep headings with scene" toggle (the reader rail's
   Page group).
@@ -334,8 +339,10 @@ is live.
 - **Reference:** `docs/pagination-reference.md` §2, the break rules by
   element (that doc lands from branch `worktree-device-map`).
 - **Device verdict: pending 2026-07-30 —** does a transition ever still
-  start a page? Same Kindle Previewer/KFX + Apple Books pass as #5a; the
-  verdict lands in this entry.
+  start a page? The 2026-07-30 STK-web pass that settled #5a saw nothing
+  contrary, but transitions were not specifically checked — this slot
+  wants a deliberate look at a page whose seam lands near a CUT TO:.
+  The verdict lands in this entry.
 - **Code:** `src/epub/css.ts` (`p.transition`).
 
 ## Cleanup & rejoining
