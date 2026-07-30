@@ -54,12 +54,24 @@ struct ReaderRail: View {
                 Toggle("Title page", isOn: binding(\.includeTitlePage))
                 Toggle("Scene numbers", isOn: binding(\.showSceneNumbers))
                 Toggle("Page markers", isOn: binding(\.showPageMarkers))
+            }
+            // These two are the only knobs consumed in fountain/serialize.ts
+            // rather than in epub/ — they are written INTO the .fountain when
+            // the PDF is first read. The reader re-renders from that cached
+            // .fountain, which is the app's cache boundary, so a change here
+            // genuinely cannot move the preview. It is saved to the sidecar and
+            // does apply on the next conversion from the PDF, so the honest
+            // move is to say so rather than to hide them or fake a re-render.
+            Section("From the PDF") {
                 Toggle("Rejoin split dialogue", isOn: binding(\.rejoinSplitDialogue))
                 Picker("(CONT'D)", selection: binding(\.contdMode)) {
                     Text("Automatic").tag("auto")
                     Text("Remove all").tag("strip")
                     Text("Keep as written").tag("keep")
                 }
+                Text("Saved for the next time you convert this PDF. The preview re-renders from the cached .fountain, so these won't change it now.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section {
                 if model.rendering { ProgressView().controlSize(.small) }
