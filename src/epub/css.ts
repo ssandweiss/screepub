@@ -29,6 +29,12 @@ export function screenplayCss(o: FormatOptions): string {
   // Screenplays are traditionally ragged-right; explicit `left` overrides
   // a reader that justifies body text by default (stretchy word gaps).
   const bodyAlign = o.justifyText ? 'justify' : 'left';
+  // Atomic speeches (registry #8c): opt-in, because an unbreakable block
+  // taller than the space left on a page gets pushed whole — bounded
+  // white space traded for never splitting a speech.
+  const speechKeep = o.keepSpeechesWhole
+    ? '\n  page-break-inside: avoid;\n  break-inside: avoid;'
+    : '';
 
   return `
 html, body {
@@ -100,7 +106,7 @@ p.mini-slug {
   margin-top: ${em(gap)};
   margin-bottom: ${em(gap)};
   margin-left: ${o.dialogueSideMarginPct}%;
-  margin-right: ${o.dialogueSideMarginPct}%;
+  margin-right: ${o.dialogueSideMarginPct}%;${speechKeep}
 }
 
 /* A cue must never orphan from its dialogue at a page break. Centered

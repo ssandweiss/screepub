@@ -92,6 +92,15 @@ describe('screenplayCss with options', () => {
     expect(on).toContain('section.scene { page-break-before: always; }');
   });
 
+  test('keepSpeechesWhole makes dialogue blocks unbreakable only when enabled', () => {
+    const off = screenplayCss(resolveFormatOptions({}));
+    expect(off.match(/\.dialogue-block\s*{[^}]*}/)![0]).not.toContain('break-inside');
+    const on = screenplayCss(resolveFormatOptions({ keepSpeechesWhole: true }));
+    const block = on.match(/\.dialogue-block\s*{[^}]*}/)![0];
+    expect(block).toContain('page-break-inside: avoid');
+    expect(block).toContain('break-inside: avoid');
+  });
+
   test('font family option switches the body stack', () => {
     expect(screenplayCss(resolveFormatOptions({ fontFamily: 'serif' }))).toMatch(/body\s*{[^}]*font-family:\s*serif/);
     expect(screenplayCss(resolveFormatOptions({ fontFamily: 'courier' }))).toContain('"Courier Prime"');
