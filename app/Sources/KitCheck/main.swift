@@ -497,6 +497,113 @@ check(UpdateCheck.shouldCheck(optedIn: true, lastChecked: checkNow.addingTimeInt
 check(!UpdateCheck.shouldCheck(optedIn: true, lastChecked: checkNow.addingTimeInterval(3600), now: checkNow),
       "a clock set backwards does not trigger a check storm")
 
+// — self-update installer: requirement pinning and swap mechanics —
+check(UpdateInstaller.appRequirement()
+        == "anchor apple generic and identifier \"com.darkwell.screepub\""
+         + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
+         + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+         + " and certificate leaf[subject.OU] = \"XSRB3D643J\"",
+      "app requirement pins anchor, Developer ID chain, bundle id, and team")
+check(UpdateInstaller.dmgRequirement()
+        == "anchor apple generic"
+         + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
+         + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+         + " and certificate leaf[subject.OU] = \"XSRB3D643J\"",
+      "dmg requirement pins the chain and team (a dmg's identifier is its filename)")
+
+// Verification must REJECT everything that isn't ours. /bin/ls is Apple-
+// signed with the wrong everything; a text file has no signature at all.
+check((try? UpdateInstaller.verify(URL(fileURLWithPath: "/bin/ls"),
+                                   requirement: UpdateInstaller.appRequirement())) == nil,
+      "an Apple-signed binary that isn't ours fails verification")
+let unsigned = tempDir("unsigned").appendingPathComponent("not-an-app.txt")
+try! Data("hello".utf8).write(to: unsigned)
+check((try? UpdateInstaller.verify(unsigned, requirement: UpdateInstaller.dmgRequirement())) == nil,
+      "an unsigned file fails verification")
+
+// Positive verification needs a real Developer ID build. The installed
+// /Applications/Screepub.app is one on the maintainer's machine; skip
+// gracefully anywhere it isn't.
+let installedApp = URL(fileURLWithPath: "/Applications/Screepub.app")
+if FileManager.default.fileExists(atPath: installedApp.path) {
+    let info = Process()
+    info.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+    info.arguments = ["-dvv", installedApp.path]
+    let infoErr = Pipe()
+    info.standardError = infoErr
+    info.standardOutput = Pipe()
+    try! info.run()
+    info.waitUntilExit()
+    let signInfo = String(data: infoErr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    if signInfo.contains("TeamIdentifier=\(UpdateInstaller.teamID)") {
+        check((try? UpdateInstaller.verify(installedApp, requirement: UpdateInstaller.appRequirement())) != nil,
+              "the installed Developer ID Screepub passes the pinned requirement")
+    } else {
+        print("  --  /Applications/Screepub.app is not a Developer ID build; positive verify untested here")
+    }
+} else {
+    print("  --  no /Applications/Screepub.app; positive verify untested here")
+}
+
+// Swap mechanics, no signing involved: the new bundle lands, the old one
+// is parked then cleaned, and a failed commit leaves the original alone.
+let swapDir = tempDir("swap")
+let swapDest = swapDir.appendingPathComponent("Fake.app")
+try! FileManager.default.createDirectory(at: swapDest, withIntermediateDirectories: true)
+try! Data("v1".utf8).write(to: swapDest.appendingPathComponent("marker"))
+let stagedNew = swapDir.appendingPathComponent("staged-new")
+try! FileManager.default.createDirectory(at: stagedNew, withIntermediateDirectories: true)
+try! Data("v2".utf8).write(to: stagedNew.appendingPathComponent("marker"))
+try! UpdateInstaller.commit(staged: stagedNew, into: swapDest)
+check((try? String(contentsOf: swapDest.appendingPathComponent("marker"), encoding: .utf8)) == "v2",
+      "commit swaps the new bundle into place")
+check(!FileManager.default.fileExists(atPath: stagedNew.path),
+      "commit consumes the staged copy")
+
+let ghostStaged = swapDir.appendingPathComponent("never-existed")
+check((try? UpdateInstaller.commit(staged: ghostStaged, into: swapDest)) == nil,
+      "a commit with nothing staged throws")
+check((try? String(contentsOf: swapDest.appendingPathComponent("marker"), encoding: .utf8)) == "v2",
+      "...and leaves the installed bundle untouched")
+
+let leftoverDir = tempDir("leftovers")
+let leftoverApp = leftoverDir.appendingPathComponent("Fake.app")
+try! FileManager.default.createDirectory(at: leftoverApp, withIntermediateDirectories: true)
+let parked = leftoverDir.appendingPathComponent(".Fake.app.old-999")
+let staleStage = leftoverDir.appendingPathComponent(".Fake.app.staged")
+try! FileManager.default.createDirectory(at: parked, withIntermediateDirectories: true)
+try! FileManager.default.createDirectory(at: staleStage, withIntermediateDirectories: true)
+UpdateInstaller.cleanupLeftovers(near: leftoverApp)
+check(!FileManager.default.fileExists(atPath: parked.path),
+      "cleanup removes parked old bundles")
+check(!FileManager.default.fileExists(atPath: staleStage.path),
+      "cleanup removes a stale staged copy")
+check(FileManager.default.fileExists(atPath: leftoverApp.path),
+      "cleanup never touches the installed bundle")
+
+check(UpdateInstaller.isTranslocated(URL(fileURLWithPath: "/private/var/folders/x/AppTranslocation/ABC/d/Screepub.app")),
+      "a translocated bundle path is recognized")
+check(!UpdateInstaller.isTranslocated(URL(fileURLWithPath: "/Applications/Screepub.app")),
+      "a normal install location is not translocated")
+
+// End-to-end against a real release DMG, when one is provided:
+//   SCREEPUB_UPDATE_DMG=path/to/Screepub-macOS.dmg swift run kit-check
+if let dmgPath = ProcessInfo.processInfo.environment["SCREEPUB_UPDATE_DMG"] {
+    let dmg = URL(fileURLWithPath: dmgPath)
+    let e2eDest = tempDir("e2e").appendingPathComponent("Screepub.app")
+    do {
+        try UpdateInstaller.install(dmg: dmg, over: e2eDest)
+        check(FileManager.default.fileExists(atPath: e2eDest.appendingPathComponent("Contents/MacOS/Screepub").path),
+              "install(dmg:over:) lands a complete app bundle")
+        check((try? UpdateInstaller.verify(e2eDest, requirement: UpdateInstaller.appRequirement())) != nil,
+              "the installed bundle still passes the pinned requirement")
+    } catch {
+        check(false, "install(dmg:over:) succeeds on the release DMG (got: \(error))")
+    }
+} else {
+    print("  --  SCREEPUB_UPDATE_DMG not set; full install flow untested here")
+}
+
 // — default mail client detection (value is machine-dependent) —
 let isAppleMail = await MainActor.run { SendToKindle.defaultMailClientIsAppleMail }
 check(isAppleMail == true || isAppleMail == false,

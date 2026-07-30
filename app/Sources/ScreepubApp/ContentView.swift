@@ -25,8 +25,8 @@ struct ContentView: View {
     /// Consent for the launch-time update check. Off until the user says
     /// otherwise — the welcome page asks once, Settings can change it.
     @AppStorage("updateOptIn") private var updateOptIn = false
-    @AppStorage("updateLastChecked") private var updateLastChecked = 0.0
-    @State private var availableUpdate: AvailableUpdate?
+    @ObservedObject private var updates = UpdateController.shared
+    @State private var showUpdatePopover = false
     /// Last destination the user actually sent to. Empty on first run, when
     /// the ordering in ResultActions.routes supplies the opening guess.
     @AppStorage("lastDestination") private var lastDestination = ""
@@ -70,11 +70,11 @@ struct ContentView: View {
                 try? await Task.sleep(for: .seconds(6))
             }
         }
-        .task { await maybeCheckForUpdates() }
+        .task { await updates.checkIfDue() }
         .onChange(of: updateOptIn) { _, on in
             // Opting in IS the request to check — do the first one right
             // away rather than making the user relaunch to see it work.
-            if on { Task { await maybeCheckForUpdates() } }
+            if on { Task { await updates.checkIfDue() } }
         }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             guard let provider = providers.first else { return false }
@@ -134,19 +134,7 @@ struct ContentView: View {
             // stamp git-describe there, so two running builds are tellable
             // apart at a glance.
             HStack(alignment: .firstTextBaseline) {
-                if let update = availableUpdate {
-                    Button {
-                        NSWorkspace.shared.open(update.releaseNotesURL)
-                    } label: {
-                        Text("rev. \(update.version) available")
-                            .font(Theme.courier(9, .bold))
-                            .kerning(0.4)
-                            .foregroundStyle(Theme.brass)
-                            .underline()
-                    }
-                    .buttonStyle(.plain)
-                    .help("Opens the release notes and download on GitHub")
-                }
+                updateNote
                 Spacer()
                 Text("rev. \(appVersion)")
                     .font(Theme.courier(9))
@@ -159,14 +147,63 @@ struct ContentView: View {
         }
     }
 
-    /// Launch-time check, gated twice: the opt-in, then the daily throttle.
-    /// Failures are silent — a background courtesy must never nag; the
-    /// manual menu check is the place errors get reported.
-    private func maybeCheckForUpdates() async {
-        let last = updateLastChecked > 0 ? Date(timeIntervalSince1970: updateLastChecked) : nil
-        guard UpdateCheck.shouldCheck(optedIn: updateOptIn, lastChecked: last, now: Date()) else { return }
-        updateLastChecked = Date().timeIntervalSince1970
-        availableUpdate = try? await UpdateCheck.latest(currentVersion: appVersion)
+    /// The bottom-left footer narrates the updater: an available revision,
+    /// install progress, or the failure and its fallback.
+    @ViewBuilder
+    private var updateNote: some View {
+        switch updates.phase {
+        case .idle:
+            if let update = updates.available {
+                Button {
+                    showUpdatePopover = true
+                } label: {
+                    Text("rev. \(update.version) available")
+                        .font(Theme.courier(9, .bold))
+                        .kerning(0.4)
+                        .foregroundStyle(Theme.brass)
+                        .underline()
+                }
+                .buttonStyle(.plain)
+                .help("Install the update, or read the release notes")
+                .popover(isPresented: $showUpdatePopover, arrowEdge: .top) {
+                    UpdatePopover(update: update)
+                }
+            }
+        case .downloading(let fraction):
+            HStack(spacing: 7) {
+                FooterProgressBar(fraction: fraction)
+                Text(footerDownloadLabel(fraction))
+                    .font(Theme.courier(9, .bold))
+                    .kerning(0.4)
+                    .foregroundStyle(Theme.brass)
+                    .monospacedDigit()
+            }
+        case .installing:
+            HStack(spacing: 7) {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(Theme.brass)
+                Text("verifying and installing…")
+                    .font(Theme.courier(9, .bold))
+                    .kerning(0.4)
+                    .foregroundStyle(Theme.brass)
+            }
+        case .failed(let message):
+            Button {
+                if let update = updates.available {
+                    NSWorkspace.shared.open(update.releaseNotesURL)
+                }
+            } label: {
+                Text("\(message). Get it from the release page instead")
+                    .font(Theme.courier(9))
+                    .kerning(0.2)
+                    .foregroundStyle(Theme.alarm)
+                    .underline()
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private var pageNumber: String {
@@ -297,6 +334,14 @@ struct ContentView: View {
             }
         }
         .animation(.spring(duration: 0.35), value: stampLabels)
+    }
+
+    private func footerDownloadLabel(_ fraction: Double?) -> String {
+        let version = updates.available?.version ?? ""
+        if let fraction {
+            return "downloading rev. \(version) (\(Int(fraction * 100))%)"
+        }
+        return "downloading rev. \(version)…"
     }
 
     private var appVersion: String {
@@ -776,6 +821,57 @@ struct ContentView: View {
         } else {
             transferNote = "no mail account available. Configure Mail.app, or use Send to Kindle web"
         }
+    }
+}
+
+/// A thin brass thermometer for the footer: determinate when the server
+/// declared a size, empty track while it hasn't.
+private struct FooterProgressBar: View {
+    let fraction: Double?
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            Rectangle()
+                .fill(Theme.inkFaint.opacity(0.35))
+            Rectangle()
+                .fill(Theme.brass)
+                .scaleEffect(x: fraction ?? 0, y: 1, anchor: .leading)
+        }
+        .frame(width: 110, height: 3)
+        .animation(.linear(duration: 0.15), value: fraction)
+    }
+}
+
+/// The install decision, anchored to the footer note that announced it.
+/// States plainly what will happen before anything happens.
+private struct UpdatePopover: View {
+    let update: AvailableUpdate
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("REV. \(update.version) IS READY")
+                .font(Theme.courier(12, .bold))
+                .kerning(0.8)
+                .foregroundStyle(Theme.ink)
+            Text("Downloads the disk image from GitHub, verifies its Apple signature against this project's Developer ID, then swaps this copy and relaunches. Nothing installs if verification fails.")
+                .font(Theme.courier(10))
+                .foregroundStyle(Theme.inkFaint)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("INSTALL AND RELAUNCH") {
+                dismiss()
+                Task { await UpdateController.shared.install() }
+            }
+            .buttonStyle(BradButtonStyle())
+            Button("VIEW RELEASE NOTES") {
+                NSWorkspace.shared.open(update.releaseNotesURL)
+            }
+            .buttonStyle(MarginButtonStyle())
+        }
+        .padding(16)
+        .frame(width: 300)
+        .background(Theme.paper)
     }
 }
 

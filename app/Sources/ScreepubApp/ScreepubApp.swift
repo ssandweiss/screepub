@@ -15,16 +15,23 @@ import ScreepubKit
 /// and unlike the silent launch check it reports every outcome — including
 /// "you're current", which is the answer the user opened the menu for.
 @MainActor func manualUpdateCheck() async {
-    let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+    let current = UpdateController.currentVersion
     let alert = NSAlert()
     do {
         if let update = try await UpdateCheck.latest(currentVersion: current) {
+            UpdateController.shared.available = update
             alert.messageText = "Screepub \(update.version) is available"
-            alert.informativeText = "You're running \(current). The release notes and download are on GitHub."
+            alert.informativeText = "You're running \(current). Install downloads the disk image, verifies its Apple signature against this project's Developer ID, and relaunches. Nothing installs if verification fails."
+            alert.addButton(withTitle: "Install and Relaunch")
             alert.addButton(withTitle: "View Release")
             alert.addButton(withTitle: "Later")
-            if alert.runModal() == .alertFirstButtonReturn {
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                await UpdateController.shared.install()
+            case .alertSecondButtonReturn:
                 NSWorkspace.shared.open(update.releaseNotesURL)
+            default:
+                break
             }
             return
         }
@@ -42,6 +49,12 @@ import ScreepubKit
 
 @main
 struct ScreepubApp: App {
+    init() {
+        // A previous self-update may have parked the old bundle beside this
+        // one; the running binary kept it alive until now.
+        UpdateInstaller.cleanupLeftovers(near: Bundle.main.bundleURL)
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
