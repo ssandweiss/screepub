@@ -38,8 +38,22 @@ const RECUR_PAGE_FRACTION = 0.4;
 
 /**
  * Recurrence layer (the watermark killer): any candidate whose normalized
- * text appears on >= max(3, 40% of pages) distinct pages is re-typed to
- * "page-number". Pure and idempotent; never mutates its input.
+ * text appears on >= max(3, 40% of pages) distinct pages is re-typed.
+ * Pure; never mutates its input. Idempotent for every type but one: a
+ * demoted mini-slug lands on "action", which a SECOND call would go on to
+ * suppress to "page-number". That is the price of demoting one step instead
+ * of hiding outright, and it is safe because parseLines calls this exactly
+ * once, on freshly classified elements.
+ *
+ * Mini-slugs are candidates too, and they are the one type that demotes to
+ * "action" instead of "page-number". Both halves matter. Counting them keeps
+ * the pool exactly what it was before classify.ts learned to mint mini-slugs
+ * — otherwise a left-flush all-caps watermark ("CONFIDENTIAL") classifies as
+ * a mini-slug at priority 9, leaves this layer's view entirely, and renders
+ * as a bold micro-heading on every page. Demoting rather than hiding is the
+ * other side: mini-slugs repeat by design ("LATER", "THE FOYER"), so the
+ * threshold is a likelier false positive here than anywhere else, and a
+ * wrong guess must cost the heading, never the words. #5b.
  */
 export function suppressBoilerplate(
   elements: ScreenplayElement[],
@@ -48,7 +62,7 @@ export function suppressBoilerplate(
   const threshold = Math.max(RECUR_MIN_PAGES, Math.ceil(pageCount * RECUR_PAGE_FRACTION));
   const pagesByText = new Map<string, Set<number>>();
   const isCandidate = (e: ScreenplayElement) =>
-    (e.type === 'action' || e.type === 'page-number') &&
+    (e.type === 'action' || e.type === 'page-number' || e.type === 'mini-slug') &&
     e.text.trim().length > 0 &&
     e.text.trim().length <= RECUR_MAX_LEN;
   const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -60,14 +74,18 @@ export function suppressBoilerplate(
     if (!pages) pagesByText.set(key, (pages = new Set()));
     pages.add(e.pageNum);
   }
+  const recurs = (e: ScreenplayElement) =>
+    (pagesByText.get(norm(e.text))?.size ?? 0) >= threshold;
 
   return elements.map((e) => {
+    if (e.type === 'mini-slug') {
+      return isCandidate(e) && recurs(e) ? { ...e, type: 'action' as const } : e;
+    }
     if (e.type !== 'action') return e;
     // Pattern layer: slugs embedding per-page-varying page marks never recur
     // verbatim, so the recurrence count alone misses them — catch directly.
     if (isBoilerplateLine(e.text)) return { ...e, type: 'page-number' as const };
     if (!isCandidate(e)) return e;
-    const pages = pagesByText.get(norm(e.text));
-    return pages && pages.size >= threshold ? { ...e, type: 'page-number' as const } : e;
+    return recurs(e) ? { ...e, type: 'page-number' as const } : e;
   });
 }

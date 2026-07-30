@@ -189,21 +189,47 @@ is live.
   action → mini-slug — 79 / 7 / 4 / 2 / 0 / 0, plus 2 section headings in
   the non-screenplay prose fixture (which still trips the guard, since that
   keys on scenes and dialogue). epubcheck clean on the 79-slug output.
-- **Not in the recurrence suppressor:** `suppressBoilerplate` only re-types
-  `action` and `page-number`, so mini-slugs sit outside it. Deliberate —
-  mini-slugs repeat by design ("LATER", "THE FOYER") and would trip the
-  ≥40%-of-pages threshold in a short script, which would delete text. The
-  pattern layer still runs first (priority 1.5), so revision slugs, draft
-  stamps and dates can never become mini-slugs, and zero recurrence-caught
-  lines in the corpus fit the mini-slug shape.
-- **Known residual:** a left-flush transition that is neither camera-prefixed
-  nor `TO:`-terminated ("SMASH TO BLACK", "OVER BLACK:") reads as a
-  mini-slug. It renders at the right visual weight for what it is, so this
-  is a naming miss, not a defect; 3 instances in one fixture.
+- **The recurrence suppressor, and the two ways it can go wrong:**
+  classification runs BEFORE `suppressBoilerplate`, so every line the
+  mini-slug rule claims leaves the recurrence layer's view. That cuts both
+  ways. **Escape:** a left-flush all-caps per-page watermark
+  ("CONFIDENTIAL", "PROPERTY OF THE STUDIO") is exactly mini-slug-shaped,
+  and it recurs by definition — left outside the layer it renders as a bold
+  micro-heading on every page, where before this change it was suppressed.
+  **Deletion:** put mini-slugs back in and a legitimately repeated slug
+  ("LATER") that crosses the ≥40%-of-pages threshold in a short script
+  loses its text entirely. **Resolution:** mini-slug is a recurrence
+  candidate — it counts toward the pool, so the pool sees exactly what it
+  saw before the classifier existed — but it is the one type that demotes
+  to **`action`**, not `page-number`. The heading goes, the words stay, and
+  a false positive costs the bold only. Deletion risk was measured at zero
+  anyway: the widest page-spread of any mini-slug in the corpus is 14%,
+  against a 40% threshold. The pattern layer still runs first
+  (priority 1.5), so revision slugs, draft stamps and dates can never
+  become mini-slugs at all. One cost, on the record: `suppressBoilerplate`
+  is no longer idempotent for this type — a demoted mini-slug lands on
+  `action`, which a second call would suppress to `page-number`. parseLines
+  calls it exactly once, on freshly classified elements.
+- **Known residual — transitions:** a left-flush transition that is neither
+  camera-prefixed nor `TO:`-terminated ("SMASH TO BLACK", "OVER BLACK:")
+  reads as a mini-slug. It renders at the right visual weight for what it
+  is, so this is a naming miss, not a defect; 3 instances in one fixture.
+- **Known residual — the colon is not always a colon:** one generator emits
+  U+A789 (MODIFIER LETTER COLON), not ASCII `:`. So "every true slug ends
+  bare or on a colon" holds only where extraction hands back ASCII, and the
+  three `INTERCUT`/`CLOSE ON` slugs in that fixture fall to action today.
+  That is the safe direction, and widening `MINI_SLUG_TAIL` to accept the
+  lookalike would need its own evidence pass first.
+- **Why `)` is not a slug ending:** the tail class is `[A-Z0-9:]`. A closing
+  paren was in it briefly and admitted nothing: the only action-band lines
+  that end on one are whole parentheticals, which have to be refused, and
+  no true slug in any fixture ends on a paren. Dropping it also retired a
+  redundant `PARENTHETICAL` guard the tail already subsumed.
 - **Code:** `src/fountain/serialize.ts` (`mini-slug` case),
   `src/epub/html.ts` (`PRIMARY_SLUG`, `isMiniSlug`), `src/epub/css.ts`
   (`p.mini-slug`), `src/parser/classify.ts` (`PRIMARY_SLUG`,
-  `isMiniSlugShaped`, priority 9).
+  `isMiniSlugShaped`, priority 9), `src/parser/boilerplate.ts`
+  (`suppressBoilerplate` — mini-slug as recurrence candidate).
 
 ### 5. Keep-with-next — minimal chain (v2)
 - **What:** `break-after: avoid` on scene headings, mini-slugs (#5b) and

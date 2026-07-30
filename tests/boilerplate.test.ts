@@ -81,6 +81,37 @@ describe("suppressBoilerplate — recurrence", () => {
     const out = suppressBoilerplate(els, PAGES);
     expect(out.every((e) => e.type === "page-number")).toBe(true);
   });
+  test("a recurring mini-slug demotes to action, not page-number", () => {
+    // Classification runs first, so a left-flush all-caps watermark can reach
+    // here already typed as a mini-slug. It has to lose the heading — but a
+    // mini-slug is the type most likely to repeat honestly, so a wrong guess
+    // must cost the bold, never the words. page-number is skipped by every
+    // consumer; action still reads. #5b.
+    const els = Array.from({ length: 50 }, (_, p) =>
+      el({ id: `w${p}`, text: "CONFIDENTIAL", pageNum: p + 1, type: "mini-slug" }),
+    );
+    expect(suppressBoilerplate(els, PAGES).every((e) => e.type === "action")).toBe(true);
+  });
+  test("a mini-slug under the threshold keeps its heading", () => {
+    const els = Array.from({ length: 3 }, (_, p) =>
+      el({ id: `s${p}`, text: "LATER", pageNum: p + 1, type: "mini-slug" }),
+    );
+    expect(suppressBoilerplate(els, PAGES).every((e) => e.type === "mini-slug")).toBe(true);
+  });
+  test("a mini-slug still counts toward the recurrence pool", () => {
+    // The pool must see what it saw before classify.ts learned to mint
+    // mini-slugs, or the same watermark typed action on one page and
+    // mini-slug on the next stops reaching the threshold.
+    const els = [
+      ...Array.from({ length: 39 }, (_, p) =>
+        el({ id: `m${p}`, text: "PROPERTY OF THE STUDIO", pageNum: p + 1, type: "mini-slug" as const }),
+      ),
+      el({ id: "a1", text: "PROPERTY OF THE STUDIO", pageNum: 40 }),
+    ];
+    const out = suppressBoilerplate(els, PAGES);
+    expect(out[39].type).toBe("page-number"); // the lone action instance
+    expect(out.slice(0, 39).every((e) => e.type === "action")).toBe(true);
+  });
   test("idempotent and index-preserving", () => {
     const pages = Array.from({ length: 40 }, (_, k) => k + 1);
     const once = suppressBoilerplate(watermarked(pages), PAGES);

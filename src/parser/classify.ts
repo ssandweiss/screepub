@@ -41,8 +41,11 @@ const DIALOGUE_EXTENSIONS =
 const CHARACTER_EXTENSIONS = /(\s*\([^)]+\))+\s*$/g;
 
 // Mini-slug shape (see isMiniSlugShaped). A slugline ends bare or on a
-// colon; the last character carries most of the signal.
-const MINI_SLUG_TAIL = /[A-Z0-9:)]$/;
+// colon; the last character carries most of the signal. A closing paren is
+// NOT in the class: the only lines it would have admitted are whole
+// parentheticals, which have to be refused anyway, and no true slug in any
+// fixture ends on one.
+const MINI_SLUG_TAIL = /[A-Z0-9:]$/;
 const TRANSITION_TAIL = /\bTO:$/;
 // PRIMARY_SLUG anchors at the start, but an unpaired shooting-script number
 // pushes the opener off it ("2 EXT. WOODS - DAY 3" — the dual-margin strip
@@ -340,7 +343,8 @@ function isMiniSlugShaped(block: TextBlock): boolean {
   // every sound effect and shouted beat carried a "." or "!" and every true
   // slug ended bare or on ":" — the ambiguity the type invited ("SILENCE"
   // vs "END DREAM") does not actually occur in the corpus. Also rejects the
-  // trailing dash of a broken-off line and the "***" of a revision note.
+  // trailing dash of a broken-off line, the "***" of a revision note, and
+  // (via the missing paren) a bare "(BEAT)" with no speaker above it.
   if (!MINI_SLUG_TAIL.test(t)) return false;
 
   // Fountain's own transition rule: uppercase, ends in "TO:". The format
@@ -355,10 +359,8 @@ function isMiniSlugShaped(block: TextBlock): boolean {
   // that wider unforced shape (EST., the space forms, bare I/E). Minting one
   // here would round-trip into a scene. Tested against the line as written
   // AND with a leading shooting-script number stripped, since that number
-  // pushes the opener off the anchor. A bare parenthetical with no active
-  // character also reaches here.
-  if (PRIMARY_SLUG.test(t) || PRIMARY_SLUG.test(t.replace(LEADING_SCENE_NUMBER, ''))) return false;
-  return !PARENTHETICAL.test(t);
+  // pushes the opener off the anchor.
+  return !PRIMARY_SLUG.test(t) && !PRIMARY_SLUG.test(t.replace(LEADING_SCENE_NUMBER, ''));
 }
 
 function isActionByPattern(text: string): boolean {

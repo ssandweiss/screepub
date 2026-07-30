@@ -533,15 +533,33 @@ describe('classifyBlock', () => {
 
     // ── shape guards ──────────────────────────────────────
     test('a wrapped multi-line block is never a slug', () => {
+      // Deliberately opens on a NON-pronoun word: "THE ..." would be vetoed
+      // at priority 7 and the test would pass without the single-line guard.
       const block = makeBlock({
-        text: 'THE ROOM EMPTIES AND THE HOUSE LIGHTS COME UP SLOWLY',
+        text: 'LANTERNS SWING OVER THE COUNTER AND NOBODY SPEAKS',
         indent: 17,
         lines: [
-          { text: 'THE ROOM EMPTIES AND THE HOUSE', indent: 17, y: 100, pageNum: 1 },
-          { text: 'LIGHTS COME UP SLOWLY', indent: 17, y: 88, pageNum: 1 },
+          { text: 'LANTERNS SWING OVER THE', indent: 17, y: 100, pageNum: 1 },
+          { text: 'COUNTER AND NOBODY SPEAKS', indent: 17, y: 88, pageNum: 1 },
         ],
       });
       expect(classifyBlock(block, null).type).toBe('action');
+      // Guard against the test passing for the wrong reason: the same text on
+      // ONE line is a slug, so only the line count can be deciding it.
+      expect(slug('LANTERNS SWING OVER THE COUNTER AND NOBODY SPEAKS').type).toBe('mini-slug');
+    });
+
+    test('the action-band ceiling holds: a right-flush line is never a slug', () => {
+      // Nothing else stops this one. TRANSITION needs a trailing colon,
+      // the cue band ends at 50, and priority 7 only runs below ACTION_MAX.
+      expect(slug('SMASH TO BLACK', 60).type).toBe('action');
+      expect(slug('SMASH TO BLACK', 17).type).toBe('mini-slug');
+    });
+
+    test('a bare parenthetical with no active character is never a slug', () => {
+      // Priority 6 needs a speaker, so this falls all the way to 9.
+      expect(slug('(BEAT)').type).toBe('action');
+      expect(slug('(SILENCE)').type).toBe('action');
     });
 
     test('mixed case is never a slug', () => {
