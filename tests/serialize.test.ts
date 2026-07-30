@@ -23,24 +23,24 @@ function screenplay(elements: ScreenplayElement[]): ParsedScreenplay {
 describe('extractTitleMeta', () => {
   test('title joins readable elements before by-line, author follows it', () => {
     const meta = extractTitleMeta([
-      el({ text: 'HURRICANE', type: 'action', isTitlePage: true }),
-      el({ text: 'PARTY', type: 'action', isTitlePage: true }),
+      el({ text: 'MOONQUAKE', type: 'action', isTitlePage: true }),
+      el({ text: 'JAMBOREE', type: 'action', isTitlePage: true }),
       el({ text: 'Written by', type: 'action', isTitlePage: true }),
-      el({ text: 'Elissa Shay & Michael Stratigakis', type: 'action', isTitlePage: true }),
-      el({ text: '© 2025 Kontraband', type: 'action', isTitlePage: true, isReadable: false }),
+      el({ text: 'Fenwick Sprocket & Tallulah Quibble', type: 'action', isTitlePage: true }),
+      el({ text: '© 2025 Placeholder Pictures', type: 'action', isTitlePage: true, isReadable: false }),
       el({ text: 'INT. HOUSE - DAY', type: 'scene', pageNum: 2 }),
     ]);
-    expect(meta.title).toBe('Hurricane Party');
-    expect(meta.author).toBe('Elissa Shay & Michael Stratigakis');
+    expect(meta.title).toBe('Moonquake Jamboree');
+    expect(meta.author).toBe('Fenwick Sprocket & Tallulah Quibble');
   });
 
   test('inline by-line "written by / Name" yields author from same element', () => {
     const meta = extractTitleMeta([
-      el({ text: 'BEFORE DAWN', type: 'action', isTitlePage: true }),
-      el({ text: 'written by Dustin Little', type: 'action', isTitlePage: true }),
+      el({ text: 'ZEPPELIN PICNIC', type: 'action', isTitlePage: true }),
+      el({ text: 'written by Barnaby Fictitious', type: 'action', isTitlePage: true }),
     ]);
-    expect(meta.title).toBe('Before Dawn');
-    expect(meta.author).toBe('Dustin Little');
+    expect(meta.title).toBe('Zeppelin Picnic');
+    expect(meta.author).toBe('Barnaby Fictitious');
   });
 
   test('no title-page elements yields empty meta', () => {
@@ -51,12 +51,12 @@ describe('extractTitleMeta', () => {
 
   test('non-readable contact info is never the author', () => {
     const meta = extractTitleMeta([
-      el({ text: 'STILL LIFE', type: 'action', isTitlePage: true }),
+      el({ text: 'GARGOYLE BRUNCH', type: 'action', isTitlePage: true }),
       el({ text: 'By', type: 'action', isTitlePage: true }),
-      el({ text: 'Austin Wood', type: 'action', isTitlePage: true }),
-      el({ text: 'austin@email.com', type: 'action', isTitlePage: true, isReadable: false }),
+      el({ text: 'Imaginaria Nobody', type: 'action', isTitlePage: true }),
+      el({ text: 'imaginaria@example.com', type: 'action', isTitlePage: true, isReadable: false }),
     ]);
-    expect(meta.author).toBe('Austin Wood');
+    expect(meta.author).toBe('Imaginaria Nobody');
   });
 });
 
