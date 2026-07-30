@@ -32,29 +32,27 @@ public enum UpdateInstaller {
     /// Requirement for Screepub.app: Developer ID chain, our team, our
     /// bundle identifier. field...6.2.6 is the Developer ID intermediate CA;
     /// field...6.1.13 is a Developer ID Application leaf.
-    public static func appRequirement(bundleID: String = bundleID, teamID: String = teamID) -> String {
+    public static let appRequirement: String =
         "anchor apple generic and identifier \"\(bundleID)\""
             + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
             + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
             + " and certificate leaf[subject.OU] = \"\(teamID)\""
-    }
 
     /// Requirement for the DMG container: same chain and team. A codesigned
     /// DMG's identifier is its filename stem, not a bundle id, so the
     /// identifier is deliberately not pinned here.
-    public static func dmgRequirement(teamID: String = teamID) -> String {
+    public static let dmgRequirement: String =
         "anchor apple generic"
             + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
             + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
             + " and certificate leaf[subject.OU] = \"\(teamID)\""
-    }
 
     // MARK: - Verification
 
     /// `codesign --verify` the target against a designated requirement.
     /// Throws with codesign's own words when the target fails.
     public static func verify(_ target: URL, requirement: String) throws {
-        let out = try runTool("/usr/bin/codesign", [
+        let out = try runToolData("/usr/bin/codesign", [
             "--verify", "--deep", "--strict",
             "--test-requirement", "=\(requirement)",
             target.path,
@@ -119,14 +117,14 @@ public enum UpdateInstaller {
             throw UpdateInstallError.notInstallable("\(parent.path) is not writable")
         }
 
-        try verify(dmg, requirement: dmgRequirement())
+        try verify(dmg, requirement: dmgRequirement)
 
         let mountPoint = try mount(dmg)
         defer { unmount(mountPoint) }
         guard let newApp = appInside(mountPoint) else {
             throw UpdateInstallError.appMissingInDMG
         }
-        try verify(newApp, requirement: appRequirement())
+        try verify(newApp, requirement: appRequirement)
 
         let staged = parent.appendingPathComponent(".\(destination.lastPathComponent).staged")
         try? FileManager.default.removeItem(at: staged)
@@ -138,14 +136,14 @@ public enum UpdateInstaller {
         stripQuarantine(staged)
         // The copy that will actually run is the one that must pass.
         do {
-            try verify(staged, requirement: appRequirement())
+            try verify(staged, requirement: appRequirement)
         } catch {
             try? FileManager.default.removeItem(at: staged)
             throw error
         }
 
         try commit(staged: staged, into: destination)
-        try verify(destination, requirement: appRequirement())
+        try verify(destination, requirement: appRequirement)
     }
 
     /// Park the old bundle, rename the staged one into place. On failure the
@@ -211,7 +209,7 @@ public enum UpdateInstaller {
     }
 
     static func unmount(_ mountPoint: URL) {
-        _ = try? runTool("/usr/bin/hdiutil", ["detach", mountPoint.path, "-force"])
+        _ = try? runToolData("/usr/bin/hdiutil", ["detach", mountPoint.path, "-force"])
     }
 
     static func appInside(_ mountPoint: URL) -> URL? {
@@ -224,7 +222,7 @@ public enum UpdateInstaller {
     /// quarantine flag would only invite Gatekeeper to translocate what we
     /// just proved is ours.
     private static func stripQuarantine(_ url: URL) {
-        _ = try? runTool("/usr/bin/xattr", ["-dr", "com.apple.quarantine", url.path])
+        _ = try? runToolData("/usr/bin/xattr", ["-dr", "com.apple.quarantine", url.path])
     }
 
     /// Task-level delegate that forwards download progress. The async
@@ -233,11 +231,21 @@ public enum UpdateInstaller {
         private let callback: @Sendable (Double) -> Void
         init(_ callback: @escaping @Sendable (Double) -> Void) { self.callback = callback }
 
+        /// Chunks arrive thousands of times per DMG; the callback hops to
+        /// the main actor, so forward only whole-percent steps. Delegate
+        /// callbacks are serialized on the session's queue, so the stored
+        /// percent needs no lock.
+        private var lastPercent = -1
+
         func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                         didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
                         totalBytesExpectedToWrite: Int64) {
             guard totalBytesExpectedToWrite > 0 else { return }
-            callback(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
+            let fraction = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
+            let percent = Int(fraction * 100)
+            guard percent != lastPercent else { return }
+            lastPercent = percent
+            callback(fraction)
         }
 
         func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
@@ -245,11 +253,6 @@ public enum UpdateInstaller {
     }
 
     // MARK: - Process plumbing
-
-    private static func runTool(_ path: String, _ args: [String]) throws -> (status: Int32, stdout: String, stderr: String) {
-        let out = try runToolData(path, args)
-        return (out.status, String(data: out.stdout, encoding: .utf8) ?? "", out.stderr)
-    }
 
     private static func runToolData(_ path: String, _ args: [String]) throws -> (status: Int32, stdout: Data, stderr: String) {
         let p = Process()

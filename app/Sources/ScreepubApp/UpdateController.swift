@@ -30,6 +30,24 @@ final class UpdateController: ObservableObject {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unbundled"
     }
 
+    /// The install promise, stated identically wherever consent is asked —
+    /// it's security-relevant copy, so it must not drift between surfaces.
+    static let installConsentText = "Downloads the disk image from GitHub, verifies its Apple signature against this project's Developer ID, then swaps this copy and relaunches. Nothing installs if verification fails."
+
+    /// Menu-path check: user-initiated, so it skips the opt-in and the
+    /// throttle — but it still lands in `available` and stamps the clock,
+    /// so the silent launch check doesn't immediately repeat the work.
+    func checkNow() async -> Result<AvailableUpdate?, Error> {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "updateLastChecked")
+        do {
+            let update = try await UpdateCheck.latest(currentVersion: Self.currentVersion)
+            available = update
+            return .success(update)
+        } catch {
+            return .failure(error)
+        }
+    }
+
     /// Launch-time check, gated twice: the opt-in, then the daily throttle.
     /// Failures are silent; a background courtesy must never nag.
     func checkIfDue() async {
@@ -50,14 +68,9 @@ final class UpdateController: ObservableObject {
         let destination = Bundle.main.bundleURL
         do {
             phase = .downloading(nil)
+            // The delegate already thins chunks to whole-percent steps.
             let dmg = try await UpdateInstaller.downloadDMG(from: update.downloadURL) { [weak self] fraction in
-                Task { @MainActor in
-                    guard let self else { return }
-                    // Repaint on whole-percent steps, not every chunk.
-                    if case .downloading(let shown?) = self.phase,
-                       abs(fraction - shown) < 0.01, fraction < 1 { return }
-                    self.phase = .downloading(fraction)
-                }
+                Task { @MainActor in self?.phase = .downloading(fraction) }
             }
             defer { try? FileManager.default.removeItem(at: dmg) }
 

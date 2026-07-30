@@ -21,6 +21,9 @@ import Foundation
 /// installs it into the user's Calibre itself — that's `installPlugin()`,
 /// the one step an app can take off the user's plate. Everything runs
 /// locally; nothing in this chain touches the network.
+/// A tool exited non-zero; `detail` is the tail of its stderr.
+public struct ToolRunError: Error, Sendable { public let detail: String }
+
 public enum KFXToolchain {
 
     // MARK: - Component discovery
@@ -49,11 +52,14 @@ public enum KFXToolchain {
         existing("/Applications/Kindle Previewer 3.app")
     }
 
-    nonisolated public static func calibreCustomizeURL() -> URL? {
+    /// One scanner for every Calibre CLI tool. The install locations are a
+    /// single list here so `status().calibre` and EbookConvert's discovery
+    /// can never disagree about whether Calibre exists.
+    nonisolated public static func calibreTool(_ name: String) -> URL? {
         let candidates = [
-            "/Applications/calibre.app/Contents/MacOS/calibre-customize",
-            "/opt/homebrew/bin/calibre-customize",
-            "/usr/local/bin/calibre-customize",
+            "/Applications/calibre.app/Contents/MacOS/\(name)",
+            "/opt/homebrew/bin/\(name)",
+            "/usr/local/bin/\(name)",
         ]
         for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
             return URL(fileURLWithPath: path)
@@ -61,12 +67,12 @@ public enum KFXToolchain {
         return nil
     }
 
+    nonisolated public static func calibreCustomizeURL() -> URL? {
+        calibreTool("calibre-customize")
+    }
+
     nonisolated public static func ebookConvertURL() -> URL? {
-        guard let customize = calibreCustomizeURL() else { return nil }
-        let sibling = customize.deletingLastPathComponent()
-            .appendingPathComponent("ebook-convert")
-        if FileManager.default.isExecutableFile(atPath: sibling.path) { return sibling }
-        return nil
+        calibreTool("ebook-convert")
     }
 
     /// Where to send the user for the two pieces they install themselves.
@@ -82,7 +88,7 @@ public enum KFXToolchain {
     /// Blocking — see `status()`.
     nonisolated public static func pluginInstalled() -> Bool {
         guard let customize = calibreCustomizeURL(),
-              let output = try? run(customize, ["--list-plugins"]) else { return false }
+              let output = try? run(tool: customize, arguments: ["--list-plugins"]) else { return false }
         return output.contains(pluginMarker)
     }
 
@@ -114,8 +120,8 @@ public enum KFXToolchain {
         guard let customize = calibreCustomizeURL() else { throw SetupError.calibreMissing }
         guard let zip = bundledPluginURL() else { throw SetupError.pluginResourceMissing }
         do {
-            _ = try run(customize, ["-a", zip.path])
-        } catch let error as RunError {
+            _ = try run(tool: customize, arguments: ["-a", zip.path])
+        } catch let error as ToolRunError {
             throw SetupError.installFailed(error.detail)
         }
         guard pluginInstalled() else {
@@ -159,11 +165,17 @@ public enum KFXToolchain {
     @discardableResult
     nonisolated public static func convert(
         _ epub: URL,
+        precheckedReady: Bool = false,
         onStage: (@Sendable (String) -> Void)? = nil
     ) throws -> URL {
-        let current = status()
-        guard current.ready, let tool = ebookConvertURL() else {
-            throw ConvertError.toolchainNotReady(current)
+        // status() spawns calibre-customize (~1s); a caller that just
+        // probed can vouch instead of paying for the same fact twice.
+        if !precheckedReady {
+            let current = status()
+            guard current.ready else { throw ConvertError.toolchainNotReady(current) }
+        }
+        guard let tool = ebookConvertURL() else {
+            throw ConvertError.toolchainNotReady(status())
         }
         let kfx = epub.deletingPathExtension().appendingPathExtension("kfx")
         var lineHandler: (@Sendable (String) -> Void)? = nil
@@ -173,13 +185,13 @@ public enum KFXToolchain {
             }
         }
         do {
-            _ = try run(tool, [
+            _ = try run(tool: tool, arguments: [
                 epub.path, kfx.path,
                 "--page-breaks-before=/",
                 "--chapter-mark=none",
                 "--disable-remove-fake-margins",
             ], onLine: lineHandler)
-        } catch let error as RunError {
+        } catch let error as ToolRunError {
             throw ConvertError.failed(error.detail)
         }
         guard FileManager.default.fileExists(atPath: kfx.path) else {
@@ -209,15 +221,13 @@ public enum KFXToolchain {
 
     // MARK: - Process plumbing
 
-    private struct RunError: Error { let detail: String }
-
     /// Line-buffers a pipe as data arrives, instead of after exit — the
     /// difference between progress and a post-mortem.
     private final class LineStream: @unchecked Sendable {
         private let lock = NSLock()
         private var buffer = Data()
         private(set) var all = Data()
-        private let onLine: (String) -> Void
+        private let onLine: @Sendable (String) -> Void
 
         init(onLine: @escaping @Sendable (String) -> Void) {
             self.onLine = onLine
@@ -239,10 +249,15 @@ public enum KFXToolchain {
         }
     }
 
+    /// Run a tool to completion, streaming stdout line-by-line as it
+    /// arrives. Public because this is the package's one subprocess
+    /// runner: it drains both pipes concurrently (a chatty child fills a
+    /// 64KB pipe buffer and deadlocks against waitUntilExit otherwise),
+    /// and callers should inherit that guard rather than re-derive it.
     @discardableResult
-    private nonisolated static func run(
-        _ tool: URL,
-        _ arguments: [String],
+    public nonisolated static func run(
+        tool: URL,
+        arguments: [String],
         onLine: (@Sendable (String) -> Void)? = nil
     ) throws -> String {
         let process = Process()
@@ -251,51 +266,23 @@ public enum KFXToolchain {
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
-
-        if let onLine {
-            let stream = LineStream(onLine: onLine)
-            out.fileHandleForReading.readabilityHandler = { handle in
-                stream.consume(handle.availableData)
-            }
-            let errData = ErrBox()
-            err.fileHandleForReading.readabilityHandler = { handle in
-                errData.append(handle.availableData)
-            }
-            try process.run()
-            process.waitUntilExit()
-            out.fileHandleForReading.readabilityHandler = nil
-            err.fileHandleForReading.readabilityHandler = nil
-            // Handlers can lag exit; scoop whatever's left in the pipes.
-            stream.consume(out.fileHandleForReading.readDataToEndOfFile())
-            errData.append(err.fileHandleForReading.readDataToEndOfFile())
-            guard process.terminationStatus == 0 else {
-                let detail = String(data: errData.data, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? "no error output"
-                throw RunError(detail: String(detail.suffix(300)))
-            }
-            return String(data: stream.all, encoding: .utf8) ?? ""
-        }
+        let stdout = LineStream(onLine: onLine ?? { _ in })
+        let stderr = LineStream(onLine: { _ in })
+        out.fileHandleForReading.readabilityHandler = { stdout.consume($0.availableData) }
+        err.fileHandleForReading.readabilityHandler = { stderr.consume($0.availableData) }
         try process.run()
-        // Drain before waiting: a chatty child (ebook-convert logs every
-        // stage) fills a 64KB pipe buffer and deadlocks against waitUntilExit.
-        let outData = out.fileHandleForReading.readDataToEndOfFile()
-        let errData = err.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        out.fileHandleForReading.readabilityHandler = nil
+        err.fileHandleForReading.readabilityHandler = nil
+        // Handlers can lag exit; scoop whatever's left in the pipes.
+        stdout.consume(out.fileHandleForReading.readDataToEndOfFile())
+        stderr.consume(err.fileHandleForReading.readDataToEndOfFile())
         guard process.terminationStatus == 0 else {
-            let detail = String(data: errData, encoding: .utf8)?
+            let detail = String(data: stderr.all, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? "no error output"
-            throw RunError(detail: String(detail.suffix(300)))
+            throw ToolRunError(detail: String(detail.suffix(300)))
         }
-        return String(data: outData, encoding: .utf8) ?? ""
-    }
-
-    private final class ErrBox: @unchecked Sendable {
-        private let lock = NSLock()
-        private(set) var data = Data()
-        func append(_ chunk: Data) {
-            guard !chunk.isEmpty else { return }
-            lock.lock(); data.append(chunk); lock.unlock()
-        }
+        return String(data: stdout.all, encoding: .utf8) ?? ""
     }
 
     private nonisolated static func existing(_ path: String) -> URL? {

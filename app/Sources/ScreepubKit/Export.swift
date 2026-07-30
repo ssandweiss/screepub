@@ -118,14 +118,24 @@ public enum Export {
         onStage: (@Sendable (String) -> Void)? = nil
     ) throws -> URL {
         if kfxReady {
-            return try KFXToolchain.convert(epub, onStage: onStage)
+            // Same staleness rule as the MOBI branch below: the EPUB is the
+            // sole input and the flags are constant, so a sibling .kfx no
+            // older than its EPUB is the previous run's answer — reusing it
+            // turns a ~20s Kindle Previewer cold start into a file stat.
+            let kfx = epub.deletingPathExtension().appendingPathExtension("kfx")
+            guard needsRegeneration(kfx, freshRelativeTo: epub) else { return kfx }
+            // The caller's kfxReady came from a live status() probe;
+            // convert doesn't need to spawn calibre-customize again.
+            return try KFXToolchain.convert(epub, precheckedReady: true, onStage: onStage)
         }
         if calibreAvailable {
+            onStage?("converting to AZW3 for Kindle…")
             return try EbookConvert.toAzw3(epub)
         }
         let mobi = mobiSibling(for: epub)
         guard needsRegeneration(mobi, freshRelativeTo: epub) else { return mobi }
         guard let fountainPath else { throw ExportError.cannotRegenerate }
+        onStage?("rebuilding the Kindle file…")
         let result = try Engine.convert(
             input: URL(fileURLWithPath: fountainPath),
             force: false,

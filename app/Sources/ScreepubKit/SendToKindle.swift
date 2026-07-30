@@ -8,10 +8,8 @@ public enum SendToKindle {
 
     public static var appURL: URL? {
         NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.amazon.sendtokindle")
-            ?? existing("/Applications/Send to Kindle.app")
+            ?? existingApp(atPath: "/Applications/Send to Kindle.app")
     }
-
-    public static var appIsInstalled: Bool { appURL != nil }
 
     /// Open a Mail compose with the EPUB attached, ready to be addressed to
     /// the user's @kindle.com address. The app doesn't store that address —
@@ -45,10 +43,6 @@ public enum SendToKindle {
             NSWorkspace.shared.activateFileViewerSelecting([epub])
             NSWorkspace.shared.open(webUploader)
         }
-    }
-
-    private static func existing(_ path: String) -> URL? {
-        FileManager.default.fileExists(atPath: path) ? URL(fileURLWithPath: path) : nil
     }
 
     /// True when Apple Mail handles `mailto:`. The compose handoff attaches

@@ -363,17 +363,17 @@ check((try? String(contentsOf: copyDest, encoding: .utf8)) == "v2", "Export.copy
 let kindleDev = ConnectedDevice(kind: .kindle, name: "Kindle", volume: URL(fileURLWithPath: "/Volumes/Kindle"))
 let rmDev = ConnectedDevice(kind: .remarkable, name: "reMarkable", volume: nil)
 
-check(ResultActions.primary(devices: [kindleDev]).destination == .device(kindleDev),
+check(ResultActions.routes(devices: [kindleDev])[0].destination == .device(kindleDev),
       "a plugged-in Kindle is the default route")
-check(ResultActions.primary(devices: [], booksAvailable: true).destination == .appleBooks,
+check(ResultActions.routes(devices: [], booksAvailable: true)[0].destination == .appleBooks,
       "no device -> Apple Books leads, being local and instant")
-check(ResultActions.primary(devices: [], booksAvailable: false).destination == .sendToKindle,
+check(ResultActions.routes(devices: [], booksAvailable: false)[0].destination == .sendToKindle,
       "no device and no Books -> Send to Kindle leads")
-check(ResultActions.primary(devices: [rmDev]).destination != .device(rmDev),
+check(ResultActions.routes(devices: [rmDev])[0].destination != .device(rmDev),
       "reMarkable never arrives as a volume device")
-check(ResultActions.primary(devices: [], remarkableDocked: true).destination == .remarkable,
+check(ResultActions.routes(devices: [], remarkableDocked: true)[0].destination == .remarkable,
       "a docked reMarkable outranks Books")
-check(ResultActions.primary(devices: [kindleDev], remarkableDocked: true).destination == .device(kindleDev),
+check(ResultActions.routes(devices: [kindleDev], remarkableDocked: true)[0].destination == .device(kindleDev),
       "a plugged-in volume still wins over a docked reMarkable")
 
 // Save is the floor: some route is always offered, whatever is connected.
@@ -499,13 +499,13 @@ check(!UpdateCheck.shouldCheck(optedIn: true, lastChecked: checkNow.addingTimeIn
       "a clock set backwards does not trigger a check storm")
 
 // — self-update installer: requirement pinning and swap mechanics —
-check(UpdateInstaller.appRequirement()
+check(UpdateInstaller.appRequirement
         == "anchor apple generic and identifier \"com.darkwell.screepub\""
          + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
          + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
          + " and certificate leaf[subject.OU] = \"XSRB3D643J\"",
       "app requirement pins anchor, Developer ID chain, bundle id, and team")
-check(UpdateInstaller.dmgRequirement()
+check(UpdateInstaller.dmgRequirement
         == "anchor apple generic"
          + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
          + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
@@ -515,11 +515,11 @@ check(UpdateInstaller.dmgRequirement()
 // Verification must REJECT everything that isn't ours. /bin/ls is Apple-
 // signed with the wrong everything; a text file has no signature at all.
 check((try? UpdateInstaller.verify(URL(fileURLWithPath: "/bin/ls"),
-                                   requirement: UpdateInstaller.appRequirement())) == nil,
+                                   requirement: UpdateInstaller.appRequirement)) == nil,
       "an Apple-signed binary that isn't ours fails verification")
 let unsigned = tempDir("unsigned").appendingPathComponent("not-an-app.txt")
 try! Data("hello".utf8).write(to: unsigned)
-check((try? UpdateInstaller.verify(unsigned, requirement: UpdateInstaller.dmgRequirement())) == nil,
+check((try? UpdateInstaller.verify(unsigned, requirement: UpdateInstaller.dmgRequirement)) == nil,
       "an unsigned file fails verification")
 
 // Positive verification needs a real Developer ID build. The installed
@@ -537,7 +537,7 @@ if FileManager.default.fileExists(atPath: installedApp.path) {
     info.waitUntilExit()
     let signInfo = String(data: infoErr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     if signInfo.contains("TeamIdentifier=\(UpdateInstaller.teamID)") {
-        check((try? UpdateInstaller.verify(installedApp, requirement: UpdateInstaller.appRequirement())) != nil,
+        check((try? UpdateInstaller.verify(installedApp, requirement: UpdateInstaller.appRequirement)) != nil,
               "the installed Developer ID Screepub passes the pinned requirement")
     } else {
         print("  --  /Applications/Screepub.app is not a Developer ID build; positive verify untested here")
@@ -596,7 +596,7 @@ if let dmgPath = ProcessInfo.processInfo.environment["SCREEPUB_UPDATE_DMG"] {
         try UpdateInstaller.install(dmg: dmg, over: e2eDest)
         check(FileManager.default.fileExists(atPath: e2eDest.appendingPathComponent("Contents/MacOS/Screepub").path),
               "install(dmg:over:) lands a complete app bundle")
-        check((try? UpdateInstaller.verify(e2eDest, requirement: UpdateInstaller.appRequirement())) != nil,
+        check((try? UpdateInstaller.verify(e2eDest, requirement: UpdateInstaller.appRequirement)) != nil,
               "the installed bundle still passes the pinned requirement")
     } catch {
         check(false, "install(dmg:over:) succeeds on the release DMG (got: \(error))")

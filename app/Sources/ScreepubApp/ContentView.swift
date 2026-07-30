@@ -31,10 +31,6 @@ struct ContentView: View {
     /// Last destination the user actually sent to. Empty on first run, when
     /// the ordering in ResultActions.routes supplies the opening guess.
     @AppStorage("lastDestination") private var lastDestination = ""
-    /// Probed once at launch, off-main (status() spawns calibre-customize).
-    /// The save panel needs it synchronously for its filename extension;
-    /// the USB path re-probes live inside its own background task.
-    @State private var kfxReady = false
     @Environment(\.openWindow) private var openWindow
 
     private let volumeEvents = NSWorkspace.shared.notificationCenter
@@ -69,7 +65,6 @@ struct ContentView: View {
             devices = DeviceDetect.mounted()
         }
         .task {
-            kfxReady = await Task.detached { KFXToolchain.status().ready }.value
             // reMarkable never mounts — poll its USB web interface instead.
             while !Task.isCancelled {
                 remarkableUp = await RemarkableDevice.probe()
@@ -350,9 +345,7 @@ struct ContentView: View {
         return "downloading rev. \(version)…"
     }
 
-    private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unbundled"
-    }
+    private var appVersion: String { UpdateController.currentVersion }
 
     private var stampLabels: [String] {
         var labels = devices.map { "\($0.name.uppercased()) CONNECTED" }
@@ -476,11 +469,7 @@ struct ContentView: View {
     @ViewBuilder
     private func transferButtons(result: EngineResult, epub: URL, title: String?) -> some View {
         VStack(spacing: 9) {
-            // result.fountainPath (--json's fountainPath) is only set for PDF
-            // input — the engine doesn't re-emit a .fountain for .fountain
-            // input, so fall back to the input file itself in that case.
-            if let fountainPath = result.fountainPath
-                ?? (lastInput?.pathExtension.lowercased() == "fountain" ? lastInput?.path : nil) {
+            if let fountainPath = fountainPath(for: result) {
                 // Outlined, not brass: SEND is the page's one primary action,
                 // and preview shouldn't compete with it.
                 Button("PREVIEW SCRIPT") {
@@ -705,20 +694,29 @@ struct ContentView: View {
         }
     }
 
+    /// result.fountainPath (--json's fountainPath) is only set for PDF
+    /// input — the engine doesn't re-emit a .fountain for .fountain input,
+    /// so fall back to the input file itself in that case.
+    private func fountainPath(for result: EngineResult) -> String? {
+        result.fountainPath
+            ?? (lastInput?.pathExtension.lowercased() == "fountain" ? lastInput?.path : nil)
+    }
+
     private func copyToDevice(result: EngineResult, epub: URL, device: ConnectedDevice) {
-        let mobiPath = result.mobiPath
         let wantKepub = koboKepub
+        // The MOBI rung can re-run the engine, which rebuilds the library
+        // EPUB — it must use this script's own sidecar settings, exactly
+        // as saveACopy does.
+        let fountainPath = fountainPath(for: result)
+        let settings = fountainPath.map {
+            ScriptSettings.load(forFountain: URL(fileURLWithPath: $0),
+                                fallback: AppSettings.formatSettings())
+        } ?? AppSettings.formatSettings()
+        let note: @Sendable (String) -> Void = { s in Task { @MainActor in transferNote = s } }
 
         switch device.kind {
-        case .kindle where EbookConvert.isAvailable:
-            // KFX vs AZW3 is decided in the background task — the check
-            // spawns calibre-customize, too slow for this thread.
-            transferNote = "converting for Kindle…"
-        case .kindle where mobiPath == nil:
-            transferNote = "no Kindle-native file available. Use Send to Kindle email instead"
-            return
         case .kindle:
-            transferNote = "copying MOBI to \(device.name)…"
+            transferNote = "preparing for \(device.name)…"
         case .kobo where wantKepub && EbookConvert.isAvailable:
             transferNote = "converting to KEPUB for Kobo…"
         default:
@@ -730,24 +728,20 @@ struct ContentView: View {
                 Result {
                     switch device.kind {
                     case .kindle:
-                        // Ladder, best rung first — registry §8b for why
-                        // KFX outranks AZW3 (Enhanced Typesetting; keeps
-                        // hold on device; AZW3's renderer strands cues).
-                        if KFXToolchain.status().ready {
-                            let kfx = try KFXToolchain.convert(epub) { stage in
-                                Task { @MainActor in transferNote = "Kindle: \(stage)" }
-                            }
-                            Task { @MainActor in transferNote = "copying to \(device.name)…" }
-                            try DeviceTransfer.copy(kfx, to: device)
-                            return "KFX"
-                        }
-                        if EbookConvert.isAvailable {
-                            let azw3 = try EbookConvert.toAzw3(epub)
-                            try DeviceTransfer.copy(azw3, to: device)
-                            return "AZW3"
-                        }
-                        try DeviceTransfer.copy(URL(fileURLWithPath: mobiPath!), to: device)
-                        return "MOBI"
+                        // ONE ladder for every Kindle path — Export owns
+                        // KFX → AZW3 → MOBI, the staleness reuse, and the
+                        // stage narration. Re-deriving it here is exactly
+                        // how the reader window fell a rung behind.
+                        let artifact = try Export.freshKindleArtifact(
+                            for: epub,
+                            fountainPath: fountainPath,
+                            format: settings,
+                            calibreAvailable: EbookConvert.isAvailable,
+                            kfxReady: KFXToolchain.status().ready,
+                            onStage: { note("Kindle: \($0)") })
+                        note("copying to \(device.name)…")
+                        try DeviceTransfer.copy(artifact, to: device)
+                        return artifact.pathExtension.uppercased()
                     case .kobo where wantKepub && EbookConvert.isAvailable:
                         let kepub = try EbookConvert.toKepub(epub)
                         try DeviceTransfer.copy(kepub, to: device)
@@ -787,55 +781,24 @@ struct ContentView: View {
     /// pick — the route that works regardless of mail client, device, or
     /// Amazon account state.
     private func saveACopy(result: EngineResult, epub: URL) {
-        let stem = epub.deletingPathExtension().lastPathComponent
         // Everything the save depends on is captured HERE, not inside the
         // completion: `panel.begin` is modeless, so CONVERT ANOTHER can move
         // `lastInput` to a different script while the sheet is still open.
-        let fountainPath = result.fountainPath
-            ?? (lastInput?.pathExtension.lowercased() == "fountain" ? lastInput?.path : nil)
-        // The export must reproduce the settings the library EPUB was built
-        // from — the same per-script sidecar, globals only as fallback, that
-        // convert() resolves. It isn't just the exported file at stake: the
-        // Kindle branch can re-run the engine, which rewrites <stem>.epub in
-        // place, so exporting under any other settings would silently desync
-        // the library EPUB from its own <Stem>.screepub.json.
+        // Settings come from the script's own sidecar — the Kindle branch
+        // can re-run the engine, which rewrites <stem>.epub in place, so any
+        // other settings would silently desync the library EPUB from its
+        // own <Stem>.screepub.json.
+        let fountainPath = fountainPath(for: result)
         let settings = fountainPath.map {
             ScriptSettings.load(forFountain: URL(fileURLWithPath: $0),
                                 fallback: AppSettings.formatSettings())
         } ?? AppSettings.formatSettings()
-        let calibre = EbookConvert.isAvailable
-        let kfx = kfxReady
-        ExportPanel.present(epub: epub, stem: stem, kfxReady: kfx) { destination, format in
-            transferNote = "saving…"
-            // freshKindleArtifact spawns Calibre or the engine — keep it off
-            // the main actor or the whole UI stalls behind it.
-            Task.detached {
-                do {
-                    let source: URL
-                    switch format {
-                    case .epub:
-                        source = epub
-                    case .kindle:
-                        source = try Export.freshKindleArtifact(
-                            for: epub,
-                            fountainPath: fountainPath,
-                            format: settings,
-                            calibreAvailable: calibre,
-                            kfxReady: kfx) { stage in
-                                Task { @MainActor in transferNote = "Kindle: \(stage)" }
-                            }
-                    }
-                    try Export.copy(source, to: destination)
-                    await MainActor.run {
-                        transferNote = "saved to \(destination.deletingLastPathComponent().lastPathComponent)"
-                    }
-                } catch {
-                    await MainActor.run {
-                        transferNote = "save failed: \(error.localizedDescription)"
-                    }
-                }
-            }
-        }
+        SaveFlow.present(
+            epub: epub,
+            fountainPath: fountainPath,
+            settings: settings,
+            status: { transferNote = $0 },
+            failure: { transferNote = $0 })
     }
 
     private func emailToKindle(_ epub: URL, title: String?) {
@@ -877,7 +840,7 @@ private struct UpdatePopover: View {
                 .font(Theme.courier(12, .bold))
                 .kerning(0.8)
                 .foregroundStyle(Theme.ink)
-            Text("Downloads the disk image from GitHub, verifies its Apple signature against this project's Developer ID, then swaps this copy and relaunches. Nothing installs if verification fails.")
+            Text(UpdateController.installConsentText)
                 .font(Theme.courier(10))
                 .foregroundStyle(Theme.inkFaint)
                 .lineSpacing(2)

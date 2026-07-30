@@ -49,7 +49,11 @@ public struct RouteOption: Equatable, Sendable, Identifiable {
     /// carries the plug-it-in instruction while it does.
     public let available: Bool
 
-    public var id: String { title + detail }
+    /// One identity, the same one the picker keys rows and remembered
+    /// choices by. Unique in any list `routes()` builds: placeholders
+    /// exclude connected kinds, and the remarkable/email rows are
+    /// available-XOR-placeholder.
+    public var id: String { destination.storageKey }
 
     public init(destination: Destination, title: String, detail: String, button: String,
                 available: Bool = true) {
@@ -136,7 +140,9 @@ public enum ResultActions {
         // and become the real row (same storage key) the moment the state
         // changes. Only truly structural absence — no Books.app — is hidden.
         let connectedKinds = Set(devices.map(\.kind))
-        for kind in [DeviceKind.kindle, .kobo, .tolino] where !connectedKinds.contains(kind) {
+        // Every volume-mounted kind, so a future DeviceKind case gets its
+        // placeholder without anyone remembering this list exists.
+        for kind in DeviceKind.allCases where kind != .remarkable && !connectedKinds.contains(kind) {
             routes.append(RouteOption(
                 destination: .device(ConnectedDevice(kind: kind, name: kind.displayName, volume: nil)),
                 title: kind.displayName,
@@ -188,15 +194,4 @@ public enum ResultActions {
         return routes.first(where: \.available) ?? routes[0]
     }
 
-    public static func primary(
-        devices: [ConnectedDevice],
-        remarkableDocked: Bool = false,
-        booksAvailable: Bool = true,
-        canEmailToKindle: Bool = false
-    ) -> RouteOption {
-        routes(devices: devices,
-               remarkableDocked: remarkableDocked,
-               booksAvailable: booksAvailable,
-               canEmailToKindle: canEmailToKindle)[0]
-    }
 }

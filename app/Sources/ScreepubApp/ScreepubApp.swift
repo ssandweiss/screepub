@@ -6,7 +6,7 @@ import KFXKit
 /// the app and OS versions. `context` seeds the "what happened" block
 /// (e.g. a conversion error) when reporting from a failure.
 @MainActor func openFeedback(context: String? = nil) {
-    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+    let appVersion = UpdateController.currentVersion
     let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
     NSWorkspace.shared.open(
         Feedback.newIssueURL(appVersion: appVersion, osVersion: osVersion, context: context))
@@ -18,30 +18,29 @@ import KFXKit
 @MainActor func manualUpdateCheck() async {
     let current = UpdateController.currentVersion
     let alert = NSAlert()
-    do {
-        if let update = try await UpdateCheck.latest(currentVersion: current) {
-            UpdateController.shared.available = update
-            alert.messageText = "Screepub \(update.version) is available"
-            alert.informativeText = "You're running \(current). Install downloads the disk image, verifies its Apple signature against this project's Developer ID, and relaunches. Nothing installs if verification fails."
-            alert.addButton(withTitle: "Install and Relaunch")
-            alert.addButton(withTitle: "View Release")
-            alert.addButton(withTitle: "Later")
-            switch alert.runModal() {
-            case .alertFirstButtonReturn:
-                await UpdateController.shared.install()
-            case .alertSecondButtonReturn:
-                NSWorkspace.shared.open(update.releaseNotesURL)
-            default:
-                break
-            }
-            return
+    switch await UpdateController.shared.checkNow() {
+    case .success(let update?):
+        alert.messageText = "Screepub \(update.version) is available"
+        alert.informativeText = "You're running \(current). " + UpdateController.installConsentText
+        alert.addButton(withTitle: "Install and Relaunch")
+        alert.addButton(withTitle: "View Release")
+        alert.addButton(withTitle: "Later")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            await UpdateController.shared.install()
+        case .alertSecondButtonReturn:
+            NSWorkspace.shared.open(update.releaseNotesURL)
+        default:
+            break
         }
+        return
+    case .success(nil):
         alert.messageText = "You're up to date"
         alert.informativeText = "Screepub \(current) is the newest release."
-    } catch UpdateCheckError.rateLimited {
+    case .failure(UpdateCheckError.rateLimited):
         alert.messageText = "GitHub declined the request"
         alert.informativeText = "Unauthenticated checks are limited to 60 an hour per network. Try again in a little while."
-    } catch {
+    case .failure(let error):
         alert.messageText = "Couldn't check for updates"
         alert.informativeText = "The request didn't go through. Check your connection and try again. (\(error.localizedDescription))"
     }
@@ -52,8 +51,13 @@ import KFXKit
 struct ScreepubApp: App {
     init() {
         // A previous self-update may have parked the old bundle beside this
-        // one; the running binary kept it alive until now.
-        UpdateInstaller.cleanupLeftovers(near: Bundle.main.bundleURL)
+        // one; the running binary kept it alive until now. Deleting a full
+        // parked bundle (~100MB, thousands of files) is not first-frame
+        // work, and nothing downstream reads the result.
+        let bundleURL = Bundle.main.bundleURL
+        Task.detached(priority: .utility) {
+            UpdateInstaller.cleanupLeftovers(near: bundleURL)
+        }
     }
 
     var body: some Scene {

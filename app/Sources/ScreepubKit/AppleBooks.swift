@@ -19,8 +19,8 @@ public enum AppleBooks {
     /// it may be absent — so this is an Optional rather than an assumption.
     public static var appURL: URL? {
         NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iBooksX")
-            ?? existing("/System/Applications/Books.app")
-            ?? existing("/Applications/Books.app")
+            ?? existingApp(atPath: "/System/Applications/Books.app")
+            ?? existingApp(atPath: "/Applications/Books.app")
     }
 
     public static var isAvailable: Bool { appURL != nil }
@@ -37,7 +37,4 @@ public enum AppleBooks {
         return true
     }
 
-    private static func existing(_ path: String) -> URL? {
-        FileManager.default.fileExists(atPath: path) ? URL(fileURLWithPath: path) : nil
-    }
 }
