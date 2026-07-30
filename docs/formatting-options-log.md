@@ -82,26 +82,37 @@ future work; everything else is live.
   slugline never strands alone at a page bottom with its scene overleaf
   (user-requested 2026-07-22). Gated by `keepSceneHeadingWithScene`; with
   the option off the heading carries no avoid link at all.
-- **Rewritten 2026-07-30 — wrapper → chain:** v1 put the heading and the
-  scene's FIRST BLOCK inside a `<div class="keep-together">` with
-  `page-break-inside: avoid`. That made the heading plus an entire block —
-  a whole action paragraph, or a whole speech — one unbreakable chunk, and
-  a renderer that honors keeps pushes a chunk that does not fit *whole*.
-  On KFX (sideloaded and Send-to-Kindle server conversions alike, see #8b)
-  and in Apple Books, that is exactly what happened: pages ended half
-  empty (the observed bug). The chain makes the same promise with a chunk
-  no larger than the heading plus the line under it, so the rest of the
-  page fills.
-- **The claim this traded away:** v1 picked the container form because KDP
+- **Changed 2026-07-30 — wrapper deleted, chain gated:** the heading had
+  BOTH mechanisms. The chain above was already in the stylesheet and
+  applied unconditionally; on top of it, v1 also wrapped the heading and
+  the scene's FIRST BLOCK in a `<div class="keep-together">` with
+  `page-break-inside: avoid`. The wrapper is what broke: it made the
+  heading plus an entire block — a whole action paragraph, or a whole
+  speech — one unbreakable chunk, and a renderer that honors keeps pushes
+  a chunk that does not fit *whole*. On KFX (sideloaded and
+  Send-to-Kindle server conversions alike, see #8b) and in Apple Books,
+  that is exactly what happened: pages ended half empty (the observed
+  bug). So the wrapper was deleted and the surviving chain was newly put
+  behind `keepSceneHeadingWithScene`, which until now gated only the
+  wrapper.
+- **Consequence of the gating:** with the toggle OFF, a heading now
+  carries no keep at all — before, it always kept the chain and the
+  toggle removed only the wrapper. Turning the option off is therefore a
+  real loss of behavior, not a return to a neutral state.
+- **The claim this traded away:** v1 added the container form because KDP
   documents it ("headlines with paragraphs to keep together") and it was
-  believed *more reliably honored* than `break-after: avoid` on the
-  heading itself. That belief is not free, and the swap is a knowing
-  trade: the container's claimed robustness for bounded chunks. Device
-  verification settles it — Kindle Previewer/KFX, plus an Apple Books
-  pass: does the heading actually travel with the line beneath it? If
-  `break-after: avoid` proves not to bind there, the recorded fallback is
-  a wrapper holding the heading + the first ELEMENT only — never the whole
-  first block, which is the bug this replaced.
+  believed *more reliably honored* than `break-after: avoid` alone.
+  Dropping it is a knowing trade: the container's claimed robustness for
+  bounded chunks. Device verification settles it — Kindle Previewer/KFX,
+  plus an Apple Books pass: does the heading actually travel with the
+  line beneath it? If `break-after: avoid` proves not to bind, the
+  recorded fallback is a wrapper holding the heading + the first ELEMENT
+  only — never the whole first block, which is the bug this replaced.
+- **Device verdict: pending 2026-07-30 —** nothing on record isolates
+  `break-after: avoid` binding on its own. #8b's 2026-07-29 KFX pass
+  ("holds every keep") was measured on CUES, which carry the wrapper AND
+  the chain, so it cannot tell the two apart; the heading was wrapped
+  then too. The verdict lands in this entry.
 - **Default:** on.
 - **App option:** "Keep scene headings with their scene" toggle (Settings
   → Formatting → Pages).
@@ -109,10 +120,14 @@ future work; everything else is live.
   `src/epub/css.ts` (`headingKeep` → `h2.scene-heading`).
 
 ### 5. Keep-with-next — minimal chain (v2)
-- **What:** `break-after: avoid` on scene headings and character cues
-  ONLY. v1 also chained parentheticals; every avoid link grows the
-  unbreakable chunk a renderer pushes to the next page, and pushed
-  chunks show up as occasional blank-bottom "weird page breaks."
+- **What:** `break-after: avoid` on the scene heading (gated by #5a's
+  `keepSceneHeadingWithScene`) and the character cue (always on). A third
+  rule sits on `p.mini-slug`, but the EPUB renderer emits no such class,
+  so it currently matches nothing — inert, and left alone here (a
+  separate branch owns that question). v1 also chained parentheticals;
+  every avoid link grows the unbreakable chunk a renderer pushes to the
+  next page, and pushed chunks show up as occasional blank-bottom "weird
+  page breaks."
 - **Default:** heading + cue avoid; parenthetical breaks freely.
 - **App options:** none — cue avoid stays always-on; the heading behavior
   is governed by 5a's CSS chain (gated by `keepSceneHeadingWithScene`).
@@ -160,8 +175,9 @@ future work; everything else is live.
   speech under #8c), in which case that block moves too.
 - **Reference:** `docs/pagination-reference.md` §2, the break rules by
   element (that doc lands from branch `worktree-device-map`).
-- **Unverified on device:** like the rest of the 2026-07-30 break work, it
-  rides on the same Kindle Previewer/KFX + Apple Books pass named in #5a.
+- **Device verdict: pending 2026-07-30 —** does a transition ever still
+  start a page? Same Kindle Previewer/KFX + Apple Books pass as #5a; the
+  verdict lands in this entry.
 - **Code:** `src/epub/css.ts` (`p.transition`).
 
 ## Cleanup & rejoining
@@ -252,6 +268,11 @@ future work; everything else is live.
 - **App option:** "Keep each speech on one page" (Settings → Formatting →
   Pages), with the tradeoff and the oversize caveat stated in the
   toggle's caption.
+- **Device verdict: pending 2026-07-30 —** does a kept speech actually
+  move whole, and how big is the gap it leaves? Same Kindle
+  Previewer/KFX + Apple Books pass as #5a. Note the interaction with
+  #10b: with this option ON, a tall dual exchange that has fallen back
+  to sequential becomes two atomic blocks. The verdict lands here.
 - **MOBI:** that dialect ships no stylesheet at all, so no keep — this
   one or any other in this document — applies on the MOBI route
   (structural, unchanged).
@@ -378,18 +399,22 @@ future work; everything else is live.
 - **Code:** `src/parser/extract.ts` (`deinterleaveDualDialogue`).
 
 ### 10b. Tall dual exchanges degrade to sequential (2026-07-30)
-- **What:** the side-by-side table of #10a has no good behavior at
-  height, and no CSS fixes it: a keep-honoring renderer (KFX, Apple
-  Books) treats the table as one object and pushes it whole, so a tall
-  exchange is a page-sized chunk waiting to waste a page bottom; the
-  legacy AZW3/MOBI renderer splits it mid-cell instead, which #8b already
-  records as its own kind of broken. The EPUB renderer now measures both
-  columns before it emits: if the taller one exceeds **12 estimated
-  rendered lines**, the exchange is emitted as two ordinary dialogue
-  blocks — left speech, then right — each carrying its own #8b cue keep.
-  Short exchanges, the common case, still get the table. The estimate
-  counts each cell's tag-stripped text (trailing newline included) at ~30
-  characters per half-width line.
+- **What:** the EPUB renderer measures both columns before it emits: if
+  the taller one exceeds **12 estimated rendered lines**, the exchange is
+  emitted as two ordinary dialogue blocks — left speech, then right —
+  each carrying its own #8b cue keep. Short exchanges, the common case,
+  still get the table. The estimate counts each cell's tag-stripped text
+  (trailing newline included) at ~30 characters per half-width line, with
+  a floor of one line per cell, so a one-word cue still costs a line.
+- **Why:** the table of #10a has no good behavior at height. A
+  keep-honoring renderer is expected to treat it as one object and push
+  it whole, making a tall exchange a page-sized chunk that wastes a page
+  bottom; the legacy AZW3/MOBI renderer splits it mid-cell instead, which
+  #8b already records as its own kind of broken.
+- **The push claim is inference, not measurement:** it is extrapolated
+  from #5a's observed half-empty pages (an unbreakable chunk pushed
+  whole), not from a dual table measured on device. #8b confirms only
+  that the side-by-side table is *readable* in AZW3.
 - **Why 12:** roughly half a typical device page. Past that, the odds the
   table has to push — wasting up to its own height at the bottom of a
   page — climb faster than the side-by-side reading is worth.
@@ -397,9 +422,19 @@ future work; everything else is live.
   `dualDialogue: 'sequential'` already produces, and it inherits that
   mode's known property — the simultaneity cue is lost; the two speeches
   simply read in order.
+- **Interaction with #8c:** the bounded-chunk rationale above holds fully
+  only with `keepSpeechesWhole` OFF. With it ON, the two blocks the
+  fallback emits are each atomic, so a 14-line exchange trades an
+  unbreakable 14-line table for an unbreakable 14-line block — the
+  simultaneity is still lost, but the chunk is not bounded. The
+  threshold does not know about the option.
 - **Honest scope:** this is a markup-level decision taken in the EPUB
   renderer, not a stylesheet knob and not an option. It is EPUB-only —
   the MOBI path still emits its table at any height.
+- **Device verdict: pending 2026-07-30 —** whether the table really does
+  push whole, and whether 12 lines is the right cut, both want the same
+  Kindle Previewer/KFX + Apple Books pass as #5a. The verdict lands in
+  this entry.
 - **Code:** `src/epub/html.ts` (`DUAL_SEQUENTIAL_LINE_THRESHOLD`,
   `EST_CHARS_PER_DUAL_LINE`, `dual_dialogue_end`).
 

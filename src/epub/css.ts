@@ -10,12 +10,14 @@
 //   owns within-paragraph spacing (the reader's own setting).
 // - Break control kept deliberately small — every avoid link grows the
 //   unbreakable chunk renderers push, causing bottom-of-page gaps. The
-//   whole inventory: keep-with-next chains on the scene heading (gated by
-//   keepSceneHeadingWithScene), the mini-slug and the character cue;
-//   inside-avoid on the cue's keep-together wrapper and the dual-dialogue
-//   table; the opt-in whole-speech keep (keepSpeechesWhole, off by
-//   default); and break-before: avoid on transitions, which may end a
-//   page but never begin one.
+//   whole inventory, one line each:
+//     break-after: avoid   h2.scene-heading (gated: keepSceneHeadingWithScene)
+//     break-after: avoid   p.character
+//     break-after: avoid   p.mini-slug (inert — no such class is emitted)
+//     break-before: avoid  p.transition
+//     break-inside: avoid  .keep-together (the cue keep)
+//     break-inside: avoid  table.dual-dialogue
+//     break-inside: avoid  .dialogue-block (gated: keepSpeechesWhole, off)
 import type { FormatOptions } from '../options';
 import { DEFAULT_FORMAT_OPTIONS } from '../options';
 
