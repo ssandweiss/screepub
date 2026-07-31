@@ -43,3 +43,63 @@ describe('collectCommits', () => {
     expect(commit.subject).not.toContain('\x1B');
   });
 });
+
+import { parseVerdicts, diffVerdicts } from '../tools/release-notes';
+
+const REGISTRY_BEFORE = `
+### 5a. Scene heading keeps its context
+- **Device verdict: pending 2026-07-30 —** does the chain bind alone?
+- **Code:** src/epub/css.ts
+
+### 16. Transitions never begin a page
+- **Device verdict: pending 2026-07-30 —** does a transition start a page?
+
+### 8c. Whole-speech keep
+- **Device verdict: pending 2026-07-30 —** does a kept speech move whole?
+`;
+
+const REGISTRY_AFTER = `
+### 5a. Scene heading keeps its context
+- **Device verdict 2026-07-30: BINDS — the chain holds without the wrapper.**
+- **Code:** src/epub/css.ts
+
+### 16. Transitions never begin a page
+- **Device verdict: pending 2026-07-30 —** does a transition start a page?
+
+### 8c. Whole-speech keep
+- **Device verdict: pending 2026-07-30 —** does a kept speech move whole?
+
+### 17. Print split minimums
+- **Device support:** KFX honors widows/orphans from fw 5.12.3.
+- **Device verdict: pending —** next KFX pass.
+`;
+
+describe('verdict diffing', () => {
+  test('parseVerdicts finds every entry still marked pending', () => {
+    expect(parseVerdicts(REGISTRY_BEFORE).map((v) => v.entry).sort()).toEqual(['16', '5a', '8c']);
+  });
+
+  test('an entry pending at BOTH refs appears in neither bucket', () => {
+    // The case that decays the section over a series: 16 and 8c were
+    // pending before this cycle and are not news now.
+    const { opened, resolved } = diffVerdicts(REGISTRY_BEFORE, REGISTRY_AFTER);
+    const names = [...opened, ...resolved].map((v) => v.entry);
+    expect(names).not.toContain('16');
+    expect(names).not.toContain('8c');
+  });
+
+  test('a verdict that became pending this cycle is OPENED', () => {
+    expect(diffVerdicts(REGISTRY_BEFORE, REGISTRY_AFTER).opened.map((v) => v.entry)).toEqual(['17']);
+  });
+
+  test('a verdict filled in this cycle is RESOLVED', () => {
+    expect(diffVerdicts(REGISTRY_BEFORE, REGISTRY_AFTER).resolved.map((v) => v.entry)).toEqual(['5a']);
+  });
+
+  test('an opened verdict carries its Device support line, not just a number', () => {
+    // "17. Print split minimums" alone cannot produce "it does nothing on
+    // readers that ignore it". The drafter needs the sentence.
+    expect(diffVerdicts(REGISTRY_BEFORE, REGISTRY_AFTER).opened[0].support)
+      .toContain('KFX honors widows/orphans');
+  });
+});

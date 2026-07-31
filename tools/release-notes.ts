@@ -44,3 +44,56 @@ export function collectCommits(cwd: string, sinceTag: string, owner = 'Sam Sandw
     })
     .reverse();
 }
+
+export interface Verdict {
+  /** Registry entry number, e.g. "17" or "5a". */
+  entry: string;
+  title: string;
+  /** The entry's `Device support:` line, if any. The drafter needs this
+   *  sentence to write an honest caveat; a number and title cannot. */
+  support: string;
+}
+
+const ENTRY_HEADING = /^### ([0-9]+[a-z]?)\.\s*(.*)$/gm;
+
+/** Every registry entry whose body still says a verdict is pending. */
+export function parseVerdicts(registry: string): Verdict[] {
+  const headings = [...registry.matchAll(ENTRY_HEADING)];
+  return headings
+    .map((match, i) => {
+      const start = match.index!;
+      const end = i + 1 < headings.length ? headings[i + 1].index! : registry.length;
+      const body = registry.slice(start, end);
+      const support = /^-\s+\*\*Device support:\*\*\s*(.*)$/m.exec(body)?.[1] ?? '';
+      return {
+        entry: match[1],
+        title: match[2].trim(),
+        support,
+        pending: /Device verdict:\s*pending/i.test(body),
+      };
+    })
+    .filter((e) => e.pending)
+    .map(({ entry, title, support }) => ({ entry, title, support }));
+}
+
+/**
+ * What CHANGED between two refs, which is the only newsworthy part.
+ * `opened` feeds the honesty section. `resolved` feeds the improvements and
+ * the closer: a claim you could not make last release and can now is
+ * exactly what a release note is for. Pending at both refs is in neither,
+ * because it was not news this cycle and would otherwise repeat forever.
+ */
+export function diffVerdicts(before: string, after: string): { opened: Verdict[]; resolved: Verdict[] } {
+  const beforeList = parseVerdicts(before);
+  const wasPending = new Set(beforeList.map((v) => v.entry));
+  const nowPending = parseVerdicts(after);
+  const nowPendingIds = new Set(nowPending.map((v) => v.entry));
+
+  const opened = nowPending.filter((v) => !wasPending.has(v.entry));
+  const beforeById = new Map(beforeList.map((v) => [v.entry, v]));
+  const resolved = [...wasPending]
+    .filter((id) => !nowPendingIds.has(id))
+    .map((id) => beforeById.get(id)!);
+
+  return { opened, resolved };
+}
