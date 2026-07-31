@@ -44,6 +44,14 @@ describe('require-release-notes hook', () => {
     expect(runHook('git push origin :refs/tags/v0.5.0').code).toBe(0);
   });
 
+  test('the read-only listing allowlist does not swallow a real create', () => {
+    // Pins the allowlist's breadth. Widening it to "any hyphenated flag"
+    // survives every other test in this file, because the version-token
+    // gate still catches anything naming a version. This is the assertion
+    // that notices the allowlist itself drifting.
+    expect(runHook('git tag my-tag').code).toBe(2);
+  });
+
   test('blocks tagging a version whose notes are missing', () => {
     const { code, stderr } = runHook('git tag -a v99.0.0 -m release');
     expect(code).toBe(2);
