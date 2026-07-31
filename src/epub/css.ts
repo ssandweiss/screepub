@@ -27,6 +27,13 @@
 //   line per page seam, not a whole pushed block — and it is the only
 //   rule here whose OFF state still emits a value (1) rather than
 //   nothing.
+//   And a shadow rule, not a seventh chunk: -webkit-column-break-inside:
+//   avoid on .keep-together and table.dual-dialogue, the old column
+//   spelling multicol-paginating engines (kepub, the Readium family)
+//   honor instead of the modern one. Lives in its OWN declaration block —
+//   iBooks drops both spellings when they share one (BlitzTricks) — so it
+//   reads as a distinct entry to the guard test below, not a change to
+//   either selector's existing break-inside rule.
 import type { FormatOptions } from '../options';
 import { DEFAULT_FORMAT_OPTIONS } from '../options';
 
@@ -95,6 +102,12 @@ ${sceneBreak}
   page-break-inside: avoid;
   break-inside: avoid;
 }
+
+/* Multicol-paginating engines (kepub, the Readium family) honor the old
+   column spelling. SEPARATE rule on purpose: iBooks drops BOTH forms when
+   they share one declaration block (BlitzTricks). Unguarded on purpose:
+   the engines that need it largely predate @supports. */
+.keep-together, table.dual-dialogue { -webkit-column-break-inside: avoid; }
 
 h2.scene-heading {
   font-size: 1em;

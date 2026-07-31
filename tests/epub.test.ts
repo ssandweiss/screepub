@@ -228,7 +228,14 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
   // header comment. Both spellings are emitted for each rule, hence 2 per
   // selector. Default options, so the two gated-off entries
   // (`.dialogue-block`, `section.scene`) are absent by design.
-  test('the avoid inventory is closed — six selectors, twelve declarations', () => {
+  //
+  // The column-spelling shadow rule (-webkit-column-break-inside, css.ts)
+  // adds a seventh entry to `carrying` below — its own declaration block,
+  // duplicating two selectors already in the six-name inventory for
+  // multicol-paginating engines — but it does NOT match the declarations
+  // regex (it carries neither `page-break-inside` nor `break-inside`), so
+  // the twelve-declaration count stays closed.
+  test('the avoid inventory is closed — twelve declarations, plus the column-spelling shadow rule', () => {
     const declarations =
       SCREENPLAY_CSS.match(/^\s*(?:page-)?break-(?:after|before|inside):\s*avoid;/gm) ?? [];
     expect(declarations).toHaveLength(12);
@@ -238,6 +245,7 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
       .map(([, selector]) => selector.trim().split('\n').pop()!.trim());
     expect(carrying).toEqual([
       '.keep-together',
+      '.keep-together, table.dual-dialogue',
       'h2.scene-heading',
       'p.mini-slug',
       'p.character',
@@ -481,7 +489,10 @@ describe('dual dialogue table rendering', () => {
   });
 
   test('table style keeps the pair together and splits width evenly', () => {
-    expect(SCREENPLAY_CSS.match(/table\.dual-dialogue\s*{[^}]*}/)![0]).toContain('page-break-inside: avoid');
+    // Anchored to line start: table.dual-dialogue also appears, comma-joined
+    // with .keep-together, in the column-spelling shadow rule above it —
+    // unanchored this regex would grab that one-liner instead.
+    expect(SCREENPLAY_CSS.match(/^table\.dual-dialogue\s*{[^}]*}/m)![0]).toContain('page-break-inside: avoid');
     expect(SCREENPLAY_CSS.match(/table\.dual-dialogue td\s*{[^}]*}/)![0]).toContain('width: 50%');
   });
 });

@@ -141,6 +141,16 @@ describe('screenplayCss with options', () => {
       }
     }
   });
+
+  test('wrapper keeps carry the column spelling in a separate rule', () => {
+    const css = screenplayCss(DEFAULT_FORMAT_OPTIONS);
+    const rule = css.match(/\.keep-together,\s*table\.dual-dialogue\s*{[^}]*}/);
+    expect(rule).not.toBeNull();
+    expect(rule![0]).toContain('-webkit-column-break-inside: avoid');
+    // iBooks bug: the column spelling must not share a declaration block
+    // with page-break-inside, or Books ignores BOTH.
+    expect(rule![0]).not.toContain('page-break-inside');
+  });
 });
 
 // ── tokensToBody(options) ────────────────────────────────
