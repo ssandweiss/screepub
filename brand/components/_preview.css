@@ -1,0 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Literata:opsz,wght@7..72,400;7..72,500&display=swap');
+@import url('../tokens.css');
+
+body {
+  margin: 0;
+  background: var(--ground);
+  font-family: var(--font-prose);
+  color: var(--ink-soft);
+  -webkit-font-smoothing: antialiased;
+}
+
+.sheet {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  background: var(--paper);
+  box-shadow: var(--page-shadow);
+  padding: 3rem var(--page-right) 3.5rem var(--binding-margin);
+  box-sizing: border-box;
+}
+
+.row { display: flex; gap: 2rem; align-items: center; flex-wrap: wrap; }
+
+.slug {
+  font-family: var(--font-structure);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin: 0 0 0.75rem;
+}
+
+.prose {
+  font-size: 17px;
+  line-height: 1.72;
+  color: var(--ink-soft);
+  max-width: var(--measure);
+  margin: 0;
+}
+
+.caption {
+  font-size: 14px;
+  color: var(--ink-muted);
+  margin: 0.6rem 0 0;
+}
