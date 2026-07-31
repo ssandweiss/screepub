@@ -384,7 +384,9 @@ is live.
 - **Interaction (load-bearing):** #8b's `.keep-together` is ALWAYS on and
   wraps cue + parentheticals + the FIRST dialogue paragraph in
   `break-inside: avoid`. A single-paragraph speech therefore never
-  splits and its widows/orphans never fire. This rule bites on the TAIL
+  splits and its widows/orphans never fire — until that keep yields (a
+  first paragraph taller than a page still breaks, and then this does
+  apply). This rule bites on the TAIL
   paragraphs of multi-paragraph speeches and on action. With #8c also
   ON, whole speeches are atomic and the dialogue arm is fully inert;
   the action arm is unaffected in every mode.
