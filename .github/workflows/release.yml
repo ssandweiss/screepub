@@ -1,7 +1,12 @@
 # Release on version tags. Requires repo secrets (see docs/release-secrets.md):
 #   DEVELOPER_ID_CERT_P12_BASE64, CERT_PASSWORD, KEYCHAIN_PASSWORD,
 #   AC_API_KEY_P8_BASE64, AC_API_KEY_ID, AC_API_ISSUER_ID
-# Least privilege + pinned third-party actions, matching ci.yml.
+# Least privilege + pinned third-party actions, matching ci.yml. The
+# checkout SHA, setup-bun SHA, and bun-version below are duplicated from
+# ci.yml on purpose (this workflow must validate its own toolchain rather
+# than trust ci.yml's run) — but the THREE PIN VALUES are not independently
+# defended anywhere. Bump them in both files together; bumping bun in
+# ci.yml alone would silently ship a real release on an unproven toolchain.
 name: release
 on:
   push:
@@ -12,6 +17,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# A dispatch re-run while a prior run is still uploading assets must not
+# race it onto the same draft release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   # The tag trigger is independent of ci.yml, so without this a tag could
   # ship a DMG from a commit whose suite fails. Same checks, same runner
@@ -23,37 +33,54 @@ jobs:
         with:
           fetch-depth: 0
       - name: Release notes and version are publishable
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           VERSION="${TAG#v}"
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || {
-            echo "::error::Tag '$TAG' is not vMAJOR.MINOR.PATCH. (A workflow_dispatch against a branch lands here.)"; exit 1; }
+            echo "::error::Tag '$TAG' is not vMAJOR.MINOR.PATCH. Dispatch this workflow against a version TAG, not a branch."; exit 1; }
 
           F="docs/releases/$VERSION.md"
           git cat-file -e "$GITHUB_SHA:$F" 2>/dev/null || {
-            echo "::error::$F is missing at the tagged commit. Run /release, which writes the notes and then tags."; exit 1; }
+            echo "::error file=$F::$F is missing at the tagged commit. Write it (see docs/release-notes-template.md), commit it, then re-tag."; exit 1; }
 
+          # Not a symlink: a committed symlink would be followed and published.
           MODE="$(git ls-tree "$GITHUB_SHA" -- "$F" | awk '{print $1}')"
-          [ "$MODE" = "100644" ] || { echo "::error::$F is not a regular file (mode $MODE)"; exit 1; }
+          [ "$MODE" = "100644" ] || { echo "::error file=$F::$F is not a regular file (mode $MODE)"; exit 1; }
 
-          BYTES="$(git cat-file -s "$(git rev-parse "$GITHUB_SHA:$F")")"
+          # GitHub's release body caps near 125k; failing here costs 20s
+          # instead of failing after notarization.
+          BYTES="$(git cat-file -s "$GITHUB_SHA:$F")"
           [ "$BYTES" -gt 0 ] && [ "$BYTES" -lt 60000 ] || {
-            echo "::error::$F is empty or too large ($BYTES bytes)"; exit 1; }
+            echo "::error file=$F::$F is empty or exceeds the 60000-byte body limit ($BYTES bytes)"; exit 1; }
 
           git cat-file blob "$GITHUB_SHA:$F" | iconv -f UTF-8 -t UTF-8 >/dev/null || {
-            echo "::error::$F is not valid UTF-8"; exit 1; }
+            echo "::error file=$F::$F is not valid UTF-8"; exit 1; }
 
-          if git cat-file blob "$GITHUB_SHA:$F" | grep -qiE 'sha-?256|[0-9a-f]{64}'; then
-            echo "::error::$F contains a checksum. The workflow appends the real ones."; exit 1
+          # The workflow appends the real checksums; two on one page both
+          # look official.
+          #
+          # Process substitution, not a `cmd | grep` pipe: under pipefail,
+          # an early-exiting grep can SIGPIPE the upstream `git cat-file`,
+          # whose failing exit code can then outrank grep's own "found"
+          # status and read as false — silently waving through a checksum
+          # that's already there.
+          if HITS="$(grep -niE -m 3 'sha-?256|[0-9a-f]{64}' < <(git cat-file blob "$GITHUB_SHA:$F"))"; then
+            echo "::error file=$F::$F contains a checksum. The workflow appends the real ones. Offending line(s):"
+            printf '%s\n' "$HITS"
+            exit 1
           fi
 
-          PKG="$(git cat-file blob "$GITHUB_SHA:package.json" | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(0,'utf8')).version)")"
+          # package.json must agree with the tag. app/release.sh checks this
+          # too, but only after certs are on disk, minutes in.
+          PKG="$(git cat-file blob "$GITHUB_SHA:package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")"
           [ "$PKG" = "$VERSION" ] || {
-            echo "::error::package.json says $PKG but the tag says $VERSION"; exit 1; }
+            echo "::error file=package.json::package.json says $PKG but the tag says $VERSION"; exit 1; }
 
+          # The tagged commit must be ON main. Without this, tagging and then
+          # amending ships a DMG built from an orphaned commit while every
+          # other check passes.
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
             echo "::error::The tagged commit is not an ancestor of origin/main. Did you amend after tagging? Re-tag the commit you actually pushed."; exit 1; }
@@ -176,6 +203,9 @@ jobs:
 
           # Draft first so /releases/latest never returns a release whose
           # assets are still uploading. Idempotent under workflow_dispatch.
+          # Without this: the app's updater throws on a release with no
+          # DMG, but it has already stamped its "last checked" clock, so a
+          # user who checks in that window is told "no update" for 24h.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --draft --title "Screepub $VERSION" --notes-file "$NOTES"
           else
