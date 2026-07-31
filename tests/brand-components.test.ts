@@ -1,4 +1,5 @@
 import { describe, test, expect } from 'bun:test';
+import { readdirSync } from 'node:fs';
 
 // A byte-order mark (U+FEFF) on line 1 of a preview file makes the
 // @dsCard check below fail, but the failure is visually indistinguishable
@@ -18,13 +19,35 @@ const firstLine = (text: string): string => {
 
 describe('brand component previews', () => {
   const dir = new URL('../brand/components/', import.meta.url);
+
+  // The list of previews a reviewer would type from memory, kept ONLY to
+  // catch a deletion or rename: the two invariant tests below no longer
+  // iterate it. They enumerate the directory instead, because a
+  // hardcoded array is exactly how a ninth preview (added straight to
+  // brand/components/, hardcoding #FF00FF) got a clean test run: nothing
+  // ever asked the filesystem what was actually there. Directory
+  // enumeration means a new file is checked automatically, with no
+  // second place to remember to update. But enumeration alone would let
+  // a deletion pass just as quietly, fewer files just means fewer loop
+  // iterations, not a failure, so this list still exists for that half.
   const expected = [
     'brad', 'page-frame', 'title-block', 'slugline',
     'transition-rule', 'buttons', 'device-table', 'shot-frame',
   ];
 
-  test('every preview opens with a @dsCard marker naming its group', async () => {
+  const found = readdirSync(dir)
+    .filter((f) => f.endsWith('.html'))
+    .map((f) => f.slice(0, -'.html'.length))
+    .sort();
+
+  test('the eight expected previews are all present', () => {
     for (const name of expected) {
+      expect(found.includes(name), `${name}.html is missing from brand/components/`).toBe(true);
+    }
+  });
+
+  test('every preview opens with a @dsCard marker naming its group', async () => {
+    for (const name of found) {
       const text = await Bun.file(new URL(`${name}.html`, dir)).text();
       expect(firstLine(text), `${name}.html must open with a @dsCard marker`).toMatch(
         DS_CARD_MARKER,
@@ -46,7 +69,7 @@ describe('brand component previews', () => {
     // gradients and are not brand colors. Everything else must be a token.
     const carriers = new Set(['#FFF', '#FFFFFF', '#000', '#000000']);
 
-    for (const name of expected) {
+    for (const name of found) {
       const raw = await Bun.file(new URL(`${name}.html`, dir)).text();
       // Strip SVG fragment references first. An id like #dad or #face is
       // valid hex and would otherwise read as a hardcoded color.

@@ -23,15 +23,17 @@ const pairs: [label: string, fgToken: string, fg: string, bg: string, floor: num
 ];
 
 // Tokens whose role puts text on the page and therefore need a pair
-// above. paper, ground and hole are surfaces or shading, never text; the
-// six brass-* ramp stops are gradient stops inside the brad graphic,
-// never text either. tokens.json's `role` field is prose for humans, not
-// a machine-checkable "is this text" flag, so this list is curated by
-// hand, the same way brand/README.md's "Adding a color" process asks a
-// human to. If you add a token whose role sets text, add its name here
-// AND add a pair above, or the completeness test below will name it and
-// fail.
-const textBearing = ['ink', 'ink-soft', 'ink-muted', 'alarm', 'brass'];
+// above. Derived from tokens.json's own `"text": true` field rather than
+// hand-curated here, because a hand-curated second list is exactly how
+// this went wrong once already: ink-footnote was added straight to
+// tokens.json and tokens.css at 2.22:1 with no contrast pair, and
+// because nothing tied this array to the token data, the suite still
+// went green. Marking a color text-bearing now happens in one place,
+// next to the color's own definition, and the completeness test below
+// fails the moment that mark exists without a matching pair above.
+const textBearing = Object.entries(colors)
+  .filter(([, v]: [string, any]) => v.text === true)
+  .map(([name]) => name);
 
 describe('brand tokens', () => {
   test('tokens sourced from Theme.swift match it exactly', async () => {
@@ -47,8 +49,14 @@ describe('brand tokens', () => {
 
     for (const [name, value] of pinned as [string, any][]) {
       expect(theme[name], `Theme.swift has no color named ${name}`).toBeDefined();
-      expect(cssValue(theme[name].light), `${name} light`).toBe(value.light);
-      expect(cssValue(theme[name].dark), `${name} dark`).toBe(value.dark);
+      expect(
+        cssValue(theme[name].light),
+        `${name} light drifted from Theme.swift; Theme.swift is the source, so fix brand/tokens.json to match`,
+      ).toBe(value.light);
+      expect(
+        cssValue(theme[name].dark),
+        `${name} dark drifted from Theme.swift; Theme.swift is the source, so fix brand/tokens.json to match`,
+      ).toBe(value.dark);
     }
   });
 
@@ -131,7 +139,7 @@ describe('brand tokens', () => {
     for (const name of textBearing) {
       expect(
         exercised.has(name),
-        `"${name}" is text-bearing (see tokens.json's role) but has no pair in the contrast table above; add one.`,
+        `"${name}" is marked "text": true in tokens.json but has no pair in the contrast table above; add one.`,
       ).toBe(true);
     }
   });
