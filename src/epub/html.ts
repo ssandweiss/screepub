@@ -5,12 +5,7 @@ import type { Token } from 'fountain-js';
 import type { FormatOptions } from '../options';
 import { DEFAULT_FORMAT_OPTIONS } from '../options';
 import { screenplayCss } from './css';
-import { PRIMARY_SLUG, isMiniSlug } from '../fountain/slug';
-
-// PRIMARY_SLUG is re-exported for tests/epub.test.ts, which pins it against
-// the parser's own copy and against fountain-js's tokenizer. The definition
-// itself now lives in ../fountain/slug.ts, shared with the MOBI renderer.
-export { PRIMARY_SLUG };
+import { isMiniSlug } from '../fountain/slug';
 
 export interface BodyFile {
   /** filename-safe id, e.g. "body001" */

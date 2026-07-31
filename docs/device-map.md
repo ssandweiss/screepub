@@ -81,11 +81,15 @@ unsettable (KFX line height is fixed; KF8 clamps near 1.2). Break and keep
 CSS: **KFX honors `page-break-*` and `break-*` including `avoid`, and
 `widows`/`orphans` from fw 5.12.3** (Kindle Previewer 3.35 and 3.36 added
 them circa 2019; jhowell's device tests plus our own #5a and #8b passes
-confirm) — but ONLY on top-level block elements: any `background-color` on
-html or body makes the KFX converter synthesize a wrapper block, after
-which every keep dies silently (MobileRead t=330798). KF8/AZW3 honors
-`always` only; there, file splits remain the only hard break. The Publisher
-Font toggle protects `font-family` only.
+confirm) — with one hard trap: any `background-color` on html or body makes
+the KFX converter synthesize a wrapper block of its own, and every keep in
+the book then dies silently (MobileRead t=330798, where jhowell frames it
+as keeps working on top-level blocks only). Authored nesting depth is NOT
+the trigger — Screepub's keeps sit two divs deep inside `section.scene` and
+held on device (registry #8b, 2026-07-29) — so the actionable rule is the
+root-background ban, not a flat DOM. KF8/AZW3 honors `always` only; there,
+file splits remain the only hard break. The Publisher Font toggle protects
+`font-family` only.
 
 Screepub needs: (a) keep the MSC volume path (correct today); (b) something
 for MTP Kindles: IOKit detection of VID `0x1949` non-MSC + guided handoff to
@@ -406,20 +410,36 @@ Amazon's EPUB conversion target (KFX vs AZW3) per title.
 What each rendering family does with the break, keep and split-minimum
 properties: the table to check any fragmentation decision against. §2.1
 states the Kindle column in prose; the Screepub-side counterpart is the
-registry's break entries (#5, #5a, #8b, #8c, #16, #17).
+registry's break entries (#5, #5a, #8b, #8c, #16, #17). "(tested)" means
+measured on device — jhowell's reporting or our own passes; everything
+else is a citation or, where marked, an inference.
+
+Two things the cells are too narrow to carry. **Apple Books honors only
+the OLD column spelling**, and drops both spellings when they share one
+declaration block (BlitzTricks) — which is why our stylesheet emits
+`-webkit-column-break-inside` in a rule of its own rather than beside the
+modern property. And **kepub's NO is for the modern spelling**: its
+renderer paginates with multicol, so the old spelling is the one form
+that plausibly reaches it, but that is an inference nobody has tested and
+t=346874 records only that kepub ignores break CSS.
 
 | Property | KFX/ET | KF8/AZW3 | MOBI 6 | Kobo epub (RMSDK) | Kobo kepub e-ink | tolino | Apple Books |
 |---|---|---|---|---|---|---|---|
-| `break-inside: avoid` | YES, top-level blocks only (tested) | NO for text blocks (images only) | NO | NO | NO | = Kobo column by generation | YES via the column spelling, in a separate rule |
+| `break-inside: avoid` | YES (tested); dies book-wide if html/body carries a `background-color` | NO for text blocks (images only) | NO | NO | NO (modern spelling; old spelling untested) | = Kobo column by generation | via the column spelling only (BlitzTricks) |
 | `break-before/after: always` | YES | YES | `<mbp:pagebreak/>` only | YES | NO (split files) | YES (Gen A) | YES |
-| `break-before/after: avoid` | YES, fw-dependent (tested) | NO | NO | YES (RMSDK's one strength) | NO | likely YES (RMSDK, untested) | NO (WebKit lacks it) |
-| `widows`/`orphans` | YES from fw 5.12.3 | NO | NO | YES (tested) | unverified (patch-lore says its WebKit reads them) | = RMSDK | likely (WebKit, untested) |
+| `break-before/after: avoid` | YES, fw-dependent (tested) | NO | NO | probably YES (inferred from RMSDK honoring book CSS; untested) | NO | likely YES (RMSDK, untested) | NO (WebKit lacks it) |
+| `widows`/`orphans` | YES, reported from fw 5.12.3 | NO | NO | YES (t=328903; reported, not verified here) | unverified (patch-lore says its WebKit reads them) | = RMSDK | likely (WebKit, untested) |
 | New XHTML file = page break | YES | YES | YES | YES | YES (the only reliable break) | YES | YES |
 
 Sources: KDP Text Guidelines (reflowable) help topic GH4DRT75GWWAGBTU;
 Kindle Previewer release notes 3.35 and 3.36; MobileRead t=330798 (avoid is
-KFX-only, top-level blocks, the background wrapper trap), t=328903 (RMSDK
-widows/orphans), t=346874 (kepub ignores break CSS, split files instead);
-kobolabs/epub-spec; clagnut.com/blog/2426 (WebKit lacks `break-after:
-avoid`). The 2026.2 guidelines PDF's Appendix B contradicts Amazon's own
-live pages and lost.
+KFX-only; the `background-color` wrapper trap that kills every keep in the
+book), t=328903 (RMSDK widows/orphans), t=346874 (kepub ignores break CSS,
+split files instead); kobolabs/epub-spec; BlitzTricks, the Blitz
+boilerplate's iBooks notes (Books needs the column spelling, alone in its
+own block); clagnut.com/blog/2426 (WebKit lacks `break-after: avoid`). The
+2026.2 guidelines PDF's Appendix B contradicts Amazon's own live pages and
+lost. Not in that list: the **fw 5.12.3** widows/orphans threshold, which
+comes from jhowell's device-test reporting rather than any Amazon artifact
+— treat the exact version as approximate; the dated artifacts are Previewer
+3.35 and 3.36.

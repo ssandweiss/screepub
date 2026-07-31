@@ -16,9 +16,9 @@ const DUAL_MARGIN_HEADING = /^(\d{1,3}[A-Z]?)\s+(.*\S)\s+\1$/;
 // back to a full scene heading — section, TOC entry and all — when its text
 // also matches this shape. So a block matching it must never classify as a
 // mini-slug; it falls through to action instead. The identical literal
-// lives in src/fountain/slug.ts as the renderers' shared discriminator
-// (src/epub/html.ts re-exports it), and tests/epub.test.ts pins the two
-// together and against fountain-js itself.
+// lives in src/fountain/slug.ts as the renderers' shared discriminator,
+// and tests/epub.test.ts pins the two together and against fountain-js
+// itself.
 export const PRIMARY_SLUG = /^(?:\*{0,3}_?)?(?:(?:int|i)\.?\/(?:ext|e)|int|ext|est)[. ]/i;
 const TRANSITION = /^[A-Z\s]+:$/;
 const PAGE_NUMBER_BARE = /^\d+\.?$/;

@@ -2,10 +2,13 @@ import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { Fountain } from 'fountain-js';
 import JSZip from 'jszip';
-import { tokensToBody, tokensToPreviewHtml, PRIMARY_SLUG } from '../src/epub/html';
+import { tokensToBody, tokensToPreviewHtml } from '../src/epub/html';
 import { buildEpub } from '../src/epub/build';
 import { SCREENPLAY_CSS } from '../src/epub/css';
 import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
+// Stage-2's copy, straight from the module that owns it — both renderers
+// import it from here, so the test reads the same definition they do.
+import { PRIMARY_SLUG } from '../src/fountain/slug';
 import { PRIMARY_SLUG as PARSER_PRIMARY_SLUG } from '../src/parser/classify';
 
 const SAMPLE = `INT. KITCHEN - DAY

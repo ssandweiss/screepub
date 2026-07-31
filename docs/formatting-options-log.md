@@ -288,7 +288,10 @@ is live.
   no true slug in any fixture ends on a paren. Dropping it also retired a
   redundant `PARENTHETICAL` guard the tail already subsumed.
 - **Code:** `src/fountain/serialize.ts` (`mini-slug` case),
-  `src/epub/html.ts` (`PRIMARY_SLUG`, `isMiniSlug`), `src/epub/css.ts`
+  `src/fountain/slug.ts` (`PRIMARY_SLUG`, `isMiniSlug` — the stage-2
+  definition, moved here 2026-07-30 when MOBI became its second consumer),
+  `src/epub/html.ts` and `src/mobi/html.ts` (both import it; the MOBI side
+  uses it to keep `<mbp:pagebreak/>` off mini-slugs, #1), `src/epub/css.ts`
   (`p.mini-slug`), `src/parser/classify.ts` (`PRIMARY_SLUG`,
   `isMiniSlugShaped`, priority 9), `src/parser/boilerplate.ts`
   (`suppressBoilerplate` — mini-slug as recurrence candidate).
@@ -308,8 +311,12 @@ is live.
   WRAPPERS — #8b's `.keep-together` and #10a's `table.dual-dialogue` —
   now also carry `-webkit-column-break-inside: avoid`, in a SEPARATE
   declaration block (separate because iBooks drops both spellings when
-  they share one), which extends those keeps to the multicol-paginating
-  engines: kepub and the Readium family. The keep-with-*next* chains in
+  they share one), which extends those keeps to **Apple Books** — which
+  honors only the old spelling — and to the **Readium family** (Thorium,
+  Kobo's mobile apps). Kobo's kepub e-ink renderer is the hoped-for
+  third, not a claimed one: it paginates with multicol, so the old
+  spelling might reach it, but the only record we have says it ignores
+  break CSS (device-map §6, MobileRead t=346874). The keep-with-*next* chains in
   this entry get no such shadow — we emit no column-spelling
   `break-after` — so they stay modern/legacy-prefixed spelling only.
 - **Code:** `src/epub/css.ts`.
@@ -482,9 +489,12 @@ is live.
 - **The column spelling too (2026-07-30):** `.keep-together` additionally
   carries `-webkit-column-break-inside: avoid`, in a SEPARATE rule of its
   own — separate because iBooks drops both spellings when they share one
-  declaration block — which extends this keep to the multicol-paginating
-  engines that honor only the old spelling: kepub and the Readium family
-  (device-map §6). Same wrapper, same selector, one more audience.
+  declaration block — which extends this keep to **Apple Books**, whose
+  WebKit honors only the old spelling, and to the **Readium family**
+  (Thorium, Kobo's mobile apps). Same wrapper, same selector, two more
+  audiences. **Not** a kepub claim: kepub paginates with multicol, so the
+  old spelling is a plausible reach, but the evidence on record is that it
+  ignores break CSS and wants file splits (device-map §6, t=346874).
 - **Code:** `src/epub/html.ts` (`closeSpeech`), `src/epub/css.ts`
   (`.keep-together` and the column-spelling rule beside it).
 
@@ -517,9 +527,11 @@ is live.
   historically made Kindle Previewer fail to render pages (jhowell,
   2016), and blank-page pushes are the failure the Blitz framework
   disables Kindle keeps to avoid. The verdict lands here.
-- **MOBI:** that dialect ships no stylesheet at all, so no keep — this
-  one or any other in this document — applies on the MOBI route
-  (structural, unchanged).
+- **MOBI:** that dialect ships no stylesheet at all, so no CSS keep — this
+  one or any other in this document — applies on the MOBI route. What it
+  does now have is the one MARKUP primitive: `<mbp:pagebreak/>`, wired to
+  `scenePageBreaks` on 2026-07-30 (#1). Keeps stay EPUB-only; forced
+  breaks no longer are.
 - **Code:** `src/options.ts` (`keepSpeechesWhole`), `src/epub/css.ts`
   (`speechKeep` → `.dialogue-block`),
   `app/Sources/ScreepubKit/FormatSettings.swift`.

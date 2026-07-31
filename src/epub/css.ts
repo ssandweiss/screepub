@@ -8,13 +8,19 @@
 //   one-blank-Courier-line between elements = 1em.
 // - No line-height/font-size overrides on body text — Enhanced Typesetting
 //   owns within-paragraph spacing (the reader's own setting).
-// - NO background-color on html or body, ever — KFX honors keeps on
-//   TOP-LEVEL blocks only, and a root background makes its converter
-//   synthesize a wrapper block, after which every keep in the book dies
-//   silently (MobileRead t=330798; docs/device-map.md §2.1).
-// - CSS values stay CSS-2.1-vintage — Adobe RMSDK (Kobo's EPUB path,
-//   tolino) violates CSS error handling and can blank an entire book on a
-//   modern value function such as min().
+// - NO background-color on html or body, ever — it makes the KFX converter
+//   synthesize a wrapper block of its own at the top of the document, and
+//   every keep in the book then dies silently (MobileRead t=330798, where
+//   jhowell frames the rule as "keeps work on top-level blocks only").
+//   Authored nesting is NOT what breaks it: the keeps below sit two divs
+//   deep inside section.scene and held on device (registry #8b,
+//   2026-07-29). The synthesized wrapper is the trap; docs/device-map.md
+//   §2.1.
+// - CSS value SYNTAX stays CSS-2.1-vintage — no min()/clamp()/var(): Adobe
+//   RMSDK (Kobo's EPUB path, tolino) violates CSS error handling and can
+//   blank an entire book on a value function it cannot parse. CSS3
+//   PROPERTIES that degrade harmlessly are fine — opacity on
+//   span.page-marker is the precedent (registry #13a).
 // - Break control kept deliberately small — every avoid link grows the
 //   unbreakable chunk renderers push, causing bottom-of-page gaps. The
 //   whole inventory, one line each:
@@ -27,14 +33,19 @@
 //     break-inside: avoid  .dialogue-block (gated: keepSpeechesWhole, off)
 //   And a shadow rule, not a new inventory entry: -webkit-column-break-inside:
 //   avoid on .keep-together and table.dual-dialogue, the old column
-//   spelling multicol-paginating engines (kepub, the Readium family)
-//   honor instead of the modern one. Lives in its OWN declaration block —
-//   iBooks drops both spellings when they share one (BlitzTricks) — so it
-//   reads as a distinct entry to the guard test in tests/epub.test.ts,
-//   not a change to either selector's existing break-inside rule. What it
-//   DOES add is cost on those engines: nothing kept there before, so these
-//   two wrappers become their first unbreakable chunks, carrying the same
-//   bottom-of-page gaps this bullet opens with.
+//   spelling Apple Books and the Readium family (Thorium, Kobo's mobile
+//   apps) honor instead of the modern one. Lives in its OWN declaration
+//   block — iBooks drops both spellings when they share one (BlitzTricks)
+//   — so it reads as a distinct entry to the guard test in
+//   tests/epub.test.ts, not a change to either selector's existing
+//   break-inside rule. Kobo's kepub e-ink renderer is a hoped-for third
+//   and NOT a claimed one: it paginates with multicol, which is why the
+//   old spelling might reach it, but the only evidence on record says it
+//   ignores break CSS and wants file splits (device-map §6, t=346874).
+//   What the rule DOES add is cost on the engines that honor it: nothing
+//   kept there before, so these two wrappers become their first
+//   unbreakable chunks, carrying the same bottom-of-page gaps this bullet
+//   opens with.
 //   Plus the one FORCED break, which is not an avoid link and so grows no
 //   chunk — it ends a page rather than refusing to:
 //     page-break-before: always  section.scene (gated: scenePageBreaks, off)
@@ -118,10 +129,13 @@ ${sceneBreak}
   break-inside: avoid;
 }
 
-/* Multicol-paginating engines (kepub, the Readium family) honor the old
-   column spelling. SEPARATE rule on purpose: iBooks drops BOTH forms when
-   they share one declaration block (BlitzTricks). Unguarded on purpose:
-   the engines that need it largely predate @supports. */
+/* Apple Books and the Readium family (Thorium, Kobo's mobile apps) honor
+   the old column spelling; Books honors ONLY it. SEPARATE rule on purpose:
+   iBooks drops BOTH forms when they share one declaration block
+   (BlitzTricks). Unguarded on purpose: the engines that need it largely
+   predate @supports. Kobo's kepub e-ink renderer paginates with multicol
+   too, so this MIGHT reach it — untested, and the evidence on record says
+   kepub ignores break CSS entirely (device-map §6). */
 .keep-together, table.dual-dialogue { -webkit-column-break-inside: avoid; }
 
 h2.scene-heading {

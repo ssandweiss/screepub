@@ -488,6 +488,24 @@ git commit -m "Reader rail: Print-style split minimums toggle in the Page group"
 
 ### Task 9: doc corrections and new invariants
 
+> **Two claims in this task's own copy were SUPERSEDED by the branch
+> review (2026-07-30) after the text below shipped. Do not re-copy them
+> from here; the corrected wording is what is in the repo.**
+> 1. *"ONLY on top-level blocks"* (steps 1, 3, 4) overstates jhowell's
+>    framing into something our own product contradicts: Screepub's keeps
+>    sit two divs deep inside `section.scene` and are device-confirmed to
+>    hold (#8b). The real, actionable rule is the ban on `background-color`
+>    on html/body, which makes the KFX converter SYNTHESIZE a wrapper and
+>    kill every keep (t=330798).
+> 2. *"kepub/Readium coverage"* for the column-spelling rule (step 6)
+>    names an audience §6's own matrix contradicts. The supported audience
+>    is Apple Books (which honors only that spelling) and the Readium
+>    family; kepub is a plausible-but-untested inference.
+>
+> The §6 matrix cells quoted in step 3 were also hedged on landing:
+> inferences and third-party reports are now marked as such rather than
+> reading as "(tested)".
+
 **Files:**
 - Modify: `docs/device-map.md` (§2.1 rendering bullet, §5 registry-corrections block, §5 "Now" item 2, new §6)
 - Modify: `CLAUDE.md` (CSS invariant bullet)
@@ -608,3 +626,71 @@ One KFX build + one Apple Books handoff of a real script carrying: a MULTI-parag
 - [ ] Post-B/C: underline renders on device; font shifts render and degrade sanely.
 
 After the pass: registry verdict edits, app bundle rebuild if anything changed, and the umbrella is done.
+
+---
+
+## Deferred follow-ups (recorded 2026-07-30, not scheduled)
+
+Two things the Phase A review found and deliberately did not fix in the
+batch. Neither is a bug in shipped output; both are test-integrity work.
+Recorded here because the branch's comments call them "tracked," and
+nothing else in the repo tracked them.
+
+### D1. A shared, selector-exact CSS rule extractor for the test suites
+
+**The pattern:** the CSS assertions pull a rule out of the generated
+stylesheet with `SCREENPLAY_CSS.match(/<selector>\s*{[^}]*}/)`. There are
+**30 such call sites** (14 in `tests/epub.test.ts`, 16 in
+`tests/options.test.ts`), and **2** of them are anchored (`/^…/m`).
+
+**Why it matters, precisely:** the regex is a substring match, so a
+selector is really a PREFIX match against every rule in the file. It
+happens to resolve correctly today only because a grouped rule like
+`.keep-together, table.dual-dialogue { … }` fails `\s*{` at the comma.
+Add one grouped rule whose first selector is a prefix of a tested one and
+the extractor silently starts reading the wrong block. The dangerous half
+is the NEGATIVE assertions (`expect(rule).not.toContain(…)`): those pass
+vacuously against the wrong rule, and a wrong-rule match still passes
+`!`-assertion on `.match()`, so nothing throws.
+
+**The local patch already applied** (the pattern to generalize): the two
+anchored sites are `tests/epub.test.ts`'s `table.dual-dialogue` extractor
+and its `.keep-together` extractor, both `/^…\s*{[^}]*}/m` with a comment
+saying why.
+
+**The fix:** one helper — `cssRule(css, selector)` in a test util — that
+splits the stylesheet into blocks and matches the selector list EXACTLY
+(trimmed, comma-split, order-insensitive), throwing a readable error when
+a selector is absent or ambiguous. Then convert all 30 call sites. Do it
+in one pass so the suites cannot drift back; expect no behavior change,
+only a mechanical diff.
+
+### D2. Vacuous sidecar-merge coverage in kit-check for seven booleans
+
+**The gap:** `ScriptSettings.merge` (in
+`app/Sources/ScreepubKit/ScriptSettings.swift`) has one `if let v =
+partial.<field> { merged.<field> = v }` line per option. For seven of
+them the merge line could be DELETED with `kit-check` still fully green:
+
+`scenePageBreaks`, `keepSceneHeadingWithScene`, `rejoinSplitDialogue`,
+`includeTitlePage`, `showSceneNumbers`, `showPageMarkers`, `justifyText`.
+
+**Why they are vacuous:** the sidecar round-trip check builds its input
+from `FormatSettings.defaults`, mutates only `dialogueSideMarginPct` and
+`keepSpeechesWhole`, and loads it back with `FormatSettings.defaults` as
+the fallback. For every other field the written value EQUALS the fallback,
+so a missing merge line yields the same struct and the equality check
+still passes. No other kit-check assertion mentions the seven names at
+all.
+
+**The pattern to follow:** commit `5630525` ("kit-check proves the sidecar
+can override printSplitMinimums"), which is exactly this fix for one
+field: write a one-key sidecar JSON carrying the OPPOSITE of the field's
+default, load with the default fallback, and assert the loaded struct
+differs from the fallback in that one field. Its comment states the rule —
+"a round-trip that never disturbs it would pass whether or not the merge
+line exists at all."
+
+**The fix:** seven more of those, or one loop over (key, opposite-value)
+pairs. Cheap; only deferred because it is app-side test work and Phase A
+was engine-side.

@@ -24,7 +24,9 @@ epubcheck <out.epub>        # validate output (brew-installed)
   now the only copy, so no cross-repo mirroring. Parser stays
   FORMAT-OPTION-FREE.
 - `src/fountain/serialize.ts` — elements → Fountain. The `.fountain` is a
-  durable artifact and the app's cache boundary.
+  durable artifact and the app's cache boundary. Beside it,
+  `src/fountain/slug.ts` owns the stage-2 `PRIMARY_SLUG`/`isMiniSlug`
+  discriminator both renderers import (registry #5b).
 - `src/epub/` + `src/mobi/` — fountain-js tokens → EPUB3 (jszip) / MOBI 6
   (hand-built PalmDB container for dependency-free USB sideload).
 - `src/options.ts` — FormatOptions, the single knob surface: CLI
@@ -43,14 +45,18 @@ epubcheck <out.epub>        # validate output (brew-installed)
   dialogue/action emit styled. Markers in cues/parens/slugs break parsing.
 - **EPUB CSS: horizontal in %, vertical in em, no max-width, no body
   line-height.** Kindle strips max-width and owns line-height. Two more
-  hard NOs: **never `background-color` on html or body** — KFX honors keeps
-  on top-level blocks only, and a root background makes its converter
-  synthesize a wrapper that silently kills every keep in the book; and
-  **CSS values stay CSS-2.1-vintage** — Adobe RMSDK (Kobo's EPUB path,
-  tolino) violates CSS error handling and can blank a whole book on a
-  modern value function like `min()`. See
-  docs/screenplay-format-reference.md before touching css.ts, and
-  docs/device-map.md §6 for what each renderer honors.
+  hard NOs: **never `background-color` on html or body** — it makes the KFX
+  converter synthesize its own wrapper block and every keep in the book
+  then dies silently (MobileRead t=330798). Our own nesting is fine:
+  `section.scene` > `.dialogue-block` > `.keep-together` is device-
+  confirmed to hold (registry #8b), so this is a ban on the root
+  background, NOT a reason to flatten the DOM. And **CSS value SYNTAX
+  stays CSS-2.1-vintage** — no `min()`/`clamp()`/`var()`, because Adobe
+  RMSDK (Kobo's EPUB path, tolino) violates CSS error handling and can
+  blank a whole book on a value function it cannot parse; CSS3 PROPERTIES
+  that degrade harmlessly are fine (`opacity` on the page marker is the
+  precedent). See docs/screenplay-format-reference.md before touching
+  css.ts, and docs/device-map.md §6 for what each renderer honors.
 - **Kindles never index sideloaded EPUBs.** USB = AZW3 via Calibre's
   ebook-convert (with flags that stop Calibre re-breaking scenes and
   stripping div margins — see EbookConvert.swift) or the engine's MOBI.
