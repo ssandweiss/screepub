@@ -533,7 +533,7 @@ guidelines PDF Appendix B contradicts the live pages and lost.
 
 - [ ] **Step 4: CLAUDE.md** — extend the EPUB CSS invariant bullet with: "No html/body background-color ever (KFX honors keeps only on top-level blocks; a root background synthesizes a wrapper and silently kills them all), and CSS values stay 2.1-vintage (RMSDK can blank the whole book on modern functions like min())."
 
-- [ ] **Step 5: css.ts header** — add the same two traps as one-liners to the geometry-rules comment block.
+- [ ] **Step 5: css.ts header** — add the same two traps as one-liners to the geometry-rules comment block. While in this file, apply two comment-precision fixes carried over from Unit 1's review: (a) the `minLines` comment says a single-paragraph speech "never splits and this rule never fires for it", which overstates — `break-inside: avoid` yields when the block cannot fit a page, exactly as this same file already caveats for #8c ("`avoid` yields where it cannot be honored"); match that voice. (b) The new trailing inventory paragraph says "the only rule here whose OFF state still emits a value", which is true of the break inventory but false of the file (`justifyText` off emits `text-align: left`); scope it to "the only rule in this inventory", and stop calling the single forced break a "list".
 
 - [ ] **Step 6: registry** — add entry #17 (text below), plus: #1 gains "MOBI arm: `<mbp:pagebreak/>` before each scene heading except the first (2026-07-30)"; #5 and #8b each gain a line noting the wrapper keeps now also carry `-webkit-column-break-inside: avoid` in a separate rule (iBooks same-rule bug; kepub/Readium coverage); #6b gains "the OPF's `ibooks:specified-fonts` meta (2026-07-30) is what makes this knob hold in Apple Books"; #8c's pending-verdict paragraph gains: "Include the longest speech in the set at the largest font size: a kept block taller than one page historically made Previewer fail to render (jhowell 2016), and blank-page pushes are the failure Blitz disables Kindle keeps to avoid."
 
@@ -547,8 +547,9 @@ Registry #17 entry, verbatim:
   documented space-reclaim trick).
 - **Device support:** KFX honors widows/orphans from fw 5.12.3 (Kindle
   Previewer 3.35 added them ~2019); RMSDK (Kobo epub, tolino) honors
-  book CSS (MobileRead t=328903). Ignored: KF8/AZW3, MOBI, kepub e-ink.
-  Apple Books: WebKit implements the properties; untested on Books.
+  book CSS (MobileRead t=328903). Ignored: KF8/AZW3, MOBI. Unverified
+  on kepub e-ink (patch-lore says its WebKit reads them; not confirmed
+  on device). Apple Books: WebKit implements the properties; untested.
   The registry's old belief that ET ignores them traced to the stale
   2026.2 guidelines PDF appendix; live KDP pages + device tests win.
 - **Interaction (load-bearing):** #8b's `.keep-together` is ALWAYS on and
