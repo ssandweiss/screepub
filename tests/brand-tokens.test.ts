@@ -2,6 +2,36 @@ import { describe, test, expect } from 'bun:test';
 import { themeColors, parseThemeColors, cssValue, contrast, fromHex } from './theme-colors';
 
 const tokens = await Bun.file(new URL('../brand/tokens.json', import.meta.url)).json();
+const colors = tokens.colors;
+
+// Every (label, foreground token, fg hex, bg hex, floor) row the contrast
+// test checks. The token name rides alongside the hex value specifically
+// so the completeness test below can ask "does this token have a pair"
+// directly, instead of maintaining a second, hand-written list of which
+// tokens are covered that could itself drift out of sync with this one.
+const pairs: [label: string, fgToken: string, fg: string, bg: string, floor: number][] = [
+  ['ink on paper',              'ink',       colors.ink.light,         colors.paper.light, 7],
+  ['ink-soft on paper',         'ink-soft',  colors['ink-soft'].light, colors.paper.light,  7],
+  ['ink-muted on paper',        'ink-muted', colors['ink-muted'].light, colors.paper.light, 4.5],
+  ['ink on brass',              'ink',       colors.ink.light,         colors.brass.light,  7],
+  ['alarm on paper',            'alarm',     colors.alarm.light,       colors.paper.light,  4.5],
+  ['ink on paper, dark',        'ink',       colors.ink.dark,          colors.paper.dark,   7],
+  ['ink-soft on paper, dark',   'ink-soft',  colors['ink-soft'].dark,  colors.paper.dark,   7],
+  ['ink-muted on paper, dark',  'ink-muted', colors['ink-muted'].dark, colors.paper.dark,   4.5],
+  ['brass on paper, dark',      'brass',     colors.brass.dark,        colors.paper.dark,   7],
+  ['alarm on paper, dark',      'alarm',     colors.alarm.dark,        colors.paper.dark,   4.5],
+];
+
+// Tokens whose role puts text on the page and therefore need a pair
+// above. paper, ground and hole are surfaces or shading, never text; the
+// six brass-* ramp stops are gradient stops inside the brad graphic,
+// never text either. tokens.json's `role` field is prose for humans, not
+// a machine-checkable "is this text" flag, so this list is curated by
+// hand, the same way brand/README.md's "Adding a color" process asks a
+// human to. If you add a token whose role sets text, add its name here
+// AND add a pair above, or the completeness test below will name it and
+// fail.
+const textBearing = ['ink', 'ink-soft', 'ink-muted', 'alarm', 'brass'];
 
 describe('brand tokens', () => {
   test('tokens sourced from Theme.swift match it exactly', async () => {
@@ -9,7 +39,7 @@ describe('brand tokens', () => {
     // the same arrangement format-defaults.json has with options.test.ts:
     // the two languages can no longer drift silently.
     const theme = await themeColors();
-    const pinned = Object.entries(tokens.colors).filter(
+    const pinned = Object.entries(colors).filter(
       ([, v]: [string, any]) => v.from === 'Theme.swift',
     );
 
@@ -39,17 +69,46 @@ describe('brand tokens', () => {
       return out;
     };
 
+    // Known limits. blockAfter/declared assume tokens.css keeps a FLAT,
+    // non-nested :root block and a flat, non-nested :root inside the dark
+    // @media block, with exactly ONE occurrence of each marker string
+    // (':root {' and '@media (prefers-color-scheme: dark)') in the whole
+    // file, and no '}' inside a comment or a quoted/URL value ahead of
+    // the block's real closing brace. Any of those would truncate the
+    // slice early, and silently: the wrong (shorter) block would still
+    // parse, just to the wrong values. declared's regex also treats any
+    // ';' as the end of a value regardless of quoting, so a future value
+    // that legitimately contains one, e.g. a data URI like
+    // url("data:image/svg+xml;base64,..."), would be silently truncated
+    // at the first ';' rather than rejected.
+    //
+    // The reason a broken dark-block slice gets caught loudly today is
+    // incidental, not structural: the loop below checks EVERY token with
+    // strict .toBe() equality, and tokens.json happens to list a
+    // light-differs-from-dark token (paper) first, so a declared() that
+    // silently returned the wrong span would already produce a value
+    // mismatch on the very first iteration. Tokens whose light and dark
+    // values are equal (brass and the six brass-* ramp stops) only assert
+    // dark[name] is undefined, which passes vacuously if the dark block
+    // failed to parse at all. Reorder tokens.json so a light-equals-dark
+    // token comes first, or change this loop to early-exit semantics
+    // (stop after the first pass instead of checking all of them), and
+    // that guarantee quietly erodes.
+    //
     // blockAfter stops at the first '}', which for the media query is the
     // close of its inner :root, so it captures exactly the dark overrides.
     const light = declared(blockAfter(':root {'));
     const dark = declared(blockAfter('@media (prefers-color-scheme: dark)'));
 
-    for (const [name, value] of Object.entries(tokens.colors) as [string, any][]) {
-      expect(light[name], `tokens.css :root is missing --${name}`).toBe(value.light);
+    for (const [name, value] of Object.entries(colors) as [string, any][]) {
+      expect(light[name], `tokens.css :root is missing --${name}`).toBeDefined();
+      expect(light[name], `tokens.css :root and tokens.json disagree on --${name}`).toBe(value.light);
+
       // Tokens whose dark value equals their light value are correctly
       // absent from the dark block: brass is a material, not a hue.
       if (value.dark !== value.light) {
-        expect(dark[name], `tokens.css dark block is missing --${name}`).toBe(value.dark);
+        expect(dark[name], `tokens.css dark block is missing --${name}`).toBeDefined();
+        expect(dark[name], `tokens.css dark block and tokens.json disagree on --${name}`).toBe(value.dark);
       } else {
         expect(dark[name], `--${name} should not be re-declared in dark`).toBeUndefined();
       }
@@ -57,23 +116,23 @@ describe('brand tokens', () => {
   });
 
   test('every text token clears WCAG AA on its own background', () => {
-    const c = tokens.colors;
-    const pairs: [string, string, string, number][] = [
-      ['ink on paper',           c.ink.light,       c.paper.light,  7],
-      ['ink-soft on paper',      c['ink-soft'].light, c.paper.light, 7],
-      ['ink-muted on paper',     c['ink-muted'].light, c.paper.light, 4.5],
-      ['ink on brass',           c.ink.light,       c.brass.light,  7],
-      ['alarm on paper',         c.alarm.light,     c.paper.light,  4.5],
-      ['ink on paper, dark',     c.ink.dark,        c.paper.dark,   7],
-      ['ink-soft on paper, dark', c['ink-soft'].dark, c.paper.dark,  7],
-      ['ink-muted on paper, dark', c['ink-muted'].dark, c.paper.dark, 4.5],
-      ['brass on paper, dark',   c.brass.dark,      c.paper.dark,   7],
-      ['alarm on paper, dark',   c.alarm.dark,      c.paper.dark,   4.5],
-    ];
-
-    for (const [label, fg, bg, floor] of pairs) {
+    for (const [label, , fg, bg, floor] of pairs) {
       const ratio = contrast(fromHex(fg), fromHex(bg));
       expect(ratio, `${label} is ${ratio.toFixed(2)}:1, needs ${floor}:1`).toBeGreaterThanOrEqual(floor);
+    }
+  });
+
+  test('the contrast pair table covers every text-bearing token', () => {
+    // Completeness guard for the table above. Without this, adding a new
+    // text-bearing color per brand/README.md's process and forgetting to
+    // add a pair fails silently, which is the same silent-inaccessibility
+    // shape the contrast test itself exists to prevent.
+    const exercised = new Set(pairs.map(([, fgToken]) => fgToken));
+    for (const name of textBearing) {
+      expect(
+        exercised.has(name),
+        `"${name}" is text-bearing (see tokens.json's role) but has no pair in the contrast table above; add one.`,
+      ).toBe(true);
     }
   });
 });
