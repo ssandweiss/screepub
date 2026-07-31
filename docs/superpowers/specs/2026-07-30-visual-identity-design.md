@@ -170,12 +170,12 @@ favicon, the bullet, the loading state, and the rail. Structure, in
 paint order:
 
 1. Cast shadow, offset down and right, radial fade from 36% black.
-2. Rim disc at `--brass-rim`, 41 units of a 100-unit box.
+2. Rim disc at `--brass-edge`, 41 units of a 100-unit box.
 3. Head at 39.5 units, filled with the brass ramp.
 4. Bounce light, lower right, `--brass-bounce` at 34%.
 5. Specular ellipse, upper left, white fading to nothing, rotated -28
    degrees.
-6. Hairline rim stroke at 55% of `#69460F`.
+6. Hairline rim stroke at 55% of `--brass-edge`.
 
 No slot. Real screenplay brads are smooth domed Acco fasteners. A slot
 would make it a screw, and anyone who has assembled a script would see
