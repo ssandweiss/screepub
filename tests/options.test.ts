@@ -3,6 +3,7 @@ import { Fountain } from 'fountain-js';
 import JSZip from 'jszip';
 import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions } from '../src/options';
 import { screenplayCss } from '../src/epub/css';
+import { ruleFor } from './css-rules';
 import { tokensToBody } from '../src/epub/html';
 import { buildEpub } from '../src/epub/build';
 import { toFountain } from '../src/fountain/serialize';
@@ -87,13 +88,13 @@ describe('screenplayCss with options', () => {
     }));
     expect(css).toContain('margin-left: 25%');
     expect(css).toContain('margin-right: 25%');
-    expect(css.match(/p\.character\s*{[^}]*}/)![0]).toContain('margin-left: 40%');
-    expect(css.match(/p\.parenthetical\s*{[^}]*}/)![0]).toContain('margin-left: 12%');
+    expect(ruleFor(css, 'p.character')).toContain('margin-left: 40%');
+    expect(ruleFor(css, 'p.parenthetical')).toContain('margin-left: 12%');
   });
 
   test('element spacing scales the vertical rhythm', () => {
     const css = screenplayCss(resolveFormatOptions({ elementSpacingEm: 0.6 }));
-    expect(css.match(/p\.action\s*{[^}]*}/)![0]).toContain('margin: 0.6em 0');
+    expect(ruleFor(css, 'p.action')).toContain('margin: 0.6em 0');
   });
 
   test('scene page breaks add a break rule only when enabled', () => {
@@ -105,9 +106,9 @@ describe('screenplayCss with options', () => {
 
   test('keepSpeechesWhole makes dialogue blocks unbreakable only when enabled', () => {
     const off = screenplayCss(resolveFormatOptions({}));
-    expect(off.match(/\.dialogue-block\s*{[^}]*}/)![0]).not.toContain('break-inside');
+    expect(ruleFor(off, '.dialogue-block')).not.toContain('break-inside');
     const on = screenplayCss(resolveFormatOptions({ keepSpeechesWhole: true }));
-    const block = on.match(/\.dialogue-block\s*{[^}]*}/)![0];
+    const block = ruleFor(on, '.dialogue-block');
     expect(block).toContain('page-break-inside: avoid');
     expect(block).toContain('break-inside: avoid');
   });
@@ -119,12 +120,12 @@ describe('screenplayCss with options', () => {
 
   test('body text is ragged-right (left-aligned) by default, justified when enabled', () => {
     const ragged = screenplayCss(resolveFormatOptions({}));
-    expect(ragged.match(/p\.action\s*{[^}]*}/)![0]).toContain('text-align: left');
-    expect(ragged.match(/p\.dialogue\s*{[^}]*}/)![0]).toContain('text-align: left');
+    expect(ruleFor(ragged, 'p.action')).toContain('text-align: left');
+    expect(ruleFor(ragged, 'p.dialogue')).toContain('text-align: left');
 
     const justified = screenplayCss(resolveFormatOptions({ justifyText: true }));
-    expect(justified.match(/p\.action\s*{[^}]*}/)![0]).toContain('text-align: justify');
-    expect(justified.match(/p\.dialogue\s*{[^}]*}/)![0]).toContain('text-align: justify');
+    expect(ruleFor(justified, 'p.action')).toContain('text-align: justify');
+    expect(ruleFor(justified, 'p.dialogue')).toContain('text-align: justify');
   });
 
   test('printSplitMinimums controls widows/orphans on dialogue and action', () => {
@@ -134,8 +135,8 @@ describe('screenplayCss with options', () => {
     // matching `widows: 20`.
     for (const [partial, n] of [[{}, 2], [{ printSplitMinimums: false }, 1]] as const) {
       const css = screenplayCss(resolveFormatOptions(partial));
-      for (const sel of ['p\\.action', 'p\\.dialogue']) {
-        const rule = css.match(new RegExp(`${sel}\\s*{[^}]*}`))![0];
+      for (const sel of ['p.action', 'p.dialogue']) {
+        const rule = ruleFor(css, sel);
         expect(rule).toContain(`widows: ${n};`);
         expect(rule).toContain(`orphans: ${n};`);
       }
@@ -144,17 +145,19 @@ describe('screenplayCss with options', () => {
 
   test('wrapper keeps carry the column spelling in a separate rule', () => {
     const css = screenplayCss(DEFAULT_FORMAT_OPTIONS);
-    const rule = css.match(/\.keep-together,\s*table\.dual-dialogue\s*{[^}]*}/);
-    expect(rule).not.toBeNull();
-    expect(rule![0]).toContain('-webkit-column-break-inside: avoid');
+    // Grouped rule on purpose: this test targets the comma-joined shadow
+    // selector itself (the old column-break spelling), not the bare
+    // .keep-together or table.dual-dialogue rules.
+    const rule = ruleFor(css, '.keep-together, table.dual-dialogue');
+    expect(rule).toContain('-webkit-column-break-inside: avoid');
     // iBooks bug: the column spelling must not share a declaration block
     // with page-break-inside, or Books ignores BOTH.
-    expect(rule![0]).not.toContain('page-break-inside');
+    expect(rule).not.toContain('page-break-inside');
   });
 
   test('page marker dims via opacity, not a hardcoded gray', () => {
     const css = screenplayCss(DEFAULT_FORMAT_OPTIONS);
-    const rule = css.match(/span\.page-marker\s*{[^}]*}/)![0];
+    const rule = ruleFor(css, 'span.page-marker');
     expect(rule).toContain('opacity: 0.6');
     expect(rule).not.toContain('#777777');
   });
@@ -164,12 +167,12 @@ describe('screenplayCss with options', () => {
 
 describe('tokensToBody with options', () => {
   test('keepSceneHeadingWithScene gates the heading break-after rule', () => {
-    const heading = screenplayCss(resolveFormatOptions({})).match(/h2\.scene-heading\s*{[^}]*}/)![0];
+    const heading = ruleFor(screenplayCss(resolveFormatOptions({})), 'h2.scene-heading');
     // both spellings: the legacy prefixed property AND the modern standalone
     expect(heading).toContain('page-break-after: avoid');
     expect(heading).toMatch(/[^-]break-after: avoid/);
     const off = screenplayCss(resolveFormatOptions({ keepSceneHeadingWithScene: false }));
-    expect(off.match(/h2\.scene-heading\s*{[^}]*}/)![0]).not.toContain('break-after');
+    expect(ruleFor(off, 'h2.scene-heading')).not.toContain('break-after');
     // markup carries no wrapper either way
     for (const format of [resolveFormatOptions({}), resolveFormatOptions({ keepSceneHeadingWithScene: false })]) {
       expect(tokensToBody(tokens(), { format }).files[0].xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
@@ -302,13 +305,13 @@ describe("contdMode", () => {
 describe('cueAlignment', () => {
   test('default centers cues and parentheticals in the column', () => {
     const css = screenplayCss(resolveFormatOptions({}));
-    expect(css.match(/p\.character\s*{[^}]*}/)![0]).toContain('text-align: center');
-    expect(css.match(/p\.parenthetical\s*{[^}]*}/)![0]).toContain('text-align: center');
+    expect(ruleFor(css, 'p.character')).toContain('text-align: center');
+    expect(ruleFor(css, 'p.parenthetical')).toContain('text-align: center');
   });
 
   test('indented mode uses print-style % indents instead', () => {
     const css = screenplayCss(resolveFormatOptions({ cueAlignment: 'indented', cueIndentPct: 40 }));
-    const cue = css.match(/p\.character\s*{[^}]*}/)![0];
+    const cue = ruleFor(css, 'p.character');
     expect(cue).toContain('margin-left: 40%');
     expect(cue).not.toContain('text-align: center');
   });

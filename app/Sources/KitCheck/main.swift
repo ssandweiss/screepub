@@ -405,16 +405,97 @@ expectedPartial.dialogueSideMarginPct = 9
 check(partialLoaded == expectedPartial,
       "partial sidecar overlays present field, leaves rest at fallback")
 
-// printSplitMinimums defaults true, so a round-trip that never disturbs it
-// would pass whether or not the merge line for this field exists at all —
-// the override has to run false-over-true to be a real assertion.
-let splitMinFountain = lib.appendingPathComponent("SplitMin.fountain")
-try! Data(#"{"printSplitMinimums": false}"#.utf8).write(to: ScriptSettings.sidecarURL(forFountain: splitMinFountain))
-let splitMinLoaded = ScriptSettings.load(forFountain: splitMinFountain, fallback: FormatSettings.defaults)
-var expectedSplitMin = FormatSettings.defaults
-expectedSplitMin.printSplitMinimums = false
-check(splitMinLoaded == expectedSplitMin,
-      "sidecar overrides printSplitMinimums to false against a true fallback")
+// Every PartialFormatSettings field's merge line in ScriptSettings.load
+// needs the same proof printSplitMinimums got in 5630525: a sidecar value
+// that merely equals FormatSettings.defaults passes whether or not that
+// field's `if let v = partial.x { merged.x = v }` line exists at all,
+// because `merged` starts life as a copy of `fallback`. So every row here
+// writes the OPPOSITE of the default and checks that exact field came
+// through the merge — the override direction is what makes it a real
+// assertion instead of a tautology.
+//
+// This table is also what turns the "Adding a field?" comment atop
+// FormatSettings.swift from aspirational into enforced: a field missing
+// its merge line, or a merge line silently deleted, fails a named row here
+// instead of passing every check in the suite. And a field added WITH its
+// merge line but WITHOUT a row here — which would otherwise pass every
+// check silently — is caught by the completeness check right after the
+// loop below, which diffs this table's field names against
+// FormatSettings' own encoded keys. Add a field to PartialFormatSettings?
+// Add its row here too, or one of the two checks catches the gap.
+struct SidecarOverrideCase {
+    let field: String
+    let json: String
+    let apply: (inout FormatSettings) -> Void
+}
+
+let sidecarOverrideCases: [SidecarOverrideCase] = [
+    .init(field: "scenePageBreaks", json: #"{"scenePageBreaks": true}"#,
+          apply: { $0.scenePageBreaks = true }),
+    .init(field: "dialogueSideMarginPct", json: #"{"dialogueSideMarginPct": 5}"#,
+          apply: { $0.dialogueSideMarginPct = 5 }),
+    .init(field: "cueIndentPct", json: #"{"cueIndentPct": 10}"#,
+          apply: { $0.cueIndentPct = 10 }),
+    .init(field: "parentheticalIndentPct", json: #"{"parentheticalIndentPct": 5}"#,
+          apply: { $0.parentheticalIndentPct = 5 }),
+    .init(field: "elementSpacingEm", json: #"{"elementSpacingEm": 1.5}"#,
+          apply: { $0.elementSpacingEm = 1.5 }),
+    .init(field: "keepSceneHeadingWithScene", json: #"{"keepSceneHeadingWithScene": false}"#,
+          apply: { $0.keepSceneHeadingWithScene = false }),
+    .init(field: "keepSpeechesWhole", json: #"{"keepSpeechesWhole": true}"#,
+          apply: { $0.keepSpeechesWhole = true }),
+    .init(field: "fontFamily", json: #"{"fontFamily": "serif"}"#,
+          apply: { $0.fontFamily = "serif" }),
+    .init(field: "rejoinSplitDialogue", json: #"{"rejoinSplitDialogue": false}"#,
+          apply: { $0.rejoinSplitDialogue = false }),
+    .init(field: "contdMode", json: #"{"contdMode": "strip"}"#,
+          apply: { $0.contdMode = "strip" }),
+    .init(field: "cueAlignment", json: #"{"cueAlignment": "indented"}"#,
+          apply: { $0.cueAlignment = "indented" }),
+    .init(field: "includeTitlePage", json: #"{"includeTitlePage": false}"#,
+          apply: { $0.includeTitlePage = false }),
+    .init(field: "showSceneNumbers", json: #"{"showSceneNumbers": true}"#,
+          apply: { $0.showSceneNumbers = true }),
+    .init(field: "showPageMarkers", json: #"{"showPageMarkers": true}"#,
+          apply: { $0.showPageMarkers = true }),
+    .init(field: "dualDialogue", json: #"{"dualDialogue": "sequential"}"#,
+          apply: { $0.dualDialogue = "sequential" }),
+    .init(field: "justifyText", json: #"{"justifyText": true}"#,
+          apply: { $0.justifyText = true }),
+    .init(field: "printSplitMinimums", json: #"{"printSplitMinimums": false}"#,
+          apply: { $0.printSplitMinimums = false }),
+]
+
+for sidecarCase in sidecarOverrideCases {
+    let caseFountain = lib.appendingPathComponent("Override-\(sidecarCase.field).fountain")
+    try! Data(sidecarCase.json.utf8).write(to: ScriptSettings.sidecarURL(forFountain: caseFountain))
+    let caseLoaded = ScriptSettings.load(forFountain: caseFountain, fallback: FormatSettings.defaults)
+    var expected = FormatSettings.defaults
+    sidecarCase.apply(&expected)
+    // Whole-struct equality is strictly stronger than a per-field check:
+    // each row's sidecar JSON carries exactly one key, so a correct merge
+    // must equal `expected` (defaults with just that field overridden) —
+    // proving the merge clobbered nothing else, not just that the target
+    // field landed.
+    check(caseLoaded == expected,
+          "sidecar merge line overrides \(sidecarCase.field) against its default fallback")
+}
+
+// The table above is only complete if every FormatSettings field has a
+// row — otherwise a field added WITH its merge line but WITHOUT a row
+// here passes silently, and the "Adding a field?" comment goes back to
+// being aspirational. FormatSettings mirrors PartialFormatSettings
+// one-to-one and is Codable, so its encoded keys are the authority on
+// what a complete table covers.
+if let encodedDefaults = try? JSONEncoder().encode(FormatSettings.defaults),
+   let decodedObject = try? JSONSerialization.jsonObject(with: encodedDefaults) as? [String: Any] {
+    let allFields = Set(decodedObject.keys)
+    let coveredFields = Set(sidecarOverrideCases.map(\.field))
+    check(coveredFields == allFields,
+          "every FormatSettings field has a sidecar override row (missing: \(allFields.subtracting(coveredFields)))")
+} else {
+    check(false, "FormatSettings.defaults encodes to a JSON object")
+}
 
 // — feedback issue URL —
 let feedback = Feedback.newIssueURL(appVersion: "0.1.0", osVersion: "macOS 15.0", context: "scanned: no text")
