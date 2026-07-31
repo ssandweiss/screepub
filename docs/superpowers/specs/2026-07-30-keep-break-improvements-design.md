@@ -1,4 +1,4 @@
-# Keep/break improvements: five small items from the renderer research
+# Keep/break improvements: six small items from the renderer research
 
 Date: 2026-07-30
 Status: approved (brainstorm complete)
@@ -11,14 +11,14 @@ also approved on main and also touching css.ts/html.ts territory)
 Batch the small, concrete improvements surfaced by the 2026-07-30
 advanced-formatting research sweep (CSS fragmentation support across
 engines; Kindle conditional formatting; production-practice survey) into
-one branch. Five items: a widows/orphans knob, a third keep spelling,
-MOBI scene breaks, a page-marker theme fix, and the doc corrections the
-research demands. Everything here is engine + docs + one app toggle; no
-parser changes.
+one branch. Six items: a widows/orphans knob, a third keep spelling,
+MOBI scene breaks, a page-marker theme fix, the Apple Books
+font/alignment meta, and the doc corrections the research demands.
+Everything here is engine + docs + one app toggle; no parser changes.
 
 ## Decisions from the brainstorm
 
-- **Scope:** the five items below, nothing else. Deliberately excluded:
+- **Scope:** the six items below, nothing else. Deliberately excluded:
   `amzn-*` conditional CSS blocks (the useful `amzn-et` variant does not
   survive our own ebook-convert pipeline, `amzn-kf8` also matches KFX so
   it cannot isolate old Kindles, and an empty block crashes legacy
@@ -29,12 +29,13 @@ parser changes.
 - **Knob shape (Sam's call):** widows/orphans ships as a toggle,
   default on at the print-rule value of 2; off means 1 (tight packing).
   Fits the registry convention that house-style rules get options.
-- **Landing shape:** one branch, five ordered commits, one review.
+- **Landing shape:** one branch, six ordered commits, one review.
 - **Sequencing:** the 2026-07-30 merge train already landed (v0.4.2),
-  so main is the base. The rich-formatting spec
-  (2026-07-30-rich-formatting-design.md) is also approved and shares
-  css.ts/html.ts territory; whichever implements second rebases, and
-  this batch is the smaller, likely first, mover.
+  so main is the base. One umbrella implementation plan sequences this
+  batch (phase A) ahead of the rich-formatting spec's two phases: the
+  batch builds the shared MOBI options plumbing and the knob-ritual
+  worked example that rich-formatting phase 2 reuses, and one combined
+  device pass settles every pending registry verdict.
 
 ## Item 1: print split minimums (widows/orphans knob)
 
@@ -111,7 +112,22 @@ parser changes.
   it full-strength: a harmless degrade. Enhanced Typesetting lists
   opacity as supported (Guidelines 2026.2 §18.1).
 
-## Item 5: doc corrections and new invariants
+## Item 5: Apple Books font and alignment meta
+
+- **Engine (src/epub/build.ts):** the OPF gains
+  `<meta property="ibooks:specified-fonts">true</meta>`, with the
+  required prefix declaration on the package element
+  (`prefix="ibooks: http://vocabulary.itunes.apple.com/rdf/ibooks/vocabulary-extensions-1.0/"`);
+  epubcheck flags the property without the prefix.
+- **Why:** without it, Apple Books' user Justify setting overrides our
+  ragged-right `text-align` and Books ignores `font-family` choices.
+  Already flagged as the highest-payoff tier-2 fix in device-map §5
+  ("Now" item 2), and it future-proofs the rich-formatting spec's font
+  classes. Books-only semantics; every other reader ignores the meta.
+- **Registry:** note under #6b (justifyText) that this meta is what
+  makes the knob hold in Apple Books; check the item off device-map §5.
+
+## Item 6: doc corrections and new invariants
 
 - **device-map.md §2.1:** rewrite the rendering paragraph. The claim
   "page-break-inside, widows, orphans all ignored under ET" comes from
@@ -154,10 +170,13 @@ TDD per item, in the standing bun:test suite:
    scene-heading count minus one; off → none.
 3. kit-check: FormatSettings round-trip for the new field;
    format-defaults.json three-way pin.
-4. Fixture sweep + epubcheck (CSS change rule), end-to-end spot check
+4. OPF test: the ibooks meta and its prefix declaration present;
+   epubcheck stays clean.
+5. Fixture sweep + epubcheck (CSS change rule), end-to-end spot check
    with a real PDF, app bundle rebuild (engine changed).
-5. Device verdicts stay pending until Sam's next KFX pass: the knob's
-   entry, #8c with the oversize caveat, #16.
+6. Device verdicts stay pending until Sam's next KFX pass: the knob's
+   entry, #8c with the oversize caveat, #16 (plus an Apple Books look
+   at ragged-right holding with Justify on, for item 5).
 
 ## Out of scope
 

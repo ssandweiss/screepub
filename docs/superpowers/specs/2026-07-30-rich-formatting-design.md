@@ -103,11 +103,14 @@ Teach the pipeline to preserve richer formatting from screenplay PDFs:
 - Unit: mark-to-item matcher (pure geometry); `joinLine` with `u` runs and
   combos; a pinning test for MOBI `inline()`'s existing underscore case.
 - Fixture: make-fixture.py draws rects under one dialogue phrase and one
-  action phrase, plus two decoys (full-width rule, mid-height strike);
-  integration test asserts the emitted Fountain contains the underscores and
-  not the decoys. Regenerate the committed fixture.
+  action phrase, plus three decoys (full-width rule, mid-height strike, and
+  a table-style border row just below the text band, the Beat-furniture
+  shape); integration test asserts the emitted Fountain contains the
+  underscores and not the decoys. Regenerate the committed fixture.
 - Sweep: full fixture suite + epubcheck + real-PDF spot checks (final-draft
-  exercises path-heavy pages; celtx exercises the zero-path case).
+  exercises path-heavy pages; celtx exercises the zero-path case; a
+  Beat-generated PDF, if the local set has one, exercises table-cell
+  furniture borders, the likeliest real-world underline false positive).
 
 ### Files touched
 
@@ -124,7 +127,9 @@ changes at all in phase 1.
   character count. Size from the text transform's vertical scale
   (`transform[3]` for unrotated text, which screenplays are); family bucket from the
   resolved PostScript base name (subset prefix `ABCDEF+` stripped):
-  - courier/mono → `mono`
+  - courier/mono/lettergothic/prestige → `mono` (Letter Gothic and
+    Prestige Elite are real screenplay monospace faces; match the joined
+    name, NOT bare "gothic", which would swallow Century Gothic, a sans)
   - times/georgia/garamond/roman → `serif`
   - script/hand/brush/comic → `cursive`
   - everything else → `sans`
@@ -144,6 +149,11 @@ changes at all in phase 1.
   `shouldBreak`, so a deviant block glued to plain action still isolates.
 - `classify.ts` carries fmt from block to element mechanically. fmt is never a
   classification input; the parser stays format-option-free.
+- Because detection and serialization are unconditional, an fmt-bearing PDF
+  produces different `.fountain` output than today regardless of the knob
+  (new notes, block isolation at fmt boundaries). That is the design, not a
+  regression; uniform single-font screenplays stay byte-identical by
+  construction.
 - Title-page elements never reach body serialization, so the oversized title
   emits nothing. Page numbers and suppressed boilerplate are likewise outside
   the body path.
@@ -240,3 +250,9 @@ tests, fixtures, registry.
 2. Phase 2 was gated on `page-span-rules` and the mini-slug stack merging;
    that precondition was met when the v0.4.2 merge train landed both
    (2026-07-30), so phase 2 is unblocked and simply follows phase 1.
+3. This spec is sequenced with the keep-break batch
+   (2026-07-30-keep-break-improvements-design.md) by one umbrella
+   implementation plan: the batch lands first and builds the shared MOBI
+   options plumbing plus the knob-ritual worked example that phase 2 here
+   reuses, and one combined device pass settles every pending registry
+   verdict in a single sideload session.
