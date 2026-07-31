@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { Fountain } from 'fountain-js';
 import { buildMobi } from '../src/mobi/writer';
 import { tokensToMobiHtml } from '../src/mobi/html';
+import { resolveFormatOptions } from '../src/options';
 
 const SAMPLE = `INT. KITCHEN - DAY
 
@@ -71,6 +72,16 @@ describe('tokensToMobiHtml', () => {
     const tokens = new Fountain().parse('INT. STORE - NIGHT\n\nThe gate rattles.\n\n.LATER\n\nStill on.\n', true).tokens;
     const html = tokensToMobiHtml(tokens, { title: 'T' });
     expect(html).toContain('<p><b>LATER</b></p>');
+  });
+
+  test('scenePageBreaks emits mbp:pagebreak before every scene heading except the first', () => {
+    const src = 'INT. A - DAY\n\nAction.\n\nINT. B - NIGHT\n\nMore.\n';
+    const { tokens } = new Fountain().parse(src, true);
+    const off = tokensToMobiHtml(tokens, { title: 'T' });
+    const on = tokensToMobiHtml(tokens, { title: 'T' }, resolveFormatOptions({ scenePageBreaks: true }));
+    // The title page always contributes exactly one pagebreak of its own.
+    expect(off.match(/<mbp:pagebreak\/>/g)!.length).toBe(1);
+    expect(on.match(/<mbp:pagebreak\/>/g)!.length).toBe(2);
   });
 });
 

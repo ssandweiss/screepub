@@ -82,7 +82,7 @@ async function renderBooks(
   const epub = await buildEpub(withId, tokensToBody(tokens, { format }), format);
   const previewHtml = tokensToPreviewHtml(tokens, format);
   const mobi = wantMobi
-    ? buildMobi({ title: meta.title, author: meta.author, html: tokensToMobiHtml(tokens, meta) })
+    ? buildMobi({ title: meta.title, author: meta.author, html: tokensToMobiHtml(tokens, meta, format) })
     : undefined;
   return { epub, mobi, previewHtml };
 }
