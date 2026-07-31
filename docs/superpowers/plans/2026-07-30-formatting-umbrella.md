@@ -551,11 +551,18 @@ Registry #17 entry, verbatim:
   Apple Books: WebKit implements the properties; untested on Books.
   The registry's old belief that ET ignores them traced to the stale
   2026.2 guidelines PDF appendix; live KDP pages + device tests win.
-- **Interaction:** with #8c ON a kept speech never splits, so its
-  widows never fire; independent knobs, no conflict.
+- **Interaction (load-bearing):** #8b's `.keep-together` is ALWAYS on and
+  wraps cue + parentheticals + the FIRST dialogue paragraph in
+  `break-inside: avoid`. A single-paragraph speech therefore never
+  splits and its widows/orphans never fire. This rule bites on the TAIL
+  paragraphs of multi-paragraph speeches and on action. With #8c also
+  ON, whole speeches are atomic and the dialogue arm is fully inert;
+  the action arm is unaffected in every mode.
 - **App option:** "Print-style split minimums" (reader rail, Page group).
-- **Device verdict: pending —** next KFX pass: does a 3-line speech at
-  a page seam hold 2+2 (and OFF hold 1+1)? The verdict lands here.
+- **Device verdict: pending —** next KFX pass. Test with a MULTI-paragraph
+  speech or a long action block, NOT a short speech: a short speech moves
+  whole because of #8b's keep, which would validate the wrong rule. Does
+  the tail hold 2+2, and OFF hold 1+1?
 - **Code:** `src/options.ts`, `src/epub/css.ts`, app FormatSettings +
   ReaderRail.
 ```
@@ -588,9 +595,9 @@ Same procedure: plan written at phase start as `2026-07-30-rich-formatting-phase
 
 ## Phase D: the combined device pass (Sam-owned, one sideload session)
 
-One KFX build + one Apple Books handoff of a real script carrying: a 3-line speech near a page seam, the set's longest speech, a CUT TO: near a seam, a dual-dialogue exchange, an underlined phrase (post-B), and a font-shifted insert (post-C). Verdicts to land, each in its registry slot:
+One KFX build + one Apple Books handoff of a real script carrying: a MULTI-paragraph speech and a long action block near page seams, the set's longest speech, a CUT TO: near a seam, a dual-dialogue exchange, an underlined phrase (post-B), and a font-shifted insert (post-C). Verdicts to land, each in its registry slot:
 
-- [ ] #17 printSplitMinimums: 2+2 holds at seams; OFF gives 1+1.
+- [ ] #17 printSplitMinimums: 2+2 holds at seams; OFF gives 1+1. Use a multi-paragraph speech or action, never a short speech: #8b's always-on keep moves a short speech whole and would validate the wrong rule.
 - [ ] #8c keepSpeechesWhole ON: kept speech moves whole; gap size noted; the oversize speech breaks bare without blank pages.
 - [ ] #16 transitions: no CUT TO: opens a page.
 - [ ] #10b tall dual exchange behavior.
