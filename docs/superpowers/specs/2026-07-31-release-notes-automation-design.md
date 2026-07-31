@@ -65,6 +65,17 @@ atomic so main and tag land together or not at all); the `checks` job
 asserts the tagged commit is an ancestor of `origin/main`; the hook also
 blocks `git commit --amend` and `git reset` when HEAD carries a `v*` tag.
 
+**Amended 2026-07-31: the third part was never built, on purpose.** The
+hook does not special-case `git commit --amend` or `git reset` on a
+tagged commit. That trade-off was accepted rather than fixed, because
+the `checks` job's ancestor assertion (part two, above) already catches
+this UNIVERSALLY -- an amend or reset that orphans a tagged commit fails
+the same way whether it happened through this hook's blind spot, a tag
+typed straight into a terminal, or a tag created on another machine
+entirely. Adding a local, Claude-Code-only special case for one of many
+ways to orphan a commit would have been redundant with a check that
+already covers all of them.
+
 ### 3. The honesty section must DIFF the registry, not grep it **[v1 was wrong]**
 
 v1 said: registry entries "whose body still contains `Device verdict:
@@ -119,7 +130,7 @@ The technical writer's template, adopted substantially as written. Its
 load-bearing parts, each measured against the approved 0.5.0 draft:
 
 - **Caps, with 0.5.0's actuals as calibration:** 350 words total (0.5.0:
-  326), one-sentence lede under 25 words (12), two change headings and six
+  325), one-sentence lede under 25 words (12), two change headings and six
   bullets total (2 and 6), three caveats max (2), optional closer under 70
   words (48).
 - **The cut ratio, stated:** 37 commits produced 6 bullets. The default
@@ -262,16 +273,41 @@ machine) with none of that.
   bypass firing before the permission prompt).
 - **Wiring:** `.claude/settings.local.json`, untracked.
 - **Matching:** `git tag`, `git push` with `--tags`/`--follow-tags`/
-  `refs/tags/`, and `gh release create` (which creates the tag server-side).
-  It does not parse a version out of the command, because the happy path
-  `git push --atomic origin main v0.5.0` and `--follow-tags` are exactly
-  the hard cases; instead it enumerates local `v*` tags absent from origin
-  and checks each with `git cat-file -e <tag>^{commit}:docs/releases/<v>.md`.
+  `refs/tags/` or naming a `vX.Y.Z` token, and `gh release create` (which
+  creates the tag server-side).
+- **Version resolution (reconciled 2026-07-31, after a follow-up review
+  found this passage never matched what was built):** this section
+  originally said the hook "does not parse a version out of the
+  command... instead it enumerates local `v*` tags absent from origin
+  and checks each with `git cat-file -e <tag>^{commit}:docs/releases/
+  <v>.md`." That design was never implemented. What ships instead: the
+  hook parses every `vX.Y.Z(-prerelease)?` token out of the COMMAND TEXT
+  itself (deduplicated, every token checked, not just the first) and
+  asserts `git cat-file -e HEAD:docs/releases/<version>.md` for each --
+  checking the working tree's `HEAD`, not the tag's own commit, because
+  at the moment this hook fires the tag does not exist yet. Matching is
+  done against shell SEGMENTS of the command (split on `;`/`&`/`|`/
+  newline, with a leading env-assignment or loop/conditional keyword
+  stripped), not only the command's first token, so `cd /tmp && git tag
+  --list` and `for x in 1; do git tag --list; done` are recognized the
+  same as a bare `git tag --list`. Whether a command counts as COMPOUND
+  (more than one real invocation joined by a metacharacter) is still
+  decided by a cruder whole-string test on purpose, because that is what
+  catches an invocation hidden inside `$(...)`/backticks that
+  segment-splitting cannot see into.
 - **Fails closed** on a matched-but-unresolvable command; exits 0
   immediately on non-matching Bash so unrelated commands are not hostage to
   whether `jq` is installed.
-- **Never blocks recovery:** anything containing `tag -d` or `:refs/tags/`
-  is explicitly allowed. A guard that blocks the fix is worse than none.
+- **Recovery is guaranteed for the forms it recognizes** (reconciled
+  2026-07-31): `git tag -d`/`--delete`, `git push --delete`/`-d`, and
+  pushing a tag deletion (`:refs/tags/...`), matched per invocation so a
+  compound command made ENTIRELY of recognized deletes also passes (the
+  standard `git tag -d v1 && git push origin :refs/tags/v1` undo). This
+  section originally said "anything containing `tag -d` or `:refs/tags/`
+  is explicitly allowed," full stop; the shipped guarantee is narrower
+  and says so: an unrecognized spelling of a delete fails closed like
+  anything else the hook cannot resolve, and a delete outnumbering a real
+  create in the same compound command does not exempt the create.
 - Documented in plain words as an ergonomics guard, not a security
   boundary. Anyone can tag from a terminal.
 
@@ -342,6 +378,18 @@ From the approved draft. Delete `docs/release-notes-0.5.0-draft.md`.
   `rendering engine`, and any real title, author or character name. Seven
   strings, no judgment, runs without Claude. Deliberately excludes EPUB,
   MOBI and "orphan", which the approved draft uses correctly.
+
+  **Corrected 2026-07-31, during implementation:** the "any real title,
+  author or character name" clause above was NOT built as a mechanical
+  ban, and should not be. Hardcoding a real script title, author or
+  character name in a committed test file would BE the leak it exists to
+  prevent, sitting in the one file a stranger auditing this public repo
+  is most likely to open. The seven strings actually shipped are all
+  generic jargon, none of them anyone's private information. The
+  confidentiality check for real names is human-only, by design, at the
+  `/release` skill's approval gate (spec deliverable 3, moment one) --
+  the reviewer, not a grep, is the only thing that can tell a real name
+  from a plausible-looking placeholder.
 
 ## Out of scope
 

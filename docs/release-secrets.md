@@ -42,20 +42,27 @@ base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy    # paste as AC_API_KEY_P8_BASE64
 
 ## Sanity check
 
-Push a throwaway tag and watch the run:
+**Updated 2026-07-31: a throwaway tag no longer works here.** Both the
+`require-release-notes` hook and the `checks` job now require a
+committed `docs/releases/<version>.md` for whatever version the tag
+names, and nothing is committed for a one-off smoke-test tag like
+`v0.0.2-rc`. Rather than writing throwaway notes for a throwaway
+version, use `release.yml`'s `workflow_dispatch` trigger (see its
+"Re-run entry point" comment) to run the SAME workflow again against a
+tag that already has real notes — the most recent real release tag,
+e.g. `v0.4.2`:
 
 ```bash
-git tag v0.0.2-rc && git push origin v0.0.2-rc
+gh workflow run release.yml --ref v0.4.2
+gh run watch --exit-status
 ```
 
-Green job → a GitHub Release with three assets attached:
-`Screepub-macOS.dmg` (universal), plus `screepub-cli-macos-arm64.tar.gz`
-and `screepub-cli-macos-x64.tar.gz`. Delete the test tag/release
-afterward if you like:
-
-```bash
-gh release delete v0.0.2-rc --yes && git push --delete origin v0.0.2-rc
-```
+Green job → the existing GitHub Release for that tag gets its three
+assets re-uploaded (`Screepub-macOS.dmg`, universal, plus
+`screepub-cli-macos-arm64.tar.gz` and `screepub-cli-macos-x64.tar.gz`):
+the publish step is idempotent (`gh release upload --clobber`), so this
+rebuilds and re-notarizes the real release rather than minting a fake
+one. Nothing to delete afterward.
 
 Then do the real acceptance test: download the DMG on a **different Mac**,
 open it, drag to Applications, double-click, and convert a PDF — that's

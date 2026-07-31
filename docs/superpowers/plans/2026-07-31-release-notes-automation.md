@@ -64,7 +64,7 @@
 Create `docs/release-notes-template.md` with the content specified in the spec's deliverable 1. It must contain, in this order:
 
 1. An instruction to read the two most recent files in `docs/releases/` before drafting, and to match their length and vocabulary.
-2. A caps table with 0.5.0's actuals as calibration: whole file 350 words (0.5.0: 326); lede 1 sentence, 25 words (12); change sections 2 headings, 6 bullets total (2 and 6); one bullet = bold claim ≤10 words + ≤50 words (3 + 46); Good to know 3 bullets max (2); closer 1 paragraph, 70 words, optional (48).
+2. A caps table with 0.5.0's actuals as calibration: whole file 350 words (0.5.0: 325); lede 1 sentence, 25 words (12); change sections 2 headings, 6 bullets total (2 and 6); one bullet = bold claim ≤10 words + ≤50 words (3 + 46); Good to know 3 bullets max (2); closer 1 paragraph, 70 words, optional (48).
 3. The cut ratio, stated with numbers: 0.5.0 was 37 commits and 34 non-merge changes and shipped 6 bullets; whole merged branches produced nothing; the default disposition for a commit is NO bullet.
 4. Five slots: (1) privacy/requirements/network change, one line, before the lede, usually absent; (2) lede, one sentence naming the theme in reader terms; (3) improvements under ONE heading named for the reader's outcome, new and improved together, fallback `## What's new`; (4) fixes under ONE heading named for who was affected, fallback `## What's fixed`; (5) `## Good to know`, then the optional italic closer. Plus an explicit instruction NOT to use New/Improved/Fixed/Changed as a fixed heading set.
 5. Bullet form: `**Claim in the reader's words.** Explanation.`
@@ -237,6 +237,11 @@ import { collectCommits } from '../tools/release-notes';
 /** A throwaway git repo, so tests never depend on live history. */
 function scratchRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), 'relnotes-'));
+  // MARKER (see correction 4 above): `sh -c` string interpolation is
+  // safe here only because every `cmd` below is a hardcoded literal.
+  // The real tool's equivalent helper (further down this file) takes an
+  // argument built from a caller-supplied tag name and is NOT safe to
+  // copy this shape into.
   const run = (cmd: string) => Bun.spawnSync(['sh', '-c', cmd], { cwd: dir });
   run('git init -q');
   run('git config user.email dev@example.com');
@@ -250,6 +255,8 @@ function scratchRepo(): string {
 describe('collectCommits', () => {
   test('returns subjects since the given tag, newest last', () => {
     const dir = scratchRepo();
+    // MARKER (see correction 4 above): safe only because `cmd` is a
+    // hardcoded literal below, never caller-supplied.
     const run = (cmd: string) => Bun.spawnSync(['sh', '-c', cmd], { cwd: dir });
     writeFileSync(join(dir, 'b.txt'), 'two');
     run('git add -A && git commit -q -m "add the second thing"');
@@ -261,6 +268,8 @@ describe('collectCommits', () => {
 
   test('truncates a very long subject and strips control characters', () => {
     const dir = scratchRepo();
+    // MARKER (see correction 4 above): safe only because `cmd` is a
+    // hardcoded literal below, never caller-supplied.
     const run = (cmd: string) => Bun.spawnSync(['sh', '-c', cmd], { cwd: dir });
     const nasty = 'x'.repeat(400) + '\x1B[31mred';
     writeFileSync(join(dir, 'c.txt'), 'three');
@@ -299,6 +308,11 @@ export interface CommitFact {
 
 const MAX_SUBJECT = 200;
 
+// MARKER (see correction 4 above): THIS is the injectable one. `args`
+// below is built from `sinceTag`, which is caller-supplied (ultimately
+// a tag name), and interpolating it into `sh -c` lets a crafted tag name
+// execute. Do not copy this shape verbatim; use array-form
+// `Bun.spawnSync(['git', ...])` with no shell instead.
 function git(cwd: string, args: string): string {
   const proc = Bun.spawnSync(['sh', '-c', `git ${args}`], { cwd });
   if (proc.exitCode !== 0) {
