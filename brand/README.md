@@ -1,0 +1,84 @@
+# Screepub brand system
+
+The identity, in a form a website can use. The design decisions and their
+reasoning live in
+[the spec](../docs/superpowers/specs/2026-07-30-visual-identity-design.md);
+this file is the operating manual.
+
+## What's here
+
+- `tokens.json` — source of truth. Every color, with a `from` field saying
+  where it came from.
+- `tokens.css` — the same values as custom properties, light and dark.
+- `components/` — eight self-contained previews. Open any of them in a
+  browser. Each opens with a `@dsCard` marker so the Design System pane
+  indexes it without explicit registration.
+
+## The pinning rule
+
+Five tokens (`paper`, `ink`, `brass`, `alarm`, `hole`) are shared with the Mac
+app. `app/Sources/ScreepubApp/Theme.swift` is the source and `tokens.json`
+mirrors it. `tests/brand-tokens.test.ts` parses the Swift and fails if they
+disagree, the same arrangement `format-defaults.json` has with
+`options.test.ts`.
+
+**If that test fails, change `tokens.json`, not the app.** Change the app only
+when you mean to change the app, and then update `tokens.json` to match.
+
+The other tokens are web-only. `Theme.swift` has exactly two text weights and
+the second, `inkFaint`, is `ink` at 55% alpha. That blends to `#7F7C74` on
+paper, which measures 3.73:1 and fails WCAG AA for normal text. It is fine for
+a one-line caption in a native window and wrong for a web page, so the web has
+its own `ink-muted` at `#6D6960` (4.90:1) and an `ink-soft` for prose that the
+app never needed.
+
+## Adding a color
+
+Don't, if you can avoid it. The palette is six colors and one of them is for
+errors. If you must:
+
+1. Add it to `tokens.json` with an honest `from` value.
+2. Add it to `tokens.css` in both blocks, or only `:root` if it is
+   mode-independent the way brass is.
+3. If anything sets text in it, add a pair to the contrast test in
+   `tests/brand-tokens.test.ts`. Floors are 7:1 for body and headings, 4.5:1
+   for captions and transitions. Darken the color rather than lowering the
+   floor.
+
+## var() is fine here
+
+`CLAUDE.md` bans `var()`, `min()` and `clamp()` in CSS. That rule is about
+`src/epub/css.ts` and only that: Adobe RMSDK, which is Kobo and tolino's EPUB
+path, can blank an entire book on a value function it cannot parse. This
+folder ships to modern browsers. Use `var()` and `clamp()` here, and don't
+carry them back into `css.ts`.
+
+## The brad symbols are defined per-document
+
+While building `page-frame.html`, cross-file SVG `<use href="brad.html#brad">`
+turned out not to resolve in Chromium. Serving the files over HTTP instead of
+`file://` did not fix it either: the referenced document is HTML, not an
+XML-parseable SVG resource, so the fragment never resolves. `page-frame.html`
+works around this by inlining `brad.html`'s `<defs>` block and pointing its
+`<use>` elements at `#brad`/`#punch` within its own document instead of
+across files. `brad.html` keeps its own copy of the same `<defs>` for its own
+preview.
+
+Consequence for the site: the `<defs>` block cannot be written once and
+shared by reference across pages. The site's layout must define the `#brad`
+and `#punch` symbols once at its root rather than referencing them across
+files.
+
+## Fonts
+
+Courier Prime for structure, Literata for prose. The previews pull both from
+Google Fonts for convenience. The site self-hosts them; both are open licensed,
+which is what makes that legal.
+
+## Pushing to Claude Design
+
+`DesignSync` reads this folder. List, then plan, then write:
+
+    list_files → finalize_plan (writes: brand/**) → write_files
+
+Push components one at a time rather than replacing the project wholesale.
