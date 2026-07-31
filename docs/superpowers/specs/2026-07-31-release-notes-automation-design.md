@@ -1,192 +1,348 @@
-# Release notes: draft, review, publish — design
+# Release notes: draft, review, publish — design (v2)
 
 Date: 2026-07-31
-Status: approved (brainstorm complete)
+Status: revised after a five-persona review; awaiting Sam's approval
 Branch: release-notes-automation (off main)
+
+v1 of this spec was reviewed by a release engineer, a DX designer, a
+security reviewer, a technical writer and a YAGNI skeptic. Four findings
+changed the design materially and are called out inline as **[v1 was
+wrong]**. Everything each reviewer proved with measurements has been
+re-verified here before adoption.
 
 ## Goal
 
-Every release ships notes an average reader can understand, written in a
-fixed template's voice, reviewed by Sam before anything publishes, and
-carried into the GitHub release automatically. Make the failure mode
-(tagging a release with no notes) unreachable rather than merely detected.
+Every release ships notes a screenwriter can read, in a fixed voice,
+reviewed by Sam before anything publishes, carried into the GitHub release
+automatically. Make the failure states unreachable, not merely detected.
 
-Today `release.yml` hardcodes a five-line body: install instructions plus
-a DMG checksum. Four releases shipped that way. There is no CHANGELOG.
+Today `release.yml` hardcodes a five-line body. Four releases shipped that
+way.
 
-## Decisions from the brainstorm
+## What changed from v1, in order of severity
 
-- **Who drafts:** Claude, on request, from the commits since the last tag.
-  The judgment this needs (plain language, what an average reader cares
-  about, what is device-verified) is not scriptable.
-- **Where notes live:** one committed file per release,
-  `docs/releases/<version>.md`, keyed on the version without the `v`
-  (matching `package.json`, and reading well as a future website path).
-- **Command scope:** drafts notes and PROPOSES the version. It also
-  commits and tags. It never pushes. Pushing publishes; that stays Sam's.
-  - **This widened mid-brainstorm, deliberately.** Asked first, Sam chose
-    "notes plus propose the version, you bump and tag yourself." The
-    later "can we prevent failure" question changed it: if the command
-    does not create the tag, nothing stops a tag from existing without
-    notes, and prevention degrades to detection. Commit-then-tag inside
-    one command is the whole mechanism. Sam approved that framing, but it
-    is called out here because it contradicts an earlier answer and is
-    worth a second look. If he would rather keep tagging by hand, layers
-    2 through 4 still stand and layer 1 is simply lost.
-- **Honesty section:** built from `docs/formatting-options-log.md`
-  entries still marked `Device verdict: pending`, not from memory.
-- **Prevention over detection:** see the four layers below.
+### 1. The `.claude/` narrowing is CUT entirely **[v1 was wrong]**
 
-## The failure being designed against
+v1 proposed tracking `.claude/skills/` and `.claude/settings.json`.
 
-`release.yml` reading a notes file that does not exist is an expensive
-failure: the tag is already public and notarization has already burned
-15 to 25 minutes (three sequential `notarytool --wait` submissions).
-Recovery means deleting a public tag and re-tagging.
+Two independent problems, both verified:
 
-Four layers, cheapest first:
+- `.gitignore:14` is `.claude/` with a trailing slash. Git does not descend
+  into an excluded directory, so a `!.claude/skills/` re-include never
+  matches. The natural fix fails silently, and the natural response to that
+  (`git add -f`) overrides every remaining deny.
+- `.claude/worktrees/` currently holds FOUR complete repo checkouts. The
+  `/fixtures/` rule is root-anchored on purpose (so `tests/fixtures/` stays
+  committed), so it does NOT protect
+  `.claude/worktrees/<name>/fixtures/<real script>.pdf`. Verified with
+  `git check-ignore -v`: that path is ignored **solely** by the `.claude/`
+  line this spec proposed to narrow. This is the same shape as the
+  near-miss caught at publication.
 
-1. **Prevent by ordering (the real fix).** `/release` writes the notes,
-   waits for approval, then commits notes + version bump and creates the
-   annotated tag ON that commit. The tag cannot exist without the notes
-   because one command makes both, in that order.
-2. **Harness hook.** A `PreToolUse` hook blocks any Bash call creating or
-   pushing a `v*` tag when `docs/releases/<version>.md` is absent at that
-   commit. This enforces the rule on CLAUDE, in future sessions with no
-   memory of this one. Limit, stated plainly: hooks only fire on tool
-   calls made through Claude Code. A tag typed in Sam's own terminal is
-   not intercepted, which is why layer 3 exists.
-3. **CI backstop on main.** On every push: if `package.json`'s version
-   changed, `docs/releases/<version>.md` must exist at that commit. Universal,
-   covers hand-made tags, fails in seconds before a tag exists.
-4. **Fail cheap in release.yml.** Validate the notes file in the FIRST
-   step, before Rosetta, signing or notarization. 20 seconds, not 20
-   minutes. `workflow_dispatch` already allows re-running without
-   re-tagging.
+**Decision: do not touch `.gitignore` in this work.** The `/release` skill
+lives at `.claude/skills/release/` untracked. Everything durable and
+portable (template, tool, hook body, CI checks) is committed elsewhere.
+The only loss is that the skill file is not versioned; the template it
+reads is, and it carries the judgment. If versioning the skill is wanted
+later it is its own reviewed change, using the `.claude/*` form with an
+explicit `.claude/worktrees/` deny after the negations, plus
+`git check-ignore` evidence for all four paths.
 
-**Rejected: auto-generating placeholder notes when the file is missing.**
-It guarantees the job never fails and reintroduces exactly the bug this
-project has: a boilerplate body nobody noticed for four releases. Silent
-success is worse than a loud stop.
+### 2. The tag can point at an orphaned commit **[v1 was wrong]**
 
-**The subtle trap this must handle:** notes must exist at the TAGGED
-COMMIT, not merely in the working tree. Tagging first and committing
-notes second yields a tag without them, and a filesystem check would pass
-locally while CI fails. Every check reads `git show <ref>:<path>`, never
-the filesystem.
+v1's central claim was "the tag cannot exist without the notes because one
+command makes both." That proves notes exist at the tagged commit. It does
+NOT prove the tagged commit is the commit being released.
+
+Defeat sequence, two keystrokes a solo maintainer types daily: `/release`
+commits and tags at A; Sam fixes a typo with `git commit --amend`, making
+B; he pushes. The tag points at A, orphaned and not on main. All four v1
+layers pass. The build ships from A.
+
+**Fix, three parts:** the printed push command is
+`git push --atomic origin main v<version>` (named refs, never `--tags`,
+atomic so main and tag land together or not at all); the `checks` job
+asserts the tagged commit is an ancestor of `origin/main`; the hook also
+blocks `git commit --amend` and `git reset` when HEAD carries a `v*` tag.
+
+### 3. The honesty section must DIFF the registry, not grep it **[v1 was wrong]**
+
+v1 said: registry entries "whose body still contains `Device verdict:
+pending`". Two reviewers independently measured the same result, which I
+re-verified:
+
+| ref | pending entries |
+|---|---|
+| `v0.4.2` | #5a, #16, #8c, #10b |
+| `HEAD` | #16, #17, #8c, #10b |
+
+The approved 0.5.0 draft cites exactly one (#17). Three of v1's four were
+already pending before this cycle and would reappear in every release
+forever, training the reader to skip the section. Meanwhile the entry that
+actually *changed* (#5a, pending → `BINDS`) is the source of the draft's
+best paragraph, and v1's rule cannot see it.
+
+**Fix:** the tool emits `verdictsOpenedInRange` and
+`verdictsResolvedInRange` by parsing the registry at both refs. Opened
+feeds "Good to know". Resolved feeds the improvements and the closer.
+Entries pending at both refs feed neither. Headline unit test: over
+`v0.4.2..HEAD`, assert #17 opened, #5a resolved, and #16/#8c/#10b in
+neither.
+
+### 4. `optionChanges` is the wrong change signal **[v1 was wrong]**
+
+Over the 0.5.0 range `src/options.ts` gained exactly one key, which
+produced one of six bullets. The other five came from behaviors with no
+option key at all. The registry, which CLAUDE.md already requires updating
+whenever a formatting behavior changes, captured five of six.
+
+**Fix:** `registryChanges` (entries added or materially edited between
+refs, grouped by `### N.` heading) becomes the primary signal.
+`optionChanges` stays as a secondary hint that a bullet needs a
+default-and-why sentence.
+
+### 5. The empty-release path contradicted the spec's own rejection **[v1 was wrong]**
+
+v1 rejects auto-generated placeholder notes in bold, then instructs Claude
+to "offer a one-line maintenance note" when nothing is user-visible. That
+is the placeholder, re-entering with Claude's endorsement.
+
+**Fix:** hard stop. Claude reports the range is not user-visible and writes
+nothing. If Sam is releasing anyway (a rebuild, a signing fix), he states
+the reason and the note is written from his words.
 
 ## Deliverables
 
 ### 1. `docs/release-notes-template.md`
 
-The durable artifact. Section shape: **New / Improved / Fixed / Good to
-know**, plus an optional italic closing paragraph for the curious. Voice
-rules, all derived from the approved 0.5.0 draft:
+The technical writer's template, adopted substantially as written. Its
+load-bearing parts, each measured against the approved 0.5.0 draft:
 
-- Written for a non-technical reader (a screenwriter, producer or exec).
-- KEEP screenplay vocabulary (dialogue, slugline, title page). DROP ebook
-  jargon (keep, kepub, EPUB/MOBI as user-facing words, rendering engine,
-  sideload, ragged-right). Say what the reader sees instead.
-- No em dashes (house rule for user-facing copy). Colons and periods.
-- Never claim device behavior that is not verified. Unverified goes in
-  "Good to know", framed as reassurance where honest ("it does nothing on
-  readers that ignore it, so it can't hurt").
-- No real script titles, authors or character names, ever (standing rule).
+- **Caps, with 0.5.0's actuals as calibration:** 350 words total (0.5.0:
+  326), one-sentence lede under 25 words (12), two change headings and six
+  bullets total (2 and 6), three caveats max (2), optional closer under 70
+  words (48).
+- **The cut ratio, stated:** 37 commits produced 6 bullets. The default
+  disposition for a commit is NO bullet. Entire merged branches produce
+  nothing.
+- **Slots, not fixed headings [v1 was wrong].** v1 specified New /
+  Improved / Fixed / Good to know. The approved draft uses none of those:
+  it leads with a theme sentence, groups new-and-improved under a heading
+  named for the reader's outcome ("Your scripts break better across
+  pages"), names the fix heading for who was affected ("Fixed for older
+  Kindles"), then Good to know, then an italic closer. Readers do not care
+  which changes were features.
+- **A say-this-not-that table** covering the vocabulary that must never
+  appear, with the replacement phrasing.
+- **Ten worked pairs** whose left column is real commit subjects and
+  registry prose, since that is literally what the drafter reads. Includes
+  two failure examples: the plausible-but-wrong-vocabulary draft and the
+  too-long draft.
+- **A pre-lede slot for privacy, requirements or network-surface changes.**
+  The README stakes the product's reputation on exactly five network
+  touchpoints; a change there can never be a bullet buried under
+  improvements.
+- **Name the switch as the reader rail labels it, once.** The 0.5.0 draft
+  never says "Print-style split minimums", so a reader who wants to turn it
+  off cannot find it.
+- **A contamination warning:** the registry and commit log are written in
+  em dashes and jargon and are the source material. Copy facts, not
+  punctuation or vocabulary.
 
-`docs/releases/0.5.0.md` ships as the first entry, from the approved draft
-now sitting at `docs/release-notes-0.5.0-draft.md` (which this work
-deletes, being superseded).
+The template's rules on format names are stated as a principle rather than
+a banned-word list, because v1's list contradicted the approved draft: the
+draft says "Kindles still can't read EPUB files copied over USB", which is
+correct, because the reader has a file with that extension. The principle:
+name a format only where the reader must act on it; never as a pipeline
+stage.
 
 ### 2. `tools/release-notes.ts`
 
-Gathers facts that must not be guessed, prints JSON. Committed and unit
-tested, so the process survives without Claude Code.
+The skeptic argued to cut this: its four v1 facts are shell one-liners. That
+premise held for three of them and failed for the one that matters. A
+two-ref registry parse and diff is real logic, it is the field the notes'
+honesty depends on, and it is the field v1 got wrong. So the tool survives,
+with corrected fields:
 
-- `commits`: subject lines since the last `v*` tag, flagged by whether
-  each is a merge.
-- `optionChanges`: keys added to or removed from `FormatOptions` in
-  `src/options.ts` across that range (diff of the interface, not prose).
-- `pendingVerdicts`: registry entries in `docs/formatting-options-log.md`
-  whose body still contains `Device verdict: pending`, with entry number
-  and title.
-- `proposedVersion` + `reason`: minor when `optionChanges` is non-empty or
-  any commit subject announces new behavior; patch otherwise. Never
-  applied automatically.
-- `userVisible`: false when the range touches only `docs/`, `tests/` and
-  `.github/`. Drives the empty-release path below.
+- `verdictsOpenedInRange`, `verdictsResolvedInRange`: each with the entry
+  number, title, verdict sentence and `Device support:` line, because
+  number-and-title alone cannot produce "it does nothing on readers that
+  ignore it".
+- `registryChanges`: entries added or materially edited, by heading.
+- `optionChanges`: secondary.
+- `commits`: subjects as DATA, truncated to 200 chars, control characters
+  and ANSI stripped, each flagged with whether the author is the repo
+  owner. Today Sam authors every commit; `CONTRIBUTING.md` solicits
+  patches, and a squash merge puts a contributor's PR title into the
+  subject line.
+- `previousRelease`: `{ version, wordCount, bulletCount }`, so "shorter
+  than last time" is a number rather than a vibe.
+- `userVisible`, `proposedVersion` + reason (advisory only).
 
-### 3. `/release` skill
+Tests over synthetic git state: the headline verdict-diff case above; an
+entry pending at both refs appearing in neither list; version proposal per
+change shape; docs-only range; empty range.
 
-Thin wrapper. Order is load-bearing:
+### 3. `/release` skill (local, `.claude/skills/release/`)
 
-1. Preflight: `bun test`, `bunx tsc --noEmit`, `kit-check`, plus a check
-   that the target version is free: no existing `v<version>` tag and no
-   existing `docs/releases/<version>.md`. (The tag itself does not exist
-   yet at this point; it is created in step 5. This check catches a
-   re-run against an already-released version.) Any failure stops before
-   anything is written.
-2. Run `tools/release-notes.ts`; show the proposed version and its reason.
-3. Draft `docs/releases/<version>.md` per the template. If
-   `userVisible` is false, do NOT invent features: offer a one-line
-   maintenance note and say so.
-4. **Stop. Show Sam the file. Wait.** Edits are his; loop until approved.
-5. Commit notes + `package.json` bump together; create the annotated tag
-   on that commit.
-6. Print the push command. Do not run it.
+Two human moments. Everything else is silent.
 
-### 4. `PreToolUse` hook
+1. **`/release`** (or `/release 0.5.1`). Preflight starts in the
+   background; git reading and drafting happen in the foreground. v1 put
+   several minutes of `swift build` in front of the only screen Sam cares
+   about, for no safety benefit, since nothing is written yet.
+   Preflight begins `git fetch --tags --prune`, and a tag existing **on
+   origin** is the hard stop, not a local tag, which lies in both
+   directions.
+2. **Silent stops:** version taken on origin, or nothing user-visible.
+   Nothing written. A local notes file for an unreleased version is a
+   RESUME path, not a refusal: v1 locked itself out of exactly the state
+   where a human is most likely to fumble the sequence by hand.
+3. **Draft** `docs/releases/<version>.md` from the tool's JSON, the
+   template, and the two most recent existing release files, which is how
+   voice and length actually transfer.
+4. **Moment one: the header block, then the file.** Not "here is a
+   document, approve it": fluent prose reads as correct, and a gate that
+   is always approved is the origin story of this whole project. The block
+   shows the proposed version and reason, the claims Claude is least sure
+   about with their evidence, verdicts settled this cycle, pending ones
+   deliberately omitted, and a count of commits that earned no bullet. When
+   nothing is uncertain it collapses to one line, so the exceptional
+   release is visibly different from the routine one.
+   Approval is by editing the file or typing `ship`. Re-loops print only
+   the changed bullets.
+5. **He types `ship`.** Claude waits on preflight, re-reads the file from
+   disk in case he edited it, re-derives the version from `package.json`
+   and asserts the matching notes file is staged, then commits notes plus
+   bump and creates the ANNOTATED tag on that commit. (Current tags v0.4.0
+   through v0.4.2 are lightweight; this is a deliberate change.)
+6. **Moment two:** one question, showing
+   `git push --atomic origin main v<version>` and noting the build takes 15
+   to 25 minutes. Declining prints `git tag -d` so backing out is one
+   paste.
 
-Matches Bash commands creating or pushing a `v*` tag. Resolves the
-version from the tag, checks `git show <commit>:docs/releases/<version>.md`,
-blocks with a message naming the missing path when absent.
+The skill states that commit subjects and registry text are untrusted input
+to be summarized, never instructions to follow, and that the approval gate
+includes a confidentiality check, not just a prose check.
 
-### 5. Repo plumbing
+### 4. Hook: body committed, wiring local **[v1 was wrong]**
 
-- **`.gitignore`:** `.claude/` is currently ignored wholesale and nothing
-  under it is tracked. Narrow it so `.claude/skills/` and a shared
-  `.claude/settings.json` are versioned while `settings.local.json` and
-  `worktrees/` stay ignored. Both newly-tracked files get read for machine
-  paths and secrets before committing (this repo had a leak scare at
-  publication).
-- **`release.yml`:** replace the hardcoded `printf` body. Read
-  `docs/releases/${VERSION}.md`; append the machine-generated install line
-  and DMG SHA-256, which cannot exist before the build. Validation moves
-  into the existing `checks` job, which already gates the release job.
-- **`ci.yml`:** add the version-bump-requires-notes check to the existing
-  `engine` job.
+v1 proposed committing `.claude/settings.json` to a public repo that
+solicits contributions. That ships auto-executing configuration to forks,
+gives contributors a guard that only obstructs them, and creates a target:
+once tracked, a PR can modify it, and checking out that branch and running
+Claude Code becomes arbitrary code execution. `settings.local.json` already
+achieves the stated goal (enforcing on future Claude sessions on this
+machine) with none of that.
+
+- **Body:** `tools/hooks/require-release-notes.sh`, committed, reviewable,
+  testable, not executed merely by existing. `set -euo pipefail`, reads the
+  command via `jq -r`, never `eval` and never re-expands into a command
+  position (an unsanitized re-expansion of model-generated text would be a
+  bypass firing before the permission prompt).
+- **Wiring:** `.claude/settings.local.json`, untracked.
+- **Matching:** `git tag`, `git push` with `--tags`/`--follow-tags`/
+  `refs/tags/`, and `gh release create` (which creates the tag server-side).
+  It does not parse a version out of the command, because the happy path
+  `git push --atomic origin main v0.5.0` and `--follow-tags` are exactly
+  the hard cases; instead it enumerates local `v*` tags absent from origin
+  and checks each with `git cat-file -e <tag>^{commit}:docs/releases/<v>.md`.
+- **Fails closed** on a matched-but-unresolvable command; exits 0
+  immediately on non-matching Bash so unrelated commands are not hostage to
+  whether `jq` is installed.
+- **Never blocks recovery:** anything containing `tag -d` or `:refs/tags/`
+  is explicitly allowed. A guard that blocks the fix is worse than none.
+- Documented in plain words as an ergonomics guard, not a security
+  boundary. Anyone can tag from a terminal.
+
+### 5. `release.yml`
+
+**A `checks` step at position 1, before `setup-bun` and Rosetta**,
+validating at the tagged commit: the version matches
+`^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$` (which also converts the
+`workflow_dispatch`-against-a-branch case from a confusing
+`docs/releases/main.md` error into an immediate clear one); the notes file
+exists via `git cat-file`; its tree mode is `100644`, not a symlink, which
+would otherwise be followed and published; size is non-zero and under
+60,000 bytes (GitHub's body cap near 125,000 would otherwise fail AFTER
+notarization); valid UTF-8; no embedded checksum, since the workflow
+appends the real one and two conflicting SHAs on one page both look
+official. Plus `package.json`'s version equals the tag, which today is
+guarded at `app/release.sh:18-23` but only fires minutes in with
+certificates already on disk. Plus the ancestor check from finding 2.
+
+**Publish step made idempotent and atomic:**
+`gh release view || gh release create --draft`, then
+`gh release upload --clobber`, then `gh release edit --draft=false`.
+This fixes two things v1 missed. `gh release create` fails on an existing
+release, so v1's cheap-recovery story (`workflow_dispatch`) was the one
+path that did not compose. And publishing before streaming three assets
+means `GET /releases/latest` briefly returns a release with no DMG:
+`UpdateCheck.latest` throws `noDownloadableAsset`, `checkIfDue` has already
+stamped `lastChecked` and swallows the throw, so a user who checks in that
+window is told "no update" for another 24 hours. Drafts are excluded from
+`/releases/latest` entirely.
+
+**Body composition:** `cp` the file and append; content reaches `printf`
+only as an argument (`printf '%s\n' "$X"`), never as a format string, since
+"100%" in release prose would silently corrupt the public page.
+`${{ github.ref_name }}` stays in `env:`, never inline in `run:`. Append
+SHA-256 for all three assets after a blank line, not just the DMG: the
+tarballs are the ones consumed by scripts and the ones with no notarization
+story.
+
+### 6. `ci.yml`
+
+**Unconditional, not diff-based [v1 was wrong].** v1 said "if the version
+changed, notes must exist", which does not fire when the version did not
+change, and needs history that `actions/checkout`'s depth-1 clone does not
+have. The stronger and simpler invariant: `docs/releases/<package.json
+version>.md` must exist and be non-empty on every push. No history needed.
+Never `|| true`.
+
+Cost: main currently says 0.4.2 with no notes file. Seed a three-line
+`docs/releases/0.4.2.md` stub saying notes begin at 0.5.0. That is not the
+backfilling this spec rejects; it is one stub for the current version,
+bought in exchange for an invariant with no exceptions.
+
+### 7. `docs/releases/0.5.0.md`
+
+From the approved draft. Delete `docs/release-notes-0.5.0-draft.md`.
 
 ## Testing
 
-`tools/release-notes.ts` gets bun tests over synthetic git state (temp
-repo, scripted commits and tags) rather than the live history:
+- `tools/release-notes.ts`: the cases listed in deliverable 2.
+- `tools/hooks/require-release-notes.sh`: matched-and-blocked,
+  matched-but-unresolvable-blocks, non-matching-exits-0, `tag -d` allowed.
+- Both guards demonstrated failing and then passing, with output recorded:
+  a tag with no notes blocked by the hook, and a branch bumping the version
+  without notes failing CI.
+- A `bun test` over `docs/releases/*.md` failing on the absolute bans: the
+  em dash character, `kepub`, `sideload`, `ragged-right`, `keep-together`,
+  `rendering engine`, and any real title, author or character name. Seven
+  strings, no judgment, runs without Claude. Deliberately excludes EPUB,
+  MOBI and "orphan", which the approved draft uses correctly.
 
-- version proposal for each shape: option added, fixes only, docs only
-- `pendingVerdicts` extraction against a fixture registry, including an
-  entry whose verdict was cleared (must NOT appear)
-- `userVisible` false for a docs-only range
-- empty range (tag at HEAD) does not crash
+## Out of scope
 
-The hook and the CI check get proven the way this repo proves guards: make
-the bad state, watch it fail, restore. For the hook, attempt a tag with no
-notes file and confirm the block. For CI, a branch bumping the version
-without notes must fail the job.
+- **The Homebrew tap, which is BROKEN and is being tracked separately.**
+  `homebrew-tap/Formula/screepub.rb` installs `screepub-macOS`, an asset
+  the build no longer produces, and points at v0.3.0. It has been skipped
+  at three consecutive releases, and `docs/release-secrets.md:62-87`
+  contains the written TODO that was skipped each time. The directory is
+  hidden from `git status` by `.git/info/exclude`, which is local-only and
+  is why nobody sees it. This is a real user-facing break and deserves its
+  own fix; it is not release-notes work.
+- Website link and in-app notes list. The committed path keeps both cheap;
+  the updater already carries `releaseNotesURL` and would need `body` added
+  to its `GitHubRelease` decode.
+- Backfilling 0.1.0 through 0.4.2 beyond the one stub above.
+- Versioning the `/release` skill (see finding 1).
 
-## Out of scope, deliberately
+## Note for the publication checklist
 
-- **Website link.** Future. The committed file gives it a stable path.
-- **In-app release notes list.** Future, and cheaper because of this: the
-  updater already carries `releaseNotesURL` and opens it in a browser from
-  three places; showing text in-app means adding `body` to the
-  `GitHubRelease` decode in `UpdateCheck.swift`.
-- **Backfilling notes for 0.1.0 through 0.4.2.** Those releases shipped
-  with the boilerplate body; rewriting history is not worth it.
-- **Conventional-commit enforcement.** The tool reads subjects as prose;
-  it does not require a format.
-
-## Sources
-
-The approved 0.5.0 draft (`docs/release-notes-0.5.0-draft.md`) is the
-voice reference. `docs/release-secrets.md` documents the six secrets the
-release job needs. `.github/workflows/release.yml` lines 111-129 hold the
-body being replaced; its `checks` job and `workflow_dispatch` entry point
-already exist and are reused rather than added.
+`v0.2.0` resolves to `033ca99`, the root commit of main. The tree there is
+clean now. Recorded because it is the same structural shape as the original
+near-miss: tags survive history rewrites and keep old trees browsable. If
+history is ever rewritten again, re-check every tag, not only the branch.
+`BORN-SECURE.md` is the natural home for that line.
