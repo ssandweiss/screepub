@@ -43,4 +43,70 @@ describe('require-release-notes hook', () => {
     expect(code).toBe(2);
     expect(stderr).toContain('/release');
   });
+
+  test('a bare lookalike string is not tag-touching at all, but naming it as a tag fails closed', () => {
+    // `notaversion` alone has nothing to do with tags: exit 0. Only once
+    // it appears as the argument to `git tag` does the guard engage, and
+    // it then fails closed because no vX.Y.Z can be resolved from it.
+    expect(runHook('notaversion').code).toBe(0);
+    expect(runHook('git tag notaversion').code).toBe(2);
+  });
+
+  test('CRITICAL: a plain `git push` naming a tag is matched even without --tags/--follow-tags/refs form', () => {
+    // This is the exact command the release flow is designed to print:
+    // no bulk-push flag at all, just the tag named directly.
+    const a = runHook('git push origin v99.0.0');
+    expect(a.code).toBe(2);
+    expect(a.stderr).toContain('docs/releases/99.0.0.md');
+
+    const b = runHook('git push --atomic origin main v99.0.0');
+    expect(b.code).toBe(2);
+    expect(b.stderr).toContain('docs/releases/99.0.0.md');
+  });
+
+  test('CRITICAL: a plain `git push` naming a tag with existing notes is allowed', () => {
+    expect(runHook('git push --atomic origin main v0.5.0').code).toBe(0);
+  });
+
+  test('CRITICAL: prerelease versions are matched in full, mirroring release.yml\'s regex', () => {
+    // release.yml strips only the leading `v` and requires
+    // docs/releases/<version>.md for the FULL version including any
+    // prerelease suffix. Resolving v0.5.0-rc1 down to 0.5.0 would let
+    // this hook pass a tag that CI rejects.
+    const { code, stderr } = runHook('git tag -a v0.5.0-rc1 -m release');
+    expect(code).toBe(2);
+    expect(stderr).toContain('docs/releases/0.5.0-rc1.md');
+  });
+
+  test('IMPORTANT: recovery matching is anchored to the command form, not a bare substring', () => {
+    // A real tag creation must not ride along after a real delete in a
+    // compound command.
+    const compound = runHook('git tag -d v0.5.0 && git tag v99.0.0');
+    expect(compound.code).toBe(2);
+
+    // "tag -d" inside a trailing comment must not look like recovery.
+    const comment = runHook('git tag v99.0.0 # tag -d');
+    expect(comment.code).toBe(2);
+
+    // "tag -d" inside a commit message must not look like recovery.
+    const inMessage = runHook('git tag -a v99.0.0 -m "see git tag -d"');
+    expect(inMessage.code).toBe(2);
+  });
+
+  test('IMPORTANT: every version token in the command is checked, not just the first', () => {
+    const a = runHook('git push --tags origin v0.5.0 v99.0.0');
+    expect(a.code).toBe(2);
+
+    const b = runHook('git push --tags origin v99.0.0 v0.5.0');
+    expect(b.code).toBe(2);
+  });
+
+  test('IMPORTANT: read-only tag listing is never blocked', () => {
+    expect(runHook('git tag').code).toBe(0);
+    expect(runHook('git tag --list').code).toBe(0);
+    expect(runHook("git tag -l 'v*'").code).toBe(0);
+    expect(runHook('git tag --contains HEAD').code).toBe(0);
+    expect(runHook('git tag --points-at HEAD').code).toBe(0);
+    expect(runHook('git tag --sort=-v:refname').code).toBe(0);
+  });
 });

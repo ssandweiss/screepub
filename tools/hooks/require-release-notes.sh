@@ -18,10 +18,33 @@
 # stderr to the model; any other exit (this script always uses 0) lets it
 # proceed.
 #
-# Recovery is never blocked: deleting a tag (`tag -d`) or pushing a tag
-# deletion (`:refs/tags/...`) always passes, checked before anything else
-# that could block. A guard that blocks the fix is worse than no guard,
-# because it fires exactly when someone is already undoing a mistake.
+# Recovery is never blocked: deleting a tag (`git tag -d ...`) or pushing
+# a tag deletion (`:refs/tags/...`) always passes, checked before
+# anything else that could block. A guard that blocks the fix is worse
+# than no guard, because it fires exactly when someone is already undoing
+# a mistake. Recovery matching is anchored to the actual command form (not
+# a bare substring) and is refused outright on compound commands (`;`,
+# `&&`, or an embedded newline) -- a real tag creation must not be able to
+# ride along after a real tag deletion in the same line. The same
+# anchoring/compound rule gates the read-only tag-listing allowlist
+# (`git tag`, `--list`, `-l`, `--contains`, `--points-at`, `--sort`,
+# `--merged`, `--no-merged`, `--format`), since listing tags is a normal
+# step inside the release flow and must not be blocked either.
+#
+# `git push` is treated as tag-touching both for the explicit bulk forms
+# (`--tags`, `--follow-tags`, `refs/tags/`) AND whenever the command also
+# names a vX.Y.Z token, because `git push --atomic origin main v0.5.0` --
+# pushing a single tag by name, no flag at all -- is the exact command the
+# release flow is designed to print.
+#
+# Version extraction mirrors release.yml's own regex
+# (`^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$` against the tag with the
+# leading `v` stripped), so a prerelease like v0.5.0-rc1 requires
+# docs/releases/0.5.0-rc1.md, not docs/releases/0.5.0.md -- CI would
+# reject exactly the tag this hook would otherwise wave through. Every
+# vX.Y.Z(-prerelease)? token in the command is checked, not just the
+# first, so `git push --tags origin v0.5.0 v99.0.0` blocks regardless of
+# which order the tags are listed in.
 #
 # The pending command arrives as model-generated JSON on stdin, at
 # .tool_input.command. That string is ONLY EVER matched against with
@@ -52,10 +75,10 @@ fi
 # raw payload itself so a broken/absent jq degrades to "match on raw
 # text", never to "crash" and never to "silently allow everything".
 # ---------------------------------------------------------------------
-command=""
+cmd=""
 extracted=0
 if command -v jq >/dev/null 2>&1; then
-  if command="$(printf '%s' "$raw" | jq -r '.tool_input.command // empty' 2>/dev/null)"; then
+  if cmd="$(printf '%s' "$raw" | jq -r '.tool_input.command // empty' 2>/dev/null)"; then
     extracted=1
   fi
 fi
@@ -66,20 +89,25 @@ if [ "$extracted" -eq 0 ]; then
   # that does not look tag-touching either, we exit 0 below --
   # under-blocking on a hook malfunction beats blocking unrelated work
   # (e.g. `bun test`) just because `jq` was not on PATH.
-  command="$raw"
+  cmd="$raw"
 fi
 
 # ---------------------------------------------------------------------
 # Step 3: cheap bail-out for anything that is not tag-touching, before
 # doing any git work or deciding anything about recovery.
 # ---------------------------------------------------------------------
+has_version_token=0
+if printf '%s' "$cmd" | grep -qE 'v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?'; then
+  has_version_token=1
+fi
+
 is_tag_touching=0
-if [[ "$command" == *"git tag"* ]]; then
+if [[ "$cmd" == *"git tag"* ]]; then
   is_tag_touching=1
-elif [[ "$command" == *"gh release create"* ]]; then
+elif [[ "$cmd" == *"gh release create"* ]]; then
   is_tag_touching=1
-elif [[ "$command" == *"git push"* ]] \
-  && { [[ "$command" == *"--tags"* ]] || [[ "$command" == *"--follow-tags"* ]] || [[ "$command" == *"refs/tags/"* ]]; }; then
+elif [[ "$cmd" == *"git push"* ]] \
+  && { [[ "$cmd" == *"--tags"* ]] || [[ "$cmd" == *"--follow-tags"* ]] || [[ "$cmd" == *"refs/tags/"* ]] || [ "$has_version_token" -eq 1 ]; }; then
   is_tag_touching=1
 fi
 
@@ -88,30 +116,56 @@ if [ "$is_tag_touching" -eq 0 ]; then
 fi
 
 # ---------------------------------------------------------------------
-# Step 4: recovery forms are never blocked. Checked before version
-# resolution so recovery always works even if notes are missing.
+# Step 4: recovery forms and read-only tag listing are never blocked.
+# Both are anchored to the actual command form and refused outright on
+# compound commands (`;`, `&&`, an embedded newline) -- a real tag
+# creation must not be able to hide behind a delete or a listing flag
+# elsewhere in the same line.
 # ---------------------------------------------------------------------
-if [[ "$command" == *"tag -d"* ]]; then
-  exit 0
+is_compound=0
+if [[ "$cmd" == *';'* ]] || [[ "$cmd" == *'&&'* ]] || [[ "$cmd" == *$'\n'* ]]; then
+  is_compound=1
 fi
-if [[ "$command" == *":refs/tags/"* ]]; then
-  exit 0
+
+if [ "$is_compound" -eq 0 ]; then
+  if [[ "$cmd" =~ ^[[:space:]]*git[[:space:]]+tag[[:space:]]+-d([[:space:]]|$) ]]; then
+    exit 0
+  fi
+  if [[ "$cmd" == *":refs/tags/"* ]]; then
+    exit 0
+  fi
+
+  if [[ "$cmd" =~ ^[[:space:]]*git[[:space:]]+tag([[:space:]]+.*)?$ ]]; then
+    if [[ "$cmd" =~ ^[[:space:]]*git[[:space:]]+tag[[:space:]]*$ ]]; then
+      exit 0
+    fi
+    if [[ "$cmd" == *"--list"* ]] || [[ "$cmd" == *"--contains"* ]] || [[ "$cmd" == *"--points-at"* ]] \
+      || [[ "$cmd" == *"--sort"* ]] || [[ "$cmd" == *"--merged"* ]] || [[ "$cmd" == *"--no-merged"* ]] \
+      || [[ "$cmd" == *"--format"* ]] || [[ "$cmd" =~ [[:space:]]-l([[:space:]]|$) ]]; then
+      exit 0
+    fi
+  fi
 fi
 
 # ---------------------------------------------------------------------
-# Step 5: extract the version. Strict vX.Y.Z only, leading v stripped.
+# Step 5: extract every vX.Y.Z(-prerelease)? token, deduplicated. Strict
+# match, leading v stripped; mirrors release.yml's own version regex.
 # ---------------------------------------------------------------------
-version=""
-if match="$(printf '%s' "$command" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"; then
-  version="${match#v}"
+versions=""
+if matches="$(printf '%s' "$cmd" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?' | sort -u)"; then
+  versions="$matches"
 fi
 
-if [ -z "$version" ]; then
+if [ -z "$versions" ]; then
+  truncated="$cmd"
+  if [ "${#truncated}" -gt 200 ]; then
+    truncated="${truncated:0:200}...[truncated]"
+  fi
   cat >&2 <<EOF
 require-release-notes: blocked -- this command touches version tags but
 no vX.Y.Z version could be found in it:
 
-  $command
+  $truncated
 
 Failing closed: this guard cannot tell whether release notes exist for
 an unresolved version, so it blocks rather than risk a tag shipping
@@ -122,32 +176,50 @@ checks job) is what actually gates a release.
 Run /release to create the tag and its release notes together.
 
 This never blocks recovery: deleting a tag ("git tag -d ...") or pushing
-a tag deletion (":refs/tags/...") is always allowed.
+a tag deletion (":refs/tags/...") is always allowed, and neither is
+read-only tag listing ("git tag", "git tag --list", ...).
 EOF
   exit 2
 fi
 
 # ---------------------------------------------------------------------
-# Step 6: check git, not the filesystem. A file present in the working
-# tree but not committed would otherwise pass while the tag ships
-# without it.
+# Step 6: check git, not the filesystem, for EVERY version found. A file
+# present in the working tree but not committed would otherwise pass
+# while the tag ships without it; checking only the first version found
+# would let a second, unreleased version ride along depending on token
+# order.
 # ---------------------------------------------------------------------
-notes_path="docs/releases/${version}.md"
-if git cat-file -e "HEAD:${notes_path}" 2>/dev/null; then
+missing=""
+while IFS= read -r v; do
+  [ -z "$v" ] && continue
+  ver="${v#v}"
+  notes_path="docs/releases/${ver}.md"
+  if ! git cat-file -e "HEAD:${notes_path}" 2>/dev/null; then
+    if [ -z "$missing" ]; then
+      missing="$notes_path"
+    else
+      missing="${missing}, ${notes_path}"
+    fi
+  fi
+done <<< "$versions"
+
+if [ -z "$missing" ]; then
   exit 0
 fi
 
 cat >&2 <<EOF
-require-release-notes: blocked -- ${notes_path} is not committed at HEAD.
+require-release-notes: blocked -- release notes are not committed at
+HEAD for: ${missing}
 
-Tagging v${version} without release notes ships a version nobody can
-read the changelog for. This is an ergonomics guard, not a security
-boundary -- CI (.github/workflows/ci.yml and the release.yml checks job)
-is what actually gates a release.
+Tagging or pushing a version without release notes ships a version
+nobody can read the changelog for. This is an ergonomics guard, not a
+security boundary -- CI (.github/workflows/ci.yml and the release.yml
+checks job) is what actually gates a release.
 
-Run /release to write ${notes_path} and create the tag together.
+Run /release to write the missing notes and create the tag together.
 
 This never blocks recovery: deleting a tag ("git tag -d ...") or pushing
-a tag deletion (":refs/tags/...") is always allowed.
+a tag deletion (":refs/tags/...") is always allowed, and neither is
+read-only tag listing ("git tag", "git tag --list", ...).
 EOF
 exit 2
