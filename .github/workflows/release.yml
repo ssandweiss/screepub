@@ -1,7 +1,12 @@
 # Release on version tags. Requires repo secrets (see docs/release-secrets.md):
 #   DEVELOPER_ID_CERT_P12_BASE64, CERT_PASSWORD, KEYCHAIN_PASSWORD,
 #   AC_API_KEY_P8_BASE64, AC_API_KEY_ID, AC_API_ISSUER_ID
-# Least privilege + pinned third-party actions, matching ci.yml.
+# Least privilege + pinned third-party actions, matching ci.yml. The
+# checkout SHA, setup-bun SHA, and bun-version below are duplicated from
+# ci.yml on purpose (this workflow must validate its own toolchain rather
+# than trust ci.yml's run) — but the THREE PIN VALUES are not independently
+# defended anywhere. Bump them in both files together; bumping bun in
+# ci.yml alone would silently ship a real release on an unproven toolchain.
 name: release
 on:
   push:
@@ -12,6 +17,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# A dispatch re-run while a prior run is still uploading assets must not
+# race it onto the same draft release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   # The tag trigger is independent of ci.yml, so without this a tag could
   # ship a DMG from a commit whose suite fails. Same checks, same runner
@@ -20,6 +30,62 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Release notes and version are publishable
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || {
+            echo "::error::Tag '$TAG' is not vMAJOR.MINOR.PATCH. Dispatch this workflow against a version TAG, not a branch."; exit 1; }
+
+          F="docs/releases/$VERSION.md"
+          git cat-file -e "$GITHUB_SHA:$F" 2>/dev/null || {
+            echo "::error file=$F::$F is missing at the tagged commit. Write it (see docs/release-notes-template.md), commit it, then re-tag."; exit 1; }
+
+          # Not a symlink: a committed symlink would be followed and published.
+          MODE="$(git ls-tree "$GITHUB_SHA" -- "$F" | awk '{print $1}')"
+          [ "$MODE" = "100644" ] || { echo "::error file=$F::$F is not a regular file (mode $MODE)"; exit 1; }
+
+          # GitHub's release body caps near 125k; failing here costs 20s
+          # instead of failing after notarization.
+          BYTES="$(git cat-file -s "$GITHUB_SHA:$F")"
+          [ "$BYTES" -gt 0 ] && [ "$BYTES" -lt 60000 ] || {
+            echo "::error file=$F::$F is empty or exceeds the 60000-byte body limit ($BYTES bytes)"; exit 1; }
+
+          git cat-file blob "$GITHUB_SHA:$F" | iconv -f UTF-8 -t UTF-8 >/dev/null || {
+            echo "::error file=$F::$F is not valid UTF-8"; exit 1; }
+
+          # The workflow appends the real checksums; two on one page both
+          # look official.
+          #
+          # Process substitution, not a `cmd | grep` pipe: under pipefail,
+          # an early-exiting grep can SIGPIPE the upstream `git cat-file`,
+          # whose failing exit code can then outrank grep's own "found"
+          # status and read as false — silently waving through a checksum
+          # that's already there.
+          if HITS="$(grep -niE -m 3 'sha-?256|[0-9a-f]{64}' < <(git cat-file blob "$GITHUB_SHA:$F"))"; then
+            echo "::error file=$F::$F contains a checksum. The workflow appends the real ones. Offending line(s):"
+            printf '%s\n' "$HITS"
+            exit 1
+          fi
+
+          # package.json must agree with the tag. app/release.sh checks this
+          # too, but only after certs are on disk, minutes in.
+          PKG="$(git cat-file blob "$GITHUB_SHA:package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")"
+          [ "$PKG" = "$VERSION" ] || {
+            echo "::error file=package.json::package.json says $PKG but the tag says $VERSION"; exit 1; }
+
+          # The tagged commit must be ON main. Without this, tagging and then
+          # amending ships a DMG built from an orphaned commit while every
+          # other check passes.
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "::error::The tagged commit is not an ancestor of origin/main. Did you amend after tagging? Re-tag the commit you actually pushed."; exit 1; }
+
+          echo "Release notes, version and ancestry all check out for $TAG."
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
@@ -113,17 +179,55 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
           VERSION="${TAG#v}"
-          SHA="$(shasum -a 256 app/dist/Screepub-macOS.dmg | awk '{print $1}')"
-          printf '%s\n' \
-            "Notarized universal build for macOS 14+ (Apple Silicon + Intel)." \
-            "" \
-            "**Install:** download \`Screepub-macOS.dmg\`, open it, drag Screepub to Applications, and double-click." \
-            "" \
-            "DMG SHA-256: \`$SHA\`" > "$RUNNER_TEMP/notes.md"
-          gh release create "$TAG" \
+
+          # The version regex (both here and in the hook) deliberately
+          # accepts a `-rc1`-style suffix, so prereleases are a supported
+          # concept -- but nothing downstream honored that until now.
+          # Without --prerelease, `gh release create` marks EVERY tag,
+          # including v0.5.0-rc1, as a normal release, and
+          # `GET /releases/latest` (which app/Sources/ScreepubKit/
+          # UpdateCheck.swift polls) returns the newest normal release.
+          # A release candidate would become "the latest release" for
+          # every user's updater the moment its tag pushed.
+          PRE=()
+          [[ "$VERSION" == *-* ]] && PRE=(--prerelease)
+
+          # Body = the committed notes, then the machine-generated install
+          # line and checksums. Copy bytes; never send content through a
+          # shell variable, and never let it reach printf as a FORMAT string
+          # ("100%" in release prose would silently corrupt the page).
+          NOTES="$RUNNER_TEMP/notes.md"
+          cp "docs/releases/$VERSION.md" "$NOTES"
+          {
+            printf '\n\n---\n\n'
+            printf '%s\n\n' "Notarized universal build for macOS 14+ (Apple Silicon and Intel)."
+            printf '%s\n\n' "**Install:** download \`Screepub-macOS.dmg\`, open it, drag Screepub to Applications, and double-click."
+            printf '%s\n' "SHA-256:"
+            printf '\n```\n'
+            shasum -a 256 \
+              app/dist/Screepub-macOS.dmg \
+              app/dist/screepub-cli-macos-arm64.tar.gz \
+              app/dist/screepub-cli-macos-x64.tar.gz | sed 's|app/dist/||'
+            printf '```\n'
+          } >> "$NOTES"
+
+          # Draft first so /releases/latest never returns a release whose
+          # assets are still uploading. Idempotent under workflow_dispatch.
+          # Without this: the app's updater throws on a release with no
+          # DMG, but it has already stamped its "last checked" clock, so a
+          # user who checks in that window is told "no update" for 24h.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "Screepub $VERSION" --notes-file "$NOTES" "${PRE[@]}"
+          else
+            gh release edit "$TAG" --title "Screepub $VERSION" --notes-file "$NOTES"
+          fi
+
+          gh release upload "$TAG" \
             app/dist/Screepub-macOS.dmg \
             app/dist/screepub-cli-macos-arm64.tar.gz \
             app/dist/screepub-cli-macos-x64.tar.gz \
-            --title "Screepub $VERSION" \
-            --notes-file "$RUNNER_TEMP/notes.md"
+            --clobber
+
+          gh release edit "$TAG" --draft=false "${PRE[@]}"
