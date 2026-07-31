@@ -32,9 +32,9 @@ Teach the pipeline to preserve richer formatting from screenplay PDFs:
   plain text; only dialogue/action emit styled. EPUB renders em/strong, MOBI
   renders i/b (registry §9d).
 - Underline is a documented §9d limitation: drawn as vector graphics, never
-  detected. EPUB's `inlineEmphasis` already renders `_..._` as
-  `span.underline` (CSS class exists); MOBI's `inline()` lacks the underscore
-  replacement, so hand-written underlines print as literal underscores there.
+  detected. Both renderers already handle `_..._` (EPUB `span.underline`,
+  MOBI `<u>`; the MOBI replacement landed in the v0.4.2 merge train), so the
+  gap is purely detection. The MOBI replacement has no pinning test.
 - Font family and size are discarded after the bold/italic check. Fountain has
   no syntax for either.
 
@@ -95,13 +95,13 @@ Teach the pipeline to preserve richer formatting from screenplay PDFs:
 ### Rendering
 
 - EPUB: no change (underscore replacement + `span.underline` CSS exist).
-- MOBI: `inline()` gains `_..._` → `<u>...</u>`, placed after the star
-  replacements.
+- MOBI: no change (the `_..._` → `<u>` replacement already exists as of the
+  v0.4.2 merge train); phase 1 only adds the missing pinning test.
 
 ### Testing (TDD, failing tests first)
 
 - Unit: mark-to-item matcher (pure geometry); `joinLine` with `u` runs and
-  combos; MOBI `inline()` underscore case.
+  combos; a pinning test for MOBI `inline()`'s existing underscore case.
 - Fixture: make-fixture.py draws rects under one dialogue phrase and one
   action phrase, plus two decoys (full-width rule, mid-height strike);
   integration test asserts the emitted Fountain contains the underscores and
@@ -111,10 +111,10 @@ Teach the pipeline to preserve richer formatting from screenplay PDFs:
 
 ### Files touched
 
-`src/parser/extract.ts`, `src/mobi/html.ts`, `tools/make-fixture.py` +
-regenerated `tests/fixtures/`, tests, `docs/formatting-options-log.md`
-(§9d amended: limitation removed, MOBI gap closed). No conflict-zone files;
-phase 1 lands independently of pending branches.
+`src/parser/extract.ts`, `tools/make-fixture.py` + regenerated
+`tests/fixtures/`, tests, `docs/formatting-options-log.md` (§9d amended:
+limitation replaced by the detection mechanism). No renderer production
+changes at all in phase 1.
 
 ## Phase 2: font family/size
 
@@ -236,6 +236,7 @@ tests, fixtures, registry.
 
 ## Sequencing
 
-1. Phase 1 lands now (no conflict-zone files).
-2. Phase 2 starts only after `page-span-rules` and the mini-slug stack merge,
-   because it edits `epub/html.ts` and `css.ts`, their known conflict zone.
+1. Phase 1 lands first (no conflict-zone files, no renderer changes).
+2. Phase 2 was gated on `page-span-rules` and the mini-slug stack merging;
+   that precondition was met when the v0.4.2 merge train landed both
+   (2026-07-30), so phase 2 is unblocked and simply follows phase 1.
