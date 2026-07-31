@@ -30,6 +30,7 @@ public enum ScriptSettings {
         var showPageMarkers: Bool?
         var dualDialogue: String?
         var justifyText: Bool?
+        var printSplitMinimums: Bool?
     }
 
     nonisolated public static func load(forFountain fountain: URL, fallback: FormatSettings) -> FormatSettings {
@@ -55,6 +56,7 @@ public enum ScriptSettings {
         if let v = partial.showPageMarkers { merged.showPageMarkers = v }
         if let v = partial.dualDialogue { merged.dualDialogue = v }
         if let v = partial.justifyText { merged.justifyText = v }
+        if let v = partial.printSplitMinimums { merged.printSplitMinimums = v }
         return merged
     }
 

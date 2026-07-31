@@ -50,7 +50,8 @@ enum AppSettings {
             showSceneNumbers: bool("fmtSceneNumbers", def.showSceneNumbers),
             showPageMarkers: bool("fmtPageMarkers", def.showPageMarkers),
             dualDialogue: d.string(forKey: "fmtDual") ?? def.dualDialogue,
-            justifyText: bool("fmtJustify", def.justifyText)
+            justifyText: bool("fmtJustify", def.justifyText),
+            printSplitMinimums: bool("fmtSplitMinimums", def.printSplitMinimums)
         )
     }
 
@@ -74,6 +75,7 @@ enum AppSettings {
         d.set(s.showPageMarkers, forKey: "fmtPageMarkers")
         d.set(s.dualDialogue, forKey: "fmtDual")
         d.set(s.justifyText, forKey: "fmtJustify")
+        d.set(s.printSplitMinimums, forKey: "fmtSplitMinimums")
     }
 
     /// Reset all formatting keys so @AppStorage bindings fall back to defaults.
@@ -81,7 +83,7 @@ enum AppSettings {
         for key in ["fmtScenePageBreaks", "fmtDialogueMargin", "fmtCueIndent", "fmtParenIndent",
                     "fmtSpacing", "fmtKeepHeading", "fmtKeepSpeeches", "fmtFont", "fmtRejoin",
                     "fmtContd", "fmtCueAlign", "fmtTitlePage", "fmtSceneNumbers",
-                    "fmtPageMarkers", "fmtDual", "fmtJustify"] {
+                    "fmtPageMarkers", "fmtDual", "fmtJustify", "fmtSplitMinimums"] {
             UserDefaults.standard.removeObject(forKey: key)
         }
     }

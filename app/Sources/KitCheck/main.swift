@@ -217,6 +217,9 @@ if let defaultsData = try? Data(contentsOf: defaultsFile) {
 check(FormatSettings.defaults.keepSpeechesWhole == false,
       "keepSpeechesWhole defaults off — speeches flow; atomicity is opt-in")
 
+check(FormatSettings.defaults.printSplitMinimums == true,
+      "printSplitMinimums defaults ON (the print two-line rule)")
+
 // — reMarkable endpoint sanity (regression: an IP literal in source once
 // arrived empty and the force-unwrapped URL(string:) crashed at launch) —
 check(RemarkableDevice.endpoint.absoluteString == "http://" + [10, 11, 99, 1].map(String.init).joined(separator: "."),
