@@ -9,9 +9,17 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* .page owns the width cap. .sheet's own padding is a PERCENTAGE, and
+   percentage padding resolves against the containing block's width, not
+   the padded element's own width. When .sheet capped its own max-width,
+   that percentage still resolved against .sheet's containing block (body,
+   i.e. the viewport), not against the capped 1000px, so binding-margin
+   over-computed above 1000px of viewport width. Wrapping .sheet in .page
+   makes .page's capped width the containing block .sheet's padding
+   resolves against. */
+.page { max-width: var(--page-max); margin: 0 auto; }
+
 .sheet {
-  max-width: var(--page-max);
-  margin: 0 auto;
   background: var(--paper);
   box-shadow: var(--page-shadow);
   padding: 3rem var(--page-right) 3.5rem var(--binding-margin);
@@ -42,4 +50,11 @@ body {
   font-size: 14px;
   color: var(--ink-muted);
   margin: 0.6rem 0 0;
+}
+
+.code {
+  font-family: var(--font-structure);
+  font-weight: 400;
+  font-size: 15px;
+  color: var(--ink);
 }

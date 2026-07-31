@@ -1,7 +1,17 @@
 <!-- @dsCard group="Brand" -->
 <link rel="stylesheet" href="_preview.css">
 <style>
-  .rail { position: fixed; top: 0; bottom: 0; left: 0; width: 100%; pointer-events: none; }
+  /* .rail matches .page's own centering: left 50% + translateX(-50%) of
+     the rail's OWN (post-max-width) box centers it exactly the way
+     .page's margin: 0 auto does, so both columns share one x-axis. The
+     -50%/-50% transform on .rail svg below still resolves against the
+     svg's own box, not the rail's, so nesting a transform on the parent
+     does not change how the child's percentage transform resolves. */
+  .rail {
+    position: fixed; top: 0; bottom: 0; left: 50%;
+    width: 100%; max-width: var(--page-max);
+    transform: translateX(-50%); pointer-events: none;
+  }
   .rail svg {
     position: absolute;
     left: var(--hole-center);
@@ -13,7 +23,11 @@
   .rail .b { top: 50%; }
   .rail .c { top: 69.3%; }
   @media (max-height: 560px) {
-    .rail .a, .rail .c { display: none; }
+    /* Three fasteners in a short window reads as a zipper: collapse to
+       one BRAD (.a, re-centered), not the empty hole. .b and .c both
+       hide. */
+    .rail .b, .rail .c { display: none; }
+    .rail .a { top: 50%; }
   }
   @media (max-width: 720px) {
     .sheet { padding-left: 11%; }
@@ -61,6 +75,7 @@
     </symbol>
   </defs>
 </svg>
+<div class="page">
 <div class="sheet" style="min-height: 150vh">
   <h2 class="slug">Int. the page frame - continuous</h2>
   <p class="prose">
@@ -74,6 +89,7 @@
     Below 560px of viewport height the rail drops to one brad, because three
     fasteners in a short window reads as a zipper.
   </p>
+</div>
 </div>
 <div class="rail" aria-hidden="true">
   <svg class="a"><use href="#brad"/></svg>
