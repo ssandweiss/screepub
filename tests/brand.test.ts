@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { themeColors, parseThemeColors, cssValue } from './theme-colors';
+import { themeColors, parseThemeColors, cssValue, contrast, fromHex } from './theme-colors';
 
 const tokens = await Bun.file(new URL('../brand/tokens.json', import.meta.url)).json();
 
@@ -53,6 +53,27 @@ describe('brand tokens', () => {
       } else {
         expect(dark[name], `--${name} should not be re-declared in dark`).toBeUndefined();
       }
+    }
+  });
+
+  test('every text token clears WCAG AA on its own background', () => {
+    const c = tokens.colors;
+    const pairs: [string, string, string, number][] = [
+      ['ink on paper',           c.ink.light,       c.paper.light,  7],
+      ['ink-soft on paper',      c['ink-soft'].light, c.paper.light, 7],
+      ['ink-muted on paper',     c['ink-muted'].light, c.paper.light, 4.5],
+      ['ink on brass',           c.ink.light,       c.brass.light,  7],
+      ['alarm on paper',         c.alarm.light,     c.paper.light,  4.5],
+      ['ink on paper, dark',     c.ink.dark,        c.paper.dark,   7],
+      ['ink-soft on paper, dark', c['ink-soft'].dark, c.paper.dark,  7],
+      ['ink-muted on paper, dark', c['ink-muted'].dark, c.paper.dark, 4.5],
+      ['brass on paper, dark',   c.brass.dark,      c.paper.dark,   7],
+      ['alarm on paper, dark',   c.alarm.dark,      c.paper.dark,   4.5],
+    ];
+
+    for (const [label, fg, bg, floor] of pairs) {
+      const ratio = contrast(fromHex(fg), fromHex(bg));
+      expect(ratio, `${label} is ${ratio.toFixed(2)}:1, needs ${floor}:1`).toBeGreaterThanOrEqual(floor);
     }
   });
 });
