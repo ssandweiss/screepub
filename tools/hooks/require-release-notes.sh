@@ -22,14 +22,31 @@
 # a tag deletion (`:refs/tags/...`) always passes, checked before
 # anything else that could block. A guard that blocks the fix is worse
 # than no guard, because it fires exactly when someone is already undoing
-# a mistake. Recovery matching is anchored to the actual command form (not
-# a bare substring) and is refused outright on compound commands (`;`,
-# `&&`, or an embedded newline) -- a real tag creation must not be able to
-# ride along after a real tag deletion in the same line. The same
-# anchoring/compound rule gates the read-only tag-listing allowlist
-# (`git tag`, `--list`, `-l`, `--contains`, `--points-at`, `--sort`,
-# `--merged`, `--no-merged`, `--format`), since listing tags is a normal
-# step inside the release flow and must not be blocked either.
+# a mistake.
+#
+# When the command was cleanly extracted by jq, recovery matching is
+# anchored to the actual command form (not a bare substring) and is
+# refused outright on a genuinely compound command -- a real tag creation
+# must not be able to hide behind a delete, `||`, `|`, `&`, `$(...)`, a
+# backtick, or an embedded newline elsewhere in the same line. "Compound"
+# means BOTH a shell metacharacter is present AND more than one
+# `git tag`/`git push`/`gh release create` invocation appears -- a plain
+# metacharacter alone (`git tag --list | wc -l`) is not enough to trip
+# it. The same anchoring/compound rule gates the read-only tag-listing
+# allowlist (`git tag`, `--list`, `-l`, `--contains`, `--points-at`,
+# `--sort`, `--merged`, `--no-merged`, `--format`), since listing tags is
+# a normal step inside the release flow and must not be blocked either --
+# but that allowlist is ALSO gated on naming no version at all, because no
+# legitimate read-only form does, while a real `-a`/`-m` create can have
+# "--list" or "--format" appear only incidentally, inside its message.
+#
+# When jq could not be used (missing, or the JSON did not parse), `cmd`
+# is the raw, unparsed stdin payload, which does not start with `git` --
+# it starts with `{`. The anchored checks above would then never match,
+# which would make recovery fail in exactly the degraded mode the raw
+# fallback exists to serve. So in that mode ONLY, recovery reverts to the
+# original bare-substring test instead: never blocking recovery outranks
+# the precision anchoring buys elsewhere.
 #
 # `git push` is treated as tag-touching both for the explicit bulk forms
 # (`--tags`, `--follow-tags`, `refs/tags/`) AND whenever the command also
@@ -117,33 +134,66 @@ fi
 
 # ---------------------------------------------------------------------
 # Step 4: recovery forms and read-only tag listing are never blocked.
-# Both are anchored to the actual command form and refused outright on
-# compound commands (`;`, `&&`, an embedded newline) -- a real tag
-# creation must not be able to hide behind a delete or a listing flag
-# elsewhere in the same line.
 # ---------------------------------------------------------------------
+
+# Compound detection: a shell metacharacter alone does not make a
+# command compound -- `git tag --list | wc -l` must still be allowed.
+# What matters is whether MORE THAN ONE tag-touching invocation appears
+# in the string, so: a metacharacter is present AND more than one of
+# `git tag` / `git push` / `gh release create` appears.
+meta=0
+# '$(' below is a literal 2-char pattern to match against, not a
+# substitution to expand; that is the whole point of this case match.
+# shellcheck disable=SC2016
+case "$cmd" in
+  *';'*|*'&'*|*'|'*|*'$('*|*'`'*|*$'\n'*) meta=1 ;;
+esac
+
+n_invocations="$(printf '%s' "$cmd" | grep -oE 'git tag|git push|gh release create' | wc -l)"
+
 is_compound=0
-if [[ "$cmd" == *';'* ]] || [[ "$cmd" == *'&&'* ]] || [[ "$cmd" == *$'\n'* ]]; then
+if [ "$meta" -eq 1 ] && [ "$n_invocations" -gt 1 ]; then
   is_compound=1
 fi
 
-if [ "$is_compound" -eq 0 ]; then
-  if [[ "$cmd" =~ ^[[:space:]]*git[[:space:]]+tag[[:space:]]+-d([[:space:]]|$) ]]; then
-    exit 0
-  fi
-  if [[ "$cmd" == *":refs/tags/"* ]]; then
-    exit 0
-  fi
+if [ "$extracted" -eq 1 ]; then
+  # cmd is the real command text: anchor recovery/listing checks to its
+  # actual form, and refuse both outright on a compound command -- a real
+  # tag creation must not be able to hide behind a delete or a listing
+  # flag elsewhere in the same line.
+  if [ "$is_compound" -eq 0 ]; then
+    if [[ "$cmd" =~ ^[[:space:]]*git[[:space:]]+tag[[:space:]]+-d([[:space:]]|$) ]]; then
+      exit 0
+    fi
+    if [[ "$cmd" == *":refs/tags/"* ]]; then
+      exit 0
+    fi
 
-  if [[ "$cmd" =~ ^[[:space:]]*git[[:space:]]+tag([[:space:]]+.*)?$ ]]; then
-    if [[ "$cmd" =~ ^[[:space:]]*git[[:space:]]+tag[[:space:]]*$ ]]; then
-      exit 0
+    # No legitimate read-only listing form names a version, so gate this
+    # on has_version_token too: a create whose MESSAGE merely mentions
+    # "--list" or "--format" must still be checked, not waved through.
+    if [ "$has_version_token" -eq 0 ] && [[ "$cmd" =~ ^[[:space:]]*git[[:space:]]+tag([[:space:]]+.*)?$ ]]; then
+      if [[ "$cmd" =~ ^[[:space:]]*git[[:space:]]+tag[[:space:]]*$ ]]; then
+        exit 0
+      fi
+      if [[ "$cmd" == *"--list"* ]] || [[ "$cmd" == *"--contains"* ]] || [[ "$cmd" == *"--points-at"* ]] \
+        || [[ "$cmd" == *"--sort"* ]] || [[ "$cmd" == *"--merged"* ]] || [[ "$cmd" == *"--no-merged"* ]] \
+        || [[ "$cmd" == *"--format"* ]] || [[ "$cmd" =~ [[:space:]]-l([[:space:]]|$) ]]; then
+        exit 0
+      fi
     fi
-    if [[ "$cmd" == *"--list"* ]] || [[ "$cmd" == *"--contains"* ]] || [[ "$cmd" == *"--points-at"* ]] \
-      || [[ "$cmd" == *"--sort"* ]] || [[ "$cmd" == *"--merged"* ]] || [[ "$cmd" == *"--no-merged"* ]] \
-      || [[ "$cmd" == *"--format"* ]] || [[ "$cmd" =~ [[:space:]]-l([[:space:]]|$) ]]; then
-      exit 0
-    fi
+  fi
+else
+  # jq was missing, or the JSON did not parse: cmd is the raw, unparsed
+  # payload, which may be wrapped in JSON punctuation the anchored checks
+  # above were never meant to see through (it starts with `{`, not
+  # `git`). Recovery must never break just because jq is absent, so fall
+  # back to the original bare-substring test here -- deliberately NOT
+  # extended to the read-only listing allowlist: a false block on a
+  # listing command in this already-degraded mode is an acceptable cost,
+  # a false PASS on recovery is not.
+  if [[ "$cmd" == *"tag -d"* ]] || [[ "$cmd" == *":refs/tags/"* ]]; then
+    exit 0
   fi
 fi
 

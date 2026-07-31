@@ -1,5 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { join } from 'node:path';
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 const HOOK = join(import.meta.dir, '..', 'tools', 'hooks', 'require-release-notes.sh');
 
@@ -7,6 +9,27 @@ function runHook(command: string): { code: number; stderr: string } {
   const input = JSON.stringify({ tool_input: { command } });
   const proc = Bun.spawnSync(['bash', HOOK], { stdin: Buffer.from(input) });
   return { code: proc.exitCode ?? 0, stderr: proc.stderr.toString() };
+}
+
+// Runs the hook with a PATH that has everything it needs EXCEPT jq, so the
+// "jq is missing" fallback path is genuinely exercised rather than assumed.
+function runHookNoJq(command: string): { code: number; stderr: string } {
+  const sandbox = mkdtempSync(join(tmpdir(), 'require-release-notes-nojq-'));
+  try {
+    for (const bin of ['git', 'grep', 'sort', 'cat', 'wc']) {
+      const real = Bun.which(bin);
+      if (!real) throw new Error(`test setup: "${bin}" not found on PATH`);
+      symlinkSync(real, join(sandbox, bin));
+    }
+    const input = JSON.stringify({ tool_input: { command } });
+    const proc = Bun.spawnSync(['/bin/bash', HOOK], {
+      stdin: Buffer.from(input),
+      env: { PATH: sandbox },
+    });
+    return { code: proc.exitCode ?? 0, stderr: proc.stderr.toString() };
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true });
+  }
 }
 
 describe('require-release-notes hook', () => {
@@ -108,5 +131,42 @@ describe('require-release-notes hook', () => {
     expect(runHook('git tag --contains HEAD').code).toBe(0);
     expect(runHook('git tag --points-at HEAD').code).toBe(0);
     expect(runHook('git tag --sort=-v:refname').code).toBe(0);
+  });
+
+  test('R1: compound detection catches ||, |, single &, and $(...), not just ; && and newline', () => {
+    // Each of these hides a real tag creation behind a listing/delete
+    // joined by a separator the earlier ; / && / newline check missed.
+    expect(runHook('git tag --list || git tag v99.0.0').code).toBe(2);
+    expect(runHook('git tag --list | xargs -I{} git tag v99.0.0').code).toBe(2);
+    expect(runHook('git tag --list & git tag v99.0.0').code).toBe(2);
+    expect(runHook('git tag --list $(git tag v99.0.0)').code).toBe(2);
+    // Recovery must not ride through `||` either.
+    expect(runHook('git tag -d v0.5.0 || git tag v99.0.0').code).toBe(2);
+  });
+
+  test('R1: a metacharacter alone does not make a command compound', () => {
+    // The fix is "metacharacter AND more than one invocation", not a flat
+    // metacharacter ban -- piping listing output through another tool is
+    // ordinary, legitimate usage and must stay allowed.
+    expect(runHook('git tag --list | wc -l').code).toBe(0);
+  });
+
+  test('R2: a create whose message merely mentions a listing flag is still checked', () => {
+    const a = runHook('git tag -a v99.0.0 -m "--list"');
+    expect(a.code).toBe(2);
+    expect(a.stderr).toContain('docs/releases/99.0.0.md');
+
+    const b = runHook('git tag -a v99.0.0 -m "see --format"');
+    expect(b.code).toBe(2);
+    expect(b.stderr).toContain('docs/releases/99.0.0.md');
+  });
+
+  test('R3 BLOCKING: recovery still works when jq is unavailable', () => {
+    // With jq missing, `cmd` is the raw JSON payload (it starts with "{",
+    // not "git"), so the anchored recovery regex can never match. The
+    // guard must fall back to the old bare-substring test here instead of
+    // leaving recovery blocked in this degraded mode.
+    expect(runHookNoJq('git tag -d v99.0.0').code).toBe(0);
+    expect(runHookNoJq('git push origin :refs/tags/v99.0.0').code).toBe(0);
   });
 });
