@@ -97,3 +97,65 @@ export function diffVerdicts(before: string, after: string): { opened: Verdict[]
 
   return { opened, resolved };
 }
+
+/** Entry bodies keyed by entry number, for comparison across refs. */
+function entryBodies(registry: string): Map<string, string> {
+  const headings = [...registry.matchAll(ENTRY_HEADING)];
+  const bodies = new Map<string, string>();
+  headings.forEach((match, i) => {
+    const start = match.index!;
+    const end = i + 1 < headings.length ? headings[i + 1].index! : registry.length;
+    bodies.set(match[1], registry.slice(start, end).trim());
+  });
+  return bodies;
+}
+
+/**
+ * Registry entries added or materially edited between two refs. This is the
+ * primary change signal, not the FormatOptions interface: over the 0.5.0
+ * range the registry caught five of six reader-visible changes while the
+ * options interface caught one.
+ */
+export function changedRegistryEntries(before: string, after: string): string[] {
+  const old = entryBodies(before);
+  const now = entryBodies(after);
+  const changed: string[] = [];
+  for (const [entry, body] of now) {
+    if (old.get(entry) !== body) changed.push(entry);
+  }
+  return changed;
+}
+
+/** `bun tools/release-notes.ts <sinceTag>` prints the facts as JSON. */
+if (import.meta.main) {
+  const sinceTag = process.argv[2];
+  if (!sinceTag) {
+    console.error('usage: bun tools/release-notes.ts <sinceTag>');
+    process.exit(2);
+  }
+  const cwd = process.cwd();
+  const registryPath = 'docs/formatting-options-log.md';
+  const before = git(cwd, `show ${sinceTag}:${registryPath}`);
+  const after = await Bun.file(registryPath).text();
+  const { opened, resolved } = diffVerdicts(before, after);
+
+  const changedPaths = git(cwd, `diff --name-only ${sinceTag}..HEAD`).split('\n').filter(Boolean);
+  const userVisible = changedPaths.some(
+    (p) => !p.startsWith('docs/') && !p.startsWith('tests/') && !p.startsWith('.github/'),
+  );
+
+  console.log(
+    JSON.stringify(
+      {
+        sinceTag,
+        commits: collectCommits(cwd, sinceTag),
+        verdictsOpenedInRange: opened,
+        verdictsResolvedInRange: resolved,
+        registryChanges: changedRegistryEntries(before, after),
+        userVisible,
+      },
+      null,
+      2,
+    ),
+  );
+}

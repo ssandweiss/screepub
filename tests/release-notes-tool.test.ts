@@ -103,3 +103,24 @@ describe('verdict diffing', () => {
       .toContain('KFX honors widows/orphans');
   });
 });
+
+import { changedRegistryEntries } from '../tools/release-notes';
+
+describe('changedRegistryEntries', () => {
+  test('reports entries whose text differs between the two refs', () => {
+    const before = `### 1. Continuous scene flow\n- **What:** scenes flow.\n\n### 2. Column\n- **What:** narrow.\n`;
+    const after = `### 1. Continuous scene flow\n- **What:** scenes flow.\n- **MOBI arm:** pagebreaks.\n\n### 2. Column\n- **What:** narrow.\n`;
+    expect(changedRegistryEntries(before, after)).toEqual(['1']);
+  });
+
+  test('reports a brand new entry', () => {
+    const before = `### 1. One\n- a\n`;
+    const after = `### 1. One\n- a\n\n### 17. Print split minimums\n- b\n`;
+    expect(changedRegistryEntries(before, after)).toEqual(['17']);
+  });
+
+  test('reports nothing when the registry is untouched', () => {
+    const same = `### 1. One\n- a\n`;
+    expect(changedRegistryEntries(same, same)).toEqual([]);
+  });
+});
