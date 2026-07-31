@@ -245,6 +245,17 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
       'p.transition',
     ]);
   });
+
+  // widows/orphans (registry #17) is a separate, gated mechanism outside
+  // the avoid-link inventory above — pin it too, the same way, so it
+  // cannot spread to a third selector (e.g. p.parenthetical) without this
+  // failing and sending its author to the css.ts header comment.
+  test('widows/orphans carry on exactly two selectors: p.action and p.dialogue', () => {
+    const carrying = [...SCREENPLAY_CSS.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+      .filter(([, , body]) => /\b(?:widows|orphans):\s*\d+;/.test(body))
+      .map(([, selector]) => selector.trim().split('\n').pop()!.trim());
+    expect(carrying).toEqual(['p.action', 'p.dialogue']);
+  });
 });
 
 // ── buildEpub ────────────────────────────────────────────

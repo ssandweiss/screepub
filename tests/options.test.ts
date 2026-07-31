@@ -66,8 +66,11 @@ describe('resolveFormatOptions', () => {
   test('printSplitMinimums defaults to true and accepts a boolean', () => {
     expect(resolveFormatOptions({}).printSplitMinimums).toBe(true);
     expect(resolveFormatOptions({ printSplitMinimums: false }).printSplitMinimums).toBe(false);
+    // A falsy invalid value: stays true under the correct type-guarded
+    // fallback, but would flip to false under a `Boolean(p[key])`
+    // regression — a truthy invalid value like 'no' can't catch that.
     expect(
-      resolveFormatOptions({ printSplitMinimums: 'no' } as Record<string, unknown>).printSplitMinimums,
+      resolveFormatOptions({ printSplitMinimums: 0 } as Record<string, unknown>).printSplitMinimums,
     ).toBe(true);
   });
 });
@@ -125,12 +128,18 @@ describe('screenplayCss with options', () => {
   });
 
   test('printSplitMinimums controls widows/orphans on dialogue and action', () => {
-    const on = screenplayCss(resolveFormatOptions({}));
-    expect(on.match(/p\.dialogue\s*{[^}]*}/)![0]).toContain('widows: 2');
-    expect(on.match(/p\.dialogue\s*{[^}]*}/)![0]).toContain('orphans: 2');
-    expect(on.match(/p\.action\s*{[^}]*}/)![0]).toContain('widows: 2');
-    const off = screenplayCss(resolveFormatOptions({ printSplitMinimums: false }));
-    expect(off.match(/p\.action\s*{[^}]*}/)![0]).toContain('orphans: 1');
+    // Loop over both states and both selectors so drift between the two
+    // hand-copied rule bodies (the likeliest regression) can't hide in an
+    // untested corner. The trailing semicolon keeps `widows: 2` from
+    // matching `widows: 20`.
+    for (const [partial, n] of [[{}, 2], [{ printSplitMinimums: false }, 1]] as const) {
+      const css = screenplayCss(resolveFormatOptions(partial));
+      for (const sel of ['p\\.action', 'p\\.dialogue']) {
+        const rule = css.match(new RegExp(`${sel}\\s*{[^}]*}`))![0];
+        expect(rule).toContain(`widows: ${n};`);
+        expect(rule).toContain(`orphans: ${n};`);
+      }
+    }
   });
 });
 

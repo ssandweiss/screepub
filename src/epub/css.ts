@@ -11,17 +11,22 @@
 // - Break control kept deliberately small — every avoid link grows the
 //   unbreakable chunk renderers push, causing bottom-of-page gaps. The
 //   whole inventory, one line each:
-//     break-after: avoid   h2.scene-heading (gated: keepSceneHeadingWithScene)
+//     break-after: avoid   h2.scene-heading (gated: keepSceneHeadingWithScene, on)
 //     break-after: avoid   p.character
 //     break-after: avoid   p.mini-slug (live: secondary sluglines, registry #5b)
 //     break-before: avoid  p.transition
 //     break-inside: avoid  .keep-together (the cue keep)
 //     break-inside: avoid  table.dual-dialogue
 //     break-inside: avoid  .dialogue-block (gated: keepSpeechesWhole, off)
-//     widows/orphans: 2    p.dialogue, p.action (gated: printSplitMinimums, on)
 //   Plus the one FORCED break, which is not an avoid link and so grows no
 //   chunk — it ends a page rather than refusing to:
 //     page-break-before: always  section.scene (gated: scenePageBreaks, off)
+//   And one more mechanism outside both lists: widows/orphans on
+//   p.dialogue and p.action (gated: printSplitMinimums, on, registry #17).
+//   It is not an avoid link — its cost is bounded to roughly one extra
+//   line per page seam, not a whole pushed block — and it is the only
+//   rule here whose OFF state still emits a value (1) rather than
+//   nothing.
 import type { FormatOptions } from '../options';
 import { DEFAULT_FORMAT_OPTIONS } from '../options';
 
@@ -56,9 +61,21 @@ export function screenplayCss(o: FormatOptions): string {
     ? '\n  page-break-after: avoid;\n  break-after: avoid;'
     : '';
   // Print split minimums (registry #17): the two-line rule at page edges.
-  // Honored by KFX (fw 5.12.3+) and RMSDK (Kobo epub, tolino); harmlessly
-  // ignored by KF8/MOBI/kepub e-ink. 1 = the documented tight-packing
-  // trade for readers who hate bottom-of-page gaps.
+  // Honored by KFX (fw 5.12.3+) and RMSDK (Kobo epub, tolino); ignored by
+  // KF8/MOBI; unverified on kepub e-ink (patch-lore says it reads them —
+  // not confirmed on device here).
+  // CSS's own initial value for widows/orphans is already 2, so ON is a
+  // DEFENSIVE restatement, not an addition: it exists to beat a reading
+  // system whose own stylesheet packs tighter than that. 1 is the
+  // documented tight-packing trade for users who hate bottom-of-page gaps.
+  // Both properties inherit, so putting them on body would have covered
+  // everything; scoping to p.dialogue/p.action only is deliberate — OFF
+  // must not loosen p.parenthetical or p.centered too.
+  // Interaction with registry #8b (load-bearing): .keep-together is
+  // ALWAYS on and wraps cue + parentheticals + the FIRST dialogue
+  // paragraph in break-inside: avoid, so a single-paragraph speech never
+  // splits and this rule never fires for it. It bites the TAIL paragraphs
+  // of multi-paragraph speeches, and action, which #8b never wraps.
   const minLines = o.printSplitMinimums ? 2 : 1;
 
   return `
