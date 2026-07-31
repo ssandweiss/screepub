@@ -1,0 +1,56 @@
+<!-- @dsCard group="Components" -->
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .devices { width: 100%; border-collapse: collapse; font-size: 15px; }
+  .devices th {
+    font-family: var(--font-structure);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: left;
+    color: var(--ink-muted);
+    padding: 0 1rem 0.7rem 0;
+    border-bottom: 1px solid var(--hole);
+  }
+  .devices td {
+    padding: 0.85rem 1rem 0.85rem 0;
+    border-bottom: 1px solid var(--hole);
+    color: var(--ink-soft);
+    vertical-align: top;
+  }
+  .devices .device { color: var(--ink); }
+  .status { font-family: var(--font-structure); font-size: 13px; white-space: nowrap; }
+  .status-ok { color: var(--ink); }
+  .status-untested { color: var(--alarm); }
+</style>
+<div class="sheet">
+  <h2 class="slug">Which readers</h2>
+  <table class="devices">
+    <thead>
+      <tr><th>Device</th><th>How it's sent</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="device">Kindle, over USB</td>
+        <td>AZW3, or the engine's MOBI</td>
+        <td class="status status-ok">Verified on hardware</td>
+      </tr>
+      <tr>
+        <td class="device">Kindle, by email</td>
+        <td>EPUB to your kindle.com address</td>
+        <td class="status status-ok">Verified</td>
+      </tr>
+      <tr>
+        <td class="device">Kobo</td>
+        <td>EPUB or KEPUB over USB</td>
+        <td class="status status-untested">Never run on a real device</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="caption">
+    Untested rows are set in alarm, the only place on the site that color
+    appears. They are not a hedge: nobody has plugged one in, and saying so
+    plainly is the most trustworthy thing on the page.
+  </p>
+</div>
