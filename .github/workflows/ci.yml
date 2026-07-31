@@ -17,6 +17,15 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bunx tsc --noEmit
       - run: bun test
+      - name: Release notes exist for the current version
+        run: |
+          set -euo pipefail
+          V="$(bun --print "require('./package.json').version")"
+          F="docs/releases/$V.md"
+          test -s "$F" || {
+            echo "::error file=package.json::package.json says $V but $F is missing or empty. Every version ships notes: add that file, or revert the bump."
+            exit 1
+          }
   app:
     runs-on: macos-15   # Swift 6 toolchain (macos-14 ships 5.10)
     steps:
