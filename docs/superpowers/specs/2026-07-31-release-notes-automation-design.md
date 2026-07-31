@@ -177,7 +177,27 @@ with corrected fields:
   subject line.
 - `previousRelease`: `{ version, wordCount, bulletCount }`, so "shorter
   than last time" is a number rather than a vibe.
-- `userVisible`, `proposedVersion` + reason (advisory only).
+- `userVisible`.
+
+**Three fields this spec promised and the implementation deliberately does
+NOT emit (reconciled 2026-07-31, after the skill was written against the
+real output):**
+
+- `proposedVersion` + reason. The `/release` skill derives the version
+  itself from a documented minor/patch rule, so a second opinion in the
+  JSON would be a second place to keep that rule correct.
+- `optionChanges`. Finding 4 already demoted it to a secondary hint, and
+  the skill gets it directly from `git diff <tag>..HEAD -- src/options.ts`
+  when it wants it. Emitting it too would duplicate one grep.
+- `previousRelease` word and bullet counts. The template already sends the
+  drafter to read the two most recent real release files, which is where
+  voice and length actually transfer; a count without the prose next to it
+  is the less useful half.
+
+None of the three is load-bearing, and the skill was verified against the
+six fields that DO exist rather than the ones this document imagined. If a
+future draft comes back visibly longer than its predecessor, `previousRelease`
+is the first of the three worth adding.
 
 Tests over synthetic git state: the headline verdict-diff case above; an
 entry pending at both refs appearing in neither list; version proposal per
