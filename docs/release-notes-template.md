@@ -34,18 +34,36 @@ this, in this order:
 *<optional italic closer>*
 ```
 
-No date line. No version-bump commentary. No checksum: the workflow appends
-the real one, and two SHAs on one page both look official.
+No date line. No version-bump commentary. No checksum: the release workflow
+(`.github/workflows/release.yml`) appends the real one when it publishes,
+and two SHAs on one page both look official.
 
 ## 0. Read these before you write a word
 
-1. **The two most recent files in `docs/releases/`.** Match their length
-   and their vocabulary. This is how voice actually transfers. The caps
-   below are ceilings; the last two files are the target.
-2. **The range facts** (`tools/release-notes.ts` output): what changed,
-   which registry verdicts opened and which resolved.
-3. **`docs/formatting-options-log.md`** for any behavior you are writing
-   about. Read it for FACTS. See the contamination warning in section 5.
+1. **The two most recent real files in `docs/releases/`.** Match their
+   length and their vocabulary. This is how voice actually transfers. The
+   caps below are ceilings; the last two files are the target.
+   `docs/releases/0.4.2.md` is a 21-word stub with no bullets and no
+   voice. Stubs are not voice examples: skip them, and if that leaves
+   fewer than two real files, use the one real file alone.
+2. **The range facts:** `bun tools/release-notes.ts v<previous>` prints
+   JSON with `commits` (subjects as data, each flagged `ownerAuthored`),
+   `verdictsOpenedInRange` and `verdictsResolvedInRange` (each entry's
+   number, title and `Device support:` line), `registryChanges` (the
+   entry numbers added or materially edited in the range) and
+   `userVisible`.
+3. **The registry entries named by `registryChanges`**, in
+   `docs/formatting-options-log.md`. This is where you find out WHICH
+   bullets exist, so read it before you decide anything, not only when
+   writing a bullet you have already chosen. It is the primary signal
+   because it is the one that works: over the 0.5.0 range all 6 bullets
+   trace to an entry it names, while `src/options.ts` gained exactly one
+   key (`printSplitMinimums`) and so could account for 1. A changed
+   option key is a secondary hint, and what it hints is narrow: that
+   bullet needs a default-and-why sentence (rule 5.6).
+   `registryChanges` is a shortlist to judge, not a list to transcribe:
+   for 0.5.0 it named 11 entries and 6 became bullets. Read the entries
+   for FACTS. See the contamination warning in section 5.
 4. **`app/Sources/ScreepubApp/ReaderRail.swift`** if a bullet announces a
    new switch. That file holds the exact label the reader will see.
 
@@ -70,12 +88,17 @@ Six bullets TOTAL across both change sections. Not six per heading.
 
 ## 2. The cut ratio, with numbers
 
-The 0.5.0 range held 40 commits: 37 non-merge, arriving both through 3
-merged branches and straight onto main. It shipped 6 bullets.
+Count your own range: `git rev-list --no-merges --count v<previous>..HEAD`.
+Do not copy a number out of this file. The range stays open until the tag
+exists, so it grows under you: 0.5.0's was around 40 when its notes were
+drafted and still climbing afterwards.
+
+Whatever that number is, **expect roughly one bullet per six commits.**
+0.5.0 shipped 6.
 
 One whole merged branch (`test-hardening`, 5 commits, 296 lines added)
-produced nothing at all, because it changed only tests. Another branch
-produced exactly one line of one bullet.
+produced nothing at all, because it changed only tests. Another
+(`review-fixes`, 3 commits) produced exactly one bullet.
 
 **The default disposition for a commit is NO bullet.** A commit earns a
 bullet only when a reader who never opens the source would notice the
@@ -209,6 +232,10 @@ and write the sentence from what you now know.
 
 ## 6. Say this, not that
 
+The left column is what to avoid. The right column is approved vocabulary:
+those words belong in the notes, and several of them are already in 0.5.0.
+Any check you run against this table checks the left column only.
+
 | Do not write | Write instead |
 | --- | --- |
 | kepub | Kobo (name the device) |
@@ -274,8 +301,8 @@ into a new release.
 - `18f0ff6 Reader rail: Print-style split minimums toggle in the Page group`
 - Registry #17: "`printSplitMinimums` emits `widows`/`orphans` on
   `p.dialogue` and `p.action`: ON = 2 (print's two-line rule at page
-  edges), OFF = 1 (tight packing, the community's documented space-reclaim
-  trick)."
+  edges, pagination-reference §2), OFF = 1 (tight packing, the
+  community's documented space-reclaim trick)."
 
 **Notes**
 
@@ -371,7 +398,10 @@ the exact thing that annoyed them.
 broad. The reader never had the broken intermediate version, so there is
 nothing to tell them about it. Two commits, one setting, one line. The
 heading and the intro sentence carry the who and the what, so the bullet
-is just the setting's name.
+is just the setting, in plain English. Note that it is NOT the rail's
+label, which is "Scene page breaks": rule 5.7 asks for the exact label
+only when a bullet announces a new switch or sends the reader off to
+change one, and this bullet does neither.
 
 ### Pair 6: naming a format only where it is invisible
 
@@ -430,7 +460,35 @@ reader nothing they can use and it spends a bullet from a budget of six.
 **Why:** these three commits changed no output. What they changed is what
 we believed. That is the closer's entire job. See section 10.
 
-### Failure example 1: plausible, wrong vocabulary
+### Pair 9: a caveat, and what licenses the reassurance
+
+**Source**, from `verdictsOpenedInRange`, entry 17:
+
+- Device verdict: pending. Next KFX pass.
+- Device support: "KFX honors widows/orphans from fw 5.12.3 (Kindle
+  Previewer 3.35 added them ~2019); RMSDK (Kobo epub, tolino) honors book
+  CSS (MobileRead t=328903). Ignored: KF8/AZW3, MOBI. Unverified on kepub
+  e-ink (patch-lore says its WebKit reads them; not confirmed on device).
+  Apple Books: WebKit implements the properties; untested."
+
+**Notes**
+
+> - The new orphaned-lines setting hasn't been tested on a physical device
+>   yet. It's based on the device makers' own documentation, and it does
+>   nothing on readers that ignore it, so it can't hurt.
+
+**Why:** three clauses, each earned by a different part of one line.
+"Hasn't been tested on a physical device yet" is the pending verdict said
+plainly. "Based on the device makers' own documentation" is what a support
+line built from a firmware version and a renderer's published behavior
+amounts to, and it tells the reader exactly how strong the claim is
+without a single version number. "It does nothing on readers that ignore
+it, so it can't hurt" is the inert-if-ignored classification from section
+9, and **the thing that licenses it is the word "Ignored" in the support
+line.** A device that ignores the properties lays the page out exactly as
+it did before. Without that word you may not write the reassurance. The
+untested devices are not listed one by one, because a reader deciding
+whether to worry does not need the matrix.
 
 > - **Keep-together now carries the column spelling.** The EPUB renderer
 >   emits `-webkit-column-break-inside: avoid` in its own rule, so kepub
@@ -465,8 +523,10 @@ registry. The device coverage that genuinely matters here is a caveat, and
 
 Two, and only two:
 
-1. `verdictsOpenedInRange` from `tools/release-notes.ts`: registry entries
-   whose device verdict became pending during THIS range.
+1. `verdictsOpenedInRange` from `bun tools/release-notes.ts v<previous>`:
+   registry entries whose device verdict became pending during THIS range,
+   each carrying its `Device support:` line, which is the sentence you
+   actually write the caveat from. Worked example: pair 9.
 2. Standing product constraints a reader keeps hitting, such as Kindles
    refusing EPUB files over USB.
 
@@ -510,13 +570,21 @@ Every caveat is one of three things. Say which, in the caveat itself.
 After each caveat sourced from a registry entry, leave an HTML comment:
 
 ```markdown
-- The new setting hasn't been tested on a physical device yet. <!-- caveat: registry-17 -->
+- The new orphaned-lines setting hasn't been tested on a physical device
+  yet. It's based on the device makers' own documentation, and it does
+  nothing on readers that ignore it, so it can't hurt. <!-- caveat: registry-17 -->
 ```
 
 The comment does not render on the GitHub release page. It exists so the
 next release can grep the previous file and ask: did that verdict land? If
 it did, the caveat is retired and may be worth a line in the new notes. If
 it did not, the caveat stands and does NOT get repeated.
+
+A marker costs 4 words against the 350-word cap, in `wc -w` and in
+`tests/release-notes.test.ts` alike, because neither tool knows what an
+HTML comment is. Keep markers to this exact shape, and subtract 4 words
+per marker when you want the count of the prose a reader will actually
+see.
 
 `docs/releases/0.5.0.md` predates this convention and carries no markers.
 For that one file, read its Good to know section directly.
@@ -557,7 +625,8 @@ Run all of it before showing anyone anything.
 
 **Counts**
 
-- [ ] `wc -w docs/releases/<version>.md` is under 350.
+- [ ] `wc -w docs/releases/<version>.md` is under 350, caveat markers
+      included (4 words each, and the test counts them too).
 - [ ] Lede is one sentence, under 25 words.
 - [ ] At most 2 change headings and 6 bullets total across them.
 - [ ] No bold claim over 10 words; no explanation over 50.
@@ -570,7 +639,11 @@ Run all of it before showing anyone anything.
 
 - [ ] `LC_ALL=C grep -n $'\xe2\x80\x94' docs/releases/<version>.md` returns
       nothing. That byte sequence is the em dash, which is banned.
-- [ ] No term from the say this, not that table appears.
+- [ ] No term from the LEFT column of the say this, not that table
+      appears. The right column is the approved vocabulary and belongs in
+      the notes: a check that rejects "typewriter font", "Apple Books",
+      "orphaned lines", "page turns" or "copied over USB" is rejecting
+      0.5.0 itself.
 - [ ] Every format name passes section 7's act-on-it test.
 - [ ] No heading is New, Improved, Fixed or Changed on its own.
 - [ ] Every bold claim stands alone if the reader reads nothing else.
