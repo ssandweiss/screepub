@@ -99,7 +99,7 @@ ramp. These five stops define every brass surface on the site.
 | 0.76 | `#BE7C1E` | shadow turn |
 | 1.00 | `#8B5917` | rim |
 
-Plus `--brass-rim: #7A5116` for the hairline edge and
+Plus `--brass-edge: #7A5116` for the brad's rim disc and hairline, and
 `--brass-bounce: #F7CE7E` for reflected light on the lower right.
 
 The ramp is a radial gradient with its focus at 33% / 27%, which puts
