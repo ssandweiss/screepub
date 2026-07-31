@@ -8,6 +8,13 @@
 //   one-blank-Courier-line between elements = 1em.
 // - No line-height/font-size overrides on body text — Enhanced Typesetting
 //   owns within-paragraph spacing (the reader's own setting).
+// - NO background-color on html or body, ever — KFX honors keeps on
+//   TOP-LEVEL blocks only, and a root background makes its converter
+//   synthesize a wrapper block, after which every keep in the book dies
+//   silently (MobileRead t=330798; docs/device-map.md §2.1).
+// - CSS values stay CSS-2.1-vintage — Adobe RMSDK (Kobo's EPUB path,
+//   tolino) violates CSS error handling and can blank an entire book on a
+//   modern value function such as min().
 // - Break control kept deliberately small — every avoid link grows the
 //   unbreakable chunk renderers push, causing bottom-of-page gaps. The
 //   whole inventory, one line each:
@@ -18,22 +25,27 @@
 //     break-inside: avoid  .keep-together (the cue keep)
 //     break-inside: avoid  table.dual-dialogue
 //     break-inside: avoid  .dialogue-block (gated: keepSpeechesWhole, off)
-//   Plus the one FORCED break, which is not an avoid link and so grows no
-//   chunk — it ends a page rather than refusing to:
-//     page-break-before: always  section.scene (gated: scenePageBreaks, off)
-//   And one more mechanism outside both lists: widows/orphans on
-//   p.dialogue and p.action (gated: printSplitMinimums, on, registry #17).
-//   It is not an avoid link — its cost is bounded to roughly one extra
-//   line per page seam, not a whole pushed block — and it is the only
-//   rule here whose OFF state still emits a value (1) rather than
-//   nothing.
-//   And a shadow rule, not a seventh chunk: -webkit-column-break-inside:
+//   And a shadow rule, not a new inventory entry: -webkit-column-break-inside:
 //   avoid on .keep-together and table.dual-dialogue, the old column
 //   spelling multicol-paginating engines (kepub, the Readium family)
 //   honor instead of the modern one. Lives in its OWN declaration block —
 //   iBooks drops both spellings when they share one (BlitzTricks) — so it
-//   reads as a distinct entry to the guard test below, not a change to
-//   either selector's existing break-inside rule.
+//   reads as a distinct entry to the guard test in tests/epub.test.ts,
+//   not a change to either selector's existing break-inside rule. What it
+//   DOES add is cost on those engines: nothing kept there before, so these
+//   two wrappers become their first unbreakable chunks, carrying the same
+//   bottom-of-page gaps this bullet opens with.
+//   Plus the one FORCED break, which is not an avoid link and so grows no
+//   chunk — it ends a page rather than refusing to:
+//     page-break-before: always  section.scene (gated: scenePageBreaks, off)
+//   And one more mechanism outside the inventory above and outside that
+//   forced break: widows/orphans on p.dialogue and p.action (gated:
+//   printSplitMinimums, on, registry #17). It is not an avoid link — its
+//   cost is bounded to roughly one extra line per page seam, not a whole
+//   pushed block — and it is the only one of the rules cataloged in this
+//   bullet whose OFF state still emits a value (1) rather than nothing
+//   (justifyText, which is no part of this inventory, is the file's other
+//   such knob).
 import type { FormatOptions } from '../options';
 import { DEFAULT_FORMAT_OPTIONS } from '../options';
 
@@ -80,9 +92,12 @@ export function screenplayCss(o: FormatOptions): string {
   // must not loosen p.parenthetical or p.centered too.
   // Interaction with registry #8b (load-bearing): .keep-together is
   // ALWAYS on and wraps cue + parentheticals + the FIRST dialogue
-  // paragraph in break-inside: avoid, so a single-paragraph speech never
-  // splits and this rule never fires for it. It bites the TAIL paragraphs
-  // of multi-paragraph speeches, and action, which #8b never wraps.
+  // paragraph in break-inside: avoid, so a single-paragraph speech does
+  // not split and this rule does not fire for it — with the same caveat
+  // #8c carries: `avoid` yields where it cannot be honored, so a wrapper
+  // taller than the page still breaks bare, and there these minimums are
+  // what is left. Its everyday bite is the TAIL paragraphs of
+  // multi-paragraph speeches, and action, which #8b never wraps.
   const minLines = o.printSplitMinimums ? 2 : 1;
 
   return `
@@ -130,7 +145,9 @@ span.underline {
    the theme's own text color instead, so the marker recedes correctly
    under any theme. Engines without opacity support just render it at full
    strength — a harmless degrade. Enhanced Typesetting lists opacity as
-   supported. */
+   supported (Guidelines 2026.2 §18.1 — the irony is deliberate: that PDF's
+   Appendix B is stale on break and keep CSS, but its supported-properties
+   table is still the citable source; docs/device-map.md §2.1). */
 span.page-marker {
   float: right;
   font-size: 0.75em;

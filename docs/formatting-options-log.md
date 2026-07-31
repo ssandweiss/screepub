@@ -21,7 +21,17 @@ is live.
 - **Default:** continuous, 250 KB/file budget.
 - **App option:** toggle "Start each scene on a new page" (off) +
   advanced: file-size budget.
-- **Code:** `src/epub/html.ts` (`tokensToBody`, `DEFAULT_MAX_FILE_BYTES`).
+- **MOBI arm (2026-07-30):** the MOBI dialect has exactly one fragmentation
+  primitive, `<mbp:pagebreak/>`, and `scenePageBreaks` now drives it: one
+  break before each PRIMARY scene heading except the first. Mini-slugs are
+  excluded, matching the EPUB, which opens a `section.scene` for primary
+  slugs only (#5b). It is the ONLY FormatOptions field the MOBI renderer
+  itself reads: that dialect ships no stylesheet (#8c), so every other
+  stage-2 knob here is EPUB CSS territory it cannot reach. Stage-1 knobs
+  (#8, #8a, #10a's mode, #13a's markers) reach it the way they reach
+  everything — written into the `.fountain` before either renderer runs.
+- **Code:** `src/epub/html.ts` (`tokensToBody`, `DEFAULT_MAX_FILE_BYTES`),
+  `src/mobi/html.ts` (`scene_heading` case).
 
 ### 2. Centered dialogue column — % geometry (v2)
 - **What:** dialogue is a narrow column with **percentage side margins**
@@ -294,6 +304,14 @@ is live.
   freely.
 - **App options:** none — cue avoid stays always-on; the heading behavior
   is governed by 5a's CSS chain (gated by `keepSceneHeadingWithScene`).
+- **Column-spelling shadow rule (2026-07-30):** the two inside-avoid
+  WRAPPERS — #8b's `.keep-together` and #10a's `table.dual-dialogue` —
+  now also carry `-webkit-column-break-inside: avoid`, in a SEPARATE
+  declaration block (separate because iBooks drops both spellings when
+  they share one), which extends those keeps to the multicol-paginating
+  engines: kepub and the Readium family. The keep-with-*next* chains in
+  this entry get no such shadow — we emit no column-spelling
+  `break-after` — so they stay modern/legacy-prefixed spelling only.
 - **Code:** `src/epub/css.ts`.
 
 ### 6. Typeface & line height (v2)
@@ -319,8 +337,16 @@ is live.
 - **Default:** ragged-right (`justifyText: false`).
 - **App option:** "Justify body text" toggle (the reader rail's Text
   group).
+- **Apple Books needs the OPF meta (2026-07-30):** unless the package
+  carries `<meta property="ibooks:specified-fonts">true</meta>`, a Books
+  reader with Justify switched on overrides our ragged-right `text-align`
+  outright (and our font-family with it), so this knob simply does not
+  hold there. Shipped 2026-07-30, with the `ibooks:` prefix declared on
+  `<package>` so epubcheck stays quiet; every other reading system
+  ignores the meta (device-map §3).
 - **Code:** `src/options.ts` (`justifyText`), `src/epub/css.ts`
-  (`bodyAlign` → `p.action`, `p.dialogue`).
+  (`bodyAlign` → `p.action`, `p.dialogue`), `src/epub/build.ts` (the OPF
+  meta).
 
 ### 16. Transitions never begin a page (always on)
 - **What:** `page-break-before: avoid; break-before: avoid` on
@@ -344,6 +370,31 @@ is live.
   wants a deliberate look at a page whose seam lands near a CUT TO:.
   The verdict lands in this entry.
 - **Code:** `src/epub/css.ts` (`p.transition`).
+
+### 17. Print split minimums (option, default ON; 2026-07-30)
+- **What:** `printSplitMinimums` emits `widows`/`orphans` on `p.dialogue`
+  and `p.action`: ON = 2 (print's two-line rule at page edges,
+  pagination-reference §2), OFF = 1 (tight packing, the community's
+  documented space-reclaim trick).
+- **Device support:** KFX honors widows/orphans from fw 5.12.3 (Kindle
+  Previewer 3.35 added them ~2019); RMSDK (Kobo epub, tolino) honors
+  book CSS (MobileRead t=328903). Ignored: KF8/AZW3, MOBI. Unverified
+  on kepub e-ink (patch-lore says its WebKit reads them; not confirmed
+  on device). Apple Books: WebKit implements the properties; untested.
+- **Interaction (load-bearing):** #8b's `.keep-together` is ALWAYS on and
+  wraps cue + parentheticals + the FIRST dialogue paragraph in
+  `break-inside: avoid`. A single-paragraph speech therefore never
+  splits and its widows/orphans never fire. This rule bites on the TAIL
+  paragraphs of multi-paragraph speeches and on action. With #8c also
+  ON, whole speeches are atomic and the dialogue arm is fully inert;
+  the action arm is unaffected in every mode.
+- **App option:** "Print-style split minimums" (reader rail, Page group).
+- **Device verdict: pending —** next KFX pass. Test with a MULTI-paragraph
+  speech or a long action block, NOT a short speech: a short speech moves
+  whole because of #8b's keep, which would validate the wrong rule. Does
+  the tail hold 2+2, and OFF hold 1+1?
+- **Code:** `src/options.ts`, `src/epub/css.ts`, app FormatSettings +
+  ReaderRail.
 
 ## Cleanup & rejoining
 
@@ -426,7 +477,14 @@ is live.
   container form; scene headings no longer use it — see #5a) so a cue
   never strands at a page bottom with its speech overleaf
   (user-requested 2026-07-22).
-- **Code:** `src/epub/html.ts` (`closeSpeech`).
+- **The column spelling too (2026-07-30):** `.keep-together` additionally
+  carries `-webkit-column-break-inside: avoid`, in a SEPARATE rule of its
+  own — separate because iBooks drops both spellings when they share one
+  declaration block — which extends this keep to the multicol-paginating
+  engines that honor only the old spelling: kepub and the Readium family
+  (device-map §6). Same wrapper, same selector, one more audience.
+- **Code:** `src/epub/html.ts` (`closeSpeech`), `src/epub/css.ts`
+  (`.keep-together` and the column-spelling rule beside it).
 
 ### 8c. Whole-speech keep (option, default OFF; 2026-07-30)
 - **What:** `keepSpeechesWhole` makes each `.dialogue-block` atomic —
@@ -452,7 +510,11 @@ is live.
   move whole, and how big is the gap it leaves? Same Kindle
   Previewer/KFX + Apple Books pass as #5a. Note the interaction with
   #10b: with this option ON, a tall dual exchange that has fallen back
-  to sequential becomes two atomic blocks. The verdict lands here.
+  to sequential becomes two atomic blocks. Include the longest speech in
+  the set at the largest font size: a kept block taller than one page
+  historically made Kindle Previewer fail to render pages (jhowell,
+  2016), and blank-page pushes are the failure the Blitz framework
+  disables Kindle keeps to avoid. The verdict lands here.
 - **MOBI:** that dialect ships no stylesheet at all, so no keep — this
   one or any other in this document — applies on the MOBI route
   (structural, unchanged).
@@ -664,7 +726,7 @@ is live.
 
 ### 13a. Original page-number markers (option, default off)
 - **What:** `showPageMarkers` emits the PDF's printed pagination as small
-  right-flush gray markers ("47.") at page boundaries — page count is how
+  right-flush dimmed markers ("47.") at page boundaries — page count is how
   scripts are evaluated (1 page ≈ 1 minute), and reflow otherwise erases
   it. Numbering anchors to the stripped printed page-number furniture
   (mode of printed−sheet offsets, so the title page never counts and
@@ -679,6 +741,13 @@ is live.
   capable readers real page numbers and page-jump. MOBI gets the floated
   span only. If a legacy renderer ignores `float`, the number degrades to
   inline text at the head of the paragraph.
+- **Dimming, not gray (2026-07-30):** the marker now recedes via
+  `opacity: 0.6` instead of a hardcoded gray. A fixed gray was picked
+  against a white page and fought every themed background; opacity is
+  relative to the theme's own text color, so the marker tracks dark and
+  sepia as well as white. Engines with no opacity support render it at
+  full strength — a harmless degrade — and Enhanced Typesetting lists
+  opacity as supported (Guidelines 2026.2 §18.1).
 - **Code:** `src/fountain/serialize.ts` (`printedPageOffset`),
   `src/epub/html.ts` + `src/mobi/html.ts` (synopsis case),
   `src/epub/css.ts` (`span.page-marker`), `src/epub/build.ts` (page-list).

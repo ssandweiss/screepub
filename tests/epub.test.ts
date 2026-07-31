@@ -211,7 +211,10 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
   });
 
   test('keep-together container uses break-inside avoid (the KDP-documented form)', () => {
-    const keep = SCREENPLAY_CSS.match(/\.keep-together\s*{[^}]*}/)![0];
+    // Anchored to line start for the same reason the dual-dialogue rule
+    // below is: .keep-together also heads the comma-joined column-spelling
+    // shadow rule, which only misses this pattern by the comma.
+    const keep = SCREENPLAY_CSS.match(/^\.keep-together\s*{[^}]*}/m)![0];
     expect(keep).toContain('page-break-inside: avoid');
     expect(keep).toContain('break-inside: avoid');
   });
@@ -235,7 +238,7 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
   // multicol-paginating engines — but it does NOT match the declarations
   // regex (it carries neither `page-break-inside` nor `break-inside`), so
   // the twelve-declaration count stays closed.
-  test('the avoid inventory is closed — twelve declarations, plus the column-spelling shadow rule', () => {
+  test('the avoid inventory is closed — seven entries, twelve declarations', () => {
     const declarations =
       SCREENPLAY_CSS.match(/^\s*(?:page-)?break-(?:after|before|inside):\s*avoid;/gm) ?? [];
     expect(declarations).toHaveLength(12);

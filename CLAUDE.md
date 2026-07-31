@@ -42,8 +42,15 @@ epubcheck <out.epub>        # validate output (brew-installed)
   emphasis from PDF font styles) rides in `styledText` beside it; only
   dialogue/action emit styled. Markers in cues/parens/slugs break parsing.
 - **EPUB CSS: horizontal in %, vertical in em, no max-width, no body
-  line-height.** Kindle strips max-width and owns line-height. See
-  docs/screenplay-format-reference.md before touching css.ts.
+  line-height.** Kindle strips max-width and owns line-height. Two more
+  hard NOs: **never `background-color` on html or body** — KFX honors keeps
+  on top-level blocks only, and a root background makes its converter
+  synthesize a wrapper that silently kills every keep in the book; and
+  **CSS values stay CSS-2.1-vintage** — Adobe RMSDK (Kobo's EPUB path,
+  tolino) violates CSS error handling and can blank a whole book on a
+  modern value function like `min()`. See
+  docs/screenplay-format-reference.md before touching css.ts, and
+  docs/device-map.md §6 for what each renderer honors.
 - **Kindles never index sideloaded EPUBs.** USB = AZW3 via Calibre's
   ebook-convert (with flags that stop Calibre re-breaking scenes and
   stripping div margins — see EbookConvert.swift) or the engine's MOBI.
