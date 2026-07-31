@@ -30,6 +30,10 @@ struct ReaderRail: View {
                 Text("Avoids mid-speech page turns; long speeches may leave white space at page bottoms. Speeches taller than a full page still break.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Toggle("Print-style split minimums", isOn: binding(\.printSplitMinimums))
+                Text("Never leaves a single line of a speech or paragraph alone at a page edge. Off packs pages tighter. Applies on new-format Kindle (KFX) and Kobo/tolino.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("Dialogue") {
                 slider("Dialogue margins", value: binding(\.dialogueSideMarginPct), range: 0...30)

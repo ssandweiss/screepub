@@ -41,6 +41,9 @@ export interface FormatOptions {
    * traditionally ragged-right; some readers justify by default, opening
    * stretchy word gaps (registry #6b) */
   justifyText: boolean;
+  /** print split minimums: never strand a single dialogue/action line at
+   * a page edge (widows/orphans 2); off packs tight (1) (registry #17) */
+  printSplitMinimums: boolean;
 }
 
 export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
@@ -60,6 +63,7 @@ export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
   showPageMarkers: false,
   dualDialogue: 'sideBySide',
   justifyText: false,
+  printSplitMinimums: true,
 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -96,5 +100,6 @@ export function resolveFormatOptions(partial?: Record<string, unknown>): FormatO
     showPageMarkers: bool('showPageMarkers'),
     dualDialogue: p.dualDialogue === 'sequential' ? 'sequential' : d.dualDialogue,
     justifyText: bool('justifyText'),
+    printSplitMinimums: bool('printSplitMinimums'),
   };
 }

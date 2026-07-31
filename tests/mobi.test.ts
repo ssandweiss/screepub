@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { Fountain } from 'fountain-js';
 import { buildMobi } from '../src/mobi/writer';
 import { tokensToMobiHtml } from '../src/mobi/html';
+import { resolveFormatOptions } from '../src/options';
 
 const SAMPLE = `INT. KITCHEN - DAY
 
@@ -71,6 +72,28 @@ describe('tokensToMobiHtml', () => {
     const tokens = new Fountain().parse('INT. STORE - NIGHT\n\nThe gate rattles.\n\n.LATER\n\nStill on.\n', true).tokens;
     const html = tokensToMobiHtml(tokens, { title: 'T' });
     expect(html).toContain('<p><b>LATER</b></p>');
+  });
+
+  test('scenePageBreaks emits mbp:pagebreak before every scene heading except the first', () => {
+    const src = 'INT. A - DAY\n\nAction.\n\nINT. B - NIGHT\n\nMore.\n';
+    const { tokens } = new Fountain().parse(src, true);
+    const off = tokensToMobiHtml(tokens, { title: 'T' });
+    const on = tokensToMobiHtml(tokens, { title: 'T' }, resolveFormatOptions({ scenePageBreaks: true }));
+    // The title page always contributes exactly one pagebreak of its own.
+    expect(off.match(/<mbp:pagebreak\/>/g)!.length).toBe(1);
+    expect(on.match(/<mbp:pagebreak\/>/g)!.length).toBe(2);
+  });
+
+  test('scenePageBreaks does not break before a mini-slug, only before primary scenes (registry #5b)', () => {
+    // fountain-js strips the leading dot: `.LATER` tokenizes as a
+    // scene_heading with text "LATER", same as the EPUB side relies on.
+    const src = 'INT. A - DAY\n\nAction.\n\n.LATER\n\nMore.\n\nINT. B - NIGHT\n\nEnd.\n';
+    const { tokens } = new Fountain().parse(src, true);
+    expect(tokens.find((t) => t.text === 'LATER')?.type).toBe('scene_heading');
+    const on = tokensToMobiHtml(tokens, { title: 'T' }, resolveFormatOptions({ scenePageBreaks: true }));
+    // Title page's break, plus one before INT. B — none before LATER.
+    expect(on.match(/<mbp:pagebreak\/>/g)!.length).toBe(2);
+    expect(on).not.toMatch(/<mbp:pagebreak\/>\s*<p><b>LATER<\/b><\/p>/);
   });
 });
 

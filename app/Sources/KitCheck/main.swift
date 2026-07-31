@@ -217,6 +217,9 @@ if let defaultsData = try? Data(contentsOf: defaultsFile) {
 check(FormatSettings.defaults.keepSpeechesWhole == false,
       "keepSpeechesWhole defaults off — speeches flow; atomicity is opt-in")
 
+check(FormatSettings.defaults.printSplitMinimums == true,
+      "printSplitMinimums defaults ON (the print two-line rule)")
+
 // — reMarkable endpoint sanity (regression: an IP literal in source once
 // arrived empty and the force-unwrapped URL(string:) crashed at launch) —
 check(RemarkableDevice.endpoint.absoluteString == "http://" + [10, 11, 99, 1].map(String.init).joined(separator: "."),
@@ -401,6 +404,17 @@ var expectedPartial = FormatSettings.defaults
 expectedPartial.dialogueSideMarginPct = 9
 check(partialLoaded == expectedPartial,
       "partial sidecar overlays present field, leaves rest at fallback")
+
+// printSplitMinimums defaults true, so a round-trip that never disturbs it
+// would pass whether or not the merge line for this field exists at all —
+// the override has to run false-over-true to be a real assertion.
+let splitMinFountain = lib.appendingPathComponent("SplitMin.fountain")
+try! Data(#"{"printSplitMinimums": false}"#.utf8).write(to: ScriptSettings.sidecarURL(forFountain: splitMinFountain))
+let splitMinLoaded = ScriptSettings.load(forFountain: splitMinFountain, fallback: FormatSettings.defaults)
+var expectedSplitMin = FormatSettings.defaults
+expectedSplitMin.printSplitMinimums = false
+check(splitMinLoaded == expectedSplitMin,
+      "sidecar overrides printSplitMinimums to false against a true fallback")
 
 // — feedback issue URL —
 let feedback = Feedback.newIssueURL(appVersion: "0.1.0", osVersion: "macOS 15.0", context: "scanned: no text")

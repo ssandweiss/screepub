@@ -4,7 +4,17 @@
 // bold sluglines, blockquoted speeches with bold cues, right-flush
 // transitions. (The EPUB path stays the high-fidelity rendering; this is
 // the dependency-free USB sideload format.)
+// This dialect has exactly one fragmentation primitive: <mbp:pagebreak/>.
+// It is wired to scenePageBreaks (registry #1) and nothing else — every
+// other FormatOptions knob is EPUB CSS territory this dialect can't reach.
+// The break follows PRIMARY scene headings only, never mini-slugs: a
+// mini-slug is a micro-heading inside the current scene, not a new scene
+// (registry #5b), so breaking before one would be wrong the same way it
+// would be wrong in the EPUB path's section.scene handling.
 import type { Token } from 'fountain-js';
+import type { FormatOptions } from '../options';
+import { DEFAULT_FORMAT_OPTIONS } from '../options';
+import { isMiniSlug } from '../fountain/slug';
 
 export interface MobiMeta {
   title: string;
@@ -28,7 +38,11 @@ function inline(escaped: string): string {
     .replace(/_(?!\s)([^_]+?)(?<!\s)_/g, '<u>$1</u>');
 }
 
-export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
+export function tokensToMobiHtml(
+  tokens: Token[],
+  meta: MobiMeta,
+  format: FormatOptions = DEFAULT_FORMAT_OPTIONS,
+): string {
   const out: string[] = [];
   out.push('<html><head></head><body>');
 
@@ -42,6 +56,7 @@ export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
   // Body: dialogue blocks accumulate into a single <blockquote>.
   let speech: string[] | null = null;
   let dual: { left: string[]; right: string[]; side: 'left' | 'right' } | null = null;
+  let sawScene = false;
   // Page markers ride inside the NEXT block instead of taking a line of
   // their own — same rule as the EPUB, minus the EPUB3 semantics (no
   // epub:type/role/id here). There is no stylesheet in this dialect to hang
@@ -68,10 +83,19 @@ export function tokensToMobiHtml(tokens: Token[], meta: MobiMeta): string {
   for (const t of tokens.filter((t) => !t.is_title)) {
     const text = t.text ?? '';
     switch (t.type) {
-      case 'scene_heading':
+      case 'scene_heading': {
         closeSpeech();
+        const primary = !isMiniSlug(t);
+        // The only break primitive this dialect has (registry #1's MOBI
+        // arm), and only before a primary scene heading — a mini-slug
+        // stays inside the scene it appears in (registry #5b). out.push,
+        // not push(): a pending page marker belongs to the heading block,
+        // never to the break itself.
+        if (format.scenePageBreaks && primary && sawScene) out.push('<mbp:pagebreak/>');
+        if (primary) sawScene = true;
         push(`<p><b>${esc(text)}</b></p>`);
         break;
+      }
       case 'action':
       case 'lyrics':
         closeSpeech();

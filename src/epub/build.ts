@@ -36,13 +36,19 @@ function packageOpf(meta: BookMeta, body: BookBody, modified: string, includeTit
     ? '    <item id="titlepage" href="titlepage.xhtml" media-type="application/xhtml+xml"/>\n'
     : '';
   const titleRef = includeTitlePage ? '    <itemref idref="titlepage"/>\n' : '';
+  // Apple Books otherwise ignores our publisher font-family and lets the
+  // reader's own Justify setting override text-align — the ibooks:
+  // specified-fonts meta below is what keeps Books honoring both. The
+  // prefix declaration is what keeps epubcheck quiet about a
+  // non-standard property; every other reading system just ignores it.
   return `<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid" xml:lang="en">
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid" xml:lang="en" prefix="ibooks: http://vocabulary.itunes.apple.com/rdf/ibooks/vocabulary-extensions-1.0/">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="uid">${escapeXml(meta.identifier!)}</dc:identifier>
     <dc:title>${escapeXml(meta.title)}</dc:title>
 ${creator}    <dc:language>${meta.language ?? 'en'}</dc:language>
     <meta property="dcterms:modified">${modified}</meta>
+    <meta property="ibooks:specified-fonts">true</meta>
   </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>

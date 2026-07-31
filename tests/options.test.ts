@@ -36,7 +36,7 @@ describe('resolveFormatOptions', () => {
   test('defaults match the canonical format-defaults.json both suites pin', async () => {
     // The same file kit-check decodes into FormatSettings and compares to
     // FormatSettings.defaults — the two languages can no longer drift
-    // silently. Sixteen literals, one source of truth.
+    // silently. Seventeen literals, one source of truth.
     const canonical = await Bun.file(new URL('../format-defaults.json', import.meta.url)).json();
     expect(DEFAULT_FORMAT_OPTIONS).toEqual(canonical);
   });
@@ -61,6 +61,17 @@ describe('resolveFormatOptions', () => {
     expect(resolveFormatOptions({}).justifyText).toBe(false);
     expect(resolveFormatOptions({ justifyText: true }).justifyText).toBe(true);
     expect(resolveFormatOptions({ justifyText: 'nope' } as Record<string, unknown>).justifyText).toBe(false);
+  });
+
+  test('printSplitMinimums defaults to true and accepts a boolean', () => {
+    expect(resolveFormatOptions({}).printSplitMinimums).toBe(true);
+    expect(resolveFormatOptions({ printSplitMinimums: false }).printSplitMinimums).toBe(false);
+    // A falsy invalid value: stays true under the correct type-guarded
+    // fallback, but would flip to false under a `Boolean(p[key])`
+    // regression — a truthy invalid value like 'no' can't catch that.
+    expect(
+      resolveFormatOptions({ printSplitMinimums: 0 } as Record<string, unknown>).printSplitMinimums,
+    ).toBe(true);
   });
 });
 
@@ -114,6 +125,38 @@ describe('screenplayCss with options', () => {
     const justified = screenplayCss(resolveFormatOptions({ justifyText: true }));
     expect(justified.match(/p\.action\s*{[^}]*}/)![0]).toContain('text-align: justify');
     expect(justified.match(/p\.dialogue\s*{[^}]*}/)![0]).toContain('text-align: justify');
+  });
+
+  test('printSplitMinimums controls widows/orphans on dialogue and action', () => {
+    // Loop over both states and both selectors so drift between the two
+    // hand-copied rule bodies (the likeliest regression) can't hide in an
+    // untested corner. The trailing semicolon keeps `widows: 2` from
+    // matching `widows: 20`.
+    for (const [partial, n] of [[{}, 2], [{ printSplitMinimums: false }, 1]] as const) {
+      const css = screenplayCss(resolveFormatOptions(partial));
+      for (const sel of ['p\\.action', 'p\\.dialogue']) {
+        const rule = css.match(new RegExp(`${sel}\\s*{[^}]*}`))![0];
+        expect(rule).toContain(`widows: ${n};`);
+        expect(rule).toContain(`orphans: ${n};`);
+      }
+    }
+  });
+
+  test('wrapper keeps carry the column spelling in a separate rule', () => {
+    const css = screenplayCss(DEFAULT_FORMAT_OPTIONS);
+    const rule = css.match(/\.keep-together,\s*table\.dual-dialogue\s*{[^}]*}/);
+    expect(rule).not.toBeNull();
+    expect(rule![0]).toContain('-webkit-column-break-inside: avoid');
+    // iBooks bug: the column spelling must not share a declaration block
+    // with page-break-inside, or Books ignores BOTH.
+    expect(rule![0]).not.toContain('page-break-inside');
+  });
+
+  test('page marker dims via opacity, not a hardcoded gray', () => {
+    const css = screenplayCss(DEFAULT_FORMAT_OPTIONS);
+    const rule = css.match(/span\.page-marker\s*{[^}]*}/)![0];
+    expect(rule).toContain('opacity: 0.6');
+    expect(rule).not.toContain('#777777');
   });
 });
 

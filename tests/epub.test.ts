@@ -2,10 +2,13 @@ import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { Fountain } from 'fountain-js';
 import JSZip from 'jszip';
-import { tokensToBody, tokensToPreviewHtml, PRIMARY_SLUG } from '../src/epub/html';
+import { tokensToBody, tokensToPreviewHtml } from '../src/epub/html';
 import { buildEpub } from '../src/epub/build';
 import { SCREENPLAY_CSS } from '../src/epub/css';
 import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
+// Stage-2's copy, straight from the module that owns it — both renderers
+// import it from here, so the test reads the same definition they do.
+import { PRIMARY_SLUG } from '../src/fountain/slug';
 import { PRIMARY_SLUG as PARSER_PRIMARY_SLUG } from '../src/parser/classify';
 
 const SAMPLE = `INT. KITCHEN - DAY
@@ -211,7 +214,10 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
   });
 
   test('keep-together container uses break-inside avoid (the KDP-documented form)', () => {
-    const keep = SCREENPLAY_CSS.match(/\.keep-together\s*{[^}]*}/)![0];
+    // Anchored to line start for the same reason the dual-dialogue rule
+    // below is: .keep-together also heads the comma-joined column-spelling
+    // shadow rule, which only misses this pattern by the comma.
+    const keep = SCREENPLAY_CSS.match(/^\.keep-together\s*{[^}]*}/m)![0];
     expect(keep).toContain('page-break-inside: avoid');
     expect(keep).toContain('break-inside: avoid');
   });
@@ -228,7 +234,14 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
   // header comment. Both spellings are emitted for each rule, hence 2 per
   // selector. Default options, so the two gated-off entries
   // (`.dialogue-block`, `section.scene`) are absent by design.
-  test('the avoid inventory is closed — six selectors, twelve declarations', () => {
+  //
+  // The column-spelling shadow rule (-webkit-column-break-inside, css.ts)
+  // adds a seventh entry to `carrying` below — its own declaration block,
+  // duplicating two selectors already in the six-name inventory for
+  // multicol-paginating engines — but it does NOT match the declarations
+  // regex (it carries neither `page-break-inside` nor `break-inside`), so
+  // the twelve-declaration count stays closed.
+  test('the avoid inventory is closed — seven entries, twelve declarations', () => {
     const declarations =
       SCREENPLAY_CSS.match(/^\s*(?:page-)?break-(?:after|before|inside):\s*avoid;/gm) ?? [];
     expect(declarations).toHaveLength(12);
@@ -238,12 +251,24 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
       .map(([, selector]) => selector.trim().split('\n').pop()!.trim());
     expect(carrying).toEqual([
       '.keep-together',
+      '.keep-together, table.dual-dialogue',
       'h2.scene-heading',
       'p.mini-slug',
       'p.character',
       'table.dual-dialogue',
       'p.transition',
     ]);
+  });
+
+  // widows/orphans (registry #17) is a separate, gated mechanism outside
+  // the avoid-link inventory above — pin it too, the same way, so it
+  // cannot spread to a third selector (e.g. p.parenthetical) without this
+  // failing and sending its author to the css.ts header comment.
+  test('widows/orphans carry on exactly two selectors: p.action and p.dialogue', () => {
+    const carrying = [...SCREENPLAY_CSS.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+      .filter(([, , body]) => /\b(?:widows|orphans):\s*\d+;/.test(body))
+      .map(([, selector]) => selector.trim().split('\n').pop()!.trim());
+    expect(carrying).toEqual(['p.action', 'p.dialogue']);
   });
 });
 
@@ -276,6 +301,15 @@ describe('buildEpub', () => {
     expect(opf).toContain('<dc:creator>Jane Doe</dc:creator>');
     expect(opf).toContain('properties="nav"');
     expect(opf).toMatch(/<itemref idref="titlepage"\/>\s*<itemref idref="body001"\/>/);
+  });
+
+  test('OPF declares the ibooks prefix and specified-fonts meta', async () => {
+    const { zip } = await build();
+    const opf = await zip.file('OEBPS/package.opf')!.async('string');
+    expect(opf).toContain(
+      'prefix="ibooks: http://vocabulary.itunes.apple.com/rdf/ibooks/vocabulary-extensions-1.0/"',
+    );
+    expect(opf).toContain('<meta property="ibooks:specified-fonts">true</meta>');
   });
 
   test('nav.xhtml lists every scene with an anchored link', async () => {
@@ -470,7 +504,10 @@ describe('dual dialogue table rendering', () => {
   });
 
   test('table style keeps the pair together and splits width evenly', () => {
-    expect(SCREENPLAY_CSS.match(/table\.dual-dialogue\s*{[^}]*}/)![0]).toContain('page-break-inside: avoid');
+    // Anchored to line start: table.dual-dialogue also appears, comma-joined
+    // with .keep-together, in the column-spelling shadow rule above it —
+    // unanchored this regex would grab that one-liner instead.
+    expect(SCREENPLAY_CSS.match(/^table\.dual-dialogue\s*{[^}]*}/m)![0]).toContain('page-break-inside: avoid');
     expect(SCREENPLAY_CSS.match(/table\.dual-dialogue td\s*{[^}]*}/)![0]).toContain('width: 50%');
   });
 });

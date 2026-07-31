@@ -488,6 +488,24 @@ git commit -m "Reader rail: Print-style split minimums toggle in the Page group"
 
 ### Task 9: doc corrections and new invariants
 
+> **Two claims in this task's own copy were SUPERSEDED by the branch
+> review (2026-07-30) after the text below shipped. Do not re-copy them
+> from here; the corrected wording is what is in the repo.**
+> 1. *"ONLY on top-level blocks"* (steps 1, 3, 4) overstates jhowell's
+>    framing into something our own product contradicts: Screepub's keeps
+>    sit two divs deep inside `section.scene` and are device-confirmed to
+>    hold (#8b). The real, actionable rule is the ban on `background-color`
+>    on html/body, which makes the KFX converter SYNTHESIZE a wrapper and
+>    kill every keep (t=330798).
+> 2. *"kepub/Readium coverage"* for the column-spelling rule (step 6)
+>    names an audience §6's own matrix contradicts. The supported audience
+>    is Apple Books (which honors only that spelling) and the Readium
+>    family; kepub is a plausible-but-untested inference.
+>
+> The §6 matrix cells quoted in step 3 were also hedged on landing:
+> inferences and third-party reports are now marked as such rather than
+> reading as "(tested)".
+
 **Files:**
 - Modify: `docs/device-map.md` (§2.1 rendering bullet, §5 registry-corrections block, §5 "Now" item 2, new §6)
 - Modify: `CLAUDE.md` (CSS invariant bullet)
@@ -533,9 +551,11 @@ guidelines PDF Appendix B contradicts the live pages and lost.
 
 - [ ] **Step 4: CLAUDE.md** — extend the EPUB CSS invariant bullet with: "No html/body background-color ever (KFX honors keeps only on top-level blocks; a root background synthesizes a wrapper and silently kills them all), and CSS values stay 2.1-vintage (RMSDK can blank the whole book on modern functions like min())."
 
-- [ ] **Step 5: css.ts header** — add the same two traps as one-liners to the geometry-rules comment block.
+- [ ] **Step 5: css.ts header** — add the same two traps as one-liners to the geometry-rules comment block. While in this file, apply two comment-precision fixes carried over from Unit 1's review: (a) the `minLines` comment says a single-paragraph speech "never splits and this rule never fires for it", which overstates — `break-inside: avoid` yields when the block cannot fit a page, exactly as this same file already caveats for #8c ("`avoid` yields where it cannot be honored"); match that voice. (b) The new trailing inventory paragraph says "the only rule here whose OFF state still emits a value", which is true of the break inventory but false of the file (`justifyText` off emits `text-align: left`); scope it to "the only rule in this inventory", and stop calling the single forced break a "list".
 
-- [ ] **Step 6: registry** — add entry #17 (text below), plus: #1 gains "MOBI arm: `<mbp:pagebreak/>` before each scene heading except the first (2026-07-30)"; #5 and #8b each gain a line noting the wrapper keeps now also carry `-webkit-column-break-inside: avoid` in a separate rule (iBooks same-rule bug; kepub/Readium coverage); #6b gains "the OPF's `ibooks:specified-fonts` meta (2026-07-30) is what makes this knob hold in Apple Books"; #8c's pending-verdict paragraph gains: "Include the longest speech in the set at the largest font size: a kept block taller than one page historically made Previewer fail to render (jhowell 2016), and blank-page pushes are the failure Blitz disables Kindle keeps to avoid."
+- [ ] **Step 5b: stale pointer** — `src/parser/classify.ts` (the comment above its own `PRIMARY_SLUG`, ~line 19) says the identical literal "lives in src/epub/html.ts as the renderer's discriminator". The definition moved to `src/fountain/slug.ts` during this batch (epub/html.ts now re-exports it), so the pointer misdirects a reader by one hop. Repoint it.
+
+- [ ] **Step 6: registry** — add entry #17 (text below), plus: #1 gains "MOBI arm: `<mbp:pagebreak/>` before each PRIMARY scene heading except the first; mini-slugs excluded, matching the EPUB, which only opens a `section.scene` for primary slugs (#5b). Code: `src/mobi/html.ts` alongside the existing `src/epub/` entries (2026-07-30)"; #5 and #8b each gain a line noting the wrapper keeps now also carry `-webkit-column-break-inside: avoid` in a separate rule (iBooks same-rule bug; kepub/Readium coverage); #6b gains "the OPF's `ibooks:specified-fonts` meta (2026-07-30) is what makes this knob hold in Apple Books"; #8c's pending-verdict paragraph gains: "Include the longest speech in the set at the largest font size: a kept block taller than one page historically made Previewer fail to render (jhowell 2016), and blank-page pushes are the failure Blitz disables Kindle keeps to avoid."
 
 Registry #17 entry, verbatim:
 
@@ -547,15 +567,23 @@ Registry #17 entry, verbatim:
   documented space-reclaim trick).
 - **Device support:** KFX honors widows/orphans from fw 5.12.3 (Kindle
   Previewer 3.35 added them ~2019); RMSDK (Kobo epub, tolino) honors
-  book CSS (MobileRead t=328903). Ignored: KF8/AZW3, MOBI, kepub e-ink.
-  Apple Books: WebKit implements the properties; untested on Books.
+  book CSS (MobileRead t=328903). Ignored: KF8/AZW3, MOBI. Unverified
+  on kepub e-ink (patch-lore says its WebKit reads them; not confirmed
+  on device). Apple Books: WebKit implements the properties; untested.
   The registry's old belief that ET ignores them traced to the stale
   2026.2 guidelines PDF appendix; live KDP pages + device tests win.
-- **Interaction:** with #8c ON a kept speech never splits, so its
-  widows never fire; independent knobs, no conflict.
+- **Interaction (load-bearing):** #8b's `.keep-together` is ALWAYS on and
+  wraps cue + parentheticals + the FIRST dialogue paragraph in
+  `break-inside: avoid`. A single-paragraph speech therefore never
+  splits and its widows/orphans never fire. This rule bites on the TAIL
+  paragraphs of multi-paragraph speeches and on action. With #8c also
+  ON, whole speeches are atomic and the dialogue arm is fully inert;
+  the action arm is unaffected in every mode.
 - **App option:** "Print-style split minimums" (reader rail, Page group).
-- **Device verdict: pending —** next KFX pass: does a 3-line speech at
-  a page seam hold 2+2 (and OFF hold 1+1)? The verdict lands here.
+- **Device verdict: pending —** next KFX pass. Test with a MULTI-paragraph
+  speech or a long action block, NOT a short speech: a short speech moves
+  whole because of #8b's keep, which would validate the wrong rule. Does
+  the tail hold 2+2, and OFF hold 1+1?
 - **Code:** `src/options.ts`, `src/epub/css.ts`, app FormatSettings +
   ReaderRail.
 ```
@@ -588,9 +616,9 @@ Same procedure: plan written at phase start as `2026-07-30-rich-formatting-phase
 
 ## Phase D: the combined device pass (Sam-owned, one sideload session)
 
-One KFX build + one Apple Books handoff of a real script carrying: a 3-line speech near a page seam, the set's longest speech, a CUT TO: near a seam, a dual-dialogue exchange, an underlined phrase (post-B), and a font-shifted insert (post-C). Verdicts to land, each in its registry slot:
+One KFX build + one Apple Books handoff of a real script carrying: a MULTI-paragraph speech and a long action block near page seams, the set's longest speech, a CUT TO: near a seam, a dual-dialogue exchange, an underlined phrase (post-B), and a font-shifted insert (post-C). Verdicts to land, each in its registry slot:
 
-- [ ] #17 printSplitMinimums: 2+2 holds at seams; OFF gives 1+1.
+- [ ] #17 printSplitMinimums: 2+2 holds at seams; OFF gives 1+1. Use a multi-paragraph speech or action, never a short speech: #8b's always-on keep moves a short speech whole and would validate the wrong rule.
 - [ ] #8c keepSpeechesWhole ON: kept speech moves whole; gap size noted; the oversize speech breaks bare without blank pages.
 - [ ] #16 transitions: no CUT TO: opens a page.
 - [ ] #10b tall dual exchange behavior.
@@ -598,3 +626,71 @@ One KFX build + one Apple Books handoff of a real script carrying: a 3-line spee
 - [ ] Post-B/C: underline renders on device; font shifts render and degrade sanely.
 
 After the pass: registry verdict edits, app bundle rebuild if anything changed, and the umbrella is done.
+
+---
+
+## Deferred follow-ups (recorded 2026-07-30, not scheduled)
+
+Two things the Phase A review found and deliberately did not fix in the
+batch. Neither is a bug in shipped output; both are test-integrity work.
+Recorded here because the branch's comments call them "tracked," and
+nothing else in the repo tracked them.
+
+### D1. A shared, selector-exact CSS rule extractor for the test suites
+
+**The pattern:** the CSS assertions pull a rule out of the generated
+stylesheet with `SCREENPLAY_CSS.match(/<selector>\s*{[^}]*}/)`. There are
+**30 such call sites** (14 in `tests/epub.test.ts`, 16 in
+`tests/options.test.ts`), and **2** of them are anchored (`/^…/m`).
+
+**Why it matters, precisely:** the regex is a substring match, so a
+selector is really a PREFIX match against every rule in the file. It
+happens to resolve correctly today only because a grouped rule like
+`.keep-together, table.dual-dialogue { … }` fails `\s*{` at the comma.
+Add one grouped rule whose first selector is a prefix of a tested one and
+the extractor silently starts reading the wrong block. The dangerous half
+is the NEGATIVE assertions (`expect(rule).not.toContain(…)`): those pass
+vacuously against the wrong rule, and a wrong-rule match still passes
+`!`-assertion on `.match()`, so nothing throws.
+
+**The local patch already applied** (the pattern to generalize): the two
+anchored sites are `tests/epub.test.ts`'s `table.dual-dialogue` extractor
+and its `.keep-together` extractor, both `/^…\s*{[^}]*}/m` with a comment
+saying why.
+
+**The fix:** one helper — `cssRule(css, selector)` in a test util — that
+splits the stylesheet into blocks and matches the selector list EXACTLY
+(trimmed, comma-split, order-insensitive), throwing a readable error when
+a selector is absent or ambiguous. Then convert all 30 call sites. Do it
+in one pass so the suites cannot drift back; expect no behavior change,
+only a mechanical diff.
+
+### D2. Vacuous sidecar-merge coverage in kit-check for seven booleans
+
+**The gap:** `ScriptSettings.merge` (in
+`app/Sources/ScreepubKit/ScriptSettings.swift`) has one `if let v =
+partial.<field> { merged.<field> = v }` line per option. For seven of
+them the merge line could be DELETED with `kit-check` still fully green:
+
+`scenePageBreaks`, `keepSceneHeadingWithScene`, `rejoinSplitDialogue`,
+`includeTitlePage`, `showSceneNumbers`, `showPageMarkers`, `justifyText`.
+
+**Why they are vacuous:** the sidecar round-trip check builds its input
+from `FormatSettings.defaults`, mutates only `dialogueSideMarginPct` and
+`keepSpeechesWhole`, and loads it back with `FormatSettings.defaults` as
+the fallback. For every other field the written value EQUALS the fallback,
+so a missing merge line yields the same struct and the equality check
+still passes. No other kit-check assertion mentions the seven names at
+all.
+
+**The pattern to follow:** commit `5630525` ("kit-check proves the sidecar
+can override printSplitMinimums"), which is exactly this fix for one
+field: write a one-key sidecar JSON carrying the OPPOSITE of the field's
+default, load with the default fallback, and assert the loaded struct
+differs from the fallback in that one field. Its comment states the rule —
+"a round-trip that never disturbs it would pass whether or not the merge
+line exists at all."
+
+**The fix:** seven more of those, or one loop over (key, opposite-value)
+pairs. Cheap; only deferred because it is app-side test work and Phase A
+was engine-side.
