@@ -177,4 +177,44 @@ describe('require-release-notes hook', () => {
     expect(runHookNoJq('git tag -d v99.0.0').code).toBe(0);
     expect(runHookNoJq('git push origin :refs/tags/v99.0.0').code).toBe(0);
   });
+
+  test('FIX A: listing and recovery are recognized when `git tag` is not the first token', () => {
+    // Previously, the allowlist/recovery patterns anchored to the START
+    // of the whole command, so anything other than a bare `git tag ...`
+    // invocation fell through to the fail-closed "no version found"
+    // branch. One of these (the grep) blocked the reviewer's own tool
+    // call while auditing this very hook.
+    expect(runHook('cd /tmp && git tag --list').code).toBe(0);
+    expect(runHook('echo hi && git tag --list').code).toBe(0);
+    expect(runHook('GIT_PAGER=cat git tag --list').code).toBe(0);
+    expect(runHook('for x in 1; do git tag --list; done').code).toBe(0);
+    expect(runHook('git log --oneline && git tag').code).toBe(0);
+    expect(runHook('grep -rn "git tag" docs/').code).toBe(0);
+    expect(runHook('echo "run git tag to list"').code).toBe(0);
+  });
+
+  test('FIX B: the standard two-step undo is recognized as recovery, not a compound create', () => {
+    // Previously the compound-command guard refused recovery outright as
+    // soon as more than one tag-touching invocation appeared, even when
+    // EVERY invocation present was itself a delete. That is exactly the
+    // canonical undo sequence: delete locally, then push the deletion.
+    expect(runHook('git tag -d v9.9.9 && git push origin :refs/tags/v9.9.9').code).toBe(0);
+    expect(runHook('git tag -d v9.9.9;  git push origin :refs/tags/v9.9.9').code).toBe(0);
+  });
+
+  test('FIX B: modern and long-form delete spellings are recognized as recovery', () => {
+    expect(runHook('git push --delete origin v9.9.9').code).toBe(0);
+    expect(runHook('git push -d origin v9.9.9').code).toBe(0);
+    expect(runHook('git tag --delete v9.9.9').code).toBe(0);
+    // The one form the guard already knew, unaffected by the fix.
+    expect(runHook('git tag -d v9.9.9').code).toBe(0);
+  });
+
+  test('FIX B: a delete followed by a real create in the same compound command still blocks', () => {
+    // Recovery is per-invocation, not per-command: outnumbering a real
+    // create with deletes elsewhere on the same line must not exempt it.
+    const { code, stderr } = runHook('git tag -d v0.5.0 && git tag v99.0.0');
+    expect(code).toBe(2);
+    expect(stderr).toContain('docs/releases/99.0.0.md');
+  });
 });

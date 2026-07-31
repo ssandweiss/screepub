@@ -10,7 +10,10 @@
 # from another machine entirely is never intercepted. The checks that
 # actually gate a release live in .github/workflows/ci.yml and the
 # `checks` job of release.yml, and those run in CI no matter how the tag
-# got there.
+# got there. Forms it knowingly does NOT catch, which CI does: `git -C .
+# tag`, double-space spellings, `git update-ref refs/tags/...`,
+# `git push --mirror`, and `gh api` calls that create a tag or release
+# directly.
 #
 # Purpose: block creating or pushing a version tag (`git tag`, tag-moving
 # `git push` forms, `gh release create`) when docs/releases/<version>.md
@@ -18,35 +21,64 @@
 # stderr to the model; any other exit (this script always uses 0) lets it
 # proceed.
 #
-# Recovery is never blocked: deleting a tag (`git tag -d ...`) or pushing
-# a tag deletion (`:refs/tags/...`) always passes, checked before
-# anything else that could block. A guard that blocks the fix is worse
-# than no guard, because it fires exactly when someone is already undoing
-# a mistake.
+# Recovery is guaranteed for the forms this script recognizes: `git tag
+# -d`/`--delete`, `git push --delete`/`-d`, and pushing a tag deletion
+# (`:refs/tags/...`), checked before anything else that could block. A
+# guard that blocks the fix is worse than no guard, because it fires
+# exactly when someone is already undoing a mistake. This is a guarantee
+# about recognized forms, not literally every string that deletes a tag --
+# an unrecognized spelling fails closed like anything else this guard
+# cannot resolve (see the version-extraction step below).
 #
-# When the command was cleanly extracted by jq, recovery matching is
-# anchored to the actual command form (not a bare substring) and is
-# refused outright on a genuinely compound command -- a real tag creation
-# must not be able to hide behind a delete, `||`, `|`, `&`, `$(...)`, a
-# backtick, or an embedded newline elsewhere in the same line. "Compound"
+# When the command was cleanly extracted by jq, matching is done against
+# actual shell SEGMENTS of the command, not the whole string and not only
+# its first token. A segment boundary is any of `;`, `&`, `|` (which also
+# covers `&&` and `||`) or an embedded newline; each segment is then
+# stripped of a leading environment-variable assignment (`FOO=bar `) or a
+# small set of shell keywords (`do`, `then`, `else`, `elif`, `while`,
+# `until`, `if`) before being checked, so `cd /tmp && git tag --list`,
+# `GIT_PAGER=cat git tag --list`, and `for x in 1; do git tag --list;
+# done` are all recognized as the same read-only listing that
+# `git tag --list` alone already was. Whether the command counts as
+# COMPOUND at all is still decided by the ORIGINAL whole-string test
+# below (a shell metacharacter present AND more than one `git
+# tag`/`git push`/`gh release create` substring anywhere in the string),
+# specifically because that cruder test also catches an invocation
+# hidden inside `$(...)` or backticks that segment-splitting alone would
+# never see (segment-splitting does not descend into either). "Compound"
 # means BOTH a shell metacharacter is present AND more than one
 # `git tag`/`git push`/`gh release create` invocation appears -- a plain
 # metacharacter alone (`git tag --list | wc -l`) is not enough to trip
-# it. The same anchoring/compound rule gates the read-only tag-listing
-# allowlist (`git tag`, `--list`, `-l`, `--contains`, `--points-at`,
-# `--sort`, `--merged`, `--no-merged`, `--format`), since listing tags is
-# a normal step inside the release flow and must not be blocked either --
-# but that allowlist is ALSO gated on naming no version at all, because no
-# legitimate read-only form does, while a real `-a`/`-m` create can have
-# "--list" or "--format" appear only incidentally, inside its message.
+# it. On a compound command, the only exemption available is "every
+# invocation present is a recognized recovery form" (e.g. `git tag -d v1
+# && git push origin :refs/tags/v1`, the standard two-step undo) --
+# outnumbering a real create with deletes elsewhere in the same line does
+# not exempt it. On a non-compound command with exactly one real
+# (segment-anchored) invocation, that segment is checked against both the
+# recovery forms and the read-only tag-listing allowlist (`git tag`,
+# `--list`, `-l`, `--contains`, `--points-at`, `--sort`, `--merged`,
+# `--no-merged`, `--format`) -- but the listing allowlist is ALSO gated on
+# naming no version at all, because no legitimate read-only form does,
+# while a real `-a`/`-m` create can have "--list" or "--format" appear
+# only incidentally, inside its message.
+#
+# A command whose tag-invocation-shaped text (e.g. the literal substring
+# "git tag") never appears in command position in any top-level segment
+# -- `grep -rn "git tag" docs/`, `echo "run git tag to list"` -- is not
+# actually touching a tag at all and is waved through immediately,
+# UNLESS the command also contains `$(...)` or a backtick, in which case
+# a real invocation could be hiding out of segment-splitting's sight and
+# this guard deliberately does not rule that out; it falls through to
+# the version-extraction step below instead, which scans the raw string
+# regardless of shell structure.
 #
 # When jq could not be used (missing, or the JSON did not parse), `cmd`
 # is the raw, unparsed stdin payload, which does not start with `git` --
-# it starts with `{`. The anchored checks above would then never match,
-# which would make recovery fail in exactly the degraded mode the raw
-# fallback exists to serve. So in that mode ONLY, recovery reverts to the
-# original bare-substring test instead: never blocking recovery outranks
-# the precision anchoring buys elsewhere.
+# it starts with `{`. The segment-anchored checks above would then never
+# match, which would make recovery fail in exactly the degraded mode the
+# raw fallback exists to serve. So in that mode ONLY, recovery reverts to
+# the original bare-substring test instead: never blocking recovery
+# outranks the precision segment-matching buys elsewhere.
 #
 # `git push` is treated as tag-touching both for the explicit bulk forms
 # (`--tags`, `--follow-tags`, `refs/tags/`) AND whenever the command also
@@ -71,6 +103,55 @@
 # user's own permission prompt, ever sees it.
 
 set -euo pipefail
+
+# ---------------------------------------------------------------------
+# Small helpers used only by the segment-anchored matching below.
+# ---------------------------------------------------------------------
+
+# Trims leading/trailing whitespace. Safe on an all-whitespace or empty
+# string (returns empty).
+trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+# Strips a leading run of environment-variable assignments
+# (`FOO=bar BAZ=qux `) and/or a small set of shell keywords (`do`,
+# `then`, `else`, `elif`, `while`, `until`, `if`) from the front of a
+# segment, so the invocation-anchored checks below see `git tag --list`
+# whether the source was `git tag --list`, `GIT_PAGER=cat git tag
+# --list`, or `do git tag --list` (the shape a `for`/`while` body takes
+# once split on its own `;`).
+normalize_segment() {
+  local s="$1" changed=1
+  while [ "$changed" -eq 1 ]; do
+    changed=0
+    if [[ "$s" =~ ^(do|then|else|elif|while|until|if)[[:space:]]+(.*)$ ]]; then
+      s="${BASH_REMATCH[2]}"
+      changed=1
+      continue
+    fi
+    if [[ "$s" =~ ^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+(.*)$ ]]; then
+      s="${BASH_REMATCH[1]}"
+      changed=1
+    fi
+  done
+  printf '%s' "$s"
+}
+
+# A normalized segment is a recognized recovery form: `git tag -d`,
+# `git tag --delete`, pushing a tag deletion (`:refs/tags/...` anywhere
+# in the segment), or `git push --delete`/`git push -d`.
+is_recovery_form() {
+  local s="$1"
+  if [[ "$s" =~ ^git[[:space:]]+tag[[:space:]]+-d([[:space:]]|$) ]]; then return 0; fi
+  if [[ "$s" =~ ^git[[:space:]]+tag[[:space:]]+--delete([[:space:]]|$) ]]; then return 0; fi
+  if [[ "$s" == *":refs/tags/"* ]]; then return 0; fi
+  if [[ "$s" =~ ^git[[:space:]]+push[[:space:]]+(--delete|-d)([[:space:]]|$) ]]; then return 0; fi
+  return 1
+}
 
 # ---------------------------------------------------------------------
 # Step 1: read stdin without ever crashing, even on no input at all.
@@ -111,7 +192,12 @@ fi
 
 # ---------------------------------------------------------------------
 # Step 3: cheap bail-out for anything that is not tag-touching, before
-# doing any git work or deciding anything about recovery.
+# doing any git work or deciding anything about recovery. Deliberately a
+# WHOLE-STRING substring test, not segment-anchored: "git tag" appearing
+# anywhere -- inside a quoted argument, inside $(...), after a `#`
+# comment -- still counts here, so an invocation hidden inside command
+# substitution is never waved through by this step alone. Whether it is
+# REALLY an invocation gets refined below, once that is safe to decide.
 # ---------------------------------------------------------------------
 has_version_token=0
 if printf '%s' "$cmd" | grep -qE 'v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?'; then
@@ -140,7 +226,10 @@ fi
 # command compound -- `git tag --list | wc -l` must still be allowed.
 # What matters is whether MORE THAN ONE tag-touching invocation appears
 # in the string, so: a metacharacter is present AND more than one of
-# `git tag` / `git push` / `gh release create` appears.
+# `git tag` / `git push` / `gh release create` appears. This is a
+# whole-string test on purpose (see the header comment): it is what
+# catches an invocation hidden inside `$(...)`/backticks that the
+# segment-splitting below cannot see into.
 meta=0
 # '$(' below is a literal 2-char pattern to match against, not a
 # substitution to expand; that is the whole point of this case match.
@@ -157,42 +246,111 @@ if [ "$meta" -eq 1 ] && [ "$n_invocations" -gt 1 ]; then
 fi
 
 if [ "$extracted" -eq 1 ]; then
-  # cmd is the real command text: anchor recovery/listing checks to its
-  # actual form, and refuse both outright on a compound command -- a real
-  # tag creation must not be able to hide behind a delete or a listing
-  # flag elsewhere in the same line.
-  if [ "$is_compound" -eq 0 ]; then
-    if [[ "$cmd" =~ ^[[:space:]]*git[[:space:]]+tag[[:space:]]+-d([[:space:]]|$) ]]; then
+  # cmd is the real command text: split it into shell segments and find
+  # every one that is ACTUALLY a git-tag/git-push/gh-release-create
+  # invocation in command position (see the header comment for why this
+  # is not a full shell parser and does not need to be). Each element of
+  # touching_segments contributes at least one occurrence counted by
+  # n_invocations above, so whenever is_compound is 0, this array has at
+  # most one element.
+  touching_segments=()
+  # `tr` is translating three DISTINCT separator characters to newline,
+  # not deduplicating a word list; the three-`\n` replacement set is
+  # intentional, one per input character. The trailing `\n` appended by
+  # the `printf` before it matters: without it, a command whose last
+  # segment is the tag-touching one loses that segment entirely, because
+  # `read` discards a final line with no trailing newline.
+  # shellcheck disable=SC2020
+  segments="$(printf '%s\n' "$cmd" | tr ';&|' '\n\n\n')"
+  while IFS= read -r line; do
+    seg="$(trim "$line")"
+    [ -z "$seg" ] && continue
+    norm="$(normalize_segment "$seg")"
+    if [[ "$norm" =~ ^git[[:space:]]+tag([[:space:]]|$) ]]; then
+      touching_segments+=("$norm")
+    elif [[ "$norm" =~ ^gh[[:space:]]+release[[:space:]]+create([[:space:]]|$) ]]; then
+      touching_segments+=("$norm")
+    elif [[ "$norm" =~ ^git[[:space:]]+push([[:space:]]|$) ]]; then
+      seg_has_version=0
+      if printf '%s' "$norm" | grep -qE 'v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?'; then
+        seg_has_version=1
+      fi
+      if [[ "$norm" == *"--tags"* ]] || [[ "$norm" == *"--follow-tags"* ]] || [[ "$norm" == *"refs/tags/"* ]] || [ "$seg_has_version" -eq 1 ]; then
+        touching_segments+=("$norm")
+      fi
+    fi
+  done <<< "$segments"
+
+  if [ "${#touching_segments[@]}" -eq 0 ]; then
+    # Nothing in command position is a real invocation: every occurrence
+    # of tag-shaped text is inert (a grep pattern, an echoed sentence).
+    # Only safe to trust when there is also no $(...)/backtick that
+    # could be hiding a real invocation out of segment-splitting's
+    # sight -- if there is, fall through instead; Step 5/6 below still
+    # scan the raw string for a version token regardless of structure.
+    has_exec_risk=0
+    # '$(' below is a literal 2-char pattern to match against, not a
+    # substitution to expand; same idiom as the compound-detection case
+    # match above.
+    # shellcheck disable=SC2016
+    case "$cmd" in
+      *'$('*|*'`'*) has_exec_risk=1 ;;
+    esac
+    if [ "$has_exec_risk" -eq 0 ]; then
       exit 0
     fi
-    if [[ "$cmd" == *":refs/tags/"* ]]; then
+  fi
+
+  if [ "$is_compound" -eq 1 ]; then
+    # More than one real invocation, joined by a metacharacter. The only
+    # exemption available here is "every invocation present is a
+    # recognized recovery form" -- a real create anywhere in the line
+    # forfeits the exemption for the WHOLE command; it is not enough for
+    # the create to be outnumbered by deletes.
+    all_recovery=1
+    if [ "${#touching_segments[@]}" -eq 0 ]; then
+      all_recovery=0
+    fi
+    for seg in "${touching_segments[@]+"${touching_segments[@]}"}"; do
+      if ! is_recovery_form "$seg"; then
+        all_recovery=0
+        break
+      fi
+    done
+    if [ "$all_recovery" -eq 1 ]; then
+      exit 0
+    fi
+  elif [ "${#touching_segments[@]}" -eq 1 ]; then
+    seg="${touching_segments[0]}"
+    if is_recovery_form "$seg"; then
       exit 0
     fi
 
     # No legitimate read-only listing form names a version, so gate this
     # on has_version_token too: a create whose MESSAGE merely mentions
     # "--list" or "--format" must still be checked, not waved through.
-    if [ "$has_version_token" -eq 0 ] && [[ "$cmd" =~ ^[[:space:]]*git[[:space:]]+tag([[:space:]]+.*)?$ ]]; then
-      if [[ "$cmd" =~ ^[[:space:]]*git[[:space:]]+tag[[:space:]]*$ ]]; then
+    if [ "$has_version_token" -eq 0 ] && [[ "$seg" =~ ^git[[:space:]]+tag([[:space:]]+.*)?$ ]]; then
+      if [[ "$seg" =~ ^git[[:space:]]+tag[[:space:]]*$ ]]; then
         exit 0
       fi
-      if [[ "$cmd" == *"--list"* ]] || [[ "$cmd" == *"--contains"* ]] || [[ "$cmd" == *"--points-at"* ]] \
-        || [[ "$cmd" == *"--sort"* ]] || [[ "$cmd" == *"--merged"* ]] || [[ "$cmd" == *"--no-merged"* ]] \
-        || [[ "$cmd" == *"--format"* ]] || [[ "$cmd" =~ [[:space:]]-l([[:space:]]|$) ]]; then
+      if [[ "$seg" == *"--list"* ]] || [[ "$seg" == *"--contains"* ]] || [[ "$seg" == *"--points-at"* ]] \
+        || [[ "$seg" == *"--sort"* ]] || [[ "$seg" == *"--merged"* ]] || [[ "$seg" == *"--no-merged"* ]] \
+        || [[ "$seg" == *"--format"* ]] || [[ "$seg" =~ [[:space:]]-l([[:space:]]|$) ]]; then
         exit 0
       fi
     fi
   fi
 else
   # jq was missing, or the JSON did not parse: cmd is the raw, unparsed
-  # payload, which may be wrapped in JSON punctuation the anchored checks
-  # above were never meant to see through (it starts with `{`, not
-  # `git`). Recovery must never break just because jq is absent, so fall
-  # back to the original bare-substring test here -- deliberately NOT
-  # extended to the read-only listing allowlist: a false block on a
+  # payload, which may be wrapped in JSON punctuation the segment-based
+  # checks above were never meant to see through (it starts with `{`,
+  # not `git`). Recovery must never break just because jq is absent, so
+  # fall back to the original bare-substring test here -- deliberately
+  # NOT extended to the read-only listing allowlist: a false block on a
   # listing command in this already-degraded mode is an acceptable cost,
   # a false PASS on recovery is not.
-  if [[ "$cmd" == *"tag -d"* ]] || [[ "$cmd" == *":refs/tags/"* ]]; then
+  if [[ "$cmd" == *"tag -d"* ]] || [[ "$cmd" == *"tag --delete"* ]] || [[ "$cmd" == *":refs/tags/"* ]] \
+    || [[ "$cmd" == *"push --delete"* ]] || [[ "$cmd" == *"push -d"* ]]; then
     exit 0
   fi
 fi
@@ -225,9 +383,12 @@ checks job) is what actually gates a release.
 
 Run /release to create the tag and its release notes together.
 
-This never blocks recovery: deleting a tag ("git tag -d ...") or pushing
-a tag deletion (":refs/tags/...") is always allowed, and neither is
-read-only tag listing ("git tag", "git tag --list", ...).
+Recovery is not blocked by this: "git tag -d ...", "git tag --delete
+...", "git push --delete ..."/"git push -d ...", and pushing a tag
+deletion (":refs/tags/...") are always allowed, and so is read-only tag
+listing ("git tag", "git tag --list", ...). An unrecognized spelling of
+any of those still fails closed like anything else this guard cannot
+resolve.
 EOF
   exit 2
 fi
@@ -268,8 +429,11 @@ checks job) is what actually gates a release.
 
 Run /release to write the missing notes and create the tag together.
 
-This never blocks recovery: deleting a tag ("git tag -d ...") or pushing
-a tag deletion (":refs/tags/...") is always allowed, and neither is
-read-only tag listing ("git tag", "git tag --list", ...).
+Recovery is not blocked by this: "git tag -d ...", "git tag --delete
+...", "git push --delete ..."/"git push -d ...", and pushing a tag
+deletion (":refs/tags/...") are always allowed, and so is read-only tag
+listing ("git tag", "git tag --list", ...). An unrecognized spelling of
+any of those still fails closed like anything else this guard cannot
+resolve.
 EOF
 exit 2

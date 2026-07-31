@@ -182,6 +182,18 @@ jobs:
           set -euo pipefail
           VERSION="${TAG#v}"
 
+          # The version regex (both here and in the hook) deliberately
+          # accepts a `-rc1`-style suffix, so prereleases are a supported
+          # concept -- but nothing downstream honored that until now.
+          # Without --prerelease, `gh release create` marks EVERY tag,
+          # including v0.5.0-rc1, as a normal release, and
+          # `GET /releases/latest` (which app/Sources/ScreepubKit/
+          # UpdateCheck.swift polls) returns the newest normal release.
+          # A release candidate would become "the latest release" for
+          # every user's updater the moment its tag pushed.
+          PRE=()
+          [[ "$VERSION" == *-* ]] && PRE=(--prerelease)
+
           # Body = the committed notes, then the machine-generated install
           # line and checksums. Copy bytes; never send content through a
           # shell variable, and never let it reach printf as a FORMAT string
@@ -207,7 +219,7 @@ jobs:
           # DMG, but it has already stamped its "last checked" clock, so a
           # user who checks in that window is told "no update" for 24h.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --title "Screepub $VERSION" --notes-file "$NOTES"
+            gh release create "$TAG" --draft --title "Screepub $VERSION" --notes-file "$NOTES" "${PRE[@]}"
           else
             gh release edit "$TAG" --title "Screepub $VERSION" --notes-file "$NOTES"
           fi
@@ -218,4 +230,4 @@ jobs:
             app/dist/screepub-cli-macos-x64.tar.gz \
             --clobber
 
-          gh release edit "$TAG" --draft=false
+          gh release edit "$TAG" --draft=false "${PRE[@]}"
