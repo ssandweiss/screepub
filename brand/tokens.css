@@ -1,0 +1,44 @@
+/* Screepub web identity. Values marked "pinned" mirror Theme.swift and are
+   enforced by tests/brand.test.ts. See brand/README.md before editing.
+   var() and clamp() are correct here: this is the website, not the EPUB. */
+
+:root {
+  --paper: #F7F2E6;
+  --ink: #1D1B16;
+  --ink-soft: #4A453A;
+  --ink-muted: #6D6960;
+  --brass: #E8A33D;
+  --ground: #23272F;
+  --alarm: #AF3220;
+  --hole: rgba(29,27,22,0.10);
+
+  --brass-specular: #FDF1CE;
+  --brass-highlight: #F6D486;
+  --brass-shadow: #BE7C1E;
+  --brass-rim: #8B5917;
+  --brass-edge: #7A5116;
+  --brass-bounce: #F7CE7E;
+
+  --font-structure: 'Courier Prime', 'Courier New', ui-monospace, monospace;
+  --font-prose: 'Literata', Georgia, 'Times New Roman', serif;
+
+  --page-max: 1000px;
+  --binding-margin: 17.6%;
+  --page-right: 11.8%;
+  --hole-center: 5.9%;
+  --brad-size: clamp(20px, 3.4%, 36px);
+  --measure: 66ch;
+  --page-shadow: 0 3px 34px rgba(0,0,0,0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #1E1C19;
+    --ink: #E8E2D3;
+    --ink-soft: #C4BDAC;
+    --ink-muted: #8F887C;
+    --ground: #141517;
+    --alarm: #EA7A65;
+    --hole: rgba(0,0,0,0.45);
+  }
+}

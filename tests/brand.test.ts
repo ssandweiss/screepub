@@ -21,6 +21,40 @@ describe('brand tokens', () => {
       expect(cssValue(theme[name].dark), `${name} dark`).toBe(value.dark);
     }
   });
+
+  test('tokens.css declares every token in tokens.json, in both modes', async () => {
+    const css = await Bun.file(new URL('../brand/tokens.css', import.meta.url)).text();
+
+    const blockAfter = (marker: string): string => {
+      const start = css.indexOf(marker);
+      expect(start, `tokens.css is missing ${marker}`).toBeGreaterThan(-1);
+      return css.slice(start, css.indexOf('}', start));
+    };
+
+    const declared = (block: string): Record<string, string> => {
+      const out: Record<string, string> = {};
+      for (const [, name, value] of block.matchAll(/--([\w-]+):\s*([^;]+);/g)) {
+        out[name] = value.trim();
+      }
+      return out;
+    };
+
+    // blockAfter stops at the first '}', which for the media query is the
+    // close of its inner :root, so it captures exactly the dark overrides.
+    const light = declared(blockAfter(':root {'));
+    const dark = declared(blockAfter('@media (prefers-color-scheme: dark)'));
+
+    for (const [name, value] of Object.entries(tokens.colors) as [string, any][]) {
+      expect(light[name], `tokens.css :root is missing --${name}`).toBe(value.light);
+      // Tokens whose dark value equals their light value are correctly
+      // absent from the dark block: brass is a material, not a hue.
+      if (value.dark !== value.light) {
+        expect(dark[name], `tokens.css dark block is missing --${name}`).toBe(value.dark);
+      } else {
+        expect(dark[name], `--${name} should not be re-declared in dark`).toBeUndefined();
+      }
+    }
+  });
 });
 
 describe('parseThemeColors', () => {
