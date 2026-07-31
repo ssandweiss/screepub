@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { ruleFor } from './css-rules';
+import { ruleFor, eachRule } from './css-rules';
 import { SCREENPLAY_CSS } from '../src/epub/css';
 
 // A small hand-written fixture that reproduces the shape that actually bit
@@ -82,6 +82,23 @@ describe('ruleFor', () => {
     // The fixture's own comment contains this exact string; if the
     // comment rode along, this assertion would wrongly pass.
     expect(rule).not.toContain('page-break-inside');
+  });
+
+  test('eachRule reports a wrapped grouped selector whole, not by its last line', () => {
+    // This is what the inventory guards in epub.test.ts depend on: they
+    // sweep every rule and assert the exact selector list carrying a
+    // mechanism. Their old hand-rolled `.split('\n').pop()` would report
+    // 'table.dual-dialogue' here and quietly drop '.keep-together'.
+    const selectors = eachRule(WRAPPED_FIXTURE).map((r) => r.selector);
+    expect(selectors).toContain('.keep-together, table.dual-dialogue');
+    expect(selectors).toEqual(['.keep-together, table.dual-dialogue', 'table.dual-dialogue']);
+  });
+
+  test('eachRule pairs each selector with its own body', () => {
+    const rules = eachRule(FIXTURE);
+    const grouped = rules.find((r) => r.selector === '.keep-together, table.dual-dialogue')!;
+    expect(grouped.body).toContain('-webkit-column-break-inside: avoid');
+    expect(grouped.body).not.toContain('width: 100%');
   });
 
   test('not-found throws rather than returning undefined', () => {

@@ -17,9 +17,14 @@ EXT. YARD - NIGHT
 > FADE OUT.
 `;
 
+// tokensToMobiHtml takes FormatOptions with no default on purpose (same
+// reason Export.swift's kfxReady has none): a call site that forgets it
+// would silently render with scenePageBreaks off rather than fail.
+const OPTS = resolveFormatOptions({});
+
 function sampleHtml(): string {
   const { tokens } = new Fountain().parse(SAMPLE, true);
-  return tokensToMobiHtml(tokens, { title: 'Test Script', author: 'Jane Doe' });
+  return tokensToMobiHtml(tokens, { title: 'Test Script', author: 'Jane Doe' }, OPTS);
 }
 
 // ── binary reader helpers (independent re-parse of our own output) ──
@@ -70,18 +75,72 @@ describe('tokensToMobiHtml', () => {
 
   test('mini-slugs read as bold paragraphs too — this dialect has no third weight', () => {
     const tokens = new Fountain().parse('INT. STORE - NIGHT\n\nThe gate rattles.\n\n.LATER\n\nStill on.\n', true).tokens;
-    const html = tokensToMobiHtml(tokens, { title: 'T' });
+    const html = tokensToMobiHtml(tokens, { title: 'T' }, OPTS);
     expect(html).toContain('<p><b>LATER</b></p>');
   });
 
   test('scenePageBreaks emits mbp:pagebreak before every scene heading except the first', () => {
     const src = 'INT. A - DAY\n\nAction.\n\nINT. B - NIGHT\n\nMore.\n';
     const { tokens } = new Fountain().parse(src, true);
-    const off = tokensToMobiHtml(tokens, { title: 'T' });
+    const off = tokensToMobiHtml(tokens, { title: 'T' }, OPTS);
     const on = tokensToMobiHtml(tokens, { title: 'T' }, resolveFormatOptions({ scenePageBreaks: true }));
     // The title page always contributes exactly one pagebreak of its own.
     expect(off.match(/<mbp:pagebreak\/>/g)!.length).toBe(1);
     expect(on.match(/<mbp:pagebreak\/>/g)!.length).toBe(2);
+  });
+
+  test('includeTitlePage off drops the MOBI title page and its break', () => {
+    const { tokens } = new Fountain().parse(SAMPLE, true);
+    const on = tokensToMobiHtml(tokens, { title: 'Test Script', author: 'Jane Doe' }, OPTS);
+    expect(on).toContain('Test Script');
+    expect(on).toContain('Written by');
+    expect(on.match(/<mbp:pagebreak\/>/g) ?? []).toHaveLength(1);
+
+    const off = tokensToMobiHtml(
+      tokens,
+      { title: 'Test Script', author: 'Jane Doe' },
+      resolveFormatOptions({ includeTitlePage: false }),
+    );
+    expect(off).not.toContain('Written by');
+    expect(off).not.toMatch(/<font size="\+2">/);
+    // No title page means no title-page break either — the body must not
+    // open on a blank leading page.
+    expect(off.match(/<mbp:pagebreak\/>/g) ?? []).toHaveLength(0);
+  });
+
+  test('scenePageBreaks breaks before the first scene when body content precedes it', () => {
+    // Opening action before the first slugline: the EPUB separates it with
+    // section.scene's page-break-before, so MOBI must too. Suppressing the
+    // break is only correct when nothing has been emitted since the last
+    // one (title page, or the very start of a title-less book).
+    const src = 'Black screen. A hum builds.\n\nINT. A - DAY\n\nAction.\n';
+    const { tokens } = new Fountain().parse(src, true);
+    const on = tokensToMobiHtml(
+      tokens,
+      { title: 'T' },
+      resolveFormatOptions({ scenePageBreaks: true }),
+    );
+    // Title-page break, then one before INT. A because action preceded it.
+    expect(on.match(/<mbp:pagebreak\/>/g) ?? []).toHaveLength(2);
+    expect(on).toMatch(/<mbp:pagebreak\/>\s*<p><b>INT\. A - DAY<\/b><\/p>/);
+  });
+
+  test('scenePageBreaks leaves no blank leading page when a scene opens the book', () => {
+    const src = 'INT. A - DAY\n\nAction.\n';
+    const { tokens } = new Fountain().parse(src, true);
+    const withTitle = tokensToMobiHtml(
+      tokens,
+      { title: 'T' },
+      resolveFormatOptions({ scenePageBreaks: true }),
+    );
+    expect(withTitle.match(/<mbp:pagebreak\/>/g) ?? []).toHaveLength(1);
+
+    const noTitle = tokensToMobiHtml(
+      tokens,
+      { title: 'T' },
+      resolveFormatOptions({ scenePageBreaks: true, includeTitlePage: false }),
+    );
+    expect(noTitle.match(/<mbp:pagebreak\/>/g) ?? []).toHaveLength(0);
   });
 
   test('scenePageBreaks does not break before a mini-slug, only before primary scenes (registry #5b)', () => {
@@ -207,7 +266,7 @@ describe('MOBI page markers', () => {
   // carries none of EPUB3's pagebreak semantics.
   function markerHtml(source: string): string {
     const { tokens } = new Fountain().parse(source, true);
-    return tokensToMobiHtml(tokens, { title: 'T', author: 'A' });
+    return tokensToMobiHtml(tokens, { title: 'T', author: 'A' }, OPTS);
   }
 
   test('marker rides inside the following block, not its own paragraph', () => {

@@ -8,22 +8,19 @@
 //   one-blank-Courier-line between elements = 1em.
 // - No line-height/font-size overrides on body text — Enhanced Typesetting
 //   owns within-paragraph spacing (the reader's own setting).
-// - NO background-color on html or body, ever — it makes the KFX converter
-//   synthesize a wrapper block of its own at the top of the document, and
-//   every keep in the book then dies silently (MobileRead t=330798, where
-//   jhowell frames the rule as "keeps work on top-level blocks only").
-//   Authored nesting is NOT what breaks it: the keeps below sit two divs
-//   deep inside section.scene and held on device (registry #8b,
-//   2026-07-29). The synthesized wrapper is the trap; docs/device-map.md
-//   §2.1.
-// - CSS value SYNTAX stays CSS-2.1-vintage — no min()/clamp()/var(): Adobe
-//   RMSDK (Kobo's EPUB path, tolino) violates CSS error handling and can
-//   blank an entire book on a value function it cannot parse. CSS3
-//   PROPERTIES that degrade harmlessly are fine — opacity on
-//   span.page-marker is the precedent (registry #13a).
-// - Break control kept deliberately small — every avoid link grows the
-//   unbreakable chunk renderers push, causing bottom-of-page gaps. The
-//   whole inventory, one line each:
+// - NO background-color on html or body, ever — the KFX converter then
+//   synthesizes a wrapper block of its own and every keep in the book
+//   dies silently. It is the SYNTHESIZED wrapper that breaks them, not
+//   nesting: our own keeps sit two divs deep and held on device (#8b).
+// - CSS value SYNTAX stays CSS-2.1-vintage — no min()/clamp()/var(), which
+//   can blank a whole book on Adobe RMSDK. CSS3 PROPERTIES that degrade
+//   harmlessly are fine; opacity on span.page-marker is the precedent.
+//
+// Break control is deliberately small: every avoid link grows the
+// unbreakable chunk a renderer pushes, which reads as a bottom-of-page
+// gap. The whole inventory, one line each — add nothing without a reason
+// good enough to write here, and the guard test in tests/epub.test.ts
+// will make you.
 //     break-after: avoid   h2.scene-heading (gated: keepSceneHeadingWithScene, on)
 //     break-after: avoid   p.character
 //     break-after: avoid   p.mini-slug (live: secondary sluglines, registry #5b)
@@ -31,32 +28,20 @@
 //     break-inside: avoid  .keep-together (the cue keep)
 //     break-inside: avoid  table.dual-dialogue
 //     break-inside: avoid  .dialogue-block (gated: keepSpeechesWhole, off)
-//   And a shadow rule, not a new inventory entry: -webkit-column-break-inside:
-//   avoid on .keep-together and table.dual-dialogue, the old column
-//   spelling Apple Books and the Readium family (Thorium, Kobo's mobile
-//   apps) honor instead of the modern one. Lives in its OWN declaration
-//   block — iBooks drops both spellings when they share one (BlitzTricks)
-//   — so it reads as a distinct entry to the guard test in
-//   tests/epub.test.ts, not a change to either selector's existing
-//   break-inside rule. Kobo's kepub e-ink renderer is a hoped-for third
-//   and NOT a claimed one: it paginates with multicol, which is why the
-//   old spelling might reach it, but the only evidence on record says it
-//   ignores break CSS and wants file splits (device-map §6, t=346874).
-//   What the rule DOES add is cost on the engines that honor it: nothing
-//   kept there before, so these two wrappers become their first
-//   unbreakable chunks, carrying the same bottom-of-page gaps this bullet
-//   opens with.
-//   Plus the one FORCED break, which is not an avoid link and so grows no
-//   chunk — it ends a page rather than refusing to:
+// Two mechanisms sit outside that list and cost less than an avoid link:
 //     page-break-before: always  section.scene (gated: scenePageBreaks, off)
-//   And one more mechanism outside the inventory above and outside that
-//   forced break: widows/orphans on p.dialogue and p.action (gated:
-//   printSplitMinimums, on, registry #17). It is not an avoid link — its
-//   cost is bounded to roughly one extra line per page seam, not a whole
-//   pushed block — and it is the only one of the rules cataloged in this
-//   bullet whose OFF state still emits a value (1) rather than nothing
-//   (justifyText, which is no part of this inventory, is the file's other
-//   such knob).
+//       — ends a page rather than refusing to, so it grows no chunk.
+//     widows/orphans on p.action and p.dialogue (gated: printSplitMinimums,
+//       on, registry #17) — bounded to about one line per seam, and the one
+//       rule here whose OFF state emits a value (1) rather than nothing.
+// And the column-spelling shadow rule, which re-lists the wrapper keeps
+// above in -webkit-column-break-inside for engines that honor only that
+// spelling. It is a second spelling of existing keeps, not a new one, but
+// it does newly make those wrappers unbreakable on engines where nothing
+// kept before, with the same gap cost. Its selector list is DERIVED from
+// the keep set (see columnKeeps below), so it cannot drift.
+//
+// Which renderer honors what, with sources: docs/device-map.md §6.
 import type { FormatOptions } from '../options';
 import { DEFAULT_FORMAT_OPTIONS } from '../options';
 
@@ -84,31 +69,29 @@ export function screenplayCss(o: FormatOptions): string {
   const speechKeep = o.keepSpeechesWhole
     ? '\n  page-break-inside: avoid;\n  break-inside: avoid;'
     : '';
+  // Every wrapper keep the stylesheet emits, in one list, so the column
+  // spelling below is DERIVED from the keep set rather than a second copy
+  // of it kept in sync by hand. A keep missing from here is inert in
+  // Apple Books, which honors only that spelling.
+  const columnKeeps = ['.keep-together', 'table.dual-dialogue'];
+  if (o.keepSpeechesWhole) columnKeeps.push('.dialogue-block');
   // The heading keep is a CHAIN, not a wrapper: break-after on the h2
   // holds it to whatever follows, without making the whole first block
   // unbreakable (the old wrapper pushed half-page chunks; registry #5a).
   const headingKeep = o.keepSceneHeadingWithScene
     ? '\n  page-break-after: avoid;\n  break-after: avoid;'
     : '';
-  // Print split minimums (registry #17): the two-line rule at page edges.
-  // Honored by KFX (fw 5.12.3+) and RMSDK (Kobo epub, tolino); ignored by
-  // KF8/MOBI; unverified on kepub e-ink (patch-lore says it reads them —
-  // not confirmed on device here).
-  // CSS's own initial value for widows/orphans is already 2, so ON is a
-  // DEFENSIVE restatement, not an addition: it exists to beat a reading
-  // system whose own stylesheet packs tighter than that. 1 is the
-  // documented tight-packing trade for users who hate bottom-of-page gaps.
-  // Both properties inherit, so putting them on body would have covered
-  // everything; scoping to p.dialogue/p.action only is deliberate — OFF
-  // must not loosen p.parenthetical or p.centered too.
-  // Interaction with registry #8b (load-bearing): .keep-together is
-  // ALWAYS on and wraps cue + parentheticals + the FIRST dialogue
-  // paragraph in break-inside: avoid, so a single-paragraph speech does
-  // not split and this rule does not fire for it — with the same caveat
-  // #8c carries: `avoid` yields where it cannot be honored, so a wrapper
-  // taller than the page still breaks bare, and there these minimums are
-  // what is left. Its everyday bite is the TAIL paragraphs of
-  // multi-paragraph speeches, and action, which #8b never wraps.
+  // Print split minimums, the two-line rule at page edges (registry #17,
+  // which carries the device support and the sources). Two facts that
+  // belong at this line: CSS's own initial value is already 2, so ON is a
+  // DEFENSIVE restatement meant to beat a reading system that packs
+  // tighter, not an addition — and both properties inherit, so scoping to
+  // these two selectors instead of body is what keeps OFF from loosening
+  // p.parenthetical and p.centered as well.
+  // Where it actually bites: #8b's always-on cue keep swallows the first
+  // dialogue paragraph, so this fires on the TAIL paragraphs of
+  // multi-paragraph speeches and on action — plus wherever that keep
+  // yields, since `avoid` gives way when a wrapper outgrows the page.
   const minLines = o.printSplitMinimums ? 2 : 1;
 
   return `
@@ -129,14 +112,11 @@ ${sceneBreak}
   break-inside: avoid;
 }
 
-/* Apple Books and the Readium family (Thorium, Kobo's mobile apps) honor
-   the old column spelling; Books honors ONLY it. SEPARATE rule on purpose:
-   iBooks drops BOTH forms when they share one declaration block
-   (BlitzTricks). Unguarded on purpose: the engines that need it largely
-   predate @supports. Kobo's kepub e-ink renderer paginates with multicol
-   too, so this MIGHT reach it — untested, and the evidence on record says
-   kepub ignores break CSS entirely (device-map §6). */
-.keep-together, table.dual-dialogue { -webkit-column-break-inside: avoid; }
+/* Apple Books honors ONLY this older spelling; the Readium family
+   (Thorium, Kobo's mobile apps) honors it too. SEPARATE rule on purpose:
+   iBooks drops BOTH forms when they share one declaration block. Unguarded
+   on purpose: the engines that need it largely predate @supports. */
+${columnKeeps.join(', ')} { -webkit-column-break-inside: avoid; }
 
 h2.scene-heading {
   font-size: 1em;
@@ -154,14 +134,10 @@ span.underline {
 }
 
 /* Original PDF page numbers — a marginal reference, out of the flow so
-   they cost no line. Horizontal in %, per the CSS invariants. A hardcoded
-   gray fights themed backgrounds (dark, sepia); opacity dims relative to
-   the theme's own text color instead, so the marker recedes correctly
-   under any theme. Engines without opacity support just render it at full
-   strength — a harmless degrade. Enhanced Typesetting lists opacity as
-   supported (Guidelines 2026.2 §18.1 — the irony is deliberate: that PDF's
-   Appendix B is stale on break and keep CSS, but its supported-properties
-   table is still the citable source; docs/device-map.md §2.1). */
+   they cost no line. Horizontal in %, per the CSS invariants. Dimming is
+   opacity rather than a fixed gray, which would fight dark and sepia
+   themes; opacity dims against whatever the theme's text color is, and
+   engines lacking it just render full strength (registry #13a). */
 span.page-marker {
   float: right;
   font-size: 0.75em;

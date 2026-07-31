@@ -48,17 +48,49 @@
  * selector fails loudly at the call site instead of a downstream
  * `undefined` crash with no context.
  *
- * Known limits (true today, harmless today, all fail loudly rather than
- * silently): only flat stylesheets are supported — a rule nested inside
- * an at-rule such as `@media` is not found and this throws; a duplicate
- * selector returns the FIRST match, whereas the CSS cascade would apply
- * the last; and comments INSIDE a declaration body are not stripped.
+ * Known limits, all true of `eachRule` below too. The first three are
+ * harmless today and fail LOUDLY: only flat stylesheets are supported —
+ * a rule nested inside an at-rule such as `@media` is not found and this
+ * throws; a duplicate selector returns the FIRST match, whereas the CSS
+ * cascade would apply the last; and comments INSIDE a declaration body
+ * are not stripped. The fourth fails SILENTLY, so it is the one to watch:
+ * rules are split on braces BEFORE comments are stripped, so a comment
+ * containing `{` or `}` shifts every rule boundary after it and lookups
+ * return a body assembled from the wrong span. No such comment exists in
+ * css.ts; don't add one.
+ *
+ * Note the returned string's selector prefix is the MATCHED selector,
+ * which by construction equals your normalized argument. It is there so a
+ * failure message names its rule — never assert on it, or you are
+ * asserting on your own lookup key.
  */
 export function ruleFor(css: string, selector: string): string {
-  const norm = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim();
-  const target = norm(selector);
-  const hit = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
-    .find(([, sel]) => norm(sel) === target);
+  const target = normalizeSelector(selector);
+  const hit = eachRule(css).find((r) => r.selector === target);
   if (!hit) throw new Error(`no rule for selector: ${selector}`);
-  return `${selector} {${hit[2]}}`;
+  return `${hit.selector} {${hit.body}}`;
+}
+
+/** Comments stripped, whitespace runs collapsed, trimmed — so a selector
+ * list means the same thing however it happens to be wrapped or spaced. */
+export function normalizeSelector(s: string): string {
+  return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Every rule in the stylesheet, selectors normalized. This is the one
+ * parser: `ruleFor` looks up a single rule through it, and the inventory
+ * guards in epub.test.ts sweep ALL rules through it to assert that a
+ * mechanism (a keep, widows/orphans) appears on exactly the selectors the
+ * css.ts header says it does. Those guards previously carried their own
+ * copy of this regex plus a `selector.split('\n').pop()` last-line
+ * comparison, which is the bug `normalizeSelector` exists to kill: a
+ * cosmetic line-wrap of a grouped selector made them read only its final
+ * member.
+ */
+export function eachRule(css: string): { selector: string; body: string }[] {
+  return [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, selector, body]) => ({
+    selector: normalizeSelector(selector),
+    body,
+  }));
 }

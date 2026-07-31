@@ -23,13 +23,20 @@ is live.
   advanced: file-size budget.
 - **MOBI arm (2026-07-30):** the MOBI dialect has exactly one fragmentation
   primitive, `<mbp:pagebreak/>`, and `scenePageBreaks` now drives it: one
-  break before each PRIMARY scene heading except the first. Mini-slugs are
-  excluded, matching the EPUB, which opens a `section.scene` for primary
-  slugs only (#5b). It is the ONLY FormatOptions field the MOBI renderer
-  itself reads: that dialect ships no stylesheet (#8c), so every other
-  stage-2 knob here is EPUB CSS territory it cannot reach. Stage-1 knobs
-  (#8, #8a, #10a's mode, #13a's markers) reach it the way they reach
-  everything — written into the `.fountain` before either renderer runs.
+  break before each PRIMARY scene heading. Mini-slugs are excluded,
+  matching the EPUB, which opens a `section.scene` for primary slugs only
+  (#5b). What that dialect cannot reach is the CSS knobs: it ships no
+  stylesheet (#8c), so every keep, margin and alignment option is EPUB
+  territory. Stage-1 knobs (#8, #8a, #10a's mode, #13a's markers) arrive
+  already baked into the `.fountain`. The other stage-2 knob it does read
+  is `includeTitlePage` (#11).
+- **Corrected 2026-07-31:** the break was suppressed before the FIRST
+  scene heading, which is right when the book opens on a scene and wrong
+  when anything precedes it — a script opening on action ran that action
+  into scene one, where the EPUB separates them. The gate is now "has any
+  body content been emitted since the last break", so the title page's
+  own break (or the start of a title-less book) still leaves no blank
+  leading page.
 - **Code:** `src/epub/html.ts` (`tokensToBody`, `DEFAULT_MAX_FILE_BYTES`),
   `src/mobi/html.ts` (`scene_heading` case).
 
@@ -307,18 +314,26 @@ is live.
   freely.
 - **App options:** none — cue avoid stays always-on; the heading behavior
   is governed by 5a's CSS chain (gated by `keepSceneHeadingWithScene`).
-- **Column-spelling shadow rule (2026-07-30):** the two inside-avoid
-  WRAPPERS — #8b's `.keep-together` and #10a's `table.dual-dialogue` —
-  now also carry `-webkit-column-break-inside: avoid`, in a SEPARATE
-  declaration block (separate because iBooks drops both spellings when
-  they share one), which extends those keeps to **Apple Books** — which
-  honors only the old spelling — and to the **Readium family** (Thorium,
-  Kobo's mobile apps). Kobo's kepub e-ink renderer is the hoped-for
-  third, not a claimed one: it paginates with multicol, so the old
-  spelling might reach it, but the only record we have says it ignores
-  break CSS (device-map §6, MobileRead t=346874). The keep-with-*next* chains in
-  this entry get no such shadow — we emit no column-spelling
-  `break-after` — so they stay modern/legacy-prefixed spelling only.
+- **Column-spelling shadow rule (2026-07-30):** every inside-avoid
+  WRAPPER also carries `-webkit-column-break-inside: avoid`, in a
+  SEPARATE declaration block (separate because iBooks drops both
+  spellings when they share one), which extends those keeps to **Apple
+  Books** — which honors only the old spelling — and to the **Readium
+  family** (Thorium, Kobo's mobile apps). Kobo's kepub e-ink renderer is
+  the hoped-for third, not a claimed one: it paginates with multicol, so
+  the old spelling might reach it, but the only record we have says it
+  ignores break CSS (device-map §6, MobileRead t=346874).
+- **The list is DERIVED, not maintained twice (corrected 2026-07-31):**
+  the shadow rule's selectors come from the same gating that emits the
+  keeps (`columnKeeps` in css.ts) — #8b's `.keep-together`, #10a's
+  `table.dual-dialogue`, and #8c's `.dialogue-block` when
+  `keepSpeechesWhole` is on. It first shipped as a hand-written list of
+  the first two, which silently left the whole-speech keep inert in
+  Apple Books: the toggle did nothing there while the cue keep worked.
+  A keep can no longer join the inventory and skip the shadow rule.
+  The keep-with-*next* chains in this entry still get no shadow — we
+  emit no column-spelling `break-after` — so they stay modern and
+  legacy-prefixed only.
 - **Code:** `src/epub/css.ts`.
 
 ### 6. Typeface & line height (v2)
@@ -518,6 +533,12 @@ is live.
 - **App option:** "Keep each speech on one page" (the reader rail's Page
   group), with the tradeoff and the oversize caveat stated in the
   caption beneath it.
+- **Reaches Apple Books as of 2026-07-31:** `.dialogue-block` joins the
+  column-spelling shadow rule (#5) when this option is on. It had been
+  left out of that rule's hand-written selector list, so the toggle was
+  inert in Books — which honors only the old spelling — while the
+  always-on cue keep worked. The list is now derived from the keep set,
+  so this cannot recur for the next keep.
 - **Device verdict: pending 2026-07-30 —** does a kept speech actually
   move whole, and how big is the gap it leaves? Same Kindle
   Previewer/KFX + Apple Books pass as #5a. Note the interaction with
@@ -718,8 +739,17 @@ is live.
   `--title` / `--author` CLI overrides exist.
 - **App options:** include/exclude title page; editable title/author
   fields (already CLI-exposed).
+- **MOBI arm (2026-07-31):** the MOBI dialect emits its own centered
+  title block followed by `<mbp:pagebreak/>`, and now honors the same
+  toggle. It had ignored it since the dialect was written: OFF dropped
+  the EPUB's title file, manifest item, spine itemref and nav landmark
+  and left the `.mobi` opening on a title page anyway. The knob only
+  became reachable there when `tokensToMobiHtml` started taking
+  FormatOptions for #1's MOBI arm, and was fixed in the same pass that
+  found it. With the title page off there is no leading break either, so
+  the body does not open on a blank page.
 - **Code:** `src/fountain/serialize.ts` (`extractTitleMeta`),
-  `src/epub/build.ts` (`titlePageXhtml`).
+  `src/epub/build.ts` (`titlePageXhtml`), `src/mobi/html.ts`.
 
 ### 12. Scene-level TOC
 - **What:** every PRIMARY slugline becomes a TOC entry (nav.xhtml) linking
