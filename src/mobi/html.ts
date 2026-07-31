@@ -5,15 +5,17 @@
 // transitions. (The EPUB path stays the high-fidelity rendering; this is
 // the dependency-free USB sideload format.)
 // This dialect has exactly one fragmentation primitive: <mbp:pagebreak/>.
-// It is wired to scenePageBreaks (registry #1) and nothing else — every
-// other FormatOptions knob is EPUB CSS territory this dialect can't reach.
-// The break follows PRIMARY scene headings only, never mini-slugs: a
-// mini-slug is a micro-heading inside the current scene, not a new scene
-// (registry #5b), so breaking before one would be wrong the same way it
-// would be wrong in the EPUB path's section.scene handling.
+// It is wired to scenePageBreaks (registry #1), before PRIMARY scene
+// headings only — a mini-slug is a micro-heading inside the current
+// scene, not a new scene (registry #5b), so breaking before one would be
+// wrong the same way it would be in the EPUB's section.scene handling.
+// The other knob this dialect reads is includeTitlePage (#11). What it
+// cannot reach is the CSS ones: it ships no stylesheet (#8c), so every
+// keep, margin and alignment knob is EPUB territory. Stage-1 knobs (#8,
+// #8a, #10a's mode, #13a's markers) arrive already baked into the
+// .fountain and need nothing here.
 import type { Token } from 'fountain-js';
 import type { FormatOptions } from '../options';
-import { DEFAULT_FORMAT_OPTIONS } from '../options';
 import { isMiniSlug } from '../fountain/slug';
 
 export interface MobiMeta {
@@ -41,22 +43,36 @@ function inline(escaped: string): string {
 export function tokensToMobiHtml(
   tokens: Token[],
   meta: MobiMeta,
-  format: FormatOptions = DEFAULT_FORMAT_OPTIONS,
+  format: FormatOptions,
 ): string {
   const out: string[] = [];
   out.push('<html><head></head><body>');
 
-  // Title page
-  out.push('<center>');
-  out.push(`<br/><br/><br/><b><font size="+2">${esc(meta.title)}</font></b>`);
-  if (meta.author) out.push(`<br/><br/>Written by<br/>${esc(meta.author)}`);
-  out.push('</center>');
-  out.push('<mbp:pagebreak/>');
+  // Body content emitted since the last page break. It gates the scene
+  // break below: a break is only wanted where there is something to break
+  // AWAY from, so the first scene of a book gets none (the title page's
+  // own break, or the start of the file, already put it at the top of a
+  // page) while a scene that follows opening action does — matching the
+  // EPUB, where section.scene's page-break-before separates exactly that.
+  let sinceBreak = false;
+  const breakPage = () => {
+    out.push('<mbp:pagebreak/>');
+    sinceBreak = false;
+  };
+
+  // Title page (registry #11's MOBI arm — gated like the EPUB's, which
+  // drops the file, its manifest item, spine itemref and nav landmark).
+  if (format.includeTitlePage) {
+    out.push('<center>');
+    out.push(`<br/><br/><br/><b><font size="+2">${esc(meta.title)}</font></b>`);
+    if (meta.author) out.push(`<br/><br/>Written by<br/>${esc(meta.author)}`);
+    out.push('</center>');
+    breakPage();
+  }
 
   // Body: dialogue blocks accumulate into a single <blockquote>.
   let speech: string[] | null = null;
   let dual: { left: string[]; right: string[]; side: 'left' | 'right' } | null = null;
-  let sawScene = false;
   // Page markers ride inside the NEXT block instead of taking a line of
   // their own — same rule as the EPUB, minus the EPUB3 semantics (no
   // epub:type/role/id here). There is no stylesheet in this dialect to hang
@@ -72,6 +88,7 @@ export function tokensToMobiHtml(
       }
     }
     out.push(s);
+    sinceBreak = true;
   };
   const closeSpeech = () => {
     if (speech) {
@@ -85,14 +102,12 @@ export function tokensToMobiHtml(
     switch (t.type) {
       case 'scene_heading': {
         closeSpeech();
-        const primary = !isMiniSlug(t);
         // The only break primitive this dialect has (registry #1's MOBI
-        // arm), and only before a primary scene heading — a mini-slug
-        // stays inside the scene it appears in (registry #5b). out.push,
+        // arm), and only before a PRIMARY scene heading — a mini-slug
+        // stays inside the scene it appears in (registry #5b). breakPage,
         // not push(): a pending page marker belongs to the heading block,
         // never to the break itself.
-        if (format.scenePageBreaks && primary && sawScene) out.push('<mbp:pagebreak/>');
-        if (primary) sawScene = true;
+        if (format.scenePageBreaks && !isMiniSlug(t) && sinceBreak) breakPage();
         push(`<p><b>${esc(text)}</b></p>`);
         break;
       }
