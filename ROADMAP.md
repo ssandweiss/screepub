@@ -44,6 +44,14 @@ noise. Screepub already recognises revision marks and scene boundaries.
 character speaks — all of it is already computed during conversion and then
 thrown away. Useful if you read scripts in volume.
 
+**The screenplay typeface, everywhere.** Screepub asks each device for
+Courier Prime, the typeface of a printed script, but most devices don't
+carry it and quietly substitute their own typewriter font. Bundling the
+font inside the e-book (its open license allows exactly this) would make
+scripts look the same on every reader that honors embedded fonts. The
+catch to design around: Amazon's Send-to-Kindle service strips embedded
+fonts, so this shines brightest on USB sideloads.
+
 **Converting several scripts at once** in the app. The command-line tool can
 already be looped; the app can't.
 
