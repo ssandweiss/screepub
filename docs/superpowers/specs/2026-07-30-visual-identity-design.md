@@ -144,8 +144,11 @@ is 1000px at its widest, which sets the scale at 117.6 pixels per inch.
 - **Brad head:** `clamp(20px, 3.4%, 36px)`. A real Acco #5 head is
   0.44in, which would be 52px at this scale and overwhelms the page on
   a screen. This is a deliberate deviation from the physical object,
-  and the only one.
-- **Hole diameter:** 0.68 of the brad head.
+  matched by the hole diameter below.
+- **Hole diameter:** 0.76 of the brad head. A physically exact ratio
+  would be about 0.57 (a 0.25in punch against a 0.44in Acco head), but
+  that reads weedy at rail size. This is a deliberate visual choice,
+  like the brad head size above.
 - **Hole positions:** 30.7%, 50%, and 69.3% of viewport height. Those
   are the true proportions of a three-hole punch on an 11in page.
   Brads sit in the first and third. The second stays empty and shows
