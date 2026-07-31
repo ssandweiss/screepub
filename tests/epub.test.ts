@@ -5,7 +5,7 @@ import JSZip from 'jszip';
 import { tokensToBody, tokensToPreviewHtml } from '../src/epub/html';
 import { buildEpub } from '../src/epub/build';
 import { SCREENPLAY_CSS } from '../src/epub/css';
-import { ruleFor } from './css-rules';
+import { ruleFor, eachRule } from './css-rules';
 import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
 // Stage-2's copy, straight from the module that owns it — both renderers
 // import it from here, so the test reads the same definition they do.
@@ -226,28 +226,32 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
     expect(t).toContain('break-before: avoid');
   });
 
+  // Selectors carrying a given mechanism, in stylesheet order. Both pins
+  // below sweep every rule through the SAME parser ruleFor uses, so a
+  // grouped selector wrapped across lines reads as its whole list rather
+  // than its last member (see eachRule's comment for the bug that idiom
+  // caused).
+  const selectorsCarrying = (re: RegExp) =>
+    eachRule(SCREENPLAY_CSS).filter((r) => re.test(r.body)).map((r) => r.selector);
+
   // Every avoid link grows the chunk a renderer pushes, so the inventory is
   // deliberately closed and written out in the css.ts header. Pin it: a new
   // keep cannot slip in without this failing and sending its author to the
-  // header comment. Both spellings are emitted for each rule, hence 2 per
-  // selector. Default options, so the two gated-off entries
+  // header comment. Default options, so the two gated-off entries
   // (`.dialogue-block`, `section.scene`) are absent by design.
   //
-  // The column-spelling shadow rule (-webkit-column-break-inside, css.ts)
-  // adds a seventh entry to `carrying` below — its own declaration block,
-  // duplicating two selectors already in the six-name inventory for
-  // multicol-paginating engines — but it does NOT match the declarations
-  // regex (it carries neither `page-break-inside` nor `break-inside`), so
-  // the twelve-declaration count stays closed.
+  // Six of the seven entries carry BOTH spellings of their avoid, hence the
+  // twelve declarations. The seventh is the column-spelling shadow rule
+  // (-webkit-column-break-inside, css.ts), which re-lists two selectors
+  // already named above for multicol-paginating engines; it matches neither
+  // `page-break-inside` nor `break-inside`, so it adds an entry without
+  // adding to the count.
   test('the avoid inventory is closed — seven entries, twelve declarations', () => {
     const declarations =
       SCREENPLAY_CSS.match(/^\s*(?:page-)?break-(?:after|before|inside):\s*avoid;/gm) ?? [];
     expect(declarations).toHaveLength(12);
 
-    const carrying = [...SCREENPLAY_CSS.matchAll(/([^{}]+)\{([^}]*)\}/g)]
-      .filter(([, , body]) => /:\s*avoid;/.test(body))
-      .map(([, selector]) => selector.trim().split('\n').pop()!.trim());
-    expect(carrying).toEqual([
+    expect(selectorsCarrying(/:\s*avoid;/)).toEqual([
       '.keep-together',
       '.keep-together, table.dual-dialogue',
       'h2.scene-heading',
@@ -263,10 +267,7 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
   // cannot spread to a third selector (e.g. p.parenthetical) without this
   // failing and sending its author to the css.ts header comment.
   test('widows/orphans carry on exactly two selectors: p.action and p.dialogue', () => {
-    const carrying = [...SCREENPLAY_CSS.matchAll(/([^{}]+)\{([^}]*)\}/g)]
-      .filter(([, , body]) => /\b(?:widows|orphans):\s*\d+;/.test(body))
-      .map(([, selector]) => selector.trim().split('\n').pop()!.trim());
-    expect(carrying).toEqual(['p.action', 'p.dialogue']);
+    expect(selectorsCarrying(/\b(?:widows|orphans):\s*\d+;/)).toEqual(['p.action', 'p.dialogue']);
   });
 });
 

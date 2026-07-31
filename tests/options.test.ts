@@ -155,6 +155,22 @@ describe('screenplayCss with options', () => {
     expect(rule).not.toContain('page-break-inside');
   });
 
+  test('the column spelling tracks the keep set: keepSpeechesWhole joins it', () => {
+    // Apple Books honors ONLY the old spelling, so a keep that is missing
+    // from this rule is inert there. The selector list is derived from the
+    // same gating that emits the keeps, not hand-maintained beside it.
+    const off = screenplayCss(resolveFormatOptions({}));
+    expect(ruleFor(off, '.keep-together, table.dual-dialogue'))
+      .toContain('-webkit-column-break-inside: avoid');
+    expect(off).not.toContain('.dialogue-block { -webkit-column-break-inside');
+
+    const on = screenplayCss(resolveFormatOptions({ keepSpeechesWhole: true }));
+    const rule = ruleFor(on, '.keep-together, table.dual-dialogue, .dialogue-block');
+    expect(rule).toContain('-webkit-column-break-inside: avoid');
+    // Still its own declaration block, per the iBooks bug above.
+    expect(rule).not.toContain('page-break-inside');
+  });
+
   test('page marker dims via opacity, not a hardcoded gray', () => {
     const css = screenplayCss(DEFAULT_FORMAT_OPTIONS);
     const rule = ruleFor(css, 'span.page-marker');

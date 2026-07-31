@@ -84,6 +84,12 @@ export function screenplayCss(o: FormatOptions): string {
   const speechKeep = o.keepSpeechesWhole
     ? '\n  page-break-inside: avoid;\n  break-inside: avoid;'
     : '';
+  // Every wrapper keep the stylesheet emits, in one list, so the column
+  // spelling below is DERIVED from the keep set rather than a second copy
+  // of it kept in sync by hand. A keep missing from here is inert in
+  // Apple Books, which honors only that spelling.
+  const columnKeeps = ['.keep-together', 'table.dual-dialogue'];
+  if (o.keepSpeechesWhole) columnKeeps.push('.dialogue-block');
   // The heading keep is a CHAIN, not a wrapper: break-after on the h2
   // holds it to whatever follows, without making the whole first block
   // unbreakable (the old wrapper pushed half-page chunks; registry #5a).
@@ -136,7 +142,7 @@ ${sceneBreak}
    predate @supports. Kobo's kepub e-ink renderer paginates with multicol
    too, so this MIGHT reach it — untested, and the evidence on record says
    kepub ignores break CSS entirely (device-map §6). */
-.keep-together, table.dual-dialogue { -webkit-column-break-inside: avoid; }
+${columnKeeps.join(', ')} { -webkit-column-break-inside: avoid; }
 
 h2.scene-heading {
   font-size: 1em;
