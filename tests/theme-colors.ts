@@ -28,8 +28,11 @@ export function fromHex(h: string): Rgba {
 }
 
 function parseColor(src: string): Rgba | null {
-  // NSColor(red:) must be tried before Color(red:), since the former
-  // contains the latter as a substring.
+  // Order here is harmless defense-in-depth, not a correctness
+  // requirement: the 3-argument Color(red:green:blue:) pattern below
+  // requires a `)` immediately after the blue digits, and
+  // NSColor(...:alpha:) always has `, alpha: ...)` there instead, so the
+  // plain pattern can never match inside an NSColor call either way.
   const rgb = src.match(/NSColor\(red:\s*([\d.]+),\s*green:\s*([\d.]+),\s*blue:\s*([\d.]+),\s*alpha:\s*([\d.]+)\)/);
   if (rgb) return { r: byte(+rgb[1]), g: byte(+rgb[2]), b: byte(+rgb[3]), a: +rgb[4] };
 
@@ -45,21 +48,60 @@ function parseColor(src: string): Rgba | null {
   return null;
 }
 
-/// Every `static let NAME` in Theme.swift that resolves to a color pair.
-/// Declarations without light:/dark: labels (Theme.brass) use the same
-/// literal for both, which is exactly what the app does.
-export async function themeColors(): Promise<Record<string, { light: Rgba; dark: Rgba }>> {
-  const text = await Bun.file(THEME).text();
-  const out: Record<string, { light: Rgba; dark: Rgba }> = {};
+type ThemeColors = Record<string, { light: Rgba; dark: Rgba }>;
+
+/// Every `static let NAME` in Theme.swift source text that resolves to a
+/// color pair. A declaration with neither a light: nor a dark: label
+/// (Theme.brass) uses its one literal for both modes, which is exactly
+/// what the app does. A declaration with exactly one of the two labels is
+/// dropped, not guessed: falling back to the whole chunk would pick up
+/// the OTHER label's literal, since it is still sitting right there in
+/// the same chunk, and silently fabricate a value for the missing side
+/// instead of surfacing it as unresolved.
+///
+/// Known limits. `parseColor` recognizes exactly three literal forms:
+/// NSColor(red:green:blue:alpha:), NSColor(white:alpha:), and
+/// Color(red:green:blue:). Any other color expression (an asset-catalog
+/// color, a semantic literal like Color.white, NSColor.systemBlue, a
+/// hue/saturation/brightness initializer, or a declaration that just
+/// refers to another color by name) fails to match and is SILENTLY
+/// dropped from the map: no throw, no warning, the key is simply absent
+/// from the result. The asymmetric-label case above is dropped the same
+/// way. That is deliberate, not accidental: a missing key surfaces
+/// loudly downstream through `expect(theme[name]).toBeDefined()` in
+/// tests/brand.test.ts, but only because that call site checks for it.
+/// Any future caller of `parseThemeColors` or `themeColors` must check
+/// for the key rather than assume every `static let` in Theme.swift made
+/// it into the map.
+export function parseThemeColors(text: string): ThemeColors {
+  const out: ThemeColors = {};
 
   for (const chunk of text.split('static let ').slice(1)) {
     const name = chunk.match(/^(\w+)/)?.[1];
     if (!name) continue;
-    const light = parseColor(chunk.match(/light:\s*([^\n]+)/)?.[1] ?? chunk);
-    const dark = parseColor(chunk.match(/dark:\s*([^\n]+)/)?.[1] ?? chunk);
+
+    const lightSrc = chunk.match(/light:\s*([^\n]+)/)?.[1];
+    const darkSrc = chunk.match(/dark:\s*([^\n]+)/)?.[1];
+
+    let light: Rgba | null;
+    let dark: Rgba | null;
+    if (lightSrc === undefined && darkSrc === undefined) {
+      const both = parseColor(chunk);
+      light = both;
+      dark = both;
+    } else {
+      light = lightSrc !== undefined ? parseColor(lightSrc) : null;
+      dark = darkSrc !== undefined ? parseColor(darkSrc) : null;
+    }
+
     if (light && dark) out[name] = { light, dark };
   }
   return out;
+}
+
+export async function themeColors(): Promise<ThemeColors> {
+  const text = await Bun.file(THEME).text();
+  return parseThemeColors(text);
 }
 
 /// WCAG 2.1 relative luminance and contrast ratio.
