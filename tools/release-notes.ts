@@ -14,10 +14,14 @@ export interface CommitFact {
 
 const MAX_SUBJECT = 200;
 
-function git(cwd: string, args: string): string {
-  const proc = Bun.spawnSync(['sh', '-c', `git ${args}`], { cwd });
+/** Argv-array spawnSync, never `sh -c` string interpolation: this file's
+ *  whole point is that DATA (a tag name, a commit subject) never gets a
+ *  chance to act as instructions, and a shell-interpolated sinceTag would
+ *  undercut that on the very first line. */
+function git(cwd: string, args: string[]): string {
+  const proc = Bun.spawnSync(['git', ...args], { cwd });
   if (proc.exitCode !== 0) {
-    throw new Error(`git ${args} failed: ${proc.stderr.toString().trim()}`);
+    throw new Error(`git ${args.join(' ')} failed: ${proc.stderr.toString().trim()}`);
   }
   return proc.stdout.toString();
 }
@@ -25,15 +29,33 @@ function git(cwd: string, args: string): string {
 /** Control characters and ANSI escapes out, length capped. Every control
  *  character here is an escape, never a literal: literals do not survive
  *  copy-paste, and this file was copied from a plan. */
-function sanitize(subject: string): string {
+export function sanitize(subject: string): string {
   const stripped = subject.replace(/[\x00-\x1F\x7F]/g, '');
   return stripped.length > MAX_SUBJECT ? stripped.slice(0, MAX_SUBJECT) : stripped;
 }
 
-export function collectCommits(cwd: string, sinceTag: string, owner = 'Sam Sandweiss'): CommitFact[] {
+/** The commit author, at minimum a Sam Sandweiss default, is meaningless
+ *  once this AGPL repo is forked: a fork's own maintainer should read as
+ *  the owner in their own clone, not as a permanent "look harder" flag on
+ *  every commit they make. Read the repo's own git config; fall back to
+ *  the literal only when nothing is configured at all. */
+function currentGitUserName(cwd: string): string | undefined {
+  try {
+    const name = git(cwd, ['config', 'user.name']).trim();
+    return name || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function collectCommits(
+  cwd: string,
+  sinceTag: string,
+  owner: string = currentGitUserName(cwd) ?? 'Sam Sandweiss',
+): CommitFact[] {
   // %x1F separates fields, %x1E separates records: neither can appear in a
   // commit subject.
-  const out = git(cwd, `log --no-merges --format=%s%x1F%an%x1E ${sinceTag}..HEAD`);
+  const out = git(cwd, ['log', '--no-merges', '--format=%s%x1F%an%x1E', `${sinceTag}..HEAD`]);
   return out
     .split('\x1E')
     .map((rec) => rec.trim())
@@ -52,26 +74,84 @@ export interface Verdict {
   /** The entry's `Device support:` line, if any. The drafter needs this
    *  sentence to write an honest caveat; a number and title cannot. */
   support: string;
+  /** The after-ref `Device verdict:` sentence, present only on resolved
+   *  entries. A before-ref entry only ever says "pending"; the sentence
+   *  that replaced it — the one the closer needs — lives in the after
+   *  ref, so `resolved` is built from there, not from the before list. */
+  verdict?: string;
 }
 
 const ENTRY_HEADING = /^### ([0-9]+[a-z]?)\.\s*(.*)$/gm;
+/** Any heading, entry or not. An entry's body ends at the NEXT one of
+ *  these (## or ###) after its own, not at the next ENTRY heading:
+ *  without this, the file's last ### entry swallows everything under the
+ *  following non-entry "## ..." section (871 - 810 = 61 lines / ~4200
+ *  characters on the live registry, attributed to an unrelated entry),
+ *  and a stray "Device verdict: pending" mention under that section makes
+ *  the entry ABOVE it look pending too. */
+const ANY_HEADING = /^#{2,3} .*$/gm;
+
+interface RegistryEntry {
+  entry: string;
+  title: string;
+  body: string;
+}
+
+/** Every "### N. Title" entry, body clamped to the next heading of ANY
+ *  level. Shared by parseVerdicts, diffVerdicts and changedRegistryEntries
+ *  so all three agree on where one entry ends and the next section begins. */
+function registryEntries(registry: string): RegistryEntry[] {
+  const entryHeadings = [...registry.matchAll(ENTRY_HEADING)];
+  const boundaries = [...registry.matchAll(ANY_HEADING)].map((m) => m.index!);
+  return entryHeadings.map((match) => {
+    const start = match.index!;
+    const end = boundaries.find((b) => b > start) ?? registry.length;
+    return { entry: match[1], title: match[2].trim(), body: registry.slice(start, end) };
+  });
+}
+
+/** Markdown here hard-wraps a bullet's prose across indented continuation
+ *  lines (docs/formatting-options-log.md wraps well short of 80 columns).
+ *  Un-wrap each bullet into one logical line before matching a field with
+ *  `$`, or a sentence that crosses a physical line break truncates at the
+ *  break — the live bug that clipped entry 17's "Device support" sentence
+ *  at "(Kindle" and would have clipped entry 5a's "Device verdict"
+ *  sentence at "without the" (the actual line break in both, on the live
+ *  file). Continuation = indented, non-blank, and not itself a new bullet
+ *  or heading. */
+function unwrapBullets(text: string): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  for (const raw of lines) {
+    const startsNewBlock = /^-\s/.test(raw) || /^#{1,6}\s/.test(raw) || raw.trim() === '';
+    if (!startsNewBlock && out.length > 0 && /^\s+\S/.test(raw)) {
+      out[out.length - 1] += ' ' + raw.trim();
+    } else {
+      out.push(raw);
+    }
+  }
+  return out.join('\n');
+}
+
+function supportLine(body: string): string {
+  return /^-\s+\*\*Device support:\*\*\s*(.*)$/m.exec(unwrapBullets(body))?.[1] ?? '';
+}
+
+/** The bolded "Device verdict..." sentence itself, not the elaboration
+ *  that may follow it in the same bullet. */
+function verdictSentence(body: string): string {
+  return /\*\*Device verdict[^*]*\*\*/.exec(unwrapBullets(body))?.[0] ?? '';
+}
 
 /** Every registry entry whose body still says a verdict is pending. */
 export function parseVerdicts(registry: string): Verdict[] {
-  const headings = [...registry.matchAll(ENTRY_HEADING)];
-  return headings
-    .map((match, i) => {
-      const start = match.index!;
-      const end = i + 1 < headings.length ? headings[i + 1].index! : registry.length;
-      const body = registry.slice(start, end);
-      const support = /^-\s+\*\*Device support:\*\*\s*(.*)$/m.exec(body)?.[1] ?? '';
-      return {
-        entry: match[1],
-        title: match[2].trim(),
-        support,
-        pending: /Device verdict:\s*pending/i.test(body),
-      };
-    })
+  return registryEntries(registry)
+    .map(({ entry, title, body }) => ({
+      entry,
+      title,
+      support: supportLine(body),
+      pending: /Device verdict:\s*pending/i.test(unwrapBullets(body)),
+    }))
     .filter((e) => e.pending)
     .map(({ entry, title, support }) => ({ entry, title, support }));
 }
@@ -90,24 +170,22 @@ export function diffVerdicts(before: string, after: string): { opened: Verdict[]
   const nowPendingIds = new Set(nowPending.map((v) => v.entry));
 
   const opened = nowPending.filter((v) => !wasPending.has(v.entry));
-  const beforeById = new Map(beforeList.map((v) => [v.entry, v]));
+
+  const afterEntries = new Map(registryEntries(after).map((e) => [e.entry, e]));
   const resolved = [...wasPending]
     .filter((id) => !nowPendingIds.has(id))
-    .map((id) => beforeById.get(id)!);
+    .map((id) => {
+      const afterEntry = afterEntries.get(id);
+      const body = afterEntry?.body ?? '';
+      return {
+        entry: id,
+        title: afterEntry?.title ?? '',
+        support: supportLine(body),
+        verdict: verdictSentence(body),
+      };
+    });
 
   return { opened, resolved };
-}
-
-/** Entry bodies keyed by entry number, for comparison across refs. */
-function entryBodies(registry: string): Map<string, string> {
-  const headings = [...registry.matchAll(ENTRY_HEADING)];
-  const bodies = new Map<string, string>();
-  headings.forEach((match, i) => {
-    const start = match.index!;
-    const end = i + 1 < headings.length ? headings[i + 1].index! : registry.length;
-    bodies.set(match[1], registry.slice(start, end).trim());
-  });
-  return bodies;
 }
 
 /**
@@ -116,14 +194,32 @@ function entryBodies(registry: string): Map<string, string> {
  * range the registry caught five of six reader-visible changes while the
  * options interface caught one.
  */
-export function changedRegistryEntries(before: string, after: string): string[] {
-  const old = entryBodies(before);
-  const now = entryBodies(after);
-  const changed: string[] = [];
-  for (const [entry, body] of now) {
-    if (old.get(entry) !== body) changed.push(entry);
-  }
-  return changed;
+export function changedRegistryEntries(before: string, after: string): { entry: string; title: string }[] {
+  const old = new Map(registryEntries(before).map((e) => [e.entry, e.body.trim()]));
+  return registryEntries(after)
+    .filter((e) => old.get(e.entry) !== e.body.trim())
+    .map(({ entry, title }) => ({ entry, title }));
+}
+
+/** Directories that never ship to a reader: docs, tests, CI config, and
+ *  this tool's own home. A change confined to these should report
+ *  `userVisible: false` and skip a drafting pass — this branch's own
+ *  commits (tools/ + tests/ only) are the worked example. */
+const NON_SHIPPING_PREFIXES = ['docs/', 'tests/', '.github/', 'tools/'];
+
+/**
+ * Whether ANY changed path ships to a reader.
+ *
+ * A denylist, not an allowlist (`src/`, `app/`), on purpose: the two fail
+ * differently. A denylist gap (a new non-shipping top-level directory not
+ * yet listed) costs an occasional wasted drafting pass on nothing —
+ * cheap, and it corrects itself the first time someone notices. An
+ * allowlist gap (a new SHIPPING directory not yet listed) would silently
+ * report false and skip drafting for a real reader-visible change — the
+ * wrong failure for a gate whose false is a hard stop.
+ */
+export function isUserVisible(changedPaths: string[]): boolean {
+  return changedPaths.some((p) => !NON_SHIPPING_PREFIXES.some((prefix) => p.startsWith(prefix)));
 }
 
 /** `bun tools/release-notes.ts <sinceTag>` prints the facts as JSON. */
@@ -135,14 +231,13 @@ if (import.meta.main) {
   }
   const cwd = process.cwd();
   const registryPath = 'docs/formatting-options-log.md';
-  const before = git(cwd, `show ${sinceTag}:${registryPath}`);
+  const before = git(cwd, ['show', `${sinceTag}:${registryPath}`]);
   const after = await Bun.file(registryPath).text();
   const { opened, resolved } = diffVerdicts(before, after);
 
-  const changedPaths = git(cwd, `diff --name-only ${sinceTag}..HEAD`).split('\n').filter(Boolean);
-  const userVisible = changedPaths.some(
-    (p) => !p.startsWith('docs/') && !p.startsWith('tests/') && !p.startsWith('.github/'),
-  );
+  const changedPaths = git(cwd, ['diff', '--name-only', `${sinceTag}..HEAD`])
+    .split('\n')
+    .filter(Boolean);
 
   console.log(
     JSON.stringify(
@@ -152,7 +247,7 @@ if (import.meta.main) {
         verdictsOpenedInRange: opened,
         verdictsResolvedInRange: resolved,
         registryChanges: changedRegistryEntries(before, after),
-        userVisible,
+        userVisible: isUserVisible(changedPaths),
       },
       null,
       2,
