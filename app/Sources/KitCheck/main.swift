@@ -417,68 +417,53 @@ check(partialLoaded == expectedPartial,
 // This table is also what turns the "Adding a field?" comment atop
 // FormatSettings.swift from aspirational into enforced: a field missing
 // its merge line, or a merge line silently deleted, fails a named row here
-// instead of passing every check in the suite. Add a field to
-// PartialFormatSettings? Add its row here too, or this table is lying
-// about being complete.
+// instead of passing every check in the suite. And a field added WITH its
+// merge line but WITHOUT a row here — which would otherwise pass every
+// check silently — is caught by the completeness check right after the
+// loop below, which diffs this table's field names against
+// FormatSettings' own encoded keys. Add a field to PartialFormatSettings?
+// Add its row here too, or one of the two checks catches the gap.
 struct SidecarOverrideCase {
     let field: String
     let json: String
     let apply: (inout FormatSettings) -> Void
-    let matches: (FormatSettings, FormatSettings) -> Bool
 }
 
 let sidecarOverrideCases: [SidecarOverrideCase] = [
     .init(field: "scenePageBreaks", json: #"{"scenePageBreaks": true}"#,
-          apply: { $0.scenePageBreaks = true },
-          matches: { $0.scenePageBreaks == $1.scenePageBreaks }),
+          apply: { $0.scenePageBreaks = true }),
     .init(field: "dialogueSideMarginPct", json: #"{"dialogueSideMarginPct": 5}"#,
-          apply: { $0.dialogueSideMarginPct = 5 },
-          matches: { $0.dialogueSideMarginPct == $1.dialogueSideMarginPct }),
+          apply: { $0.dialogueSideMarginPct = 5 }),
     .init(field: "cueIndentPct", json: #"{"cueIndentPct": 10}"#,
-          apply: { $0.cueIndentPct = 10 },
-          matches: { $0.cueIndentPct == $1.cueIndentPct }),
+          apply: { $0.cueIndentPct = 10 }),
     .init(field: "parentheticalIndentPct", json: #"{"parentheticalIndentPct": 5}"#,
-          apply: { $0.parentheticalIndentPct = 5 },
-          matches: { $0.parentheticalIndentPct == $1.parentheticalIndentPct }),
+          apply: { $0.parentheticalIndentPct = 5 }),
     .init(field: "elementSpacingEm", json: #"{"elementSpacingEm": 1.5}"#,
-          apply: { $0.elementSpacingEm = 1.5 },
-          matches: { $0.elementSpacingEm == $1.elementSpacingEm }),
+          apply: { $0.elementSpacingEm = 1.5 }),
     .init(field: "keepSceneHeadingWithScene", json: #"{"keepSceneHeadingWithScene": false}"#,
-          apply: { $0.keepSceneHeadingWithScene = false },
-          matches: { $0.keepSceneHeadingWithScene == $1.keepSceneHeadingWithScene }),
+          apply: { $0.keepSceneHeadingWithScene = false }),
     .init(field: "keepSpeechesWhole", json: #"{"keepSpeechesWhole": true}"#,
-          apply: { $0.keepSpeechesWhole = true },
-          matches: { $0.keepSpeechesWhole == $1.keepSpeechesWhole }),
+          apply: { $0.keepSpeechesWhole = true }),
     .init(field: "fontFamily", json: #"{"fontFamily": "serif"}"#,
-          apply: { $0.fontFamily = "serif" },
-          matches: { $0.fontFamily == $1.fontFamily }),
+          apply: { $0.fontFamily = "serif" }),
     .init(field: "rejoinSplitDialogue", json: #"{"rejoinSplitDialogue": false}"#,
-          apply: { $0.rejoinSplitDialogue = false },
-          matches: { $0.rejoinSplitDialogue == $1.rejoinSplitDialogue }),
+          apply: { $0.rejoinSplitDialogue = false }),
     .init(field: "contdMode", json: #"{"contdMode": "strip"}"#,
-          apply: { $0.contdMode = "strip" },
-          matches: { $0.contdMode == $1.contdMode }),
+          apply: { $0.contdMode = "strip" }),
     .init(field: "cueAlignment", json: #"{"cueAlignment": "indented"}"#,
-          apply: { $0.cueAlignment = "indented" },
-          matches: { $0.cueAlignment == $1.cueAlignment }),
+          apply: { $0.cueAlignment = "indented" }),
     .init(field: "includeTitlePage", json: #"{"includeTitlePage": false}"#,
-          apply: { $0.includeTitlePage = false },
-          matches: { $0.includeTitlePage == $1.includeTitlePage }),
+          apply: { $0.includeTitlePage = false }),
     .init(field: "showSceneNumbers", json: #"{"showSceneNumbers": true}"#,
-          apply: { $0.showSceneNumbers = true },
-          matches: { $0.showSceneNumbers == $1.showSceneNumbers }),
+          apply: { $0.showSceneNumbers = true }),
     .init(field: "showPageMarkers", json: #"{"showPageMarkers": true}"#,
-          apply: { $0.showPageMarkers = true },
-          matches: { $0.showPageMarkers == $1.showPageMarkers }),
+          apply: { $0.showPageMarkers = true }),
     .init(field: "dualDialogue", json: #"{"dualDialogue": "sequential"}"#,
-          apply: { $0.dualDialogue = "sequential" },
-          matches: { $0.dualDialogue == $1.dualDialogue }),
+          apply: { $0.dualDialogue = "sequential" }),
     .init(field: "justifyText", json: #"{"justifyText": true}"#,
-          apply: { $0.justifyText = true },
-          matches: { $0.justifyText == $1.justifyText }),
+          apply: { $0.justifyText = true }),
     .init(field: "printSplitMinimums", json: #"{"printSplitMinimums": false}"#,
-          apply: { $0.printSplitMinimums = false },
-          matches: { $0.printSplitMinimums == $1.printSplitMinimums }),
+          apply: { $0.printSplitMinimums = false }),
 ]
 
 for sidecarCase in sidecarOverrideCases {
@@ -487,8 +472,29 @@ for sidecarCase in sidecarOverrideCases {
     let caseLoaded = ScriptSettings.load(forFountain: caseFountain, fallback: FormatSettings.defaults)
     var expected = FormatSettings.defaults
     sidecarCase.apply(&expected)
-    check(sidecarCase.matches(caseLoaded, expected),
+    // Whole-struct equality is strictly stronger than a per-field check:
+    // each row's sidecar JSON carries exactly one key, so a correct merge
+    // must equal `expected` (defaults with just that field overridden) —
+    // proving the merge clobbered nothing else, not just that the target
+    // field landed.
+    check(caseLoaded == expected,
           "sidecar merge line overrides \(sidecarCase.field) against its default fallback")
+}
+
+// The table above is only complete if every FormatSettings field has a
+// row — otherwise a field added WITH its merge line but WITHOUT a row
+// here passes silently, and the "Adding a field?" comment goes back to
+// being aspirational. FormatSettings mirrors PartialFormatSettings
+// one-to-one and is Codable, so its encoded keys are the authority on
+// what a complete table covers.
+if let encodedDefaults = try? JSONEncoder().encode(FormatSettings.defaults),
+   let decodedObject = try? JSONSerialization.jsonObject(with: encodedDefaults) as? [String: Any] {
+    let allFields = Set(decodedObject.keys)
+    let coveredFields = Set(sidecarOverrideCases.map(\.field))
+    check(coveredFields == allFields,
+          "every FormatSettings field has a sidecar override row (missing: \(allFields.subtracting(coveredFields)))")
+} else {
+    check(false, "FormatSettings.defaults encodes to a JSON object")
 }
 
 // — feedback issue URL —

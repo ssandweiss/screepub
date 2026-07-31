@@ -30,20 +30,35 @@
  *        shadow rule) passes the selector list exactly as written in
  *        css.ts, comma and all.
  *
- * The return value is the rule's declaration BODY ONLY
+ * The return value is the requested selector plus the declaration body
  * (`${selector} {...}`), reconstructed from the requested selector and
- * the matched declarations — never the raw text the regex captured ahead
- * of the selector. That matters: css.ts's shadow-rule comment contains
- * the literal string "page-break-inside", so a `.toContain(...)`
- * assertion would spuriously pass if a leading comment rode along.
+ * the matched declarations — never any leading comment or preceding text
+ * the regex captured ahead of the selector. That matters: css.ts's
+ * shadow-rule comment contains the literal string "page-break-inside",
+ * so a `.toContain(...)` assertion would spuriously pass if a leading
+ * comment rode along.
+ *
+ * Matching normalizes both the source selector and the requested one
+ * (comments stripped, runs of whitespace collapsed to a single space,
+ * trimmed), so a selector list that happens to be wrapped across lines
+ * in the stylesheet is still found by its natural single-line form, and
+ * a same-line leading comment can't shift what "the selector" is.
  *
  * Throws if no rule has that exact selector, so a typo'd or renamed
  * selector fails loudly at the call site instead of a downstream
  * `undefined` crash with no context.
+ *
+ * Known limits (true today, harmless today, all fail loudly rather than
+ * silently): only flat stylesheets are supported — a rule nested inside
+ * an at-rule such as `@media` is not found and this throws; a duplicate
+ * selector returns the FIRST match, whereas the CSS cascade would apply
+ * the last; and comments INSIDE a declaration body are not stripped.
  */
 export function ruleFor(css: string, selector: string): string {
+  const norm = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim();
+  const target = norm(selector);
   const hit = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
-    .find(([, sel]) => sel.trim().split('\n').pop()!.trim() === selector);
+    .find(([, sel]) => norm(sel) === target);
   if (!hit) throw new Error(`no rule for selector: ${selector}`);
   return `${selector} {${hit[2]}}`;
 }

@@ -23,7 +23,33 @@ table.dual-dialogue {
 }
 `;
 
+// A cosmetic line-wrap of the same grouped selector: a formatter or a
+// future edit could break the comma-joined list across lines without
+// changing its meaning. The old implementation compared only the
+// selector's LAST PHYSICAL LINE, so this reinstates the exact shadowing
+// bug ruleFor exists to prevent — matching bare `table.dual-dialogue`
+// against the wrapped group instead of throwing/returning the real rule.
+const WRAPPED_FIXTURE = `
+.keep-together,
+table.dual-dialogue { -webkit-column-break-inside: avoid; }
+
+table.dual-dialogue {
+  width: 100%;
+}
+`;
+
 describe('ruleFor', () => {
+  test('a grouped selector wrapped across two lines is still found by its verbatim single-line selector', () => {
+    const rule = ruleFor(WRAPPED_FIXTURE, '.keep-together, table.dual-dialogue');
+    expect(rule).toContain('-webkit-column-break-inside: avoid');
+  });
+
+  test('a bare member of a line-wrapped group is NOT returned by the wrapped grouped rule', () => {
+    const rule = ruleFor(WRAPPED_FIXTURE, 'table.dual-dialogue');
+    expect(rule).not.toContain('-webkit-column-break-inside');
+    expect(rule).toContain('width: 100%');
+  });
+
   test('exact match returns the body of the selector requested', () => {
     const rule = ruleFor(FIXTURE, 'table.dual-dialogue');
     expect(rule).toContain('width: 100%');
