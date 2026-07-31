@@ -14,5 +14,6 @@
   "showSceneNumbers": false,
   "showPageMarkers": false,
   "dualDialogue": "sideBySide",
-  "justifyText": false
+  "justifyText": false,
+  "printSplitMinimums": true
 }

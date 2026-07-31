@@ -36,7 +36,7 @@ describe('resolveFormatOptions', () => {
   test('defaults match the canonical format-defaults.json both suites pin', async () => {
     // The same file kit-check decodes into FormatSettings and compares to
     // FormatSettings.defaults — the two languages can no longer drift
-    // silently. Sixteen literals, one source of truth.
+    // silently. Seventeen literals, one source of truth.
     const canonical = await Bun.file(new URL('../format-defaults.json', import.meta.url)).json();
     expect(DEFAULT_FORMAT_OPTIONS).toEqual(canonical);
   });
@@ -61,6 +61,14 @@ describe('resolveFormatOptions', () => {
     expect(resolveFormatOptions({}).justifyText).toBe(false);
     expect(resolveFormatOptions({ justifyText: true }).justifyText).toBe(true);
     expect(resolveFormatOptions({ justifyText: 'nope' } as Record<string, unknown>).justifyText).toBe(false);
+  });
+
+  test('printSplitMinimums defaults to true and accepts a boolean', () => {
+    expect(resolveFormatOptions({}).printSplitMinimums).toBe(true);
+    expect(resolveFormatOptions({ printSplitMinimums: false }).printSplitMinimums).toBe(false);
+    expect(
+      resolveFormatOptions({ printSplitMinimums: 'no' } as Record<string, unknown>).printSplitMinimums,
+    ).toBe(true);
   });
 });
 
