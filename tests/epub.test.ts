@@ -297,6 +297,15 @@ describe('buildEpub', () => {
     expect(opf).toMatch(/<itemref idref="titlepage"\/>\s*<itemref idref="body001"\/>/);
   });
 
+  test('OPF declares the ibooks prefix and specified-fonts meta', async () => {
+    const { zip } = await build();
+    const opf = await zip.file('OEBPS/package.opf')!.async('string');
+    expect(opf).toContain(
+      'prefix="ibooks: http://vocabulary.itunes.apple.com/rdf/ibooks/vocabulary-extensions-1.0/"',
+    );
+    expect(opf).toContain('<meta property="ibooks:specified-fonts">true</meta>');
+  });
+
   test('nav.xhtml lists every scene with an anchored link', async () => {
     const { zip } = await build();
     const nav = await zip.file('OEBPS/nav.xhtml')!.async('string');
