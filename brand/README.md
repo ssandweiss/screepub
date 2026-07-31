@@ -40,10 +40,12 @@ errors. If you must:
 1. Add it to `tokens.json` with an honest `from` value.
 2. Add it to `tokens.css` in both blocks, or only `:root` if it is
    mode-independent the way brass is.
-3. If anything sets text in it, add a pair to the contrast test in
-   `tests/brand-tokens.test.ts`. Floors are 7:1 for body and headings, 4.5:1
-   for captions and transitions. Darken the color rather than lowering the
-   floor.
+3. If anything sets text in it, add `"text": true` to its `tokens.json` entry
+   AND add a pair to the contrast test in `tests/brand-tokens.test.ts`. Floors
+   are 7:1 for body and headings, 4.5:1 for captions and transitions. Darken
+   the color rather than lowering the floor. `tests/brand-tokens.test.ts`
+   fails loudly if a token is marked `"text": true` with no pair, so this
+   cannot go unnoticed the way `ink-footnote` once did.
 
 ## var() is fine here
 
@@ -82,3 +84,9 @@ which is what makes that legal.
     list_files → finalize_plan (writes: brand/**) → write_files
 
 Push components one at a time rather than replacing the project wholesale.
+
+Previews must not reference anything outside `brand/`. DesignSync only
+carries `brand/**`, so a path like `../../assets/screenshot-drop.png` leaves
+the folder it writes and 404s once synced, the same way it 404s under
+`python3 -m http.server --directory brand`. `shot-frame.html` hit exactly
+this and now uses an inline SVG placeholder instead of a real screenshot.
