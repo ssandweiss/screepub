@@ -5,6 +5,7 @@ import JSZip from 'jszip';
 import { tokensToBody, tokensToPreviewHtml } from '../src/epub/html';
 import { buildEpub } from '../src/epub/build';
 import { SCREENPLAY_CSS } from '../src/epub/css';
+import { ruleFor } from './css-rules';
 import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
 // Stage-2's copy, straight from the module that owns it — both renderers
 // import it from here, so the test reads the same definition they do.
@@ -167,39 +168,39 @@ describe('dual dialogue height fallback', () => {
 
 describe('screenplay CSS (Kindle-safe geometry)', () => {
   test('dialogue column narrows with % side margins — never max-width (Kindle strips it)', () => {
-    const block = SCREENPLAY_CSS.match(/\.dialogue-block\s*{[^}]*}/)![0];
+    const block = ruleFor(SCREENPLAY_CSS, '.dialogue-block');
     expect(block).toMatch(/margin-left:\s*\d+%/);
     expect(block).toMatch(/margin-right:\s*\d+%/);
     expect(SCREENPLAY_CSS).not.toContain('max-width');
   });
 
   test('cue keeps with its dialogue and centers in the column by default', () => {
-    const cue = SCREENPLAY_CSS.match(/p\.character\s*{[^}]*}/)![0];
+    const cue = ruleFor(SCREENPLAY_CSS, 'p.character');
     expect(cue).toContain('break-after: avoid');
     expect(cue).toContain('text-align: center');
   });
 
   test('parenthetical centers in the column by default', () => {
-    const paren = SCREENPLAY_CSS.match(/p\.parenthetical\s*{[^}]*}/)![0];
+    const paren = ruleFor(SCREENPLAY_CSS, 'p.parenthetical');
     expect(paren).toContain('text-align: center');
   });
 
   test('vertical rhythm is em-based: a full blank line between elements', () => {
-    const action = SCREENPLAY_CSS.match(/p\.action\s*{[^}]*}/)![0];
+    const action = ruleFor(SCREENPLAY_CSS, 'p.action');
     expect(action).toMatch(/margin:\s*1(\.\d+)?em 0/);
-    const block = SCREENPLAY_CSS.match(/\.dialogue-block\s*{[^}]*}/)![0];
+    const block = ruleFor(SCREENPLAY_CSS, '.dialogue-block');
     expect(block).toMatch(/margin-top:\s*1(\.\d+)?em/);
   });
 
   test('body text keeps device-default line height (Enhanced Typesetting owns it)', () => {
-    const body = SCREENPLAY_CSS.match(/(^|\n)body\s*{[^}]*}/)![0];
+    const body = ruleFor(SCREENPLAY_CSS, 'body');
     expect(body).not.toContain('line-height');
   });
 
   test('keep-with-next chain is minimal: heading and cue only, not parenthetical', () => {
-    const paren = SCREENPLAY_CSS.match(/p\.parenthetical\s*{[^}]*}/)![0];
+    const paren = ruleFor(SCREENPLAY_CSS, 'p.parenthetical');
     expect(paren).not.toContain('break-after');
-    const heading = SCREENPLAY_CSS.match(/h2\.scene-heading\s*{[^}]*}/)![0];
+    const heading = ruleFor(SCREENPLAY_CSS, 'h2.scene-heading');
     // both spellings: the legacy prefixed property AND the modern standalone
     expect(heading).toContain('page-break-after: avoid');
     expect(heading).toMatch(/[^-]break-after: avoid/);
@@ -207,23 +208,20 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
 
   test('page markers float out of the flow so they cost no line', () => {
     expect(SCREENPLAY_CSS).not.toMatch(/p\.page-marker\s*{/);
-    const marker = SCREENPLAY_CSS.match(/span\.page-marker\s*{[^}]*}/)![0];
+    const marker = ruleFor(SCREENPLAY_CSS, 'span.page-marker');
     expect(marker).toContain('float: right');
     // horizontal geometry in % per the CSS invariants
     expect(marker).toMatch(/margin-left:\s*\d+%/);
   });
 
   test('keep-together container uses break-inside avoid (the KDP-documented form)', () => {
-    // Anchored to line start for the same reason the dual-dialogue rule
-    // below is: .keep-together also heads the comma-joined column-spelling
-    // shadow rule, which only misses this pattern by the comma.
-    const keep = SCREENPLAY_CSS.match(/^\.keep-together\s*{[^}]*}/m)![0];
+    const keep = ruleFor(SCREENPLAY_CSS, '.keep-together');
     expect(keep).toContain('page-break-inside: avoid');
     expect(keep).toContain('break-inside: avoid');
   });
 
   test('transitions may end a page but never begin one', () => {
-    const t = SCREENPLAY_CSS.match(/p\.transition\s*{[^}]*}/)![0];
+    const t = ruleFor(SCREENPLAY_CSS, 'p.transition');
     expect(t).toContain('page-break-before: avoid');
     expect(t).toContain('break-before: avoid');
   });
@@ -504,11 +502,8 @@ describe('dual dialogue table rendering', () => {
   });
 
   test('table style keeps the pair together and splits width evenly', () => {
-    // Anchored to line start: table.dual-dialogue also appears, comma-joined
-    // with .keep-together, in the column-spelling shadow rule above it —
-    // unanchored this regex would grab that one-liner instead.
-    expect(SCREENPLAY_CSS.match(/^table\.dual-dialogue\s*{[^}]*}/m)![0]).toContain('page-break-inside: avoid');
-    expect(SCREENPLAY_CSS.match(/table\.dual-dialogue td\s*{[^}]*}/)![0]).toContain('width: 50%');
+    expect(ruleFor(SCREENPLAY_CSS, 'table.dual-dialogue')).toContain('page-break-inside: avoid');
+    expect(ruleFor(SCREENPLAY_CSS, 'table.dual-dialogue td')).toContain('width: 50%');
   });
 });
 
@@ -594,7 +589,7 @@ describe('mini-slug rendering', () => {
   });
 
   test('the stylesheet gives it the bold uppercase micro-heading treatment', () => {
-    const rule = SCREENPLAY_CSS.match(/p\.mini-slug\s*{[^}]*}/)![0];
+    const rule = ruleFor(SCREENPLAY_CSS, 'p.mini-slug');
     expect(rule).toContain('font-weight: bold');
     expect(rule).toContain('text-transform: uppercase');
     // Vertical rhythm in em, per the CSS invariants: more air above than below.
