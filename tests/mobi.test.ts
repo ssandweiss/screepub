@@ -83,6 +83,18 @@ describe('tokensToMobiHtml', () => {
     expect(off.match(/<mbp:pagebreak\/>/g)!.length).toBe(1);
     expect(on.match(/<mbp:pagebreak\/>/g)!.length).toBe(2);
   });
+
+  test('scenePageBreaks does not break before a mini-slug, only before primary scenes (registry #5b)', () => {
+    // fountain-js strips the leading dot: `.LATER` tokenizes as a
+    // scene_heading with text "LATER", same as the EPUB side relies on.
+    const src = 'INT. A - DAY\n\nAction.\n\n.LATER\n\nMore.\n\nINT. B - NIGHT\n\nEnd.\n';
+    const { tokens } = new Fountain().parse(src, true);
+    expect(tokens.find((t) => t.text === 'LATER')?.type).toBe('scene_heading');
+    const on = tokensToMobiHtml(tokens, { title: 'T' }, resolveFormatOptions({ scenePageBreaks: true }));
+    // Title page's break, plus one before INT. B — none before LATER.
+    expect(on.match(/<mbp:pagebreak\/>/g)!.length).toBe(2);
+    expect(on).not.toMatch(/<mbp:pagebreak\/>\s*<p><b>LATER<\/b><\/p>/);
+  });
 });
 
 // ── MOBI container ───────────────────────────────────────
