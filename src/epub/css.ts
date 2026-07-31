@@ -18,6 +18,7 @@
 //     break-inside: avoid  .keep-together (the cue keep)
 //     break-inside: avoid  table.dual-dialogue
 //     break-inside: avoid  .dialogue-block (gated: keepSpeechesWhole, off)
+//     widows/orphans: 2    p.dialogue, p.action (gated: printSplitMinimums, on)
 //   Plus the one FORCED break, which is not an avoid link and so grows no
 //   chunk — it ends a page rather than refusing to:
 //     page-break-before: always  section.scene (gated: scenePageBreaks, off)
@@ -54,6 +55,11 @@ export function screenplayCss(o: FormatOptions): string {
   const headingKeep = o.keepSceneHeadingWithScene
     ? '\n  page-break-after: avoid;\n  break-after: avoid;'
     : '';
+  // Print split minimums (registry #17): the two-line rule at page edges.
+  // Honored by KFX (fw 5.12.3+) and RMSDK (Kobo epub, tolino); harmlessly
+  // ignored by KF8/MOBI/kepub e-ink. 1 = the documented tight-packing
+  // trade for readers who hate bottom-of-page gaps.
+  const minLines = o.printSplitMinimums ? 2 : 1;
 
   return `
 html, body {
@@ -105,6 +111,8 @@ p {
 p.action {
   margin: ${em(gap)} 0;
   text-align: ${bodyAlign};
+  widows: ${minLines};
+  orphans: ${minLines};
 }
 
 p.mini-slug {
@@ -146,6 +154,8 @@ ${o.cueAlignment === 'centered'
 p.dialogue {
   margin: 0;
   text-align: ${bodyAlign};
+  widows: ${minLines};
+  orphans: ${minLines};
 }
 
 /* Simultaneous speech: two half-width columns, kept on one page. The

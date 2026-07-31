@@ -123,6 +123,15 @@ describe('screenplayCss with options', () => {
     expect(justified.match(/p\.action\s*{[^}]*}/)![0]).toContain('text-align: justify');
     expect(justified.match(/p\.dialogue\s*{[^}]*}/)![0]).toContain('text-align: justify');
   });
+
+  test('printSplitMinimums controls widows/orphans on dialogue and action', () => {
+    const on = screenplayCss(resolveFormatOptions({}));
+    expect(on.match(/p\.dialogue\s*{[^}]*}/)![0]).toContain('widows: 2');
+    expect(on.match(/p\.dialogue\s*{[^}]*}/)![0]).toContain('orphans: 2');
+    expect(on.match(/p\.action\s*{[^}]*}/)![0]).toContain('widows: 2');
+    const off = screenplayCss(resolveFormatOptions({ printSplitMinimums: false }));
+    expect(off.match(/p\.action\s*{[^}]*}/)![0]).toContain('orphans: 1');
+  });
 });
 
 // ── tokensToBody(options) ────────────────────────────────
