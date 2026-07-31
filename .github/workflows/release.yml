@@ -152,17 +152,40 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
           VERSION="${TAG#v}"
-          SHA="$(shasum -a 256 app/dist/Screepub-macOS.dmg | awk '{print $1}')"
-          printf '%s\n' \
-            "Notarized universal build for macOS 14+ (Apple Silicon + Intel)." \
-            "" \
-            "**Install:** download \`Screepub-macOS.dmg\`, open it, drag Screepub to Applications, and double-click." \
-            "" \
-            "DMG SHA-256: \`$SHA\`" > "$RUNNER_TEMP/notes.md"
-          gh release create "$TAG" \
+
+          # Body = the committed notes, then the machine-generated install
+          # line and checksums. Copy bytes; never send content through a
+          # shell variable, and never let it reach printf as a FORMAT string
+          # ("100%" in release prose would silently corrupt the page).
+          NOTES="$RUNNER_TEMP/notes.md"
+          cp "docs/releases/$VERSION.md" "$NOTES"
+          {
+            printf '\n\n---\n\n'
+            printf '%s\n\n' "Notarized universal build for macOS 14+ (Apple Silicon and Intel)."
+            printf '%s\n\n' "**Install:** download \`Screepub-macOS.dmg\`, open it, drag Screepub to Applications, and double-click."
+            printf '%s\n' "SHA-256:"
+            printf '\n```\n'
+            shasum -a 256 \
+              app/dist/Screepub-macOS.dmg \
+              app/dist/screepub-cli-macos-arm64.tar.gz \
+              app/dist/screepub-cli-macos-x64.tar.gz | sed 's|app/dist/||'
+            printf '```\n'
+          } >> "$NOTES"
+
+          # Draft first so /releases/latest never returns a release whose
+          # assets are still uploading. Idempotent under workflow_dispatch.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "Screepub $VERSION" --notes-file "$NOTES"
+          else
+            gh release edit "$TAG" --title "Screepub $VERSION" --notes-file "$NOTES"
+          fi
+
+          gh release upload "$TAG" \
             app/dist/Screepub-macOS.dmg \
             app/dist/screepub-cli-macos-arm64.tar.gz \
             app/dist/screepub-cli-macos-x64.tar.gz \
-            --title "Screepub $VERSION" \
-            --notes-file "$RUNNER_TEMP/notes.md"
+            --clobber
+
+          gh release edit "$TAG" --draft=false
