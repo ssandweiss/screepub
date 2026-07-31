@@ -1,0 +1,98 @@
+<!-- @dsCard group="Brand" -->
+<link rel="stylesheet" href="_preview.css">
+<style>
+  /* .rail matches .page's own centering: left 50% + translateX(-50%) of
+     the rail's OWN (post-max-width) box centers it exactly the way
+     .page's margin: 0 auto does, so both columns share one x-axis. The
+     -50%/-50% transform on .rail svg below still resolves against the
+     svg's own box, not the rail's, so nesting a transform on the parent
+     does not change how the child's percentage transform resolves. */
+  .rail {
+    position: fixed; top: 0; bottom: 0; left: 50%;
+    width: 100%; max-width: var(--page-max);
+    transform: translateX(-50%); pointer-events: none;
+  }
+  .rail svg {
+    position: absolute;
+    left: var(--hole-center);
+    width: var(--brad-size);
+    height: var(--brad-size);
+    transform: translate(-50%, -50%);
+  }
+  .rail .a { top: 30.7%; }
+  .rail .b { top: 50%; }
+  .rail .c { top: 69.3%; }
+  @media (max-height: 560px) {
+    /* Three fasteners in a short window reads as a zipper: collapse to
+       one BRAD (.a, re-centered), not the empty hole. .b and .c both
+       hide. */
+    .rail .b, .rail .c { display: none; }
+    .rail .a { top: 50%; }
+  }
+  @media (max-width: 720px) {
+    .sheet { padding-left: 11%; }
+    .rail svg { width: 20px; height: 20px; }
+  }
+</style>
+<!-- Cross-file <use href="brad.html#brad"> did not resolve for this preview
+     (tested over file:// and over http://localhost via python3 -m
+     http.server), so the brad.html <defs> are duplicated here per the task's
+     documented fallback. Keep this block identical to brad.html's <defs>. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <radialGradient id="bradFace" cx="50%" cy="50%" r="58%" fx="33%" fy="27%">
+      <stop offset="0" stop-color="var(--brass-specular)"/>
+      <stop offset="0.17" stop-color="var(--brass-highlight)"/>
+      <stop offset="0.45" stop-color="var(--brass)"/>
+      <stop offset="0.76" stop-color="var(--brass-shadow)"/>
+      <stop offset="1" stop-color="var(--brass-rim)"/>
+    </radialGradient>
+    <radialGradient id="bradSpec">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.88"/>
+      <stop offset="0.55" stop-color="#fff" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bradCast">
+      <stop offset="0.52" stop-color="#000" stop-opacity="0.36"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="punchShade" cx="50%" cy="40%" r="54%">
+      <stop offset="0.7" stop-color="#000" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <symbol id="brad" viewBox="0 0 100 100">
+      <ellipse cx="53" cy="56" rx="47" ry="46" fill="url(#bradCast)"/>
+      <circle cx="50" cy="50" r="41" fill="var(--brass-edge)"/>
+      <circle cx="50" cy="50" r="39.5" fill="url(#bradFace)"/>
+      <ellipse cx="63" cy="67" rx="15" ry="8" fill="var(--brass-bounce)" opacity="0.34" transform="rotate(-28 63 67)"/>
+      <ellipse cx="38" cy="33" rx="17" ry="11" fill="url(#bradSpec)" transform="rotate(-28 38 33)"/>
+      <circle cx="50" cy="50" r="39.5" fill="none" stroke="var(--brass-edge)" stroke-opacity="0.55" stroke-width="1.6"/>
+    </symbol>
+    <symbol id="punch" viewBox="0 0 100 100">
+      <circle cx="50" cy="52.4" r="31.5" fill="var(--paper)"/>
+      <circle cx="50" cy="50" r="30" fill="var(--ground)"/>
+      <circle cx="50" cy="50" r="30" fill="url(#punchShade)"/>
+    </symbol>
+  </defs>
+</svg>
+<div class="page">
+<div class="sheet" style="min-height: 150vh">
+  <h2 class="slug">Int. the page frame - continuous</h2>
+  <p class="prose">
+    The page scrolls. The brads do not. They are fixed to the viewport, so
+    paper moves under the binding the way it does when you thumb through a
+    script on a desk. Scroll this preview to see it.
+  </p>
+  <p class="caption">
+    Holes sit at 30.7%, 50% and 69.3% of viewport height: the true proportions
+    of a three-hole punch on an 11 inch page. Brads fill the first and third.
+    Below 560px of viewport height the rail drops to one brad, because three
+    fasteners in a short window reads as a zipper.
+  </p>
+</div>
+</div>
+<div class="rail" aria-hidden="true">
+  <svg class="a"><use href="#brad"/></svg>
+  <svg class="b"><use href="#punch"/></svg>
+  <svg class="c"><use href="#brad"/></svg>
+</div>

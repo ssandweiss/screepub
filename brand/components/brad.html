@@ -1,0 +1,55 @@
+<!-- @dsCard group="Brand" -->
+<link rel="stylesheet" href="_preview.css">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <radialGradient id="bradFace" cx="50%" cy="50%" r="58%" fx="33%" fy="27%">
+      <stop offset="0" stop-color="var(--brass-specular)"/>
+      <stop offset="0.17" stop-color="var(--brass-highlight)"/>
+      <stop offset="0.45" stop-color="var(--brass)"/>
+      <stop offset="0.76" stop-color="var(--brass-shadow)"/>
+      <stop offset="1" stop-color="var(--brass-rim)"/>
+    </radialGradient>
+    <radialGradient id="bradSpec">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.88"/>
+      <stop offset="0.55" stop-color="#fff" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bradCast">
+      <stop offset="0.52" stop-color="#000" stop-opacity="0.36"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="punchShade" cx="50%" cy="40%" r="54%">
+      <stop offset="0.7" stop-color="#000" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <symbol id="brad" viewBox="0 0 100 100">
+      <ellipse cx="53" cy="56" rx="47" ry="46" fill="url(#bradCast)"/>
+      <circle cx="50" cy="50" r="41" fill="var(--brass-edge)"/>
+      <circle cx="50" cy="50" r="39.5" fill="url(#bradFace)"/>
+      <ellipse cx="63" cy="67" rx="15" ry="8" fill="var(--brass-bounce)" opacity="0.34" transform="rotate(-28 63 67)"/>
+      <ellipse cx="38" cy="33" rx="17" ry="11" fill="url(#bradSpec)" transform="rotate(-28 38 33)"/>
+      <circle cx="50" cy="50" r="39.5" fill="none" stroke="var(--brass-edge)" stroke-opacity="0.55" stroke-width="1.6"/>
+    </symbol>
+    <symbol id="punch" viewBox="0 0 100 100">
+      <circle cx="50" cy="52.4" r="31.5" fill="var(--paper)"/>
+      <circle cx="50" cy="50" r="30" fill="var(--ground)"/>
+      <circle cx="50" cy="50" r="30" fill="url(#punchShade)"/>
+    </symbol>
+  </defs>
+</svg>
+<div class="page">
+<div class="sheet">
+  <h2 class="slug">The brad</h2>
+  <div class="row">
+    <svg width="96" height="96" aria-hidden="true"><use href="#brad"/></svg>
+    <svg width="48" height="48" aria-hidden="true"><use href="#brad"/></svg>
+    <svg width="24" height="24" aria-hidden="true"><use href="#brad"/></svg>
+    <svg width="96" height="96" aria-hidden="true"><use href="#punch"/></svg>
+  </div>
+  <p class="caption">
+    Smooth domed head, no slot: real screenplay brads are Acco fasteners, and a
+    slot would make it a screw. Light source is upper left in every brass
+    element on the site. The fourth is an empty punch hole.
+  </p>
+</div>
+</div>

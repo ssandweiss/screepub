@@ -1,0 +1,57 @@
+<!-- @dsCard group="Components" -->
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .shot { margin: 0; }
+  .shot svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 4px;
+    box-shadow: 0 1px 12px rgba(0,0,0,0.28);
+  }
+  .shot figcaption {
+    font-size: 14px;
+    color: var(--ink-muted);
+    margin-top: 0.8rem;
+    max-width: var(--measure);
+  }
+</style>
+<div class="page">
+<div class="sheet">
+  <h2 class="slug">Look before you send</h2>
+  <figure class="shot">
+    <!-- Placeholder: the real screenshots live in the repo's assets/, and
+         the site wires them in. This SVG stays self-contained so the
+         preview renders standalone; DesignSync only carries brand/**, so a
+         path outside this folder (this used to point at
+         ../../assets/screenshot-drop.png) 404s the moment the preview
+         leaves the repo. See brand/README.md. -->
+    <svg viewBox="0 0 640 400" role="img" aria-label="Screepub's window, waiting for a screenplay PDF">
+      <rect width="640" height="400" rx="10" fill="var(--paper)" stroke="var(--ink-muted)" stroke-opacity="0.3"/>
+      <rect width="640" height="30" rx="10" fill="var(--ground)"/>
+      <rect y="15" width="640" height="15" fill="var(--ground)"/>
+      <circle cx="21" cy="15" r="5" fill="var(--alarm)"/>
+      <circle cx="39" cy="15" r="5" fill="var(--brass)"/>
+      <circle cx="57" cy="15" r="5" fill="var(--ink-muted)"/>
+      <g fill="var(--ink-soft)" opacity="0.55">
+        <rect x="220" y="72" width="200" height="6"/>
+        <rect x="220" y="88" width="200" height="6"/>
+        <rect x="220" y="104" width="140" height="6"/>
+      </g>
+      <rect x="240" y="130" width="160" height="8" fill="var(--ink)"/>
+      <g fill="var(--ink-soft)" opacity="0.55">
+        <rect x="220" y="152" width="200" height="6"/>
+        <rect x="220" y="168" width="200" height="6"/>
+        <rect x="220" y="184" width="170" height="6"/>
+        <rect x="220" y="200" width="200" height="6"/>
+        <rect x="220" y="216" width="120" height="6"/>
+      </g>
+    </svg>
+    <figcaption>
+      Screenshots mount flat on the page with a hairline shadow, no device
+      bezel and no perspective. The app already looks like a script page, so a
+      frame around it would be a frame around a frame.
+    </figcaption>
+  </figure>
+</div>
+</div>
