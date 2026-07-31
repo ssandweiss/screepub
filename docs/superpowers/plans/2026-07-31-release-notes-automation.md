@@ -10,6 +10,28 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-31-release-notes-automation-design.md` (v2, approved). Read it before starting; it records four things v1 got wrong and why, and this plan implements only v2.
 
+> **Corrections found during execution.** Three defects in this plan's own
+> code were caught by review after being implemented verbatim. They are
+> fixed in the branch; the text below is annotated so a future reader does
+> not reintroduce them.
+>
+> 1. **Task 4's control-character test was vacuous.** `JSON.stringify` turns
+>    a `\x1B` escape into six literal characters, so git never receives a
+>    control byte and the assertion passes on a payload that never contained
+>    one. Deleting the entire sanitizer left every test green. Commit real
+>    bytes with `git commit -F`, or export `sanitize` and test it directly.
+> 2. **Task 5/6's entry-body slicing swallows the following section.**
+>    `ENTRY_HEADING` matches only `### N.`, so the last entry absorbs the
+>    whole `## Mac app notes` tail (4199 chars in the live registry), and an
+>    edit touching only that tail is attributed to entry 15. Clamp the body
+>    end to the nearest following heading of ANY level.
+> 3. **Task 6's `userVisible` counts `tools/` as reader-visible.** Nothing
+>    in `tools/` ships to a reader, and a tools-only range would trigger a
+>    wasted drafting pass. Exclude it, or invert to an allowlist.
+>
+> A fourth, minor: `sinceTag` is interpolated into `sh -c`, so a crafted tag
+> name executes. Use array-form `Bun.spawnSync(['git', ...])` with no shell.
+
 ---
 
 ## File structure
