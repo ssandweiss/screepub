@@ -69,7 +69,7 @@ type ThemeColors = Record<string, { light: Rgba; dark: Rgba }>;
 /// from the result. The asymmetric-label case above is dropped the same
 /// way. That is deliberate, not accidental: a missing key surfaces
 /// loudly downstream through `expect(theme[name]).toBeDefined()` in
-/// tests/brand.test.ts, but only because that call site checks for it.
+/// tests/brand-tokens.test.ts, but only because that call site checks for it.
 /// Any future caller of `parseThemeColors` or `themeColors` must check
 /// for the key rather than assume every `static let` in Theme.swift made
 /// it into the map.

@@ -1,5 +1,5 @@
 /* Screepub web identity. Values marked "pinned" mirror Theme.swift and are
-   enforced by tests/brand.test.ts. See brand/README.md before editing.
+   enforced by tests/brand-tokens.test.ts. See brand/README.md before editing.
    var() and clamp() are correct here: this is the website, not the EPUB. */
 
 :root {
