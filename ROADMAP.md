@@ -48,9 +48,12 @@ thrown away. Useful if you read scripts in volume.
 Courier Prime, the typeface of a printed script, but most devices don't
 carry it and quietly substitute their own typewriter font. Bundling the
 font inside the e-book (its open license allows exactly this) would make
-scripts look the same on every reader that honors embedded fonts. The
-catch to design around: Amazon's Send-to-Kindle service strips embedded
-fonts, so this shines brightest on USB sideloads.
+scripts look the same nearly everywhere: every USB route Screepub ships
+(Kindle, Kobo, tolino) honors embedded fonts, and Apple Books does too
+with a one-line fix Screepub can make. It would ship as a toggle rather
+than always-on: the four font styles add roughly half a megabyte,
+Amazon's Send-to-Kindle service strips embedded fonts no matter what,
+and reMarkable hasn't been tested with them.
 
 **Converting several scripts at once** in the app. The command-line tool can
 already be looped; the app can't.
