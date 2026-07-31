@@ -151,6 +151,13 @@ describe('screenplayCss with options', () => {
     // with page-break-inside, or Books ignores BOTH.
     expect(rule![0]).not.toContain('page-break-inside');
   });
+
+  test('page marker dims via opacity, not a hardcoded gray', () => {
+    const css = screenplayCss(DEFAULT_FORMAT_OPTIONS);
+    const rule = css.match(/span\.page-marker\s*{[^}]*}/)![0];
+    expect(rule).toContain('opacity: 0.6');
+    expect(rule).not.toContain('#777777');
+  });
 });
 
 // ── tokensToBody(options) ────────────────────────────────

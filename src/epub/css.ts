@@ -125,11 +125,16 @@ span.underline {
 }
 
 /* Original PDF page numbers — a marginal reference, out of the flow so
-   they cost no line. Horizontal in %, per the CSS invariants. */
+   they cost no line. Horizontal in %, per the CSS invariants. A hardcoded
+   gray fights themed backgrounds (dark, sepia); opacity dims relative to
+   the theme's own text color instead, so the marker recedes correctly
+   under any theme. Engines without opacity support just render it at full
+   strength — a harmless degrade. Enhanced Typesetting lists opacity as
+   supported. */
 span.page-marker {
   float: right;
   font-size: 0.75em;
-  color: #777777;
+  opacity: 0.6;
   margin-left: 1%;
 }
 
