@@ -7,10 +7,10 @@ this file is the operating manual.
 
 ## What's here
 
-- `tokens.json` — source of truth. Every color, with a `from` field saying
+- `tokens.json`: source of truth. Every color, with a `from` field saying
   where it came from.
-- `tokens.css` — the same values as custom properties, light and dark.
-- `components/` — eight self-contained previews. Open any of them in a
+- `tokens.css`: the same values as custom properties, light and dark.
+- `components/`: eight self-contained previews. Open any of them in a
   browser. Each opens with a `@dsCard` marker so the Design System pane
   indexes it without explicit registration.
 
