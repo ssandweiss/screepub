@@ -25,12 +25,23 @@ TOP = PAGE_H - 1.0 * PT        # 1" top margin
 BOTTOM = 1.0 * PT
 LINES_PER_PAGE = 55
 
+# Base-14 Type1 fonts, so nothing is embedded and the generator stays a
+# pure string builder. Verified against pdf.js: it reports these PostScript
+# names through commonObjs, which is what src/parser/extract.ts regexes for
+# /bold|black|heavy/ and /italic|oblique/.
+FONTS = {"F1": "Courier", "F2": "Courier-Bold",
+         "F3": "Courier-Oblique", "F4": "Courier-BoldOblique"}
+
+CHAR_W = 7.2                   # 12pt Courier advance: 0.1" at 10 chars/inch
+
 X = {                          # inches from left edge
     "scene":  1.5, "action": 1.5, "dialogue": 2.5,
     "paren":  3.1, "character": 3.7, "trans": 1.5, "pgnum": 7.4,
+    "mini":   1.5,
 }
 WRAP = {"scene": 60, "action": 60, "dialogue": 35, "paren": 24,
-        "trans": 60, "character": 38}   # cues never wrap in practice
+        "trans": 60, "character": 38,   # cues never wrap in practice
+        "mini": 60}
 
 # (type, text) — blank string means a blank line
 S = [
@@ -261,6 +272,42 @@ def layout():
     return pages
 
 
+def font_for(styles):
+    """Style set -> font resource key.
+
+    Underline is orthogonal: it is DRAWN, not selected, so it never changes
+    which font a run uses. That mirrors how PDFs actually carry underline,
+    which is why the parser cannot see it from font data alone (registry 9d).
+    """
+    s = set(styles) - {"u"}
+    if s == {"b", "i"}:
+        return "F4"
+    if s == {"b"}:
+        return "F2"
+    if s == {"i"}:
+        return "F3"
+    return "F1"
+
+
+def styled_row_ops(x_in, y, runs):
+    """-> (text operators, underline rectangles) for one laid-out line."""
+    ops, rects = [], []
+    x = x_in * PT
+    for run in runs:
+        text, styles = run["text"], run["styles"]
+        if text:
+            ops += [f"/{font_for(styles)} 12 Tf",
+                    f"1 0 0 1 {x:.2f} {y:.2f} Tm", f"({esc(text)}) Tj"]
+            if "u" in styles:
+                # A filled rectangle, not a stroked line: the rich-formatting
+                # spec's detector keys on a flat bbox (<= 2.5pt tall, >= 4pt
+                # wide) sitting in a band just under the baseline.
+                rects.append(f"0 g {x:.2f} {y - 2.0:.2f} "
+                             f"{len(text) * CHAR_W:.2f} 0.6 re f")
+        x += len(text) * CHAR_W
+    return ops, rects
+
+
 def content_stream(rows, page_no):
     out = ["BT", "/F1 12 Tf"]
     if page_no:                                   # page number, top right
@@ -348,14 +395,21 @@ def blank_stream():
 
 def build(path, streams):
     objs, n_pages = [], len(streams)
-    kids = " ".join(f"{4+2*i} 0 R" for i in range(n_pages))
+    # Objects: 1 catalog, 2 pages, then one per font, then page/content
+    # pairs. Every kind carries all four fonts even when it uses one, so
+    # the resource dict is identical across kinds and there is only one
+    # object-numbering scheme to reason about.
+    first_page_obj = 3 + len(FONTS)
+    kids = " ".join(f"{first_page_obj + 2*i} 0 R" for i in range(n_pages))
     objs.append("<< /Type /Catalog /Pages 2 0 R >>")
     objs.append(f"<< /Type /Pages /Kids [{kids}] /Count {n_pages} >>")
-    objs.append("<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>")
+    for key in FONTS:
+        objs.append(f"<< /Type /Font /Subtype /Type1 /BaseFont /{FONTS[key]} >>")
+    res = " ".join(f"/{k} {3+i} 0 R" for i, k in enumerate(FONTS))
     for s in streams:
         objs.append(
             f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_W:.0f} "
-            f"{PAGE_H:.0f}] /Resources << /Font << /F1 3 0 R >> >> "
+            f"{PAGE_H:.0f}] /Resources << /Font << {res} >> >> "
             f"/Contents {len(objs)+2} 0 R >>")
         objs.append(f"<< /Length {len(s)} >>\nstream\n{s}\nendstream")
 
