@@ -308,6 +308,128 @@ def styled_row_ops(x_in, y, runs):
     return ops, rects
 
 
+# Dual dialogue column geometry. The parser anchors a dual region on a line
+# holding TWO cue-shaped clusters, then partitions body lines by start-x
+# (registry 10a: the boundary starts at rightCueX - 13% and refines only
+# leftward). These indents put the right cue far enough right that the
+# learned boundary lands cleanly between the columns.
+DUAL_X = {
+    "left":  {"character": 2.2, "dialogue": 1.9, "paren": 2.4},
+    "right": {"character": 5.4, "dialogue": 5.1, "paren": 5.6},
+}
+DUAL_WRAP = 26
+
+
+def dual_rows(left, right):
+    """Two (kind, text) lists -> rows where both columns share a Y.
+
+    The cue lines of both columns MUST land on one Y, or the parser sees
+    two ordinary consecutive cues rather than a dual region.
+    """
+    def col(items, side):
+        out = []
+        for kind, text in items:
+            plain, spans = parse_markup(text)
+            for runs in wrap_spans(plain, spans, DUAL_WRAP):
+                out.append((DUAL_X[side][kind], runs))
+        return out
+
+    L, R = col(left, "left"), col(right, "right")
+    rows = []
+    for i in range(max(len(L), len(R))):
+        pair = []
+        if i < len(L):
+            pair.append(L[i])
+        if i < len(R):
+            pair.append(R[i])
+        rows.append(("multi", pair))
+    rows.append(None)
+    return rows, len(rows)
+
+
+def flow_torture(content):
+    """Lay torture content out into pages, honouring directives.
+
+      ("pagebreak", "")   start a new page
+      ("atline", n)       pad with blanks until the page is at line n
+      ("dual", L, R)      two-column simultaneous dialogue
+    """
+    pages, cur, n = [], [], 0
+
+    def flush():
+        nonlocal cur, n
+        if cur:
+            pages.append(cur)
+        cur, n = [], 0
+
+    for kind, *rest in content:
+        if kind == "pagebreak":
+            flush()
+            continue
+
+        if kind == "atline":
+            target = rest[0]
+            if n > target:
+                # Raising rather than overflowing is deliberate. Silently
+                # sliding past the anchor would turn the (MORE) test into a
+                # test of nothing the first time content above it grew by a
+                # sentence, and nothing would report it.
+                raise SystemExit(
+                    f"atline: page {len(pages) + 1} is already at line {n}, "
+                    f"cannot pad back to {target}. Content above it grew: "
+                    f"shorten it, or move the anchor.")
+            while n < target:
+                cur.append(None)
+                n += 1
+            continue
+
+        if kind == "dual":
+            rows, used = dual_rows(rest[0], rest[1])
+            if n + used > LINES_PER_PAGE:
+                flush()
+            cur.extend(rows)
+            n += used
+            continue
+
+        plain, spans = parse_markup(rest[0])
+        for runs in wrap_spans(plain, spans, WRAP[kind]):
+            if n >= LINES_PER_PAGE:
+                flush()
+            cur.append((X[kind], runs))
+            n += 1
+        if n < LINES_PER_PAGE:
+            cur.append(None)
+            n += 1
+
+    flush()
+    return pages
+
+
+def torture_content_stream(rows, page_no):
+    """Like content_stream, but rows carry styled runs and may hold two
+    columns sharing one Y."""
+    text_ops, rects = ["BT", "/F1 12 Tf"], []
+    if page_no:
+        text_ops += [f"1 0 0 1 {X['pgnum']*PT:.2f} {PAGE_H - 0.5*PT:.2f} Tm",
+                     f"({page_no}.) Tj"]
+    y = TOP
+    for row in rows:
+        if row is not None:
+            if row[0] == "multi":
+                for x, runs in row[1]:
+                    ops, rs = styled_row_ops(x, y, runs)
+                    text_ops += ops
+                    rects += rs
+            else:
+                x, runs = row
+                ops, rs = styled_row_ops(x, y, runs)
+                text_ops += ops
+                rects += rs
+        y -= LINE
+    text_ops.append("ET")
+    return "\n".join(rects + text_ops)
+
+
 def content_stream(rows, page_no):
     out = ["BT", "/F1 12 Tf"]
     if page_no:                                   # page number, top right
@@ -477,6 +599,12 @@ def layout_json(kind):
 if __name__ == "__main__":
     import sys
     argv = sys.argv[1:]
+
+    if argv and argv[0] == "--atline-overflow-check":
+        # Proves the guard fires: asked to pad back to line 2 having already
+        # emitted well past it. Exits nonzero via SystemExit's message.
+        flow_torture([("action", "x " * 200), ("atline", 2)])
+        sys.exit("expected atline to raise, it did not")
 
     if argv and argv[0] == "--wrap":
         import json

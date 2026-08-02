@@ -54,3 +54,17 @@ describe('--emit-layout', () => {
     expect(text).toContain('A. N. Placeholder');
   });
 });
+
+describe('pagination directives', () => {
+  // Silently sliding past an anchor would turn the (MORE) test into a test
+  // of nothing the first time content above it grew by a sentence, and
+  // nothing would report it.
+  test('atline raises when the page is already past the requested line', () => {
+    const run = spawnSync('python3', ['tools/make-fixture.py', '--atline-overflow-check'], {
+      encoding: 'utf8',
+    });
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain('already at line');
+    expect(run.stderr).toContain('shorten it, or move the anchor');
+  });
+});
