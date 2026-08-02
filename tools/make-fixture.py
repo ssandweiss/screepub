@@ -397,7 +397,12 @@ def flow_torture(content):
                 flush()
             cur.append((X[kind], runs))
             n += 1
-        if n < LINES_PER_PAGE:
+        # A cue and a parenthetical sit DIRECTLY above what they introduce:
+        # real scripts print no blank line there, and the geometry is the
+        # whole point of this fixture. Everything else gets its blank.
+        # (The inherited layout() blanks after every element; the parser
+        # tolerates it, but it is not what a real page looks like.)
+        if kind not in ("character", "paren") and n < LINES_PER_PAGE:
             cur.append(None)
             n += 1
 
@@ -445,9 +450,9 @@ def content_stream(rows, page_no):
     return "\n".join(out)
 
 
-def title_stream():
+def title_stream(table=None):
     out = ["BT", "/F1 12 Tf"]
-    for inches_down, text in TITLE:
+    for inches_down, text in (TITLE if table is None else table):
         x = (8.5 - len(text) / 10.0) / 2.0        # 10 chars/inch, centered
         y = PAGE_H - inches_down * PT
         out += [f"1 0 0 1 {x*PT:.2f} {y:.2f} Tm", f"({esc(text)}) Tj"]
@@ -558,6 +563,30 @@ KINDS = {
 }
 
 
+def _torture_content():
+    """Load tools/torture-content.py. It is data, kept in its own file so
+    the person editing 14 sheets of screenplay never has to read layout
+    code. The dash in the filename means it cannot be a normal import."""
+    import importlib.util
+    import pathlib
+    path = pathlib.Path(__file__).with_name("torture-content.py")
+    spec = importlib.util.spec_from_file_location("torture_content", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def torture_streams():
+    mod = _torture_content()
+    pages = flow_torture(mod.CONTENT)
+    return [title_stream(mod.TITLE)] + [
+        torture_content_stream(p, i + 1) for i, p in enumerate(pages)
+    ]
+
+
+KINDS["torture"] = torture_streams
+
+
 # --- layout as data, for tests -------------------------------------------
 # Page PLACEMENT is the thing most likely to rot silently: a speech written
 # to start at line 50 so it straddles a page break still satisfies every
@@ -585,7 +614,32 @@ def _content_rows(rows):
     return out
 
 
+def _torture_rows(rows):
+    """Styled rows, including two-column ones, as flat data. Both columns of
+    a dual line report the SAME line number, which is the property that
+    makes them a dual region at all."""
+    out = []
+    for n, row in enumerate(rows):
+        if row is None:
+            continue
+        pairs = row[1] if row[0] == "multi" else [row]
+        for x, runs in pairs:
+            out.append({
+                "line": n,
+                "x": round(x, 3),
+                "runs": [{"styles": r["styles"], "text": r["text"]} for r in runs],
+                "underline": any("u" in r["styles"] for r in runs),
+            })
+    return out
+
+
 def layout_json(kind):
+    if kind == "torture":
+        mod = _torture_content()
+        pages = [{"page": 1, "rows": _title_rows(mod.TITLE)}]
+        for i, rows in enumerate(flow_torture(mod.CONTENT)):
+            pages.append({"page": i + 2, "rows": _torture_rows(rows)})
+        return pages
     if kind != "screenplay":
         # prose and blank have no line-addressable structure worth emitting:
         # one is a wall of paragraphs, the other has no text operators at all.
