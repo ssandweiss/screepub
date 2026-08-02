@@ -181,6 +181,60 @@ def parse_markup(s):
     return "".join(plain), spans
 
 
+def _words(plain):
+    """[(start, end)] for each space-delimited word, as offsets into plain."""
+    out, i, n = [], 0, len(plain)
+    while i < n:
+        while i < n and plain[i] == " ":
+            i += 1
+        if i >= n:
+            break
+        j = i
+        while j < n and plain[j] != " ":
+            j += 1
+        out.append((i, j))
+        i = j
+    return out
+
+
+def _runs(plain, spans, start, end):
+    """Slice [start, end) into styled runs, merging equal-styled neighbours."""
+    runs = []
+    for i in range(start, end):
+        st = sorted(s for (a, b, s) in spans if a <= i < b)
+        if runs and runs[-1][0] == st:
+            runs[-1][1] += plain[i]
+        else:
+            runs.append([st, plain[i]])
+    return [{"styles": st, "text": txt} for st, txt in runs]
+
+
+def wrap_spans(plain, spans, width):
+    """Greedy word wrap that keeps style spans intact across line breaks.
+
+    -> list of lines, each a list of {styles, text} runs.
+
+    Deliberately NOT textwrap. textwrap takes a plain string, so markup has
+    to be either stripped (losing the styles) or left in (counting marker
+    characters as text width, and splitting a marker across a line). The
+    three original fixture kinds keep calling textwrap, untouched, which is
+    what lets the byte-stability guard stay meaningful.
+    """
+    words = _words(plain)
+    if not words:
+        return [[{"styles": [], "text": ""}]]
+    lines = []
+    line_start, line_end = words[0]
+    for ws, we in words[1:]:
+        if we - line_start <= width:
+            line_end = we
+        else:
+            lines.append(_runs(plain, spans, line_start, line_end))
+            line_start, line_end = ws, we
+    lines.append(_runs(plain, spans, line_start, line_end))
+    return lines
+
+
 def layout():
     """-> list of pages; each page is a list of (x_inches, text)."""
     flowed = []
@@ -369,6 +423,12 @@ def layout_json(kind):
 if __name__ == "__main__":
     import sys
     argv = sys.argv[1:]
+
+    if argv and argv[0] == "--wrap":
+        import json
+        plain, spans = parse_markup(argv[2])
+        print(json.dumps(wrap_spans(plain, spans, int(argv[1]))))
+        sys.exit(0)
 
     if argv and argv[0] == "--parse-markup":
         import json
