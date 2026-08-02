@@ -294,9 +294,56 @@ KINDS = {
 }
 
 
+# --- layout as data, for tests -------------------------------------------
+# Page PLACEMENT is the thing most likely to rot silently: a speech written
+# to start at line 50 so it straddles a page break still satisfies every
+# output-shaped assertion at line 48, while proving nothing. These mirror
+# what the content streams draw, so an assertion about a line number is an
+# assertion about the actual PDF.
+
+def _title_rows(table):
+    out = []
+    for inches_down, text in table:
+        x = (8.5 - len(text) / 10.0) / 2.0
+        out.append({"line": int(inches_down * 6), "x": round(x, 3),
+                    "runs": [{"styles": [], "text": text}], "underline": False})
+    return out
+
+
+def _content_rows(rows):
+    out = []
+    for n, row in enumerate(rows):
+        if row is None:
+            continue
+        x, text = row
+        out.append({"line": n, "x": round(x, 3),
+                    "runs": [{"styles": [], "text": text}], "underline": False})
+    return out
+
+
+def layout_json(kind):
+    if kind != "screenplay":
+        # prose and blank have no line-addressable structure worth emitting:
+        # one is a wall of paragraphs, the other has no text operators at all.
+        return []
+    pages = [{"page": 1, "rows": _title_rows(TITLE)}]
+    for i, rows in enumerate(layout()):
+        pages.append({"page": i + 2, "rows": _content_rows(rows)})
+    return pages
+
+
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) != 3 or sys.argv[1] not in KINDS:
+    argv = sys.argv[1:]
+
+    if argv and argv[0] == "--emit-layout":
+        if len(argv) != 2 or argv[1] not in KINDS:
+            sys.exit(f"usage: make-fixture.py --emit-layout <{'|'.join(KINDS)}>")
+        import json
+        print(json.dumps(layout_json(argv[1])))
+        sys.exit(0)
+
+    if len(argv) != 2 or argv[0] not in KINDS:
         sys.exit(f"usage: make-fixture.py <{'|'.join(KINDS)}> <out.pdf>")
-    kind, p = sys.argv[1], sys.argv[2]
+    kind, p = argv
     print(f"{build(p, KINDS[kind]())} pages -> {p}")
