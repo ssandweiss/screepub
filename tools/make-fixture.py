@@ -15,6 +15,7 @@ per inch, 6 lines per inch. Indents matter: Screepub classifies elements by
 horizontal position, so a demo PDF with sloppy geometry would parse wrong
 and prove nothing.
 """
+import re
 import textwrap
 
 PT = 72.0
@@ -145,6 +146,39 @@ def esc(s):
     # latin-1 (the PDF string encoding here) has no em dash anyway.
     s = s.translate(ASCII_MAP)
     return s.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+
+
+# --- inline markup, for the torture kind ---------------------------------
+
+MARKUP = re.compile(r"\{(/?)([biu])\}")
+
+
+def parse_markup(s):
+    """'a {b}bold{/b} c' -> ('a bold c', [(2, 6, 'b')]).
+
+    Offsets index the PLAIN text, so wrapping can slice by character and
+    re-derive styles without ever seeing a marker. Unbalanced markers raise:
+    a typo buried in 14 sheets of content must fail at generation rather
+    than produce a fixture that quietly tests nothing.
+    """
+    plain, spans, open_at, pos, out_len = [], [], {}, 0, 0
+    for m in MARKUP.finditer(s):
+        plain.append(s[pos:m.start()])
+        out_len += m.start() - pos
+        closing, style = m.group(1), m.group(2)
+        if closing:
+            if style not in open_at:
+                raise ValueError(f"unmatched {{/{style}}} in {s!r}")
+            spans.append((open_at.pop(style), out_len, style))
+        else:
+            if style in open_at:
+                raise ValueError(f"nested {{{style}}} in {s!r}")
+            open_at[style] = out_len
+        pos = m.end()
+    plain.append(s[pos:])
+    if open_at:
+        raise ValueError(f"unclosed {sorted(open_at)} in {s!r}")
+    return "".join(plain), spans
 
 
 def layout():
@@ -335,6 +369,12 @@ def layout_json(kind):
 if __name__ == "__main__":
     import sys
     argv = sys.argv[1:]
+
+    if argv and argv[0] == "--parse-markup":
+        import json
+        plain, spans = parse_markup(argv[1])
+        print(json.dumps({"plain": plain, "spans": spans}))
+        sys.exit(0)
 
     if argv and argv[0] == "--emit-layout":
         if len(argv) != 2 or argv[1] not in KINDS:
