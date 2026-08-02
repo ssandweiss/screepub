@@ -421,6 +421,12 @@ def torture_content_stream(rows, page_no):
     for row in rows:
         if row is not None:
             if row[0] == "multi":
+                # KNOWN GAP: these two columns are emitted at correct
+                # x positions on a shared Y, but the parser still joins them
+                # into "BUNNY CASSIUS" rather than anchoring a dual region.
+                # clusterSplit's thresholds all pass by hand-calculation, so
+                # the cause is upstream of it and not yet identified.
+                # tests/torture.test.ts records the current behavior.
                 for x, runs in row[1]:
                     ops, rs = styled_row_ops(x, y, runs)
                     text_ops += ops

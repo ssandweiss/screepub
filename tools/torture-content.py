@@ -74,9 +74,12 @@ CONTENT = [
     # ---- page 2: transitions, mini-slugs, furniture ----------------------
     ("scene", "INT. READING ROOM - DAY"),
     ("action", "ODILE sets down a box that is heavier than it looks."),
-    ("mini", "THE INDEX CARDS"),
+    # NOT "THE INDEX CARDS": ACTION_PRONOUNS in classify.ts refuses a line
+    # opening with "The ", so a mini-slug starting that way is action before
+    # the slug rule ever sees it. Real mini-slugs rarely take an article.
+    ("mini", "INDEX CARDS"),
     ("action", "Handwriting from four decades, none of it consistent."),
-    ("mini", "THE LEDGER"),
+    ("mini", "LEDGER, LATER"),
     ("action", "One column, ruled in pencil, never once balanced."),
     ("trans", "CUT TO:"),
     ("scene", "INT. STAIRWELL - CONTINUOUS"),
