@@ -94,3 +94,51 @@ describe('mini-slugs and the recurrence suppressor', () => {
     expect([...typesOf(pages(20, 'LATER', [4, 9, 15]), 'LATER')]).toEqual(['mini-slug']);
   });
 });
+
+describe('scene numbers vs page numbers', () => {
+  // Both arrive as `page-number` elements, because a standalone shooting-script
+  // scene number is deliberately typed that way so it stays hidden
+  // (classify.ts, "Shooting script scene numbers"). attachSceneNumbers then
+  // promotes it onto the following heading.
+  //
+  // The trap: a BARE page number like "1." is caught by PAGE_NUMBER_BARE at
+  // priority 1 and is textually indistinguishable from a scene number, so any
+  // page that OPENS with a scene heading used to donate its page number to
+  // that scene. Ordinary scripts do that constantly.
+
+  function pageOpeningOnHeading(numberText: string): RawLine[] {
+    return [
+      line(numberText, 87, 740, 2), // top-right gutter, first thing on page 2
+      line('INT. ARCHIVE - NIGHT', 18, 700, 2),
+      line('Someone is already here.', 18, 676, 2),
+      line('BUNNY', 44, 640, 2),
+      line('You came back.', 26, 628, 2),
+    ];
+  }
+
+  test('a bare page number is NOT absorbed as a scene number', () => {
+    const { elements } = parseLines(pageOpeningOnHeading('2.'));
+    const scene = elements.find((e) => e.type === 'scene');
+    expect(scene).toBeDefined();
+    expect(scene!.sceneNumber).toBeUndefined();
+  });
+
+  test('a shooting-script scene number IS still attached', () => {
+    // The documented path must keep working: this is why the rule exists.
+    const { elements } = parseLines(pageOpeningOnHeading('1A.'));
+    const scene = elements.find((e) => e.type === 'scene');
+    expect(scene).toBeDefined();
+    expect(scene!.sceneNumber).toBe('1A.');
+  });
+
+  test('a compound shooting-script number is still attached', () => {
+    const { elements } = parseLines(pageOpeningOnHeading('2.2.'));
+    const scene = elements.find((e) => e.type === 'scene');
+    expect(scene!.sceneNumber).toBe('2.2.');
+  });
+
+  test('the page number is still stripped from the body either way', () => {
+    const { elements } = parseLines(pageOpeningOnHeading('2.'));
+    expect(elements.some((e) => e.type === 'page-number' && e.text === '2.')).toBe(true);
+  });
+});

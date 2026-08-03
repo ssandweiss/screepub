@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll } from 'bun:test';
 import { extractDocument } from '../src/parser/extract';
 import { parseLines } from '../src/parser/index';
-import type { ParsedScreenplay } from '../src/parser/types';
+import type { ElementType, ParsedScreenplay } from '../src/parser/types';
 
 // Source-side assertions against the committed torture fixture. Device-side
 // behavior (keeps, orphan control, transitions never beginning a page) can
@@ -21,8 +21,9 @@ beforeAll(async () => {
 describe('the proof sheet parses', () => {
   test('every content element type the parser knows appears at least once', () => {
     const seen = new Set(doc.elements.map((e) => e.type));
-    for (const t of ['scene', 'character', 'dialogue', 'action',
-                     'parenthetical', 'transition', 'mini-slug']) {
+    const required: ElementType[] = ['scene', 'character', 'dialogue', 'action',
+                                     'parenthetical', 'transition', 'mini-slug'];
+    for (const t of required) {
       expect(seen).toContain(t);
     }
   });
@@ -126,26 +127,26 @@ describe('rich formatting', () => {
   });
 });
 
-describe('known defects this fixture surfaces', () => {
-  // ---------------------------------------------------------------------
-  // SUSPECTED PARSER DEFECT, asserted at its CURRENT behavior.
-  //
-  // attachSceneNumbers (src/parser/classify.ts:186) attaches a page-number
-  // element to a following scene heading whenever its text matches
-  // SCENE_NUMBER. A bare page number like "1." matches, so every page that
-  // OPENS with a scene heading donates its page number to that scene.
-  //
-  // screenplay.pdf never exposed this because its pages start mid-scene.
-  //
-  // This is asserted rather than worked around so the fixture keeps the
-  // realistic geometry that found it. If the rule is fixed, this test fails
-  // and should be flipped to expect no scene number.
-  // ---------------------------------------------------------------------
-  test('page numbers are absorbed as scene numbers on scene-opening pages', () => {
-    const opening = doc.elements.find(
+describe('defects this fixture surfaced', () => {
+  // FIXED. This fixture found it: attachSceneNumbers used to promote any
+  // page-number element whose text matched SCENE_NUMBER, and a bare "1."
+  // matches, so every page OPENING on a scene heading donated its page
+  // number to that scene. screenplay.pdf never exposed it because its pages
+  // start mid-scene. classifyBlock now marks the shooting-script case at
+  // classification time, where the two are still distinguishable.
+  test('a page number is not absorbed as a scene number', () => {
+    const openers = doc.elements.filter(
       (e) => e.type === 'scene' && e.text === 'INT. ARCHIVE BASEMENT - NIGHT',
     );
-    expect(opening).toBeDefined();
-    expect(opening!.sceneNumber).toBe('1.');
+    expect(openers.length).toBeGreaterThan(0);
+    for (const scene of openers) {
+      expect(scene.sceneNumber).toBeUndefined();
+    }
+  });
+
+  test('the genuine shooting-script number still attaches', () => {
+    const el = doc.elements.find((e) => e.sceneNumber === '42');
+    expect(el).toBeDefined();
+    expect(el!.type).toBe('scene');
   });
 });

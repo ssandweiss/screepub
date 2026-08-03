@@ -877,13 +877,28 @@ describe('attachSceneNumbers', () => {
     };
   }
 
+  // classifyBlock marks a shooting-script number by setting `sceneNumber` on
+  // the page-number element itself; attachSceneNumbers only promotes what was
+  // marked. It deliberately does NOT re-test the text, because by this point a
+  // bare page number ("1.") and a bare scene number are the same type carrying
+  // the same shape of text. See the pipeline tests for the end-to-end path
+  // through the real classifier.
   test('shooting-script scene number before scene heading is attached', () => {
     const elements: ScreenplayElement[] = [
-      makeElement({ text: '2.2.', type: 'page-number' }),
+      makeElement({ text: '2.2.', type: 'page-number', sceneNumber: '2.2.' }),
       makeElement({ text: 'INT. KITCHEN - DAY', type: 'scene' }),
     ];
     attachSceneNumbers(elements);
     expect(elements[1].sceneNumber).toBe('2.2.');
+  });
+
+  test('an unmarked page number before a scene heading is NOT attached', () => {
+    const elements: ScreenplayElement[] = [
+      makeElement({ text: '2.', type: 'page-number' }),
+      makeElement({ text: 'INT. KITCHEN - DAY', type: 'scene' }),
+    ];
+    attachSceneNumbers(elements);
+    expect(elements[1].sceneNumber).toBeUndefined();
   });
 
   test('revision slug before scene heading is NOT attached as scene number', () => {
