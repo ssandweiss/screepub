@@ -36,7 +36,11 @@ CHAR_W = 7.2                   # 12pt Courier advance: 0.1" at 10 chars/inch
 
 X = {                          # inches from left edge
     "scene":  1.5, "action": 1.5, "dialogue": 2.5,
-    "paren":  3.1, "character": 3.7, "trans": 1.5, "pgnum": 7.4,
+    # Transitions are RIGHT-flush in a real script, and the classifier keys on
+    # that: TRANSITION_MIN is indent 55, so a left-flush "CUT TO:" is action,
+    # not a transition. At 1.5" neither fixture had ever produced a single
+    # transition element while appearing to contain four.
+    "paren":  3.1, "character": 3.7, "trans": 6.0, "pgnum": 7.4,
     "mini":   1.5,
 }
 WRAP = {"scene": 60, "action": 60, "dialogue": 35, "paren": 24,

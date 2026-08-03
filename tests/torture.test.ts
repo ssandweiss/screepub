@@ -62,8 +62,10 @@ describe('the proof sheet parses', () => {
 
   test('mini-slugs are micro-headings, not scenes', () => {
     const mini = doc.elements.filter((e) => e.type === 'mini-slug');
-    expect(mini.map((e) => e.text)).toContain('THE INDEX CARDS');
-    expect(doc.scenes.map((s) => s.heading)).not.toContain('THE INDEX CARDS');
+    expect(mini.map((e) => e.text)).toContain('INDEX CARDS');
+    // A mini-slug must NOT become a scene: it serializes as a forced
+    // slugline, and a scene would mint a section and a TOC entry.
+    expect(doc.scenes.map((s) => s.heading)).not.toContain('INDEX CARDS');
   });
 
   test('cue extensions are tolerated with and without their closing period', () => {
