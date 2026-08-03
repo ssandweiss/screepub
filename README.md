@@ -221,6 +221,7 @@ bun src/cli.ts <input.pdf | input.fountain> [options]
 | `--title` / `--author` | override detected metadata |
 | `--force` | convert even if it doesn't look like a screenplay |
 | `--json` | machine-readable result (the app↔engine contract) |
+| `--progress` | NDJSON progress on **stderr** while converting (stdout stays the single `--json` object) |
 | `--debug` | dump classified elements JSON |
 
 ### Fountain input — partial support

@@ -4,20 +4,20 @@
   .subslug {
     font-family: var(--font-structure);
     font-weight: 700;
-    font-size: 14px;
+    font-size: var(--text-caption);
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--ink-muted);
-    margin: 2rem 0 0.6rem;
+    margin: var(--space-7) 0 var(--space-2);
   }
   .cue {
     font-family: var(--font-structure);
     font-weight: 700;
-    font-size: 15px;
+    font-size: var(--text-code);
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--ink);
-    margin: 2rem 0 0.4rem 3.5rem;
+    margin: var(--space-7) 0 var(--space-1) var(--space-10);
   }
 </style>
 <div class="page">
@@ -34,7 +34,7 @@
     ink. They divide a section without competing with the slugline above it.
   </p>
   <p class="cue">Feature name</p>
-  <p class="prose" style="margin-left: 3.5rem">
+  <p class="prose" style="margin-left: var(--space-10)">
     A character cue sets a labelled item, indented the way dialogue is on a
     script page.
   </p>

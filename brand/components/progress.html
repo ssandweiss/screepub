@@ -1,0 +1,102 @@
+<!-- @dsCard group="Components" -->
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .work { display: flex; flex-direction: column; gap: 22px; }
+  .work-line {
+    font-family: var(--font-structure);
+    font-size: var(--text-ui);
+    line-height: 1.5;
+    color: var(--ink);
+    margin: 0;
+  }
+  .meter { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .track {
+    width: 220px;
+    height: 3px;
+    background: var(--hole);
+    position: relative;
+    overflow: hidden;
+  }
+  .fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: var(--brass);
+  }
+  .fill-42 { width: 42%; }
+  .fill-96 { width: 96%; }
+  .read-out {
+    font-family: var(--font-structure);
+    font-size: var(--text-note);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-muted);
+  }
+  .quit {
+    font-family: var(--font-structure);
+    font-weight: 700;
+    font-size: var(--text-note);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+  .quit:hover { color: var(--ink); }
+  .stage-row { display: flex; flex-wrap: wrap; gap: var(--space-8); }
+  .stage { display: flex; flex-direction: column; gap: 0.7rem; }
+  .state-label {
+    font-family: var(--font-structure);
+    font-size: var(--text-note);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin: 0;
+  }
+  .sign-off {
+    font-family: var(--font-structure);
+    font-size: var(--text-ui);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    text-align: right;
+    margin: 0;
+  }
+</style>
+<div class="page">
+<div class="sheet">
+  <h2 class="slug">Int. conversion bay - continuous</h2>
+  <div class="work">
+    <p class="work-line">The pages of the-last-video-store.pdf reflow themselves, one scene at a time.</p>
+    <div class="stage-row">
+      <div class="stage">
+        <p class="state-label">Parsing</p>
+        <div class="meter">
+          <div class="track"><div class="fill fill-42"></div></div>
+          <span class="read-out">parsing pages (42%)</span>
+          <button class="quit">Cancel</button>
+        </div>
+      </div>
+      <div class="stage">
+        <p class="state-label">Rendering</p>
+        <div class="meter">
+          <div class="track"><div class="fill fill-96"></div></div>
+          <span class="read-out">building the book (96%)</span>
+          <button class="quit">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <p class="sign-off">Please stand by:</p>
+  </div>
+  <p class="caption">
+    Determinate, because the engine now says where it is. It emits a line per
+    percent on stderr while it works, and page extraction is the long stage,
+    so a real script spends nearly all of its wait on a bar that is actually
+    moving. The spinner survives only for the moment before the first tick.
+  </p>
+  <p class="caption">
+    The bar never walks backwards and cancel is always present: a long script
+    used to commit you to the whole wait with no way out.
+  </p>
+</div>
+</div>

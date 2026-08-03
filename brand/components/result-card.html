@@ -1,0 +1,116 @@
+<!-- @dsCard group="Components" -->
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .announce { text-align: center; display: flex; flex-direction: column; gap: 5px; }
+  .book-title {
+    font-family: var(--font-structure);
+    font-weight: 700;
+    font-size: var(--text-code);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink);
+    margin: 0;
+  }
+  .book-by {
+    font-family: var(--font-structure);
+    font-size: var(--text-label);
+    color: var(--ink-muted);
+    margin: 0;
+  }
+  .book-count {
+    font-family: var(--font-structure);
+    font-size: var(--text-ui);
+    line-height: 1.55;
+    color: var(--ink);
+    margin: var(--space-1) 0 0;
+    white-space: pre-line;
+  }
+  .send { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: 1.8rem; }
+  .send-primary {
+    font-family: var(--font-structure);
+    font-weight: 700;
+    font-size: var(--text-label);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    background: var(--brass);
+    color: var(--ink-on-brass);
+    border: none;
+    border-radius: var(--radius);
+    padding: 6px 26px;
+    min-width: 150px;
+    cursor: pointer;
+  }
+  .send-primary:hover:not(:disabled) { background: var(--brass-highlight); }
+  .send-primary:disabled { opacity: 0.35; cursor: default; }
+  .send-primary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .asides { display: flex; gap: 22px; }
+  .aside {
+    font-family: var(--font-structure);
+    font-weight: 700;
+    font-size: var(--text-note);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+  .aside:hover { color: var(--ink); }
+  .stamps { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; margin-top: var(--space-7); }
+  .stamp {
+    font-family: var(--font-structure);
+    font-weight: 700;
+    font-size: var(--text-fine);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--brass);
+    border: 1.4px solid var(--brass);
+    border-radius: var(--radius-mark);
+    padding: 3px 9px;
+    transform: rotate(-2deg);
+  }
+  .state-note {
+    font-family: var(--font-structure);
+    font-size: var(--text-note);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin: 0 0 0.7rem;
+  }
+</style>
+<div class="page">
+<div class="sheet">
+  <h2 class="slug">Int. your library - night</h2>
+  <div class="announce">
+    <p class="book-title">The Last Video Store</p>
+    <p class="book-by">(by A. N. Placeholder)</p>
+    <p class="book-count">5 pages. 5 scenes.
+3 speaking characters.</p>
+  </div>
+  <div class="send">
+    <button class="send-primary">Send to Kindle</button>
+    <div class="asides">
+      <button class="aside">Show in Finder</button>
+      <button class="aside">Convert another</button>
+    </div>
+  </div>
+  <div class="stamps">
+    <p class="state-note">Connected hardware</p>
+    <span class="stamp">Kindle mounted</span>
+    <span class="stamp">reMarkable up</span>
+  </div>
+  <p class="caption">
+    The converted script gets a speech: cue, parenthetical, dialogue. Title,
+    byline and counts are set as if the book were introducing itself, which is
+    also the fastest way to confirm the parse was right. Wrong character count
+    means the cues were misread.
+  </p>
+  <p class="caption">
+    One brass object on the page, as always. The send button holds dimmed at
+    35% while its hardware is unplugged rather than disappearing: it is
+    waiting, and saying so is the point. Rubber stamps in the corner are the
+    devices actually attached right now.
+  </p>
+</div>
+</div>

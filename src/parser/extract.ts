@@ -16,9 +16,15 @@ import { getDocument } from 'pdfjs-dist/build/pdf.mjs';
  * NOTE: pdf.js transfers the underlying ArrayBuffer to its worker — the
  * caller's `pdfBytes` is detached afterwards. Pass a copy if you still need it.
  */
+/// Called once per page as extraction advances. `pages` is the number of
+/// pages this run will actually visit (so it honors `maxPages`), which makes
+/// `page / pages` a usable fraction from the very first tick.
+export type PageProgress = (page: number, pages: number) => void;
+
 export async function extractDocument(
   pdfBytes: Uint8Array,
   maxPages?: number,
+  onProgress?: PageProgress,
 ): Promise<{ lines: RawLine[]; pageCount: number }> {
   const pdf = await getDocument({ data: pdfBytes }).promise;
   const allLines: RawLine[] = [];
@@ -32,6 +38,9 @@ export async function extractDocument(
 
     const pageLines = groupItemsIntoLines(textContent.items, viewport.width, pageNum);
     allLines.push(...pageLines);
+    // After the work, not before: a tick means "page N is done", so the
+    // fraction never claims progress the parser has not actually made.
+    onProgress?.(pageNum, lastPage);
   }
 
   return { lines: allLines, pageCount: pdf.numPages };

@@ -1,0 +1,117 @@
+<!-- @dsCard group="Components" -->
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .well {
+    border: 1.5px dashed var(--ink-muted);
+    border-radius: var(--radius-well);
+    padding: 24px 20px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 9px;
+  }
+  .well-targeted { border-color: var(--brass); }
+  .well-mark { color: var(--ink-muted); line-height: 0; }
+  .well-targeted .well-mark { color: var(--brass); }
+  .well-mark svg { display: block; }
+  .well-call {
+    font-family: var(--font-structure);
+    font-weight: 700;
+    font-size: var(--text-ui);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .well-or {
+    font-family: var(--font-structure);
+    font-size: var(--text-fine);
+    color: var(--ink-muted);
+  }
+  .well-btn {
+    font-family: var(--font-structure);
+    font-weight: 700;
+    font-size: var(--text-label);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink);
+    background: none;
+    border: none;
+    box-shadow: inset 0 0 0 1.2px var(--ink);
+    border-radius: var(--radius);
+    padding: 6px 26px;
+    cursor: pointer;
+  }
+  .well-limits {
+    font-family: var(--font-structure);
+    font-size: var(--text-fine);
+    color: var(--ink-muted);
+    margin-top: 2px;
+  }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+  @media (max-width: 720px) { .pair { grid-template-columns: 1fr; } }
+  .state-label {
+    font-family: var(--font-structure);
+    font-size: var(--text-note);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin: 0 0 var(--space-2);
+  }
+</style>
+<div class="page">
+<div class="sheet">
+  <h2 class="slug">Drop well</h2>
+  <div class="pair">
+    <div>
+      <p class="state-label">Resting</p>
+      <div class="well">
+        <span class="well-mark" aria-hidden="true">
+          <svg width="26" height="26" viewBox="0 0 26 26" fill="none"
+               stroke="currentColor" stroke-width="1.3" stroke-linecap="round"
+               stroke-linejoin="round">
+            <path d="M6 3.5h9l5 5v14H6z"/>
+            <path d="M15 3.5v5h5"/>
+            <path d="M13 11.5v7"/>
+            <path d="M10 15.5l3 3 3-3"/>
+          </svg>
+        </span>
+        <span class="well-call">Drop a screenplay PDF</span>
+        <span class="well-or">or</span>
+        <button class="well-btn">Choose PDF&hellip; &#8984;O</button>
+        <span class="well-limits">Needs selectable text, not a scan. No password.</span>
+      </div>
+    </div>
+    <div>
+      <p class="state-label">File over the window</p>
+      <div class="well well-targeted">
+        <span class="well-mark" aria-hidden="true">
+          <svg width="26" height="26" viewBox="0 0 26 26" fill="none"
+               stroke="currentColor" stroke-width="1.3" stroke-linecap="round"
+               stroke-linejoin="round">
+            <path d="M6 3.5h9l5 5v14H6z"/>
+            <path d="M15 3.5v5h5"/>
+            <path d="M13 11.5v7"/>
+            <path d="M10 15.5l3 3 3-3"/>
+          </svg>
+        </span>
+        <span class="well-call">Drop a screenplay PDF</span>
+        <span class="well-or">or</span>
+        <button class="well-btn">Choose PDF&hellip; &#8984;O</button>
+        <span class="well-limits">Needs selectable text, not a scan. No password.</span>
+      </div>
+    </div>
+  </div>
+  <p class="caption">
+    The dashed rule is the page's own perforation, not a generic upload box,
+    and the whole well turns brass the moment a file is over the window: the
+    target confirms itself before the drop rather than after it.
+  </p>
+  <p class="caption">
+    The last line is the important one. The engine guards four failures, and
+    two of them (a scanned PDF with no text layer, and a password-locked file)
+    are properties a reader can check at a glance. Saying so here moves both
+    from after the wait to before the drop.
+  </p>
+</div>
+</div>

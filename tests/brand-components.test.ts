@@ -33,6 +33,11 @@ describe('brand component previews', () => {
   const expected = [
     'brad', 'page-frame', 'title-block', 'slugline',
     'transition-rule', 'buttons', 'device-table', 'shot-frame',
+    // The app's four states. These existed as designed things in
+    // Theme.swift/ContentView.swift long before they existed here, which
+    // meant the website had no vocabulary for anything happening and the
+    // designs were invisible to everyone outside the Swift source.
+    'drop-well', 'progress', 'failure-notice', 'result-card',
   ];
 
   const found = readdirSync(dir)
@@ -40,7 +45,7 @@ describe('brand component previews', () => {
     .map((f) => f.slice(0, -'.html'.length))
     .sort();
 
-  test('the eight expected previews are all present', () => {
+  test('every expected preview is present', () => {
     for (const name of expected) {
       expect(found.includes(name), `${name}.html is missing from brand/components/`).toBe(true);
     }
@@ -64,6 +69,50 @@ describe('brand component previews', () => {
     expect(firstLine(withBom)).toMatch(DS_CARD_MARKER);
   });
 
+  // Color was governed by a pinning test and a contrast floor from the
+  // start. Type, radius and motion were not governed at all: 10 font sizes,
+  // 4 radii and a lone inline easing had accumulated across the previews
+  // with nothing to notice. These are the equivalent guard for those three.
+  // Spacing is deliberately NOT enforced here: eight one-off rem values
+  // remain literal because snapping them would have changed the design, and
+  // a test that fails on the current, intended state is worse than no test.
+  describe('scale adoption', () => {
+    test('tokens.css declares the type, radius and motion scales', async () => {
+      const css = await Bun.file(new URL('../brand/tokens.css', import.meta.url)).text();
+      const required = [
+        '--text-fine', '--text-note', '--text-label', '--text-ui', '--text-caption',
+        '--text-code', '--text-body', '--text-lede', '--text-title', '--text-display',
+        '--radius-mark', '--radius', '--radius-well',
+        '--motion-press', '--motion-state', '--ease',
+        '--space-1', '--space-10',
+      ];
+      for (const token of required) {
+        expect(
+          new RegExp(`${token}:`).test(css),
+          `tokens.css does not declare ${token}`,
+        ).toBe(true);
+      }
+    });
+
+    test('no preview hardcodes a font size, radius, or easing', async () => {
+      for (const name of found) {
+        const css = await Bun.file(new URL(`${name}.html`, dir)).text();
+        for (const [raw, prop] of css.matchAll(/(font-size|border-radius):\s*[\d.]+px/g)) {
+          expect(
+            false,
+            `${name}.html sets ${prop} to a literal (${raw.trim()}); use a scale token`,
+          ).toBe(true);
+        }
+        for (const [raw] of css.matchAll(/[\d.]+m?s\s+(ease|linear|cubic-bezier)/g)) {
+          expect(
+            false,
+            `${name}.html hardcodes the duration "${raw.trim()}"; use --motion-* and --ease`,
+          ).toBe(true);
+        }
+      }
+    });
+  });
+
   test('previews use tokens, never raw brand colors', async () => {
     // White and black are allowed: they carry opacity in the brass
     // gradients and are not brand colors. Everything else must be a token.
@@ -72,10 +121,13 @@ describe('brand component previews', () => {
     for (const name of found) {
       const raw = await Bun.file(new URL(`${name}.html`, dir)).text();
       // Strip SVG fragment references first. An id like #dad or #face is
-      // valid hex and would otherwise read as a hardcoded color.
+      // valid hex and would otherwise read as a hardcoded color. Numeric
+      // character references are the same shape of false positive from the
+      // other direction: &#8984; (the command key) reads as #8984.
       const text = raw
         .replace(/url\(#[\w-]+\)/g, '')
-        .replace(/href="[^"]*"/g, '');
+        .replace(/href="[^"]*"/g, '')
+        .replace(/&#x?[0-9a-fA-F]+;/g, '');
 
       for (const [literal] of text.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
         expect(

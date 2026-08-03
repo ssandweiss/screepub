@@ -19,6 +19,17 @@ enum Theme {
         light: NSColor(red: 0.114, green: 0.106, blue: 0.086, alpha: 1),
         dark: NSColor(red: 0.910, green: 0.886, blue: 0.827, alpha: 1)
     )
+    /// Secondary TEXT. `inkFaint` composites to #7F7C74 on paper, which is
+    /// 3.73:1 and fails AA for normal text; the web hit this first and split
+    /// off its own muted weight, and this is that weight brought back. Use
+    /// this for anything a reader has to read.
+    static let inkMuted = dynamic(
+        light: NSColor(red: 0.427, green: 0.412, blue: 0.376, alpha: 1),
+        dark: NSColor(red: 0.561, green: 0.533, blue: 0.486, alpha: 1)
+    )
+    /// Hairlines, strokes and fills only. Kept because a 1.2pt rule or a
+    /// progress track is decoration, where 3.73:1 is fine and a heavier ink
+    /// would draw the eye to furniture instead of the page.
     static let inkFaint = dynamic(
         light: NSColor(red: 0.114, green: 0.106, blue: 0.086, alpha: 0.55),
         dark: NSColor(red: 0.910, green: 0.886, blue: 0.827, alpha: 0.55)
@@ -28,6 +39,10 @@ enum Theme {
         dark: NSColor(white: 0, alpha: 0.45)
     )
     static let brass = Color(red: 0.910, green: 0.639, blue: 0.239) // icon amber
+    /// Label color for anything sitting ON brass. Fixed in both appearances,
+    /// because brass is fixed: following `ink` into dark mode puts cream on
+    /// amber at 1.67:1. Same value as light-mode ink, which measures 7.98:1.
+    static let inkOnBrass = Color(red: 0.114, green: 0.106, blue: 0.086)
     static let alarm = dynamic(
         light: NSColor(red: 0.686, green: 0.196, blue: 0.125, alpha: 1),
         dark: NSColor(red: 0.918, green: 0.478, blue: 0.396, alpha: 1)
@@ -60,7 +75,7 @@ struct Transition: View {
     var body: some View {
         Text(text.uppercased())
             .font(Theme.courier(13, .bold))
-            .foregroundStyle(Theme.inkFaint)
+            .foregroundStyle(Theme.inkMuted)
             .kerning(0.5)
             .frame(maxWidth: .infinity, alignment: .trailing)
     }
@@ -76,7 +91,7 @@ struct BradButtonStyle: ButtonStyle {
         configuration.label
             .font(Theme.courier(12, .bold))
             .kerning(0.8)
-            .foregroundStyle(Color.black.opacity(0.82))
+            .foregroundStyle(Theme.inkOnBrass)
             .padding(.vertical, 6)
             .padding(.horizontal, 26)
             .frame(minWidth: 150)
@@ -116,7 +131,7 @@ struct OutlineButtonStyle: ButtonStyle {
 /// larger size and ink when the choice is the point of the page.
 struct MarginToggleStyle: ToggleStyle {
     var size: CGFloat = 10
-    var color: Color = Theme.inkFaint
+    var color: Color = Theme.inkMuted
 
     func makeBody(configuration: Configuration) -> some View {
         Button {
@@ -149,7 +164,7 @@ struct MarginButtonStyle: ButtonStyle {
         configuration.label
             .font(Theme.courier(11, .bold))
             .kerning(0.6)
-            .foregroundStyle(configuration.isPressed ? Theme.ink : Theme.inkFaint)
+            .foregroundStyle(configuration.isPressed ? Theme.ink : Theme.inkMuted)
             .contentShape(Rectangle())
     }
 }

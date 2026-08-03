@@ -12,6 +12,7 @@ import {
   ScannedPdfError,
   NotAScreenplayError,
   type ConvertResult,
+  type ConvertStage,
 } from './convert';
 import { mapConversionError, type JsonError } from './cli-errors';
 
@@ -37,6 +38,7 @@ Options:
   --preview-html <file>  also write the script as one self-contained HTML file
   --options <file.json>  formatting options (see docs/formatting-options-log.md)
   --json                 machine-readable result on stdout (for the app)
+  --progress             emit NDJSON progress to STDERR while converting
   --debug                also dump classified elements, and let pdf.js's
                          internal warnings through to stderr
   -h, --help             show this help
@@ -85,6 +87,7 @@ function parseCliArgs() {
       'preview-html': { type: 'string' },
       options: { type: 'string' },
       json: { type: 'boolean', default: false },
+      progress: { type: 'boolean', default: false },
       debug: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
       version: { type: 'boolean', default: false },
@@ -141,7 +144,22 @@ async function main() {
     }
   }
 
-  const opts = { title: values.title, author: values.author, force: values.force, mobi: values.mobi, format };
+  // Progress goes to STDERR, never stdout. --json's contract is that stdout
+  // is exactly one parseable object, and the app decodes it as such; a
+  // progress line on stdout would corrupt every conversion the app runs.
+  // Ticks are throttled to whole percents so a 300-page script emits ~100
+  // lines rather than one per page per stage.
+  let lastPercent = -1;
+  const onProgress = values.progress
+    ? (stage: ConvertStage, fraction: number) => {
+        const percent = Math.round(fraction * 100);
+        if (percent === lastPercent) return;
+        lastPercent = percent;
+        process.stderr.write(`${JSON.stringify({ progress: { stage, percent } })}\n`);
+      }
+    : undefined;
+
+  const opts = { title: values.title, author: values.author, force: values.force, mobi: values.mobi, format, onProgress };
 
   let result: ConvertResult;
   const isPdf = ext === '.pdf';

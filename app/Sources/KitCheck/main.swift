@@ -1060,5 +1060,71 @@ if kfxStatus.ready {
     print("  --  KFX toolchain incomplete on this machine; conversion untested here")
 }
 
+// — Engine progress and cancellation —
+// The conversion page showed an indeterminate spinner because the engine
+// said nothing until it finished. These checks cover the reporting channel
+// and the cancel path; the engine's own share is covered by
+// tests/cli.test.ts and tests/extract.test.ts.
+let fixture = repoRoot.appendingPathComponent("tests/fixtures/screenplay.pdf")
+
+if Engine.binaryURL() == nil {
+    print("  --  no engine binary; run bun build first. Engine checks skipped")
+} else if !FileManager.default.fileExists(atPath: fixture.path) {
+    print("  --  committed fixture missing; Engine checks skipped")
+} else {
+    // Progress arrives, climbs, and finishes. The callback fires on the
+    // pipe's read queue, so the collector has to be safe to share.
+    final class Ticks: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [Double] = []
+        func add(_ v: Double) { lock.lock(); values.append(v); lock.unlock() }
+        var all: [Double] { lock.lock(); defer { lock.unlock() }; return values }
+    }
+    let ticks = Ticks()
+    do {
+        let result = try Engine.convert(
+            input: fixture, force: false, outputDir: tempDir("progress"),
+            includeMobi: false,
+            onProgress: { _, fraction in ticks.add(fraction) }
+        )
+        check(result.ok, "engine converts the committed fixture")
+
+        let seen = ticks.all
+        check(!seen.isEmpty, "conversion reported progress at least once")
+        check(seen == seen.sorted(), "reported progress never goes backwards")
+        check(seen.last.map { $0 >= 0.99 } ?? false, "progress reaches 100% at the end")
+    } catch {
+        check(false, "engine conversion with progress threw: \(error)")
+    }
+
+    // Cancelling before the run starts is the deterministic half of the
+    // cancel path: a mid-flight cancel on a five-page fixture would race the
+    // conversion itself. Both go through the same adopt/terminate gate.
+    let control = ConversionControl()
+    control.cancel()
+    do {
+        _ = try Engine.convert(
+            input: fixture, force: false, outputDir: tempDir("cancelled"),
+            includeMobi: false, control: control
+        )
+        check(false, "a pre-cancelled conversion should not return a result")
+    } catch EngineFailure.cancelled {
+        check(true, "a cancelled conversion throws EngineFailure.cancelled")
+    } catch {
+        check(false, "cancelled conversion threw the wrong error: \(error)")
+    }
+
+    // Progress is opt-in: no callback means no --progress flag, so stderr
+    // stays the diagnostic channel it has always been.
+    do {
+        let quiet = try Engine.convert(
+            input: fixture, force: false, outputDir: tempDir("quiet"), includeMobi: false
+        )
+        check(quiet.ok, "conversion without a progress callback still succeeds")
+    } catch {
+        check(false, "conversion without progress threw: \(error)")
+    }
+}
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
