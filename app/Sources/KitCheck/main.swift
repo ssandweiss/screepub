@@ -1223,23 +1223,54 @@ do {
 // — Update decoding —
 // The exact shape GitHub returns, including the body field the old decoder
 // silently dropped.
+// v0.6.0 and v0.5.0 stay first/last so the pre-existing body/dmg assertions
+// below still target them unchanged; the draft and prerelease releases sit
+// in between, each with its own .dmg so they are otherwise valid releases
+// and the flag under test is the only thing distinguishing them.
 let releasesJSON = """
 [
   {"tag_name":"v0.6.0","html_url":"https://example.invalid/6","draft":false,
    "prerelease":false,"body":"# Screepub 0.6.0\\n\\nNewer.",
    "assets":[{"name":"Screepub-0.6.0.dmg",
               "browser_download_url":"https://example.invalid/6.dmg"}]},
+  {"tag_name":"v0.7.0","html_url":"https://example.invalid/7","draft":true,
+   "prerelease":false,"body":"# Screepub 0.7.0\\n\\nDraft.",
+   "assets":[{"name":"Screepub-0.7.0.dmg",
+              "browser_download_url":"https://example.invalid/7.dmg"}]},
+  {"tag_name":"v0.6.5","html_url":"https://example.invalid/6.5","draft":false,
+   "prerelease":true,"body":"# Screepub 0.6.5\\n\\nPrerelease.",
+   "assets":[{"name":"Screepub-0.6.5.dmg",
+              "browser_download_url":"https://example.invalid/6.5.dmg"}]},
   {"tag_name":"v0.5.0","html_url":"https://example.invalid/5","draft":false,
    "prerelease":false,"body":"# Screepub 0.5.0\\n\\nOlder.","assets":[]}
 ]
 """
 do {
     let decoded = try UpdateCheck.candidates(from: Data(releasesJSON.utf8))
-    check(decoded.count == 2, "decoding reads every release in the array")
+    check(decoded.count == 4, "decoding reads every release in the array")
     check(decoded.first?.body?.contains("Newer.") == true,
           "the release body is decoded, not dropped")
     check(decoded.first?.dmgURL != nil, "the .dmg asset is found")
     check(decoded.last?.dmgURL == nil, "a release with no assets has no dmgURL")
+
+    // isDraft/isPrerelease gate whether select() can ever offer this release
+    // as an update, so each flag is checked propagating true on the release
+    // that sets it, and false on releases that don't set it — a mapping
+    // that hardcodes either value, or swaps the two fields, fails one of
+    // these four checks.
+    let draftCandidate = decoded.first(where: { $0.tag == "v0.7.0" })
+    check(draftCandidate?.isDraft == true,
+          "the draft flag propagates from GitHub's JSON to the candidate")
+    let prereleaseCandidate = decoded.first(where: { $0.tag == "v0.6.5" })
+    check(prereleaseCandidate?.isPrerelease == true,
+          "the prerelease flag propagates from GitHub's JSON to the candidate")
+
+    let plainNewer = decoded.first(where: { $0.tag == "v0.6.0" })
+    check(plainNewer?.isDraft == false, "an ordinary release decodes isDraft false")
+    check(plainNewer?.isPrerelease == false, "an ordinary release decodes isPrerelease false")
+    let plainOlder = decoded.first(where: { $0.tag == "v0.5.0" })
+    check(plainOlder?.isDraft == false, "the other ordinary release decodes isDraft false")
+    check(plainOlder?.isPrerelease == false, "the other ordinary release decodes isPrerelease false")
 } catch {
     check(false, "decoding valid release JSON threw: \(error)")
 }
