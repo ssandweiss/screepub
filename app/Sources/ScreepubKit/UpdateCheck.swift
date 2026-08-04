@@ -174,6 +174,26 @@ public enum UpdateCheck {
 
     // MARK: - Choosing
 
+    /// Decodes GitHub's releases array into the public candidate shape.
+    /// Separate from `select` so both halves of the check are testable and
+    /// only the URLSession call in `latest` is not.
+    public static func candidates(from data: Data) throws -> [ReleaseCandidate] {
+        guard let releases = try? JSONDecoder().decode([GitHubRelease].self, from: data) else {
+            throw UpdateCheckError.malformedResponse
+        }
+        return releases.map { release in
+            ReleaseCandidate(
+                tag: release.tagName,
+                notesURL: release.htmlURL,
+                dmgURL: release.assets
+                    .first(where: { $0.name.hasSuffix(".dmg") })?.browserDownloadURL,
+                body: release.body,
+                isDraft: release.draft,
+                isPrerelease: release.prerelease
+            )
+        }
+    }
+
     /// Picks the update to offer and the notes to show with it. Pure: no
     /// network, no clock. Drafts and prereleases are GitHub's own flags on
     /// the release, which is a different thing from a semver pre-release
@@ -216,7 +236,11 @@ public enum UpdateCheck {
         repository: String = defaultRepository,
         session: URLSession = .shared
     ) async throws -> AvailableUpdate? {
-        let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
+        // The list, not /latest: the sheet shows every version since the
+        // installed one. 30 is a bound rather than a page size — a reader
+        // more than 30 releases behind sees the newest 30, which beats
+        // paginating for a case that will not happen.
+        let url = URL(string: "https://api.github.com/repos/\(repository)/releases?per_page=30")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -242,17 +266,9 @@ public enum UpdateCheck {
             }
         }
 
-        guard let release = try? JSONDecoder().decode(GitHubRelease.self, from: data) else {
-            throw UpdateCheckError.malformedResponse
-        }
-        guard isNewer(release.tagName, than: currentVersion) else { return nil }
-        guard let dmg = release.assets.first(where: { $0.name.hasSuffix(".dmg") }) else {
-            throw UpdateCheckError.noDownloadableAsset
-        }
-        return AvailableUpdate(
-            version: normalized(release.tagName),
-            downloadURL: dmg.browserDownloadURL,
-            releaseNotesURL: release.htmlURL
+        return try select(
+            releases: try candidates(from: data),
+            currentVersion: currentVersion
         )
     }
 
@@ -260,6 +276,9 @@ public enum UpdateCheck {
         let tagName: String
         let htmlURL: URL
         let assets: [Asset]
+        let body: String?
+        let draft: Bool
+        let prerelease: Bool
 
         struct Asset: Decodable {
             let name: String
@@ -274,7 +293,7 @@ public enum UpdateCheck {
         enum CodingKeys: String, CodingKey {
             case tagName = "tag_name"
             case htmlURL = "html_url"
-            case assets
+            case assets, body, draft, prerelease
         }
     }
 }

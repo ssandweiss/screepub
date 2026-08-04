@@ -1220,5 +1220,38 @@ do {
     check(false, "nil-body selection threw: \(error)")
 }
 
+// — Update decoding —
+// The exact shape GitHub returns, including the body field the old decoder
+// silently dropped.
+let releasesJSON = """
+[
+  {"tag_name":"v0.6.0","html_url":"https://example.invalid/6","draft":false,
+   "prerelease":false,"body":"# Screepub 0.6.0\\n\\nNewer.",
+   "assets":[{"name":"Screepub-0.6.0.dmg",
+              "browser_download_url":"https://example.invalid/6.dmg"}]},
+  {"tag_name":"v0.5.0","html_url":"https://example.invalid/5","draft":false,
+   "prerelease":false,"body":"# Screepub 0.5.0\\n\\nOlder.","assets":[]}
+]
+"""
+do {
+    let decoded = try UpdateCheck.candidates(from: Data(releasesJSON.utf8))
+    check(decoded.count == 2, "decoding reads every release in the array")
+    check(decoded.first?.body?.contains("Newer.") == true,
+          "the release body is decoded, not dropped")
+    check(decoded.first?.dmgURL != nil, "the .dmg asset is found")
+    check(decoded.last?.dmgURL == nil, "a release with no assets has no dmgURL")
+} catch {
+    check(false, "decoding valid release JSON threw: \(error)")
+}
+
+do {
+    _ = try UpdateCheck.candidates(from: Data("not json".utf8))
+    check(false, "malformed JSON should throw")
+} catch UpdateCheckError.malformedResponse {
+    check(true, "malformed JSON throws malformedResponse")
+} catch {
+    check(false, "wrong error for malformed JSON: \(error)")
+}
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
