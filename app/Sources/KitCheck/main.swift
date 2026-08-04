@@ -1284,5 +1284,66 @@ do {
     check(false, "wrong error for malformed JSON: \(error)")
 }
 
+// — Release notes parsing —
+// The committed 0.5.0 notes are the fixture because release.yml publishes
+// that exact file as the GitHub release body.
+let notesFixture = repoRoot.appendingPathComponent("docs/releases/0.5.0.md")
+if let markdown = try? String(contentsOf: notesFixture, encoding: .utf8) {
+    let blocks = ReleaseNotes.parse(markdown)
+
+    var sections = 0, bullets = 0, paragraphs = 0, asides = 0
+    var leads: [String] = []
+    for block in blocks {
+        switch block {
+        case .section: sections += 1
+        case .bullet(let lead, _): bullets += 1; if let lead { leads.append(lead) }
+        case .paragraph: paragraphs += 1
+        case .aside: asides += 1
+        }
+    }
+    check(sections >= 1, "parses ## headings into sections")
+    check(bullets >= 1, "parses - lines into bullets")
+    check(paragraphs >= 1, "parses prose into paragraphs")
+    check(asides == 1, "parses the trailing italic note into an aside")
+
+    check(leads.contains("No more orphaned lines."),
+          "a bold lead becomes the bullet's lead, without asterisks")
+
+    let titleText = blocks.contains { block in
+        if case .section(let t) = block { return t.contains("Screepub 0.5.0") }
+        if case .paragraph(let t) = block { return t.contains("# Screepub") }
+        return false
+    }
+    check(!titleText, "the # title line produces no block")
+
+    // No text lost. Every word in the source, minus markdown punctuation and
+    // the dropped title, must survive into some block.
+    func words(_ s: String) -> Set<String> {
+        Set(s.replacingOccurrences(of: "*", with: " ")
+             .replacingOccurrences(of: "#", with: " ")
+             .replacingOccurrences(of: "-", with: " ")
+             .split(whereSeparator: { $0 == " " || $0.isNewline })
+             .map(String.init))
+    }
+    var rendered = ""
+    for block in blocks {
+        switch block {
+        case .section(let t): rendered += " " + t
+        case .bullet(let lead, let body): rendered += " " + (lead ?? "") + " " + body
+        case .paragraph(let t): rendered += " " + t
+        case .aside(let t): rendered += " " + t
+        }
+    }
+    let sourceWords = words(markdown).subtracting(["Screepub", "0.5.0"])
+    let missing = sourceWords.subtracting(words(rendered))
+    check(missing.isEmpty, "no text is lost in parsing (missing: \(missing.sorted().prefix(5)))")
+} else {
+    check(false, "could not read the 0.5.0 notes fixture")
+}
+
+check(ReleaseNotes.parse("").isEmpty, "empty input parses to no blocks")
+check(ReleaseNotes.parse("Mystery: [a link](x) and `code`.").count == 1,
+      "unrecognized syntax degrades to one paragraph rather than vanishing")
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
