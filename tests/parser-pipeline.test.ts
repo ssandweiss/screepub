@@ -192,3 +192,81 @@ describe('page furniture between a cue and its dialogue', () => {
     expect(act!.type).toBe('action');
   });
 });
+
+describe('a speech split by a page boundary is one speech', () => {
+  // Device-confirmed on a Kindle: a speech spanning a page in the SOURCE pdf
+  // stayed two elements, so the book rendered "...at the top or the" and
+  // "bottom of a page..." as two paragraphs with a hard break mid-sentence.
+  //
+  // The earlier furniture fix gave both halves the right speaker. It never
+  // merged their TEXT. Registry 8's rejoin only fires when the script prints
+  // (MORE)/(CONT'D); celtx does not, and shows 9 of these seams.
+  function speechAcrossAPage(): RawLine[] {
+    return [
+      line('ODILE', 44, 200, 1),
+      line('Speech nineteen. If this line sits alone at the top or the', 29, 188, 1),
+      line('13.', 87, 756, 2),
+      line('bottom of a page, the keep failed.', 29, 720, 2),
+    ];
+  }
+
+  test('the halves merge into a single dialogue element', () => {
+    const { elements } = parseLines(speechAcrossAPage());
+    const speeches = elements.filter((e) => e.type === 'dialogue');
+    expect(speeches.length).toBe(1);
+    expect(speeches[0].text).toBe(
+      'Speech nineteen. If this line sits alone at the top or the bottom of a page, the keep failed.',
+    );
+  });
+
+  test('the merged speech keeps its speaker', () => {
+    const { elements } = parseLines(speechAcrossAPage());
+    expect(elements.find((e) => e.type === 'dialogue')?.character).toBe('ODILE');
+  });
+
+  test('two DIFFERENT speakers across a page are NOT merged', () => {
+    // The merge must key on the character, or a page break between two
+    // people's lines would fuse them into one speech.
+    const { elements } = parseLines([
+      line('ODILE', 44, 200, 1),
+      line('Her line.', 29, 188, 1),
+      line('13.', 87, 756, 2),
+      line('WREN', 44, 720, 2),
+      line('His line.', 29, 708, 2),
+    ]);
+    const speeches = elements.filter((e) => e.type === 'dialogue');
+    expect(speeches.length).toBe(2);
+    expect(speeches.map((s) => s.character)).toEqual(['ODILE', 'WREN']);
+  });
+
+  test('two paragraphs of one speech on the SAME page stay separate', () => {
+    // A speech may legitimately hold two paragraphs. They arrive as two
+    // dialogue elements on one page, and merging them would destroy a break
+    // the writer put there. Only a page turn splits a paragraph in half.
+    const { elements } = parseLines([
+      line('ODILE', 44, 300, 1),
+      line('First paragraph of the speech.', 29, 288, 1),
+      line('Second paragraph, deliberately separate.', 29, 250, 1),
+    ]);
+    expect(elements.filter((e) => e.type === 'dialogue').length).toBe(2);
+  });
+
+  test('the merge does not reach across an ACTION line', () => {
+    // Only page furniture is transparent. Real content between two speeches
+    // means they are genuinely separate.
+    //
+    // Note what the parser already does here, which this test pins rather
+    // than changes: action RESETS the speaker, so the line after it is not
+    // dialogue at all. The guard that matters is that the first speech does
+    // not absorb anything past the action line.
+    const { elements } = parseLines([
+      line('ODILE', 44, 200, 1),
+      line('First half.', 29, 188, 1),
+      line('She crosses to the window.', 18, 176, 1),
+      line('Second half.', 29, 164, 1),
+    ]);
+    const speeches = elements.filter((e) => e.type === 'dialogue');
+    expect(speeches.length).toBe(1);
+    expect(speeches[0].text).toBe('First half.');
+  });
+});

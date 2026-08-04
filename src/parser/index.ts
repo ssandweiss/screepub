@@ -69,12 +69,84 @@ export function parseLines(lines: RawLine[]): ParsedScreenplay {
   // is a 1:1 map), so blocks[i] still pairs with suppressed[i].
   rescueCues(suppressed, blocks);
 
-  // Step 6: Build metadata
-  const characters = extractCharacters(suppressed);
-  const scenes = extractScenes(suppressed);
-  const pageCount = Math.max(...suppressed.map((el) => el.pageNum), 1);
+  // Step 5.7: a speech split by a page boundary is ONE speech.
+  //
+  // When a speech runs over a page in the source PDF, its halves arrive as
+  // two dialogue elements with printed page furniture between them. Giving
+  // them the same speaker (see the page-number transparency above) is not
+  // enough: they still serialize as two fountain lines and render as two
+  // paragraphs, so the book shows a hard break mid-sentence. Device-confirmed
+  // on a Kindle.
+  //
+  // Registry 8's (MORE)/(CONT'D) rejoin only fires when the script PRINTS
+  // that furniture. Final Draft and Highland do; celtx does not, and shows 9
+  // of these seams. This is the case that rejoin cannot see.
+  //
+  // Must run AFTER rescueCues: steps 4 through 5.6 are length-preserving so
+  // blocks[i] still pairs with suppressed[i], and this pass is the first that
+  // changes the element count.
+  const merged = mergeSplitSpeeches(suppressed);
 
-  return { elements: suppressed, characters, scenes, pageCount };
+  // Step 6: Build metadata
+  const characters = extractCharacters(merged);
+  const scenes = extractScenes(merged);
+  const pageCount = Math.max(...merged.map((el) => el.pageNum), 1);
+
+  return { elements: merged, characters, scenes, pageCount };
+}
+
+/**
+ * Join the halves of a speech that a page boundary split in two.
+ *
+ * Two dialogue elements merge only when they name the SAME character and
+ * nothing but page furniture sits between them. Keying on the character
+ * matters: a page break between two people's lines would otherwise fuse
+ * their speeches into one. Anything real in between (action, a heading, a
+ * new cue) ends the run, so this can only rejoin what one page turn
+ * separated.
+ *
+ * The furniture elements are kept, not dropped: `showPageMarkers` (registry
+ * 13a) re-surfaces them, and this pass has no business deciding that.
+ */
+function mergeSplitSpeeches(elements: ScreenplayElement[]): ScreenplayElement[] {
+  const out: ScreenplayElement[] = [];
+  // The last dialogue element pushed, and whether only furniture has been
+  // seen since. Reset by anything that is neither.
+  let openSpeech: ScreenplayElement | null = null;
+
+  for (const el of elements) {
+    if (el.type === 'page-number') {
+      out.push(el);
+      continue;
+    }
+
+    if (
+      el.type === 'dialogue' &&
+      openSpeech !== null &&
+      el.character !== undefined &&
+      el.character === openSpeech.character &&
+      // ONLY across a page boundary. A speech may legitimately hold two
+      // paragraphs separated by a blank line, and those arrive as two
+      // dialogue elements on the SAME page. Merging those would destroy a
+      // break the writer put there. The defect this fixes is specifically a
+      // page turn cutting one paragraph in half.
+      el.pageNum !== openSpeech.pageNum
+    ) {
+      // A source line break inside one speech is a wrap, not a paragraph:
+      // join with a space so the sentence reads continuously.
+      openSpeech.text = `${openSpeech.text} ${el.text}`;
+      if (openSpeech.styledText !== undefined || el.styledText !== undefined) {
+        openSpeech.styledText =
+          `${openSpeech.styledText ?? openSpeech.text} ${el.styledText ?? el.text}`;
+      }
+      continue;
+    }
+
+    out.push(el);
+    openSpeech = el.type === 'dialogue' ? el : null;
+  }
+
+  return out;
 }
 
 // attachSceneNumbers lives in classify.ts — it shares the private
