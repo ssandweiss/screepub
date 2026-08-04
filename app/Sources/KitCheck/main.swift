@@ -1159,6 +1159,22 @@ do {
 }
 
 do {
+    // The newest release sits in the MIDDLE of the input array, not first
+    // or last. That defeats a naive `.first` (picks v0.5.0) AND a naive
+    // `.last`-after-reversal fix (picks v0.6.0) — only an actual sort by
+    // version, not by position, lands on v0.9.0 here.
+    let picked = try UpdateCheck.select(
+        releases: [candidate("v0.5.0"), candidate("v0.9.0"), candidate("v0.6.0")],
+        currentVersion: "0.4.2"
+    )
+    check(picked?.version == "0.9.0", "selection finds the newest release when it's not first in the input")
+    check(picked?.notes.map(\.version) == ["0.9.0", "0.6.0", "0.5.0"],
+          "notes stay newest-first regardless of input order")
+} catch {
+    check(false, "scrambled-order selection threw unexpectedly: \(error)")
+}
+
+do {
     let picked = try UpdateCheck.select(
         releases: [candidate("v0.7.0", draft: true),
                    candidate("v0.6.5", prerelease: true),
