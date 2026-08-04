@@ -1,15 +1,62 @@
 import Foundation
 
+/// One version's notes, exactly as published.
+public struct ReleaseNote: Equatable, Sendable {
+    public let version: String
+    public let markdown: String
+
+    public init(version: String, markdown: String) {
+        self.version = version
+        self.markdown = markdown
+    }
+}
+
+/// A release as `select` sees it. GitHub's JSON shape stays private in
+/// `GitHubRelease`; this is the public seam so selection can be tested
+/// without a network and without exposing the wire format.
+public struct ReleaseCandidate: Equatable, Sendable {
+    public let tag: String
+    public let notesURL: URL
+    public let dmgURL: URL?
+    public let body: String?
+    public let isDraft: Bool
+    public let isPrerelease: Bool
+
+    public init(
+        tag: String,
+        notesURL: URL,
+        dmgURL: URL?,
+        body: String?,
+        isDraft: Bool = false,
+        isPrerelease: Bool = false
+    ) {
+        self.tag = tag
+        self.notesURL = notesURL
+        self.dmgURL = dmgURL
+        self.body = body
+        self.isDraft = isDraft
+        self.isPrerelease = isPrerelease
+    }
+}
+
 /// A release newer than the one running.
 public struct AvailableUpdate: Equatable, Sendable {
     public let version: String
     public let downloadURL: URL
     public let releaseNotesURL: URL
+    /// Every version newer than the installed one, newest first.
+    public let notes: [ReleaseNote]
 
-    public init(version: String, downloadURL: URL, releaseNotesURL: URL) {
+    public init(
+        version: String,
+        downloadURL: URL,
+        releaseNotesURL: URL,
+        notes: [ReleaseNote] = []
+    ) {
         self.version = version
         self.downloadURL = downloadURL
         self.releaseNotesURL = releaseNotesURL
+        self.notes = notes
     }
 }
 
@@ -123,6 +170,42 @@ public enum UpdateCheck {
             pre = nil
         }
         return (core.split(separator: ".").map { Int($0) ?? 0 }, pre)
+    }
+
+    // MARK: - Choosing
+
+    /// Picks the update to offer and the notes to show with it. Pure: no
+    /// network, no clock. Drafts and prereleases are GitHub's own flags on
+    /// the release, which is a different thing from a semver pre-release
+    /// tag inside the version string; `isNewer` handles the latter.
+    public static func select(
+        releases: [ReleaseCandidate],
+        currentVersion: String
+    ) throws -> AvailableUpdate? {
+        let newer = releases
+            .filter { !$0.isDraft && !$0.isPrerelease }
+            .filter { isNewer($0.tag, than: currentVersion) }
+            // Sorted with the same comparison used to filter, rather than
+            // trusting the order GitHub returned.
+            .sorted { isNewer($0.tag, than: $1.tag) }
+
+        guard let newest = newer.first else { return nil }
+        guard let dmg = newest.dmgURL else {
+            throw UpdateCheckError.noDownloadableAsset
+        }
+
+        return AvailableUpdate(
+            version: normalized(newest.tag),
+            downloadURL: dmg,
+            releaseNotesURL: newest.notesURL,
+            notes: newer.map {
+                ReleaseNote(
+                    version: normalized($0.tag),
+                    markdown: $0.body?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                )
+            }
+        )
     }
 
     // MARK: - Asking GitHub

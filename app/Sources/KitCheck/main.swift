@@ -1126,5 +1126,83 @@ if Engine.binaryURL() == nil {
     }
 }
 
+// — Update selection —
+// Pure over ReleaseCandidate, so every rule below is checked without a
+// network. GitHubRelease stays private; this is the seam kit-check can reach.
+func candidate(
+    _ tag: String,
+    dmg: Bool = true,
+    body: String? = "notes",
+    draft: Bool = false,
+    prerelease: Bool = false
+) -> ReleaseCandidate {
+    ReleaseCandidate(
+        tag: tag,
+        notesURL: URL(string: "https://example.invalid/\(tag)")!,
+        dmgURL: dmg ? URL(string: "https://example.invalid/\(tag).dmg")! : nil,
+        body: body,
+        isDraft: draft,
+        isPrerelease: prerelease
+    )
+}
+
+do {
+    let picked = try UpdateCheck.select(
+        releases: [candidate("v0.6.0"), candidate("v0.5.0"), candidate("v0.4.2")],
+        currentVersion: "0.4.2"
+    )
+    check(picked?.version == "0.6.0", "selection takes the newest release")
+    check(picked?.notes.map(\.version) == ["0.6.0", "0.5.0"],
+          "notes cover every version newer than the installed one")
+} catch {
+    check(false, "selection threw unexpectedly: \(error)")
+}
+
+do {
+    let picked = try UpdateCheck.select(
+        releases: [candidate("v0.7.0", draft: true),
+                   candidate("v0.6.5", prerelease: true),
+                   candidate("v0.6.0")],
+        currentVersion: "0.4.2"
+    )
+    check(picked?.version == "0.6.0", "drafts and prereleases are skipped")
+    check(picked?.notes.count == 1, "skipped releases contribute no notes")
+} catch {
+    check(false, "draft/prerelease selection threw: \(error)")
+}
+
+do {
+    let none = try UpdateCheck.select(
+        releases: [candidate("v0.4.2"), candidate("v0.4.1")],
+        currentVersion: "0.4.2"
+    )
+    check(none == nil, "nothing newer means no update")
+} catch {
+    check(false, "up-to-date selection threw: \(error)")
+}
+
+do {
+    _ = try UpdateCheck.select(
+        releases: [candidate("v0.6.0", dmg: false)],
+        currentVersion: "0.4.2"
+    )
+    check(false, "a newest release with no .dmg should throw")
+} catch UpdateCheckError.noDownloadableAsset {
+    check(true, "a newest release with no .dmg throws noDownloadableAsset")
+} catch {
+    check(false, "wrong error for a missing .dmg: \(error)")
+}
+
+do {
+    let picked = try UpdateCheck.select(
+        releases: [candidate("v0.6.0", body: nil)],
+        currentVersion: "0.4.2"
+    )
+    check(picked?.notes.first?.markdown == "",
+          "a release with no body still contributes an empty note")
+} catch {
+    check(false, "nil-body selection threw: \(error)")
+}
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
