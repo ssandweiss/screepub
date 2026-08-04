@@ -142,3 +142,53 @@ describe('scene numbers vs page numbers', () => {
     expect(elements.some((e) => e.type === 'page-number' && e.text === '2.')).toBe(true);
   });
 });
+
+describe('page furniture between a cue and its dialogue', () => {
+  // A cue as the LAST line of a page, its speech resuming on the next page,
+  // with the printed page number in between. Found on a real Kindle: speech
+  // thirty-seven of the proof sheet rendered as "BUNNY Speech thirty-seven."
+  // in one run instead of a cue and a speech.
+  //
+  // Page furniture is stripped from the output, so it must not influence
+  // structure. Letting it reset the speaker breaks the speech in half.
+  function cueStrandedAtPageEnd(): RawLine[] {
+    return [
+      line('BUNNY', 44, 72, 1),        // last line of page 1
+      line('13.', 87, 756, 2),         // printed page number, top of page 2
+      line('Speech thirty-seven. Short.', 29, 720, 2),
+      line('CASSIUS', 44, 696, 2),
+      line('And the reply.', 29, 684, 2),
+    ];
+  }
+
+  test('dialogue after the page number still belongs to the cue', () => {
+    const { elements } = parseLines(cueStrandedAtPageEnd());
+    const speech = elements.find((e) => e.text.startsWith('Speech thirty-seven'));
+    expect(speech).toBeDefined();
+    expect(speech!.type).toBe('dialogue');
+    expect(speech!.character).toBe('BUNNY');
+  });
+
+  test('the cue itself still classifies as a character', () => {
+    const { elements } = parseLines(cueStrandedAtPageEnd());
+    expect(elements.find((e) => e.text === 'BUNNY')?.type).toBe('character');
+  });
+
+  test('the page number is still stripped', () => {
+    const { elements } = parseLines(cueStrandedAtPageEnd());
+    expect(elements.find((e) => e.text === '13.')?.type).toBe('page-number');
+  });
+
+  test('furniture does not invent a speaker where there was none', () => {
+    // Action after a page number must stay action: transparency must not
+    // become "attach anything that follows furniture to the last speaker".
+    const { elements } = parseLines([
+      line('BUNNY', 44, 72, 1),
+      line('Her line.', 29, 60, 1),
+      line('13.', 87, 756, 2),
+      line('She crosses to the window.', 18, 720, 2),
+    ]);
+    const act = elements.find((e) => e.text.startsWith('She crosses'));
+    expect(act!.type).toBe('action');
+  });
+});
