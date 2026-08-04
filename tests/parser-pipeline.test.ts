@@ -94,3 +94,101 @@ describe('mini-slugs and the recurrence suppressor', () => {
     expect([...typesOf(pages(20, 'LATER', [4, 9, 15]), 'LATER')]).toEqual(['mini-slug']);
   });
 });
+
+describe('scene numbers vs page numbers', () => {
+  // Both arrive as `page-number` elements, because a standalone shooting-script
+  // scene number is deliberately typed that way so it stays hidden
+  // (classify.ts, "Shooting script scene numbers"). attachSceneNumbers then
+  // promotes it onto the following heading.
+  //
+  // The trap: a BARE page number like "1." is caught by PAGE_NUMBER_BARE at
+  // priority 1 and is textually indistinguishable from a scene number, so any
+  // page that OPENS with a scene heading used to donate its page number to
+  // that scene. Ordinary scripts do that constantly.
+
+  function pageOpeningOnHeading(numberText: string): RawLine[] {
+    return [
+      line(numberText, 87, 740, 2), // top-right gutter, first thing on page 2
+      line('INT. ARCHIVE - NIGHT', 18, 700, 2),
+      line('Someone is already here.', 18, 676, 2),
+      line('BUNNY', 44, 640, 2),
+      line('You came back.', 26, 628, 2),
+    ];
+  }
+
+  test('a bare page number is NOT absorbed as a scene number', () => {
+    const { elements } = parseLines(pageOpeningOnHeading('2.'));
+    const scene = elements.find((e) => e.type === 'scene');
+    expect(scene).toBeDefined();
+    expect(scene!.sceneNumber).toBeUndefined();
+  });
+
+  test('a shooting-script scene number IS still attached', () => {
+    // The documented path must keep working: this is why the rule exists.
+    const { elements } = parseLines(pageOpeningOnHeading('1A.'));
+    const scene = elements.find((e) => e.type === 'scene');
+    expect(scene).toBeDefined();
+    expect(scene!.sceneNumber).toBe('1A.');
+  });
+
+  test('a compound shooting-script number is still attached', () => {
+    const { elements } = parseLines(pageOpeningOnHeading('2.2.'));
+    const scene = elements.find((e) => e.type === 'scene');
+    expect(scene!.sceneNumber).toBe('2.2.');
+  });
+
+  test('the page number is still stripped from the body either way', () => {
+    const { elements } = parseLines(pageOpeningOnHeading('2.'));
+    expect(elements.some((e) => e.type === 'page-number' && e.text === '2.')).toBe(true);
+  });
+});
+
+describe('page furniture between a cue and its dialogue', () => {
+  // A cue as the LAST line of a page, its speech resuming on the next page,
+  // with the printed page number in between. Found on a real Kindle: speech
+  // thirty-seven of the proof sheet rendered as "BUNNY Speech thirty-seven."
+  // in one run instead of a cue and a speech.
+  //
+  // Page furniture is stripped from the output, so it must not influence
+  // structure. Letting it reset the speaker breaks the speech in half.
+  function cueStrandedAtPageEnd(): RawLine[] {
+    return [
+      line('BUNNY', 44, 72, 1),        // last line of page 1
+      line('13.', 87, 756, 2),         // printed page number, top of page 2
+      line('Speech thirty-seven. Short.', 29, 720, 2),
+      line('CASSIUS', 44, 696, 2),
+      line('And the reply.', 29, 684, 2),
+    ];
+  }
+
+  test('dialogue after the page number still belongs to the cue', () => {
+    const { elements } = parseLines(cueStrandedAtPageEnd());
+    const speech = elements.find((e) => e.text.startsWith('Speech thirty-seven'));
+    expect(speech).toBeDefined();
+    expect(speech!.type).toBe('dialogue');
+    expect(speech!.character).toBe('BUNNY');
+  });
+
+  test('the cue itself still classifies as a character', () => {
+    const { elements } = parseLines(cueStrandedAtPageEnd());
+    expect(elements.find((e) => e.text === 'BUNNY')?.type).toBe('character');
+  });
+
+  test('the page number is still stripped', () => {
+    const { elements } = parseLines(cueStrandedAtPageEnd());
+    expect(elements.find((e) => e.text === '13.')?.type).toBe('page-number');
+  });
+
+  test('furniture does not invent a speaker where there was none', () => {
+    // Action after a page number must stay action: transparency must not
+    // become "attach anything that follows furniture to the last speaker".
+    const { elements } = parseLines([
+      line('BUNNY', 44, 72, 1),
+      line('Her line.', 29, 60, 1),
+      line('13.', 87, 756, 2),
+      line('She crosses to the window.', 18, 720, 2),
+    ]);
+    const act = elements.find((e) => e.text.startsWith('She crosses'));
+    expect(act!.type).toBe('action');
+  });
+});

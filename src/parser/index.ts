@@ -33,7 +33,17 @@ export function parseLines(lines: RawLine[]): ParsedScreenplay {
   for (const block of blocks) {
     const element = classifyBlock(block, prevElement, nextId);
     elements.push(element);
-    prevElement = element;
+    // Page furniture is TRANSPARENT to classification context. A cue can be
+    // the last line of a page with its speech resuming after the printed page
+    // number, and letting that number reset the speaker splits the speech:
+    // the continuation classifies as action and the cue is left with nothing
+    // under it. Device-confirmed on a Kindle (proof sheet, speech 37).
+    //
+    // This is not "attach whatever follows furniture to the last speaker":
+    // classifyBlock still decides by indent band, so action after a page
+    // number stays action. It only stops furniture from erasing the context
+    // that a genuine continuation line depends on.
+    if (element.type !== 'page-number') prevElement = element;
   }
 
   // Step 4: Attach scene numbers to scene headings (shooting scripts)

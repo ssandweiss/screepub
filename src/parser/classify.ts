@@ -108,8 +108,15 @@ export function classifyBlock(
   // Shooting script scene numbers (e.g., "2.2.", "1A.", "42A") — classified as
   // page-number so they're hidden. The parser pipeline attaches them to the
   // following scene heading element as `sceneNumber`.
+  //
+  // Carrying `sceneNumber` here is what makes attachSceneNumbers able to tell
+  // these apart from ordinary page numbers LATER. It cannot re-derive the
+  // difference from the text: PAGE_NUMBER_BARE above already consumed "1." and
+  // "42.", and a bare number is a scene number or a page number depending only
+  // on which branch classified it. Without this marker, every page that opens
+  // on a scene heading donates its page number to that scene.
   if (SCENE_NUMBER.test(trimmed) && trimmed.length <= 10) {
-    return { ...base, type: 'page-number' };
+    return { ...base, type: 'page-number', sceneNumber: trimmed };
   }
 
   // Priority 1.5: production-draft furniture (revision slugs, draft stamps,
@@ -185,12 +192,17 @@ export function classifyBlock(
  */
 export function attachSceneNumbers(elements: ScreenplayElement[]): void {
   for (let i = 0; i < elements.length - 1; i++) {
+    // Only a page-number element that classifyBlock MARKED as a scene number
+    // is promoted. Re-testing SCENE_NUMBER here would match a bare page
+    // number ("1.", "42.") just as well, because by this point the two are
+    // the same type carrying the same shape of text, and every page opening
+    // on a scene heading would hand its page number to that scene.
     if (
       elements[i].type === 'page-number' &&
       elements[i + 1].type === 'scene' &&
-      SCENE_NUMBER.test(elements[i].text.trim())
+      elements[i].sceneNumber !== undefined
     ) {
-      elements[i + 1].sceneNumber = elements[i].text.trim();
+      elements[i + 1].sceneNumber = elements[i].sceneNumber;
     }
   }
 }

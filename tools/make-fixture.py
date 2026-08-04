@@ -15,6 +15,7 @@ per inch, 6 lines per inch. Indents matter: Screepub classifies elements by
 horizontal position, so a demo PDF with sloppy geometry would parse wrong
 and prove nothing.
 """
+import re
 import textwrap
 
 PT = 72.0
@@ -24,12 +25,27 @@ TOP = PAGE_H - 1.0 * PT        # 1" top margin
 BOTTOM = 1.0 * PT
 LINES_PER_PAGE = 55
 
+# Base-14 Type1 fonts, so nothing is embedded and the generator stays a
+# pure string builder. Verified against pdf.js: it reports these PostScript
+# names through commonObjs, which is what src/parser/extract.ts regexes for
+# /bold|black|heavy/ and /italic|oblique/.
+FONTS = {"F1": "Courier", "F2": "Courier-Bold",
+         "F3": "Courier-Oblique", "F4": "Courier-BoldOblique"}
+
+CHAR_W = 7.2                   # 12pt Courier advance: 0.1" at 10 chars/inch
+
 X = {                          # inches from left edge
     "scene":  1.5, "action": 1.5, "dialogue": 2.5,
-    "paren":  3.1, "character": 3.7, "trans": 1.5, "pgnum": 7.4,
+    # Transitions are RIGHT-flush in a real script, and the classifier keys on
+    # that: TRANSITION_MIN is indent 55, so a left-flush "CUT TO:" is action,
+    # not a transition. At 1.5" neither fixture had ever produced a single
+    # transition element while appearing to contain four.
+    "paren":  3.1, "character": 3.7, "trans": 6.0, "pgnum": 7.4,
+    "mini":   1.5,
 }
 WRAP = {"scene": 60, "action": 60, "dialogue": 35, "paren": 24,
-        "trans": 60, "character": 38}   # cues never wrap in practice
+        "trans": 60, "character": 38,   # cues never wrap in practice
+        "mini": 60}
 
 # (type, text) — blank string means a blank line
 S = [
@@ -147,6 +163,93 @@ def esc(s):
     return s.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
 
 
+# --- inline markup, for the torture kind ---------------------------------
+
+MARKUP = re.compile(r"\{(/?)([biu])\}")
+
+
+def parse_markup(s):
+    """'a {b}bold{/b} c' -> ('a bold c', [(2, 6, 'b')]).
+
+    Offsets index the PLAIN text, so wrapping can slice by character and
+    re-derive styles without ever seeing a marker. Unbalanced markers raise:
+    a typo buried in 14 sheets of content must fail at generation rather
+    than produce a fixture that quietly tests nothing.
+    """
+    plain, spans, open_at, pos, out_len = [], [], {}, 0, 0
+    for m in MARKUP.finditer(s):
+        plain.append(s[pos:m.start()])
+        out_len += m.start() - pos
+        closing, style = m.group(1), m.group(2)
+        if closing:
+            if style not in open_at:
+                raise ValueError(f"unmatched {{/{style}}} in {s!r}")
+            spans.append((open_at.pop(style), out_len, style))
+        else:
+            if style in open_at:
+                raise ValueError(f"nested {{{style}}} in {s!r}")
+            open_at[style] = out_len
+        pos = m.end()
+    plain.append(s[pos:])
+    if open_at:
+        raise ValueError(f"unclosed {sorted(open_at)} in {s!r}")
+    return "".join(plain), spans
+
+
+def _words(plain):
+    """[(start, end)] for each space-delimited word, as offsets into plain."""
+    out, i, n = [], 0, len(plain)
+    while i < n:
+        while i < n and plain[i] == " ":
+            i += 1
+        if i >= n:
+            break
+        j = i
+        while j < n and plain[j] != " ":
+            j += 1
+        out.append((i, j))
+        i = j
+    return out
+
+
+def _runs(plain, spans, start, end):
+    """Slice [start, end) into styled runs, merging equal-styled neighbours."""
+    runs = []
+    for i in range(start, end):
+        st = sorted(s for (a, b, s) in spans if a <= i < b)
+        if runs and runs[-1][0] == st:
+            runs[-1][1] += plain[i]
+        else:
+            runs.append([st, plain[i]])
+    return [{"styles": st, "text": txt} for st, txt in runs]
+
+
+def wrap_spans(plain, spans, width):
+    """Greedy word wrap that keeps style spans intact across line breaks.
+
+    -> list of lines, each a list of {styles, text} runs.
+
+    Deliberately NOT textwrap. textwrap takes a plain string, so markup has
+    to be either stripped (losing the styles) or left in (counting marker
+    characters as text width, and splitting a marker across a line). The
+    three original fixture kinds keep calling textwrap, untouched, which is
+    what lets the byte-stability guard stay meaningful.
+    """
+    words = _words(plain)
+    if not words:
+        return [[{"styles": [], "text": ""}]]
+    lines = []
+    line_start, line_end = words[0]
+    for ws, we in words[1:]:
+        if we - line_start <= width:
+            line_end = we
+        else:
+            lines.append(_runs(plain, spans, line_start, line_end))
+            line_start, line_end = ws, we
+    lines.append(_runs(plain, spans, line_start, line_end))
+    return lines
+
+
 def layout():
     """-> list of pages; each page is a list of (x_inches, text)."""
     flowed = []
@@ -173,6 +276,175 @@ def layout():
     return pages
 
 
+def font_for(styles):
+    """Style set -> font resource key.
+
+    Underline is orthogonal: it is DRAWN, not selected, so it never changes
+    which font a run uses. That mirrors how PDFs actually carry underline,
+    which is why the parser cannot see it from font data alone (registry 9d).
+    """
+    s = set(styles) - {"u"}
+    if s == {"b", "i"}:
+        return "F4"
+    if s == {"b"}:
+        return "F2"
+    if s == {"i"}:
+        return "F3"
+    return "F1"
+
+
+def styled_row_ops(x_in, y, runs):
+    """-> (text operators, underline rectangles) for one laid-out line."""
+    ops, rects = [], []
+    x = x_in * PT
+    for run in runs:
+        text, styles = run["text"], run["styles"]
+        if text:
+            ops += [f"/{font_for(styles)} 12 Tf",
+                    f"1 0 0 1 {x:.2f} {y:.2f} Tm", f"({esc(text)}) Tj"]
+            if "u" in styles:
+                # A filled rectangle, not a stroked line: the rich-formatting
+                # spec's detector keys on a flat bbox (<= 2.5pt tall, >= 4pt
+                # wide) sitting in a band just under the baseline.
+                rects.append(f"0 g {x:.2f} {y - 2.0:.2f} "
+                             f"{len(text) * CHAR_W:.2f} 0.6 re f")
+        x += len(text) * CHAR_W
+    return ops, rects
+
+
+# Dual dialogue column geometry. The parser anchors a dual region on a line
+# holding TWO cue-shaped clusters, then partitions body lines by start-x
+# (registry 10a: the boundary starts at rightCueX - 13% and refines only
+# leftward). These indents put the right cue far enough right that the
+# learned boundary lands cleanly between the columns.
+DUAL_X = {
+    "left":  {"character": 2.2, "dialogue": 1.9, "paren": 2.4},
+    "right": {"character": 5.4, "dialogue": 5.1, "paren": 5.6},
+}
+DUAL_WRAP = 26
+
+
+def dual_rows(left, right):
+    """Two (kind, text) lists -> rows where both columns share a Y.
+
+    The cue lines of both columns MUST land on one Y, or the parser sees
+    two ordinary consecutive cues rather than a dual region.
+    """
+    def col(items, side):
+        out = []
+        for kind, text in items:
+            plain, spans = parse_markup(text)
+            for runs in wrap_spans(plain, spans, DUAL_WRAP):
+                out.append((DUAL_X[side][kind], runs))
+        return out
+
+    L, R = col(left, "left"), col(right, "right")
+    rows = []
+    for i in range(max(len(L), len(R))):
+        pair = []
+        if i < len(L):
+            pair.append(L[i])
+        if i < len(R):
+            pair.append(R[i])
+        rows.append(("multi", pair))
+    rows.append(None)
+    return rows, len(rows)
+
+
+def flow_torture(content):
+    """Lay torture content out into pages, honouring directives.
+
+      ("pagebreak", "")   start a new page
+      ("atline", n)       pad with blanks until the page is at line n
+      ("dual", L, R)      two-column simultaneous dialogue
+    """
+    pages, cur, n = [], [], 0
+
+    def flush():
+        nonlocal cur, n
+        if cur:
+            pages.append(cur)
+        cur, n = [], 0
+
+    for kind, *rest in content:
+        if kind == "pagebreak":
+            flush()
+            continue
+
+        if kind == "atline":
+            target = rest[0]
+            if n > target:
+                # Raising rather than overflowing is deliberate. Silently
+                # sliding past the anchor would turn the (MORE) test into a
+                # test of nothing the first time content above it grew by a
+                # sentence, and nothing would report it.
+                raise SystemExit(
+                    f"atline: page {len(pages) + 1} is already at line {n}, "
+                    f"cannot pad back to {target}. Content above it grew: "
+                    f"shorten it, or move the anchor.")
+            while n < target:
+                cur.append(None)
+                n += 1
+            continue
+
+        if kind == "dual":
+            rows, used = dual_rows(rest[0], rest[1])
+            if n + used > LINES_PER_PAGE:
+                flush()
+            cur.extend(rows)
+            n += used
+            continue
+
+        plain, spans = parse_markup(rest[0])
+        for runs in wrap_spans(plain, spans, WRAP[kind]):
+            if n >= LINES_PER_PAGE:
+                flush()
+            cur.append((X[kind], runs))
+            n += 1
+        # A cue and a parenthetical sit DIRECTLY above what they introduce:
+        # real scripts print no blank line there, and the geometry is the
+        # whole point of this fixture. Everything else gets its blank.
+        # (The inherited layout() blanks after every element; the parser
+        # tolerates it, but it is not what a real page looks like.)
+        if kind not in ("character", "paren") and n < LINES_PER_PAGE:
+            cur.append(None)
+            n += 1
+
+    flush()
+    return pages
+
+
+def torture_content_stream(rows, page_no):
+    """Like content_stream, but rows carry styled runs and may hold two
+    columns sharing one Y."""
+    text_ops, rects = ["BT", "/F1 12 Tf"], []
+    if page_no:
+        text_ops += [f"1 0 0 1 {X['pgnum']*PT:.2f} {PAGE_H - 0.5*PT:.2f} Tm",
+                     f"({page_no}.) Tj"]
+    y = TOP
+    for row in rows:
+        if row is not None:
+            if row[0] == "multi":
+                # KNOWN GAP: these two columns are emitted at correct
+                # x positions on a shared Y, but the parser still joins them
+                # into "BUNNY CASSIUS" rather than anchoring a dual region.
+                # clusterSplit's thresholds all pass by hand-calculation, so
+                # the cause is upstream of it and not yet identified.
+                # tests/torture.test.ts records the current behavior.
+                for x, runs in row[1]:
+                    ops, rs = styled_row_ops(x, y, runs)
+                    text_ops += ops
+                    rects += rs
+            else:
+                x, runs = row
+                ops, rs = styled_row_ops(x, y, runs)
+                text_ops += ops
+                rects += rs
+        y -= LINE
+    text_ops.append("ET")
+    return "\n".join(rects + text_ops)
+
+
 def content_stream(rows, page_no):
     out = ["BT", "/F1 12 Tf"]
     if page_no:                                   # page number, top right
@@ -188,9 +460,9 @@ def content_stream(rows, page_no):
     return "\n".join(out)
 
 
-def title_stream():
+def title_stream(table=None):
     out = ["BT", "/F1 12 Tf"]
-    for inches_down, text in TITLE:
+    for inches_down, text in (TITLE if table is None else table):
         x = (8.5 - len(text) / 10.0) / 2.0        # 10 chars/inch, centered
         y = PAGE_H - inches_down * PT
         out += [f"1 0 0 1 {x*PT:.2f} {y:.2f} Tm", f"({esc(text)}) Tj"]
@@ -260,14 +532,21 @@ def blank_stream():
 
 def build(path, streams):
     objs, n_pages = [], len(streams)
-    kids = " ".join(f"{4+2*i} 0 R" for i in range(n_pages))
+    # Objects: 1 catalog, 2 pages, then one per font, then page/content
+    # pairs. Every kind carries all four fonts even when it uses one, so
+    # the resource dict is identical across kinds and there is only one
+    # object-numbering scheme to reason about.
+    first_page_obj = 3 + len(FONTS)
+    kids = " ".join(f"{first_page_obj + 2*i} 0 R" for i in range(n_pages))
     objs.append("<< /Type /Catalog /Pages 2 0 R >>")
     objs.append(f"<< /Type /Pages /Kids [{kids}] /Count {n_pages} >>")
-    objs.append("<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>")
+    for key in FONTS:
+        objs.append(f"<< /Type /Font /Subtype /Type1 /BaseFont /{FONTS[key]} >>")
+    res = " ".join(f"/{k} {3+i} 0 R" for i, k in enumerate(FONTS))
     for s in streams:
         objs.append(
             f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_W:.0f} "
-            f"{PAGE_H:.0f}] /Resources << /Font << /F1 3 0 R >> >> "
+            f"{PAGE_H:.0f}] /Resources << /Font << {res} >> >> "
             f"/Contents {len(objs)+2} 0 R >>")
         objs.append(f"<< /Length {len(s)} >>\nstream\n{s}\nendstream")
 
@@ -294,9 +573,123 @@ KINDS = {
 }
 
 
+def _torture_content():
+    """Load tools/torture-content.py. It is data, kept in its own file so
+    the person editing 14 sheets of screenplay never has to read layout
+    code. The dash in the filename means it cannot be a normal import."""
+    import importlib.util
+    import pathlib
+    path = pathlib.Path(__file__).with_name("torture-content.py")
+    spec = importlib.util.spec_from_file_location("torture_content", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def torture_streams():
+    mod = _torture_content()
+    pages = flow_torture(mod.CONTENT)
+    return [title_stream(mod.TITLE)] + [
+        torture_content_stream(p, i + 1) for i, p in enumerate(pages)
+    ]
+
+
+KINDS["torture"] = torture_streams
+
+
+# --- layout as data, for tests -------------------------------------------
+# Page PLACEMENT is the thing most likely to rot silently: a speech written
+# to start at line 50 so it straddles a page break still satisfies every
+# output-shaped assertion at line 48, while proving nothing. These mirror
+# what the content streams draw, so an assertion about a line number is an
+# assertion about the actual PDF.
+
+def _title_rows(table):
+    out = []
+    for inches_down, text in table:
+        x = (8.5 - len(text) / 10.0) / 2.0
+        out.append({"line": int(inches_down * 6), "x": round(x, 3),
+                    "runs": [{"styles": [], "text": text}], "underline": False})
+    return out
+
+
+def _content_rows(rows):
+    out = []
+    for n, row in enumerate(rows):
+        if row is None:
+            continue
+        x, text = row
+        out.append({"line": n, "x": round(x, 3),
+                    "runs": [{"styles": [], "text": text}], "underline": False})
+    return out
+
+
+def _torture_rows(rows):
+    """Styled rows, including two-column ones, as flat data. Both columns of
+    a dual line report the SAME line number, which is the property that
+    makes them a dual region at all."""
+    out = []
+    for n, row in enumerate(rows):
+        if row is None:
+            continue
+        pairs = row[1] if row[0] == "multi" else [row]
+        for x, runs in pairs:
+            out.append({
+                "line": n,
+                "x": round(x, 3),
+                "runs": [{"styles": r["styles"], "text": r["text"]} for r in runs],
+                "underline": any("u" in r["styles"] for r in runs),
+            })
+    return out
+
+
+def layout_json(kind):
+    if kind == "torture":
+        mod = _torture_content()
+        pages = [{"page": 1, "rows": _title_rows(mod.TITLE)}]
+        for i, rows in enumerate(flow_torture(mod.CONTENT)):
+            pages.append({"page": i + 2, "rows": _torture_rows(rows)})
+        return pages
+    if kind != "screenplay":
+        # prose and blank have no line-addressable structure worth emitting:
+        # one is a wall of paragraphs, the other has no text operators at all.
+        return []
+    pages = [{"page": 1, "rows": _title_rows(TITLE)}]
+    for i, rows in enumerate(layout()):
+        pages.append({"page": i + 2, "rows": _content_rows(rows)})
+    return pages
+
+
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) != 3 or sys.argv[1] not in KINDS:
+    argv = sys.argv[1:]
+
+    if argv and argv[0] == "--atline-overflow-check":
+        # Proves the guard fires: asked to pad back to line 2 having already
+        # emitted well past it. Exits nonzero via SystemExit's message.
+        flow_torture([("action", "x " * 200), ("atline", 2)])
+        sys.exit("expected atline to raise, it did not")
+
+    if argv and argv[0] == "--wrap":
+        import json
+        plain, spans = parse_markup(argv[2])
+        print(json.dumps(wrap_spans(plain, spans, int(argv[1]))))
+        sys.exit(0)
+
+    if argv and argv[0] == "--parse-markup":
+        import json
+        plain, spans = parse_markup(argv[1])
+        print(json.dumps({"plain": plain, "spans": spans}))
+        sys.exit(0)
+
+    if argv and argv[0] == "--emit-layout":
+        if len(argv) != 2 or argv[1] not in KINDS:
+            sys.exit(f"usage: make-fixture.py --emit-layout <{'|'.join(KINDS)}>")
+        import json
+        print(json.dumps(layout_json(argv[1])))
+        sys.exit(0)
+
+    if len(argv) != 2 or argv[0] not in KINDS:
         sys.exit(f"usage: make-fixture.py <{'|'.join(KINDS)}> <out.pdf>")
-    kind, p = sys.argv[1], sys.argv[2]
+    kind, p = argv
     print(f"{build(p, KINDS[kind]())} pages -> {p}")

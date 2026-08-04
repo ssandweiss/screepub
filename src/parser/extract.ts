@@ -231,7 +231,17 @@ interface ClusterSplit {
  * the geometry looks like side-by-side text. Reliable only on short lines
  * (cue pairs) — long body lines close the gap, see the boundary pass. */
 function clusterSplit(items: TextItem[], pageWidth: number): ClusterSplit | null {
-  if (items.length < 2) return null;
+  // Drop whitespace-only items before measuring. pdf.js synthesizes a space
+  // item to BRIDGE a wide horizontal jump, and that filler is exactly as wide
+  // as the gap it spans: for a dual cue line it arrives as
+  //   ["BUNNY" x=158 w=36]  [" " x=194 w=194]  ["CASSIUS" x=389 w=50]
+  // so every adjacent gap measures zero, the largest-gap scan finds nothing,
+  // and a perfectly good two-column line never anchors a dual region.
+  // A whitespace item carries no text and contributes nothing to leftText or
+  // rightText, so removing it can only reveal the real gap, never invent one.
+  const solid = items.filter((it) => it.str.trim() !== '');
+  if (solid.length < 2) return null;
+  items = solid;
   let gapIdx = -1;
   let gapSize = 0;
   for (let i = 1; i < items.length; i++) {
@@ -317,7 +327,12 @@ function deinterleaveDualDialogue(
     const right: string[] = [split.rightText];
     i++;
     while (i < lines.length) {
-      const items = lines[i].items;
+      // Whitespace-only items dropped for the same reason as in clusterSplit:
+      // pdf.js's bridging space spans the WHOLE column gap, so it looks like a
+      // single item straddling the boundary and would end the region on the
+      // first body line. It carries no text, so nothing downstream loses
+      // anything (joinItems re-inserts spaces from the surviving gaps).
+      const items = lines[i].items.filter((it) => it.str.trim() !== '');
       const straddles = items.some(
         (it) => it.transform[4] < boundary - 6 && endX(it) > boundary + 6,
       );
