@@ -386,10 +386,13 @@ is live.
   speech under #8c), in which case that block moves too.
 - **Reference:** `docs/pagination-reference.md` §2, the break rules by
   element (that doc lands from branch `worktree-device-map`).
-- **Device verdict: pending 2026-07-30 —** does a transition ever still
-  start a page? The 2026-07-30 STK-web pass that settled #5a saw nothing
-  contrary, but transitions were not specifically checked — this slot
-  wants a deliberate look at a page whose seam lands near a CUT TO:.
+- **Device verdict 2026-08-03: HOLDS — no transition begins a page.**
+  Deliberate look, sideloaded KFX on the Kindle, torture fixture sheet 2
+  (CUT TO:, DISSOLVE TO:, SMASH CUT TO:). Worth recording that this is the
+  FIRST time the rule was ever exercised on a device: transitions sat at
+  the action margin in both committed fixtures until 2026-08-03, below
+  TRANSITION_MIN, so every earlier pass was looking at action elements that
+  merely read like transitions.
   The verdict lands in this entry.
 - **Code:** `src/epub/css.ts` (`p.transition`).
 
@@ -413,10 +416,19 @@ is live.
   ON, whole speeches are atomic and the dialogue arm is fully inert;
   the action arm is unaffected in every mode.
 - **App option:** "Print-style split minimums" (reader rail, Page group).
-- **Device verdict: pending —** next KFX pass. Test with a MULTI-paragraph
-  speech or a long action block, NOT a short speech: a short speech moves
-  whole because of #8b's keep, which would validate the wrong rule. Does
-  the tail hold 2+2, and OFF hold 1+1?
+- **Device verdict 2026-08-03: HOLDS — no stranded single lines.**
+  Sideloaded KFX on the Kindle, torture fixture sheets 9-14: 40 numbered
+  speeches, lengths cycling 1/2/4/3 lines, so breaks land inside speeches
+  rather than only between them. No single line of dialogue or action was
+  left alone at the top or bottom of any page.
+  **Scope, stated so nobody over-reads it:** the 4-line speeches are the
+  ones that carry this verdict, since a 1-2 line speech moves whole under
+  #8b's keep and would validate the wrong rule. They are single-paragraph,
+  so this confirms widows/orphans WITHIN a block; a multi-paragraph speech
+  spanning a break is still unproven. OFF (1+1) was not tested, and the
+  format matters: KFX only. AZW3 and MOBI ignore these properties, so a
+  sideload in either format would look identical whether the rule fired or
+  not.
 - **Code:** `src/options.ts`, `src/epub/css.ts`, app FormatSettings +
   ReaderRail.
 
@@ -723,10 +735,14 @@ is live.
 - **Honest scope:** this is a markup-level decision taken in the EPUB
   renderer, not a stylesheet knob and not an option. It is EPUB-only —
   the MOBI path still emits its table at any height.
-- **Device verdict: pending 2026-07-30 —** whether the table really does
-  push whole, and whether 12 lines is the right cut, both want the same
-  Kindle Previewer/KFX + Apple Books pass as #5a. The verdict lands in
-  this entry.
+- **Device verdict 2026-08-03: HOLDS — the fallback fires.** Sideloaded
+  KFX on the Kindle, torture fixture sheet 7, which carries the two cases
+  back to back: a short exchange rendered side by side as a table, and one
+  whose taller column passes 12 estimated lines rendered as two ordinary
+  sequential speeches. Both behaved as specified.
+  **Still open:** whether 12 is the RIGHT cut. This pass proves the
+  threshold fires, not that it fires in the right place, since only one
+  exchange either side of it was tried. Apple Books untested.
 - **Code:** `src/epub/html.ts` (`DUAL_SEQUENTIAL_LINE_THRESHOLD`,
   `EST_CHARS_PER_DUAL_LINE`, `dual_dialogue_end`).
 
