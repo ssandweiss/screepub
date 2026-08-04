@@ -191,6 +191,14 @@ jobs:
           # UpdateCheck.swift polls) returns the newest normal release.
           # A release candidate would become "the latest release" for
           # every user's updater the moment its tag pushed.
+          # Expanded below with the ${arr[@]+...} guard, never bare.
+          # The runner is macOS, whose bash is 3.2, where expanding an EMPTY
+          # array under `set -u` is an unbound-variable error rather than
+          # nothing at all. PRE is empty for every ordinary release, so the
+          # plain spelling fails on exactly the releases that matter and
+          # works on the prereleases used to test it. v0.5.0 was the first
+          # normal tag to reach this code and it died here, AFTER
+          # notarization, with the DMG already built.
           PRE=()
           [[ "$VERSION" == *-* ]] && PRE=(--prerelease)
 
@@ -219,7 +227,7 @@ jobs:
           # DMG, but it has already stamped its "last checked" clock, so a
           # user who checks in that window is told "no update" for 24h.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --title "Screepub $VERSION" --notes-file "$NOTES" "${PRE[@]}"
+            gh release create "$TAG" --draft --title "Screepub $VERSION" --notes-file "$NOTES" ${PRE[@]+"${PRE[@]}"}
           else
             gh release edit "$TAG" --title "Screepub $VERSION" --notes-file "$NOTES"
           fi
@@ -230,4 +238,4 @@ jobs:
             app/dist/screepub-cli-macos-x64.tar.gz \
             --clobber
 
-          gh release edit "$TAG" --draft=false "${PRE[@]}"
+          gh release edit "$TAG" --draft=false ${PRE[@]+"${PRE[@]}"}
