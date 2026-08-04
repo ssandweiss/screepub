@@ -1,0 +1,133 @@
+[
+  { "entry": "1", "title": "Continuous scene flow (no page break per scene)",
+    "covered": true, "page": 8, "side": "device",
+    "how": "saturation sheets run continuously with no forced break between scenes" },
+
+  { "entry": "2", "title": "Centered dialogue column, % geometry",
+    "covered": false,
+    "why": "renderer geometry every page exercises equally: no content could single it out. On the device checklist as a free look, and pinned by the CSS tests" },
+
+  { "entry": "2b", "title": "Cue & parenthetical alignment (option, default centered)",
+    "covered": true, "page": 4, "side": "device",
+    "how": "leading, mid-speech and stacked parentheticals under centered cues" },
+
+  { "entry": "3", "title": "Vertical rhythm between elements",
+    "covered": false,
+    "why": "renderer spacing, exercised identically by any content; the CSS tests own it" },
+
+  { "entry": "4", "title": "Relative-unit scaling (principle, not an option)",
+    "covered": false,
+    "why": "a principle, not a content behavior. No PDF content could exercise it" },
+
+  { "entry": "5a", "title": "Scene heading keeps its context (keep-with-next chain)",
+    "covered": true, "page": 8, "side": "device",
+    "how": "12 scene headings, several landing near page seams across the saturation run" },
+
+  { "entry": "5b", "title": "Mini-slugs, micro-headings not scenes",
+    "covered": true, "page": 2, "side": "both",
+    "how": "two mini-slugs inside a scene, asserted to type as mini-slug and to stay out of the scene list" },
+
+  { "entry": "5", "title": "Keep-with-next, minimal chain (v2)",
+    "covered": true, "page": 8, "side": "device",
+    "how": "the saturation run puts cue/speech chains against page seams repeatedly" },
+
+  { "entry": "6", "title": "Typeface & line height (v2)",
+    "covered": false,
+    "why": "renderer typography, identical for all content; on the device checklist as a free look" },
+
+  { "entry": "6b", "title": "Body text alignment, ragged-right by default",
+    "covered": true, "page": 8, "side": "device",
+    "how": "long action and dialogue paragraphs throughout, where justification would open visible gaps" },
+
+  { "entry": "16", "title": "Transitions never begin a page",
+    "covered": true, "page": 2, "side": "both",
+    "how": "CUT TO:, DISSOLVE TO: and SMASH CUT TO: at right-flush indent, asserted to type as transition" },
+
+  { "entry": "17", "title": "Print split minimums (option, default ON)",
+    "covered": true, "page": 8, "side": "device",
+    "how": "40 numbered speeches cycling 1/2/4/3 lines so breaks land inside speeches, not only between them" },
+
+  { "entry": "7", "title": "Right-margin revision stars, dropped",
+    "covered": true, "page": 2, "side": "source",
+    "how": "star-only items past 80% page width, which must not survive as action elements" },
+
+  { "entry": "8", "title": "(MORE) / (CONT'D) page-break rejoin",
+    "covered": true, "page": 5, "side": "source",
+    "how": "the MORE-ANCHOR speech is placed at line 44 so it straddles the sheet boundary" },
+
+  { "entry": "8a", "title": "(CONT'D) normalization (option, default auto)",
+    "covered": true, "page": 3, "side": "source",
+    "how": "a WREN (CONT'D) cue carrying its extension" },
+
+  { "entry": "8b", "title": "Cue keeps its first dialogue line (always on)",
+    "covered": true, "page": 8, "side": "device",
+    "how": "40 cue/speech pairs against page seams; also the defect speech 37 exposed" },
+
+  { "entry": "8c", "title": "Whole-speech keep (option, default OFF)",
+    "covered": false,
+    "why": "OFF by default, so the committed fixture never exercises it. Needs a second conversion with keepSpeechesWhole ON: the only registry entry still carrying a pending device verdict" },
+
+  { "entry": "9", "title": "Page furniture stripping",
+    "covered": true, "page": 2, "side": "source",
+    "how": "printed page numbers on every sheet, which must type as page-number and stay out of the body" },
+
+  { "entry": "10", "title": "Final Draft double-print dedup",
+    "covered": false,
+    "why": "the artifact is exact-coordinate overlapping duplicate items, which this generator cannot emit: it writes each run once. Reproducing it would mean modelling a Final Draft bug rather than a screenplay" },
+
+  { "entry": "9a", "title": "Dual-margin scene numbers collapsed",
+    "covered": true, "page": 1, "side": "source",
+    "how": "a heading printing 42 at both margins, asserted to attach as sceneNumber and leave the text clean" },
+
+  { "entry": "9b", "title": "Hybrid character cues",
+    "covered": true, "page": 3, "side": "source",
+    "how": "BUNNY (V.O.), name and extension on one cue line" },
+
+  { "entry": "9c", "title": "Width-aware item joining",
+    "covered": true, "page": 5, "side": "source",
+    "how": "wrapped action and dialogue throughout, which must rejoin into single elements rather than per-line fragments" },
+
+  { "entry": "9d", "title": "Inline bold/italic pass-through",
+    "covered": true, "page": 6, "side": "both",
+    "how": "bold, italic and bold-italic runs in action and dialogue, a run crossing a wrap boundary, and a punctuation-only styled item. Vector underlines are present and asserted NOT detected, per this entry's own limitation" },
+
+  { "entry": "9e", "title": "Cue extensions tolerate a missing closing period",
+    "covered": true, "page": 3, "side": "source",
+    "how": "(O.S.) with its period alongside (V.O) and (O.C) without" },
+
+  { "entry": "9f", "title": "Cue rescue from the character roster",
+    "covered": true, "page": 4, "side": "source",
+    "how": "a recurring cast of four, so the roster exists for the rescue pass to draw on" },
+
+  { "entry": "10a", "title": "Dual dialogue, de-interleaved to sequential speeches",
+    "covered": true, "page": 7, "side": "both",
+    "how": "a short exchange with both cues sharing one Y, asserted to de-interleave into left speech then right with no element mixing the columns" },
+
+  { "entry": "10b", "title": "Tall dual exchanges degrade to sequential",
+    "covered": true, "page": 7, "side": "both",
+    "how": "a second exchange whose taller column passes the 12-line threshold, so the table falls back to sequential speeches" },
+
+  { "entry": "11", "title": "Generated title page",
+    "covered": true, "page": 0, "side": "both",
+    "how": "an invented title, credit and author, asserted to stay out of the character roster" },
+
+  { "entry": "12", "title": "Scene-level TOC",
+    "covered": true, "page": 1, "side": "device",
+    "how": "12 scenes across the fixture, enough for a TOC with real structure" },
+
+  { "entry": "13", "title": "Shooting-script scene numbers, kept in Fountain, hidden in EPUB",
+    "covered": true, "page": 1, "side": "both",
+    "how": "the 42 dual-margin number, which must serialize into the fountain and not render in the heading" },
+
+  { "entry": "13a", "title": "Original page-number markers (option, default off)",
+    "covered": true, "page": 2, "side": "source",
+    "how": "printed page numbers on every sheet are the furniture this option re-surfaces when enabled" },
+
+  { "entry": "14", "title": "Scanned-PDF bail-out",
+    "covered": false,
+    "why": "a screenplay fixture cannot also be a page with no text layer. blank-pages.pdf owns this" },
+
+  { "entry": "15", "title": "Not-a-screenplay guard",
+    "covered": false,
+    "why": "a screenplay fixture cannot also be a non-screenplay. prose.pdf owns this" }
+]
