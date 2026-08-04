@@ -551,9 +551,24 @@ is live.
   inert in Books — which honors only the old spelling — while the
   always-on cue keep worked. The list is now derived from the keep set,
   so this cannot recur for the next keep.
-- **Device verdict: pending 2026-07-30 —** does a kept speech actually
-  move whole, and how big is the gap it leaves? Same Kindle
-  Previewer/KFX + Apple Books pass as #5a. Note the interaction with
+- **Device verdict 2026-08-04: HOLDS, and no rendering failure.** Sideloaded
+  KFX on the Kindle, torture fixture with the option ON, read against the
+  0.5.1 engine. Speeches held together and Sam reported nothing wrong. The
+  longest speech in the set (the MORE-ANCHOR block, taller than one page)
+  rendered without the blank-page push the 2016 Previewer reports warned
+  about, which was the specific risk this slot named.
+  **What this verdict does NOT cover, stated so nobody reads it as more
+  than it is:** the white-space COST was not quantified. The entry's own
+  framing is that atomic speeches buy "never split" by paying in gaps, and
+  which side of that trade a reader wants is taste. Nobody measured how
+  much page height went unused, so "HOLDS" here means the mechanism works
+  and looks acceptable, not that the trade was judged and preferred. The
+  default stays OFF for that reason. Apple Books remains untested.
+  A first pass at this was invalidated and redone: the build carried the
+  split-speech defect (fixed in 0.5.1), which put hard breaks mid-sentence
+  and would have been read as a keep failure. Rebuild the fixture against
+  current code before any device pass.
+  Note the interaction with
   #10b: with this option ON, a tall dual exchange that has fallen back
   to sequential becomes two atomic blocks. Include the longest speech in
   the set at the largest font size: a kept block taller than one page
