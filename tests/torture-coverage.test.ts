@@ -54,7 +54,7 @@ describe('torture fixture coverage manifest', () => {
   test('covered rows say where, which side, and how', () => {
     for (const row of manifest.filter((r) => r.covered)) {
       expect(typeof row.page, `entry ${row.entry} page`).toBe('number');
-      expect(['source', 'device', 'both'], `entry ${row.entry} side`).toContain(row.side);
+      expect(['source', 'device', 'both'], `entry ${row.entry} side`).toContain(row.side ?? '');
       expect((row.how ?? '').length, `entry ${row.entry} how`).toBeGreaterThan(0);
     }
   });
