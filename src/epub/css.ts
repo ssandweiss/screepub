@@ -253,6 +253,40 @@ section.titlepage p.author {
   font-size: 1.1em;
   margin: 0.4em 0;
 }
+
+/* Block font shifts the PDF carried (registry #18), gated by
+   preserveFontShifts. Sizes are em, per the vertical-in-em invariant, and
+   carry no line-height. A family class sits on the paragraph itself, so it
+   locally overrides the body fontFamily option (#6) without !important.
+   Values stay CSS-2.1-vintage: RMSDK can blank a whole book on a value
+   function it cannot parse. */
+.fmt-mono {
+  font-family: ${FONT_STACKS.courier};
+}
+
+.fmt-serif {
+  font-family: ${FONT_STACKS.serif};
+}
+
+.fmt-sans {
+  font-family: ${FONT_STACKS.sans};
+}
+
+.fmt-cursive {
+  font-family: "Comic Sans MS", cursive;
+}
+
+.fmt-minus1 {
+  font-size: 0.85em;
+}
+
+.fmt-plus1 {
+  font-size: 1.2em;
+}
+
+.fmt-plus2 {
+  font-size: 1.5em;
+}
 `.trimStart();
 }
 

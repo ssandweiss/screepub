@@ -6,6 +6,7 @@ import type { FormatOptions } from '../options';
 import { DEFAULT_FORMAT_OPTIONS } from '../options';
 import { screenplayCss } from './css';
 import { isMiniSlug } from '../fountain/slug';
+import { fmtClasses, stripNotes } from '../fountain/notes';
 
 export interface BodyFile {
   /** filename-safe id, e.g. "body001" */
@@ -139,7 +140,12 @@ function renderBlocks(
   };
 
   for (const t of tokens) {
-    const text = t.text ?? '';
+    const raw = t.text ?? '';
+    // Read the shift BEFORE stripping, then strip every note from every token
+    // type in one place. Notes are invisible by spec; this is also the general
+    // fix for hand-written ones, which used to render as literal text.
+    const fmt = format.preserveFontShifts ? fmtClasses(raw) : '';
+    const text = stripNotes(raw);
     switch (t.type) {
       case 'scene_heading': {
         const num = format.showSceneNumbers && t.scene_number
@@ -154,7 +160,7 @@ function renderBlocks(
         break;
       }
       case 'action':
-        emit(`<p class="action">${inlineEmphasis(escapeXml(text))}</p>\n`);
+        emit(`<p class="action${fmt}">${inlineEmphasis(escapeXml(text))}</p>\n`);
         break;
       case 'dual_dialogue_begin':
         dual = { left: [], right: [], side: 'left' };
@@ -199,7 +205,7 @@ function renderBlocks(
         // Multi-line speech arrives as one token with embedded newlines
         // (lyrics, verse) — each line becomes its own paragraph.
         for (const line of text.split('\n')) {
-          if (line.trim()) emit(`<p class="dialogue">${inlineEmphasis(escapeXml(line))}</p>\n`, 'dialogue');
+          if (line.trim()) emit(`<p class="dialogue${fmt}">${inlineEmphasis(escapeXml(line))}</p>\n`, 'dialogue');
         }
         break;
       case 'transition':
@@ -209,7 +215,7 @@ function renderBlocks(
         emit(`<p class="centered">${inlineEmphasis(escapeXml(text))}</p>\n`);
         break;
       case 'lyrics':
-        emit(`<p class="action">${inlineEmphasis(escapeXml(text))}</p>\n`);
+        emit(`<p class="action${fmt}">${inlineEmphasis(escapeXml(text))}</p>\n`);
         break;
       case 'synopsis': {
         // "= pg N" lines are our page markers; other synopses stay invisible.
