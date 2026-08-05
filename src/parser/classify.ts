@@ -89,7 +89,9 @@ export function classifyBlock(
 ): ScreenplayElement {
   const { text, indent } = block;
   const id = nextId();
-  const base: ScreenplayElement = { id, type: 'action', text, styledText: block.styledText, dualRight: block.dualRight, pageNum: block.pageNum, isTitlePage: false, isReadable: true };
+  // fmt rides from block to element mechanically and is NEVER a classification
+  // input: the parser stays format-option-free (registry #18).
+  const base: ScreenplayElement = { id, type: 'action', text, styledText: block.styledText, fmt: block.fmt, dualRight: block.dualRight, pageNum: block.pageNum, isTitlePage: false, isReadable: true };
 
   // Get current character from previous element chain
   const currentCharacter = getActiveCharacter(prevElement);

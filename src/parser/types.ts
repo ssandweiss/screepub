@@ -43,6 +43,8 @@ export interface ScreenplayElement {
   styledText?: string;
   /** cue of the RIGHT column of a simultaneous (dual) exchange */
   dualRight?: boolean;
+  /** block-level font shift, serialized as a [[fmt: ...]] note (registry #18) */
+  fmt?: Fmt;
 }
 
 export interface CharacterInfo {
@@ -87,6 +89,7 @@ export interface TextBlock {
   lines: RawLine[];
   text: string;
   styledText?: string;
+  fmt?: Fmt;
   dualRight?: boolean;
   indent: number; // first line indent
   minIndent: number;
