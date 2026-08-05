@@ -31,13 +31,6 @@ struct ContentView: View {
     @AppStorage(AppSettings.updateOptInKey) private var updateOptIn = false
     @ObservedObject private var updates = UpdateController.shared
     @State private var showUpdatePopover = false
-    /// Drives the release-notes sheet via `.sheet(item:)`. Holding the
-    /// update itself, not a boolean, means the sheet cannot be presented
-    /// without its content: there is no flag that can go true while this
-    /// stays nil, and no later re-lookup of `updates.available` that a
-    /// background check can null out from under an already-decided
-    /// presentation.
-    @State private var releaseNotesUpdate: AvailableUpdate?
     /// Last destination the user actually sent to. Empty on first run, when
     /// the ordering in ResultActions.routes supplies the opening guess.
     @AppStorage("lastDestination") private var lastDestination = ""
@@ -97,11 +90,11 @@ struct ContentView: View {
         // updates.available { ReleaseNotesSheet(...) }`), so a background
         // check nulling `available` made the content vanish out from under
         // an still-presented sheet. `.sheet(item:)` below presents
-        // `releaseNotesUpdate`'s own captured value: once set, it is
+        // `updates.notesRequest`'s own captured value: once set, it is
         // independent of `updates.available` until the sheet dismisses and
         // SwiftUI nils the binding itself, so there is no longer a state
         // where the sheet is showing but its content is gone.
-        .sheet(item: $releaseNotesUpdate) { update in
+        .sheet(item: $updates.notesRequest) { update in
             ReleaseNotesSheet(update: update)
         }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
@@ -196,7 +189,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .help("Install the update, or read the release notes")
                 .popover(isPresented: $showUpdatePopover, arrowEdge: .top) {
-                    UpdatePopover(update: update) { releaseNotesUpdate = $0 }
+                    UpdatePopover(update: update) { updates.notesRequest = $0 }
                 }
             }
         case .downloading(let fraction):

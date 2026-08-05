@@ -17,6 +17,11 @@ final class UpdateController: ObservableObject {
     }
 
     @Published var available: AvailableUpdate?
+    /// The update whose notes should be on screen, or nil for no sheet.
+    /// Lives here rather than in ContentView because two surfaces raise the
+    /// same sheet now: the footer popover, and the menu bar's Check for
+    /// Updates alert, which has no view context of its own.
+    @Published var notesRequest: AvailableUpdate?
     @Published var phase: Phase = .idle
 
     var busy: Bool {
