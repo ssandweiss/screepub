@@ -23,6 +23,14 @@ final class UpdateController: ObservableObject {
     /// Updates alert, which has no view context of its own.
     @Published var notesRequest: AvailableUpdate?
     @Published var phase: Phase = .idle
+    /// True while ContentView is in the window hierarchy, kept current by
+    /// its own onAppear/onDisappear. The menu bar's Check for Updates needs
+    /// this rather than scanning `NSApp.windows`, because this app can also
+    /// have a Script Preview window and a Settings window open, and both
+    /// are regular, visible, main-capable windows too, despite neither
+    /// hosting the release-notes sheet. Not `@Published`: it is polled once
+    /// per menu click, not observed by any view.
+    var mainWindowOpen = false
 
     var busy: Bool {
         switch phase {

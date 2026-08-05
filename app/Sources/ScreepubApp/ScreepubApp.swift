@@ -15,7 +15,7 @@ import KFXKit
 /// Menu-driven check: user-initiated, so it runs regardless of the opt-in,
 /// and unlike the silent launch check it reports every outcome — including
 /// "you're current", which is the answer the user opened the menu for.
-@MainActor func manualUpdateCheck() async {
+@MainActor func manualUpdateCheck(openWindow: OpenWindowAction) async {
     let current = UpdateController.currentVersion
     let alert = NSAlert()
     switch await UpdateController.shared.checkNow() {
@@ -40,7 +40,23 @@ import KFXKit
         case .alertFirstButtonReturn where !installRunning:
             await UpdateController.shared.install()
         case .alertSecondButtonReturn:
-            NSWorkspace.shared.open(update.releaseNotesURL)
+            // Reopen first: the sheet needs a ContentView alive to present
+            // it, and Check for Updates works from the menu bar with every
+            // window closed. Setting the request into a windowless app
+            // would silently do nothing, which is the worst of the options.
+            //
+            // UpdateController.mainWindowOpen, not an NSApp.windows scan:
+            // this app can also have a Script Preview window and a Settings
+            // window open, and both are visible, regular, main-capable
+            // windows despite neither hosting this sheet. A
+            // canBecomeMain-based scan would treat either as "a window
+            // exists," skip the reopen, and set notesRequest with nothing
+            // alive to present it, which is the exact silent failure this
+            // guard exists to rule out.
+            if !UpdateController.shared.mainWindowOpen {
+                openWindow(id: ScreepubApp.mainWindowID)
+            }
+            UpdateController.shared.notesRequest = update
         default:
             break
         }
@@ -64,6 +80,10 @@ import KFXKit
 
 @main
 struct ScreepubApp: App {
+    /// The main window needs an id so `openWindow` can reopen it when the
+    /// menu bar's Check for Updates runs with every window closed.
+    static let mainWindowID = "main"
+
     init() {
         // A previous self-update may have parked the old bundle beside this
         // one; the running binary kept it alive until now. Deleting a full
@@ -76,7 +96,7 @@ struct ScreepubApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: Self.mainWindowID) {
             ContentView()
                 .frame(minWidth: 460, minHeight: 560)
                 .onAppear {
@@ -89,9 +109,7 @@ struct ScreepubApp: App {
         .windowResizability(.contentSize)
         .windowStyle(.hiddenTitleBar)
         .commands {
-            CommandGroup(after: .appInfo) {
-                Button("Check for Updates…") { Task { await manualUpdateCheck() } }
-            }
+            UpdateCommands()
             CommandGroup(replacing: .help) {
                 Button("Send Feedback on GitHub…") { openFeedback() }
             }
@@ -315,6 +333,21 @@ struct KfxQualitySection: View {
         // The Settings pane exists to answer "did my install take?" —
         // bypass the cache and probe for real.
         status = await Task.detached { KFXToolchain.status(maxAge: 0) }.value
+    }
+}
+
+/// Holds `openWindow` so `manualUpdateCheck` can reopen the main window
+/// before raising the notes sheet. A free function cannot read the
+/// environment; a `Commands` type can.
+struct UpdateCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") {
+                Task { await manualUpdateCheck(openWindow: openWindow) }
+            }
+        }
     }
 }
 
