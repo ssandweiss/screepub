@@ -85,6 +85,14 @@ struct ContentView: View {
             // away rather than making the user relaunch to see it work.
             if on { Task { await updates.checkIfDue() } }
         }
+        .onChange(of: updates.available) { _, available in
+            // ReleaseNotesSheet's own dismiss controls (NOT NOW, its Escape
+            // shortcut, INSTALL AND RELAUNCH) live inside the content that
+            // vanishes the moment `available` goes nil, so a stale sheet
+            // has no user-reachable way to close itself — it has to be
+            // closed from out here instead.
+            if available == nil { showReleaseNotes = false }
+        }
         .sheet(isPresented: $showReleaseNotes) {
             if let update = updates.available {
                 ReleaseNotesSheet(update: update)
@@ -207,6 +215,7 @@ struct ContentView: View {
         case .failed(let message):
             Button {
                 if let update = updates.available {
+                    // Deliberate, not an oversight: the in-app install just failed, so this fallback goes to the browser, not a sheet whose headline button would retry the same failing install.
                     NSWorkspace.shared.open(update.releaseNotesURL)
                 }
             } label: {
