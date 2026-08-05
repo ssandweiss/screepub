@@ -53,7 +53,11 @@ import KFXKit
         alert.informativeText = "Unauthenticated checks are limited to 60 an hour per network. Try again in a little while."
     case .failure(let error):
         alert.messageText = "Couldn't check for updates"
-        alert.informativeText = "The request didn't go through. Check your connection and try again. (\(error.localizedDescription))"
+        // errorDescription is a complete message now, so it stands on its
+        // own rather than being parenthesized inside a second apology.
+        // The connection advice lives in .network's own description, the
+        // one case where it is true.
+        alert.informativeText = error.localizedDescription
     }
     alert.runModal()
 }
