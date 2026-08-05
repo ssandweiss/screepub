@@ -1487,8 +1487,10 @@ check(UpdateCheckError.malformedResponse("key 'draft' not found")
         .localizedDescription.contains("key 'draft' not found"),
       "malformedResponse carries its detail into the description")
 
-// The boundary: proves the `try?` was really replaced, rather than the
-// payload being filled with a constant.
+// Invalid JSON, which reaches describe()'s .dataCorrupted arm with an empty
+// codingPath. That arm has no decoder-sourced text to check, so non-empty is
+// the strongest assertion it admits. The missing-key case below is what
+// proves a real reason reached the payload rather than a constant.
 do {
     _ = try UpdateCheck.candidates(from: Data("not json".utf8))
     check(false, "malformed JSON should throw")
