@@ -219,6 +219,8 @@ check(FormatSettings.defaults.keepSpeechesWhole == false,
 
 check(FormatSettings.defaults.printSplitMinimums == true,
       "printSplitMinimums defaults ON (the print two-line rule)")
+check(FormatSettings.defaults.preserveFontShifts == true,
+      "preserveFontShifts defaults ON (block font shifts render)")
 
 // — reMarkable endpoint sanity (regression: an IP literal in source once
 // arrived empty and the force-unwrapped URL(string:) crashed at launch) —
@@ -464,6 +466,8 @@ let sidecarOverrideCases: [SidecarOverrideCase] = [
           apply: { $0.justifyText = true }),
     .init(field: "printSplitMinimums", json: #"{"printSplitMinimums": false}"#,
           apply: { $0.printSplitMinimums = false }),
+    .init(field: "preserveFontShifts", json: #"{"preserveFontShifts": false}"#,
+          apply: { $0.preserveFontShifts = false }),
 ]
 
 for sidecarCase in sidecarOverrideCases {

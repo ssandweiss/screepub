@@ -27,6 +27,7 @@ public struct FormatSettings: Codable, Sendable, Equatable {
     public var dualDialogue: String
     public var justifyText: Bool
     public var printSplitMinimums: Bool
+    public var preserveFontShifts: Bool
 
     public static let defaults = FormatSettings(
         scenePageBreaks: false,
@@ -45,7 +46,8 @@ public struct FormatSettings: Codable, Sendable, Equatable {
         showPageMarkers: false,
         dualDialogue: "sideBySide",
         justifyText: false,
-        printSplitMinimums: true
+        printSplitMinimums: true,
+        preserveFontShifts: true
     )
 
     public init(
@@ -54,7 +56,8 @@ public struct FormatSettings: Codable, Sendable, Equatable {
         keepSceneHeadingWithScene: Bool, keepSpeechesWhole: Bool, fontFamily: String,
         rejoinSplitDialogue: Bool, contdMode: String, cueAlignment: String,
         includeTitlePage: Bool, showSceneNumbers: Bool, showPageMarkers: Bool,
-        dualDialogue: String, justifyText: Bool, printSplitMinimums: Bool
+        dualDialogue: String, justifyText: Bool, printSplitMinimums: Bool,
+        preserveFontShifts: Bool
     ) {
         self.scenePageBreaks = scenePageBreaks
         self.dialogueSideMarginPct = dialogueSideMarginPct
@@ -73,5 +76,6 @@ public struct FormatSettings: Codable, Sendable, Equatable {
         self.dualDialogue = dualDialogue
         self.justifyText = justifyText
         self.printSplitMinimums = printSplitMinimums
+        self.preserveFontShifts = preserveFontShifts
     }
 }
