@@ -1291,6 +1291,19 @@ let notesFixture = repoRoot.appendingPathComponent("docs/releases/0.5.0.md")
 if let markdown = try? String(contentsOf: notesFixture, encoding: .utf8) {
     let blocks = ReleaseNotes.parse(markdown)
 
+    // CRLF must parse identically to LF: components(separatedBy: .newlines)
+    // splits "\r" and "\n" independently rather than treating "\r\n" as one
+    // separator, so an unnormalized CRLF file turns every real line break
+    // into a phantom blank line and shatters blocks mid-sentence. Equality
+    // against the LF parse is the strong form a reviewer asked for: a
+    // block-COUNT check alone could miss two shatters that happened to sum
+    // back to the same total.
+    let crlfMarkdown = markdown
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\n", with: "\r\n")
+    check(ReleaseNotes.parse(crlfMarkdown) == blocks,
+          "CRLF line endings parse to the same blocks as LF")
+
     var sections = 0, bullets = 0, paragraphs = 0, asides = 0
     var leads: [String] = []
     for block in blocks {
@@ -1318,13 +1331,17 @@ if let markdown = try? String(contentsOf: notesFixture, encoding: .utf8) {
 
     // No text lost. Every word in the source, minus markdown punctuation,
     // the dropped title LINE, and any HTML comment marker, must survive
-    // into some block.
-    func words(_ s: String) -> Set<String> {
-        Set(s.replacingOccurrences(of: "*", with: " ")
-             .replacingOccurrences(of: "#", with: " ")
-             .replacingOccurrences(of: "-", with: " ")
-             .split(whereSeparator: { $0 == " " || $0.isNewline })
-             .map(String.init))
+    // into some block — checked by COUNT, not just membership. A Set
+    // comparison cannot see a single dropped occurrence of a word that
+    // recurs elsewhere: proof is dropping "page" from the lede alone
+    // ("about page turns" -> "about turns") still passes a Set diff,
+    // because "page" survives in other bullets in this same fixture.
+    func wordCounts(_ s: String) -> [String: Int] {
+        s.replacingOccurrences(of: "*", with: " ")
+         .replacingOccurrences(of: "#", with: " ")
+         .replacingOccurrences(of: "-", with: " ")
+         .split(whereSeparator: { $0 == " " || $0.isNewline })
+         .reduce(into: [:]) { counts, word in counts[String(word), default: 0] += 1 }
     }
     var rendered = ""
     for block in blocks {
@@ -1364,9 +1381,14 @@ if let markdown = try? String(contentsOf: notesFixture, encoding: .utf8) {
         .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("# ") }
         .map(stripComments)
         .joined(separator: "\n")
-    let sourceWords = words(bodyOnly)
-    let missing = sourceWords.subtracting(words(rendered))
-    check(missing.isEmpty, "no text is lost in parsing (missing: \(missing.sorted().prefix(5)))")
+    let sourceCounts = wordCounts(bodyOnly)
+    let renderedCounts = wordCounts(rendered)
+    let shortfalls = sourceCounts.compactMap { word, needed -> String? in
+        let have = renderedCounts[word] ?? 0
+        guard have < needed else { return nil }
+        return "\(word): \(have)/\(needed)"
+    }.sorted()
+    check(shortfalls.isEmpty, "no text is lost in parsing (shortfalls: \(shortfalls.prefix(5)))")
 } else {
     check(false, "could not read the 0.5.0 notes fixture")
 }
@@ -1392,6 +1414,22 @@ if case .bullet(_, let body)? = markerBlocks.first {
 } else {
     check(false, "a bullet with a trailing HTML comment still parses to a bullet")
 }
+
+// — adversarial inputs: markdown punctuation with no content behind it —
+// flush() used to check emptiness on the joined text BEFORE splitLead and
+// unemphasize stripped markdown, so a line that was only "**" survived as
+// an empty block. Re-checked AFTER the strip, all four of these must
+// vanish rather than produce a stray empty bullet, paragraph, or dash.
+check(ReleaseNotes.parse("- **").isEmpty,
+      "a bullet that is only markdown punctuation yields no block")
+check(ReleaseNotes.parse("**").isEmpty,
+      "a paragraph that is only markdown punctuation yields no block")
+check(ReleaseNotes.parse("- ****").isEmpty,
+      "a fully-empty bold bullet yields no block rather than an empty-but-non-nil lead")
+check(ReleaseNotes.parse("- ").isEmpty,
+      "a bullet marker with nothing after it yields no block, not a stray dash")
+check(ReleaseNotes.parse("## **Bold** Heading") == [.section("Bold Heading")],
+      "a heading's inline bold is flattened, same as every other block")
 
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

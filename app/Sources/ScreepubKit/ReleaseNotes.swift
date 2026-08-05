@@ -17,6 +17,13 @@ public enum NoteBlock: Equatable, Sendable {
 /// verbatim. Unknown syntax may render plainly, but it never disappears.
 public enum ReleaseNotes {
     public static func parse(_ markdown: String) -> [NoteBlock] {
+        // CRLF is NOT one separator to components(separatedBy: .newlines) —
+        // it splits \r and \n independently, so every real CRLF line break
+        // yields a phantom empty string that the blank-line rule below
+        // reads as a block break mid-sentence. Normalize once, up front,
+        // rather than guard every call site downstream.
+        let normalized = markdown.replacingOccurrences(of: "\r\n", with: "\n")
+
         var blocks: [NoteBlock] = []
         var pending: [String] = []
         var pendingIsBullet = false
@@ -28,27 +35,40 @@ public enum ReleaseNotes {
             let text = pending.joined(separator: " ")
                 .trimmingCharacters(in: .whitespaces)
             let wasBullet = pendingIsBullet
+            // Reset before the emptiness guard below: an early return here
+            // must not leave a stale pending/pendingIsBullet for the NEXT
+            // flush() call to inherit.
             pending = []
             pendingIsBullet = false
             guard !text.isEmpty else { return }
 
             if wasBullet {
                 let (lead, body) = splitLead(text)
+                // Re-check AFTER splitLead/unemphasize strip markdown: a
+                // markdown-only line like "**" or "****" is non-empty going
+                // in but empty coming out, and must emit no block either way.
+                guard !(lead ?? "").isEmpty || !body.isEmpty else { return }
                 blocks.append(.bullet(lead: lead, body: body))
             } else if let inner = wholeItalic(text) {
+                guard !inner.isEmpty else { return }
                 blocks.append(.aside(inner))
             } else {
-                blocks.append(.paragraph(unemphasize(text)))
+                let paragraph = unemphasize(text)
+                guard !paragraph.isEmpty else { return }
+                blocks.append(.paragraph(paragraph))
             }
         }
 
-        for raw in markdown.components(separatedBy: .newlines) {
+        for raw in normalized.components(separatedBy: .newlines) {
             let line = stripHTMLComments(raw).trimmingCharacters(in: .whitespaces)
 
-            if line.isEmpty { flush(); continue }
+            // A bare bullet marker with nothing after it ("- ", which trims
+            // to "-") is content-free: treat it like a blank line rather
+            // than let it fall through to a stray "-" paragraph.
+            if line.isEmpty || line == "-" { flush(); continue }
             if line.hasPrefix("## ") {
                 flush()
-                blocks.append(.section(String(line.dropFirst(3))))
+                blocks.append(.section(unemphasize(String(line.dropFirst(3)))))
                 continue
             }
             // The sheet prints the version itself, so the title would double.
@@ -75,7 +95,9 @@ public enum ReleaseNotes {
         let lead = String(text[afterOpen..<close.lowerBound])
         let rest = String(text[close.upperBound...])
             .trimmingCharacters(in: .whitespaces)
-        return (lead, unemphasize(rest))
+        // An empty extracted lead ("****") is the same as no lead at all —
+        // never return a non-nil-but-empty lead for a view to branch on.
+        return (lead.isEmpty ? nil : lead, unemphasize(rest))
     }
 
     /// A paragraph that is italic end to end, which is how the notes carry
