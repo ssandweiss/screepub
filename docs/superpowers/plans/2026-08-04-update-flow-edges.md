@@ -217,10 +217,12 @@ It currently reads:
 Now that `errorDescription` is a real sentence, the parenthetical nesting is redundant. Replace that line with:
 
 ```swift
-        // errorDescription is a full sentence now, so it stands on its own
-        // rather than being parenthesized inside a second apology.
-        alert.informativeText = "\(error.localizedDescription) Check your connection and try again."
+        // errorDescription is a complete message now, so it stands on its
+        // own rather than being parenthesized inside a second apology.
+        alert.informativeText = error.localizedDescription
 ```
+
+**Corrected after review.** An earlier draft of this step appended "Check your connection and try again." to every error. That is wrong advice for two of the four cases: `noDownloadableAsset` means GitHub has not finished uploading a `.dmg`, and `malformedResponse` means the response arrived fine and could not be read. Neither is a connectivity problem. The advice now lives inside `network`'s own `errorDescription`, which is the only case where it is true, so each description is complete and correct on its own and this line simply shows it.
 
 - [ ] **Step 3: Verify it compiles**
 

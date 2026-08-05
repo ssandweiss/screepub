@@ -62,11 +62,19 @@ the second deliverable touches the same function.
   which is a half-published release rather than anything the reader did.
 
 `malformedResponse` gains a payload because `candidates(from:)` currently
-does `try? JSONDecoder().decode(...)` and throws the detail away.
-`JSONDecoder` produces a precise `DecodingError` naming the array index and
-the key, and one malformed element fails all thirty releases, so the index
-is the whole diagnosis. Switch to `do/catch` and carry
-`error.localizedDescription`.
+does `try? JSONDecoder().decode(...)` and throws the detail away. One
+malformed element fails all thirty releases, so which element, and which
+key, is the whole diagnosis.
+
+**Corrected after review.** An earlier draft of this spec said to carry
+`error.localizedDescription`. That is wrong: on a `DecodingError` it returns
+a generic Foundation sentence ("The data couldn't be read because it is
+missing.") with no index and no key, which is barely better than the
+placeholder this deliverable exists to remove. Verified by decoding a
+three-element array whose second element was missing `tag_name`. The index
+and key live on the error's associated `Context`, in `codingPath` and
+`debugDescription`. Read those instead, and fall back to
+`localizedDescription` only for a non-`DecodingError`.
 
 Adding an associated value changes the pattern match at
 `app/Sources/KitCheck/main.swift`, which currently does
