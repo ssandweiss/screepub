@@ -472,6 +472,12 @@ if let markdown = try? String(contentsOf: notesFixture, encoding: .utf8) {
 
     // No text lost. Every word in the source, minus markdown punctuation and
     // the dropped title, must survive into some block.
+    //
+    // The exclusion is scoped to the title LINE, not to a list of words. An
+    // earlier draft subtracted ["Screepub", "0.5.0"] from the whole document
+    // to excuse the dropped title, which silently blinded the check to the
+    // word "Screepub" being lost from the three body lines that also use it.
+    // A parser mutation that ate the product's own name passed that version.
     func words(_ s: String) -> Set<String> {
         Set(s.replacingOccurrences(of: "*", with: " ")
              .replacingOccurrences(of: "#", with: " ")
@@ -488,7 +494,11 @@ if let markdown = try? String(contentsOf: notesFixture, encoding: .utf8) {
         case .aside(let t): rendered += " " + t
         }
     }
-    let sourceWords = words(markdown).subtracting(["Screepub", "0.5.0"])
+    let bodyOnly = markdown
+        .components(separatedBy: .newlines)
+        .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("# ") }
+        .joined(separator: "\n")
+    let sourceWords = words(bodyOnly)
     let missing = sourceWords.subtracting(words(rendered))
     check(missing.isEmpty, "no text is lost in parsing (missing: \(missing.sorted().prefix(5)))")
 } else {
