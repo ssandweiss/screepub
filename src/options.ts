@@ -44,6 +44,10 @@ export interface FormatOptions {
   /** print split minimums: never strand a single dialogue/action line at
    * a page edge (widows/orphans 2); off packs tight (1) (registry #17) */
   printSplitMinimums: boolean;
+  /** render block-level font family/size shifts the PDF carried (registry
+   * #18). Off renders every block in the body face; the notes stay in the
+   * .fountain either way, so flipping this needs no re-parse */
+  preserveFontShifts: boolean;
 }
 
 export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
@@ -64,6 +68,7 @@ export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
   dualDialogue: 'sideBySide',
   justifyText: false,
   printSplitMinimums: true,
+  preserveFontShifts: true,
 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -101,5 +106,6 @@ export function resolveFormatOptions(partial?: Record<string, unknown>): FormatO
     dualDialogue: p.dualDialogue === 'sequential' ? 'sequential' : d.dualDialogue,
     justifyText: bool('justifyText'),
     printSplitMinimums: bool('printSplitMinimums'),
+    preserveFontShifts: bool('preserveFontShifts'),
   };
 }

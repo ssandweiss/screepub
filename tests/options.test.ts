@@ -37,7 +37,7 @@ describe('resolveFormatOptions', () => {
   test('defaults match the canonical format-defaults.json both suites pin', async () => {
     // The same file kit-check decodes into FormatSettings and compares to
     // FormatSettings.defaults — the two languages can no longer drift
-    // silently. Seventeen literals, one source of truth.
+    // silently. Eighteen literals, one source of truth.
     const canonical = await Bun.file(new URL('../format-defaults.json', import.meta.url)).json();
     expect(DEFAULT_FORMAT_OPTIONS).toEqual(canonical);
   });
@@ -72,6 +72,16 @@ describe('resolveFormatOptions', () => {
     // regression — a truthy invalid value like 'no' can't catch that.
     expect(
       resolveFormatOptions({ printSplitMinimums: 0 } as Record<string, unknown>).printSplitMinimums,
+    ).toBe(true);
+  });
+
+  test('preserveFontShifts defaults to true and accepts a boolean', () => {
+    expect(resolveFormatOptions({}).preserveFontShifts).toBe(true);
+    expect(resolveFormatOptions({ preserveFontShifts: false }).preserveFontShifts).toBe(false);
+    // Falsy-but-invalid, per the neighbour above: a `Boolean(p[key])`
+    // regression would flip this to false.
+    expect(
+      resolveFormatOptions({ preserveFontShifts: 0 } as Record<string, unknown>).preserveFontShifts,
     ).toBe(true);
   });
 });
