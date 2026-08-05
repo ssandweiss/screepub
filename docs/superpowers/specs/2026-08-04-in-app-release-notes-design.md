@@ -153,10 +153,22 @@ Rules:
 - Inline `**bold**` inside a body is unwrapped to plain text. The sheet
   styles the lead; it does not need a rich inline model, and a half-rendered
   asterisk is worse than none.
+- `<!-- ... -->` HTML comment markers are stripped. GitHub hides these
+  because it renders markdown to HTML, where a comment is invisible; our
+  sheet renders plain SwiftUI `Text`, so a marker left in would show up to
+  the reader as literal `<!-- ... -->`.
+- A line that is exactly `---` after trimming ends the document. release.yml
+  publishes the committed notes file with a machine-generated trailer
+  appended after that separator (install instructions, a SHA-256 block), and
+  that trailer is not authored content.
 
 **The invariant:** any line that matches nothing becomes `.paragraph`
 verbatim. Unknown syntax may render plainly, but it never disappears. This is
-the one rule with a dedicated test.
+the one rule with a dedicated test. It is a guarantee about PROSE, not about
+every byte of input: the `# ` title, `<!-- ... -->` markers, and everything
+from a bare `---` onward are dropped on purpose, because each is process
+punctuation rather than content the reader is meant to see. No other prose
+is dropped.
 
 ### 3. `app/Sources/ScreepubApp/ReleaseNotesSheet.swift` (new)
 
@@ -202,17 +214,23 @@ Selection, against hand-built `[ReleaseCandidate]` values and no network:
 5. A newer release with a nil body still contributes a `ReleaseNote` with
    empty markdown.
 
-Parsing, using the committed `docs/releases/0.5.0.md` as the fixture, since
-it is the same text the release body carries:
+Parsing, using the committed `docs/releases/0.5.0.md` as the fixture. That
+file is the prose half of what release.yml actually publishes, not the whole
+release body: the workflow appends a machine-generated trailer after it (a
+bare `---` line, then install instructions and a SHA-256 block), which the
+parser stops at:
 
 6. Produces at least one of each of `.section`, `.bullet`, `.paragraph`,
    `.aside`.
 7. The `# Screepub 0.5.0` title produces no block.
 8. A bullet opening `**No more orphaned lines.**` yields that as `lead`, with
    the remainder as `body` and no asterisks in either.
-9. **No text lost.** Concatenating every block's text contains every
-   non-empty, non-title source line's words. This is the guard on the
-   degrade-to-paragraph invariant.
+9. **No text lost.** Concatenating every block's text contains every word of
+   the source's PROSE: every non-empty line except the title, any
+   `<!-- ... -->` comment markers, and anything from a bare `---` line
+   onward (release.yml's trailer). This is the guard on the
+   degrade-to-paragraph invariant, not a claim that the parser preserves the
+   raw bytes verbatim.
 10. Empty input yields an empty array rather than one empty paragraph.
 
 ## Out of scope
