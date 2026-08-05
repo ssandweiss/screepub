@@ -1,7 +1,7 @@
 // Adapted from an earlier table-read parser by the same author, reworked for
 // headless Bun/Node: modern pdf.js build + DOM shims, no browser worker.
 import './pdfjs-shims';
-import type { RawLine } from './types';
+import type { FamilyBucket, RawLine } from './types';
 import { getDocument, OPS } from 'pdfjs-dist/build/pdf.mjs';
 
 /**
@@ -241,6 +241,34 @@ export function markUnderlinesItem(
   if (width <= 0) return false;
   const overlap = Math.min(x1, mark.x1) - Math.max(x0, mark.x0);
   return overlap / width >= MARK_MIN_OVERLAP;
+}
+
+/**
+ * PostScript base name → coarse family bucket.
+ *
+ * Matched against the name lowercased with its subset prefix ("AAAAAB+") and
+ * every non-alphanumeric stripped, so "Letter Gothic" and "LetterGothic" both
+ * read as "lettergothic". Two traps this shape avoids:
+ *   - bare "gothic" would swallow Century Gothic, which is a sans;
+ *   - bare "roman" would swallow Helvetica-Roman and AvenirNext-Roman, where
+ *     "-Roman" is the REGULAR weight, not the family. Times matches "times".
+ * Weight and slope tokens (bold, black, heavy, italic, oblique) match nothing
+ * here on purpose: they are style, and style is registry 9d's business.
+ */
+const FAMILY_PATTERNS: [RegExp, FamilyBucket][] = [
+  [/courier|mono|lettergothic|prestige/, 'mono'],
+  [/times|georgia|garamond|palatino|caslon|baskerville|minion/, 'serif'],
+  [/script|hand|brush|comic/, 'cursive'],
+];
+
+export function familyBucket(name: string): FamilyBucket | undefined {
+  const n = String(name ?? '')
+    .replace(/^[A-Z]{6}\+/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+  if (!n) return undefined;
+  for (const [re, bucket] of FAMILY_PATTERNS) if (re.test(n)) return bucket;
+  return 'sans';
 }
 
 /**

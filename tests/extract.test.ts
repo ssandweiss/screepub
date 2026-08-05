@@ -1,6 +1,11 @@
 import '../src/parser/pdfjs-shims';
 import { describe, test, expect } from 'bun:test';
-import { collectUnderlineMarks, groupItemsIntoLines, markUnderlinesItem } from '../src/parser/extract';
+import {
+  collectUnderlineMarks,
+  familyBucket,
+  groupItemsIntoLines,
+  markUnderlinesItem,
+} from '../src/parser/extract';
 import { OPS } from 'pdfjs-dist/build/pdf.mjs';
 
 function item(str: string, x: number, y: number) {
@@ -450,5 +455,58 @@ describe('markUnderlinesItem', () => {
 
   test('a zero-width item never matches', () => {
     expect(markUnderlinesItem(mark(498), 100, 100, 500)).toBe(false);
+  });
+});
+
+describe('familyBucket', () => {
+  test('screenplay monospace faces bucket as mono', () => {
+    for (const n of ['Courier', 'CourierPrime-Bold', 'AAAAAB+CourierFinalDraft',
+                     'WXPDAA+CourierNewPSMT', 'LetterGothic', 'Prestige Elite',
+                     'Andale Mono']) {
+      expect(familyBucket(n), n).toBe('mono');
+    }
+  });
+
+  test('Century Gothic is a sans, not a mono', () => {
+    // The trap the spec calls out: match the JOINED name "lettergothic",
+    // never bare "gothic".
+    expect(familyBucket('CenturyGothic')).toBe('sans');
+  });
+
+  test('serif faces bucket as serif', () => {
+    for (const n of ['Times-Roman', 'TimesNewRomanPSMT', 'Georgia', 'Garamond',
+                     'Palatino-Roman']) {
+      expect(familyBucket(n), n).toBe('serif');
+    }
+  });
+
+  test('a -Roman weight suffix does not make a sans into a serif', () => {
+    // "-Roman" is PostScript for the REGULAR weight. Times matches on "times"
+    // anyway, so bare "roman" buys nothing and misbuckets these.
+    for (const n of ['Helvetica-Roman', 'AvenirNext-Roman', 'Frutiger-Roman']) {
+      expect(familyBucket(n), n).toBe('sans');
+    }
+  });
+
+  test('handwriting faces bucket as cursive', () => {
+    for (const n of ['BrushScriptMT', 'BradleyHandITC', 'Comic Sans MS']) {
+      expect(familyBucket(n), n).toBe('cursive');
+    }
+  });
+
+  test('everything else is sans', () => {
+    for (const n of ['AvenirNext-Bold', 'Helvetica', 'Scream', 'Arial-BoldMT']) {
+      expect(familyBucket(n), n).toBe('sans');
+    }
+  });
+
+  test('style tokens never decide the bucket', () => {
+    expect(familyBucket('Courier-BoldOblique')).toBe('mono');
+    expect(familyBucket('Georgia-Italic')).toBe('serif');
+  });
+
+  test('an empty or missing name has no bucket', () => {
+    expect(familyBucket('')).toBeUndefined();
+    expect(familyBucket('AAAAAB+')).toBeUndefined();
   });
 });
