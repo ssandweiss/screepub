@@ -31,7 +31,13 @@ struct ContentView: View {
     @AppStorage(AppSettings.updateOptInKey) private var updateOptIn = false
     @ObservedObject private var updates = UpdateController.shared
     @State private var showUpdatePopover = false
-    @State private var showReleaseNotes = false
+    /// Drives the release-notes sheet via `.sheet(item:)`. Holding the
+    /// update itself, not a boolean, means the sheet cannot be presented
+    /// without its content: there is no flag that can go true while this
+    /// stays nil, and no later re-lookup of `updates.available` that a
+    /// background check can null out from under an already-decided
+    /// presentation.
+    @State private var releaseNotesUpdate: AvailableUpdate?
     /// Last destination the user actually sent to. Empty on first run, when
     /// the ordering in ResultActions.routes supplies the opening guess.
     @AppStorage("lastDestination") private var lastDestination = ""
@@ -85,18 +91,18 @@ struct ContentView: View {
             // away rather than making the user relaunch to see it work.
             if on { Task { await updates.checkIfDue() } }
         }
-        .onChange(of: updates.available) { _, available in
-            // ReleaseNotesSheet's own dismiss controls (NOT NOW, its Escape
-            // shortcut, INSTALL AND RELAUNCH) live inside the content that
-            // vanishes the moment `available` goes nil, so a stale sheet
-            // has no user-reachable way to close itself — it has to be
-            // closed from out here instead.
-            if available == nil { showReleaseNotes = false }
-        }
-        .sheet(isPresented: $showReleaseNotes) {
-            if let update = updates.available {
-                ReleaseNotesSheet(update: update)
-            }
+        // No onChange(of: updates.available) guard here on purpose. That
+        // guard existed because the sheet's content used to be looked up
+        // FROM `updates.available` at presentation time (`if let update =
+        // updates.available { ReleaseNotesSheet(...) }`), so a background
+        // check nulling `available` made the content vanish out from under
+        // an still-presented sheet. `.sheet(item:)` below presents
+        // `releaseNotesUpdate`'s own captured value: once set, it is
+        // independent of `updates.available` until the sheet dismisses and
+        // SwiftUI nils the binding itself, so there is no longer a state
+        // where the sheet is showing but its content is gone.
+        .sheet(item: $releaseNotesUpdate) { update in
+            ReleaseNotesSheet(update: update)
         }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             guard let provider = providers.first else { return false }
@@ -190,7 +196,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .help("Install the update, or read the release notes")
                 .popover(isPresented: $showUpdatePopover, arrowEdge: .top) {
-                    UpdatePopover(update: update) { showReleaseNotes = true }
+                    UpdatePopover(update: update) { releaseNotesUpdate = $0 }
                 }
             }
         case .downloading(let fraction):
@@ -922,10 +928,14 @@ private struct FooterProgressBar: View {
 /// States plainly what will happen before anything happens.
 private struct UpdatePopover: View {
     let update: AvailableUpdate
-    /// Raised instead of opening a browser. ContentView owns the sheet,
-    /// because a sheet presented by a view that is itself dismissing races
-    /// its own presenter, and this popover dismisses as the button fires.
-    let onReadNotes: () -> Void
+    /// Raised instead of opening a browser, with the update this popover
+    /// already holds handed straight to the caller — not a flag that
+    /// leaves ContentView to re-look `updates.available` up later, which is
+    /// exactly the window a concurrent check can clear it in. ContentView
+    /// owns the sheet, because a sheet presented by a view that is itself
+    /// dismissing races its own presenter, and this popover dismisses as
+    /// the button fires.
+    let onReadNotes: (AvailableUpdate) -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -947,8 +957,12 @@ private struct UpdatePopover: View {
             Button("VIEW RELEASE NOTES") {
                 dismiss()
                 // One hop after the popover has gone, so the sheet is not
-                // presented by a view on its way out.
-                Task { @MainActor in onReadNotes() }
+                // presented by a view on its way out. `update` is this
+                // popover's own already-captured value, not a fresh look at
+                // `updates.available` after the hop, so a check that lands
+                // in that window and clears it cannot pull the rug out from
+                // under a presentation that has already been decided.
+                Task { @MainActor in onReadNotes(update) }
             }
             .buttonStyle(MarginButtonStyle())
         }

@@ -1154,6 +1154,12 @@ do {
     check(picked?.version == "0.6.0", "selection takes the newest release")
     check(picked?.notes.map(\.version) == ["0.6.0", "0.5.0"],
           "notes cover every version newer than the installed one")
+    // The app presents the release-notes sheet with .sheet(item:), which
+    // identifies presentations by this id — it has to track `version`
+    // exactly, or two different releases could collide onto one
+    // presentation (or a genuine update stop being seen as "new").
+    check(picked?.id == picked?.version,
+          "AvailableUpdate.id is its version, the key .sheet(item:) presents on")
 } catch {
     check(false, "selection threw unexpectedly: \(error)")
 }

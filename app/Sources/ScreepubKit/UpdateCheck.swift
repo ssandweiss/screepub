@@ -40,12 +40,21 @@ public struct ReleaseCandidate: Equatable, Sendable {
 }
 
 /// A release newer than the one running.
-public struct AvailableUpdate: Equatable, Sendable {
+///
+/// `Identifiable` so the app can present its release-notes sheet with
+/// `.sheet(item:)` over the update itself rather than a separate boolean
+/// flag: the sheet then cannot exist without the content it needs, which a
+/// flag-plus-optional-lookup can't guarantee once the two fall out of sync.
+public struct AvailableUpdate: Equatable, Identifiable, Sendable {
     public let version: String
     public let downloadURL: URL
     public let releaseNotesURL: URL
     /// Every version newer than the installed one, newest first.
     public let notes: [ReleaseNote]
+
+    /// The version is already the natural key: two `AvailableUpdate`
+    /// values for the same tag are the same update.
+    public var id: String { version }
 
     public init(
         version: String,
