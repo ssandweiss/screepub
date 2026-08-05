@@ -76,6 +76,10 @@ export interface RawLine {
   styled?: string;
   /** cue line opening the right column of a dual-dialogue region */
   dualRight?: boolean;
+  /** per-run font tallies, consumed by the document-dominant pass */
+  fonts?: FontRun[];
+  /** block-level font shift relative to the document's dominant font */
+  fmt?: Fmt;
 }
 
 // Grouped text block

@@ -5,7 +5,9 @@ import {
   familyBucket,
   groupItemsIntoLines,
   markUnderlinesItem,
+  stampLineFmt,
 } from '../src/parser/extract';
+import type { FontRun, RawLine } from '../src/parser/types';
 import { OPS } from 'pdfjs-dist/build/pdf.mjs';
 
 function item(str: string, x: number, y: number) {
@@ -508,5 +510,93 @@ describe('familyBucket', () => {
   test('an empty or missing name has no bucket', () => {
     expect(familyBucket('')).toBeUndefined();
     expect(familyBucket('AAAAAB+')).toBeUndefined();
+  });
+});
+
+describe('stampLineFmt', () => {
+  const line = (fonts: FontRun[]): RawLine =>
+    ({ text: 'x', indent: 10, y: 700, pageNum: 1, fonts });
+
+  const body = (n: number) => line([{ bucket: 'mono', size: 12, chars: n }]);
+
+  test('a uniform document produces no fmt anywhere', () => {
+    const lines = [body(500), body(500), body(500)];
+    stampLineFmt(lines);
+    expect(lines.map((l) => l.fmt)).toEqual([undefined, undefined, undefined]);
+  });
+
+  test('a line in another family gets a family fmt', () => {
+    const shifted = line([{ bucket: 'sans', size: 12, chars: 30 }]);
+    const lines = [body(500), shifted, body(500)];
+    stampLineFmt(lines);
+    expect(shifted.fmt).toEqual({ family: 'sans', size: undefined });
+  });
+
+  test('the three size steps come off the ratio, both directions', () => {
+    const smaller = line([{ bucket: 'mono', size: 10, chars: 30 }]);   // 0.83
+    const bigger = line([{ bucket: 'mono', size: 15, chars: 30 }]);    // 1.25
+    const biggest = line([{ bucket: 'mono', size: 18, chars: 30 }]);   // 1.50
+    const lines = [body(500), smaller, bigger, biggest, body(500)];
+    stampLineFmt(lines);
+    expect(smaller.fmt).toEqual({ family: undefined, size: '-1' });
+    expect(bigger.fmt).toEqual({ family: undefined, size: '+1' });
+    expect(biggest.fmt).toEqual({ family: undefined, size: '+2' });
+  });
+
+  test('a shift in both arms reports both', () => {
+    const both = line([{ bucket: 'sans', size: 18, chars: 30 }]);
+    const lines = [body(500), both];
+    stampLineFmt(lines);
+    expect(both.fmt).toEqual({ family: 'sans', size: '+2' });
+  });
+
+  test('float jitter under 1.5pt never fires', () => {
+    // 13.4/12 = 1.117 is under the ratio floor anyway; the absolute delta is
+    // the belt to the ratio's braces.
+    const jittery = line([{ bucket: 'mono', size: 13.4, chars: 30 }]);
+    const lines = [body(500), jittery];
+    stampLineFmt(lines);
+    expect(jittery.fmt).toBeUndefined();
+  });
+
+  test('a ratio between the steps is not a step', () => {
+    // 13.5/12 = 1.125: bigger than jitter, smaller than +1's 1.15 floor.
+    const between = line([{ bucket: 'mono', size: 13.5, chars: 30 }]);
+    stampLineFmt([body(500), between]);
+    expect(between.fmt).toBeUndefined();
+  });
+
+  test('a line only half in the deviant font gets nothing', () => {
+    const mixed = line([
+      { bucket: 'mono', size: 12, chars: 20 },
+      { bucket: 'sans', size: 12, chars: 20 },
+    ]);
+    stampLineFmt([body(500), mixed]);
+    expect(mixed.fmt).toBeUndefined();
+  });
+
+  test('80% agreement is enough', () => {
+    const mostly = line([
+      { bucket: 'mono', size: 12, chars: 2 },
+      { bucket: 'sans', size: 12, chars: 8 },
+    ]);
+    stampLineFmt([body(500), mostly]);
+    expect(mostly.fmt).toEqual({ family: 'sans', size: undefined });
+  });
+
+  test('the dominant is by character weight, not by line count', () => {
+    // Many short sans lines lose to one long mono block.
+    const sansLines = Array.from({ length: 20 }, () =>
+      line([{ bucket: 'sans', size: 12, chars: 5 }]));
+    const monoLine = line([{ bucket: 'mono', size: 12, chars: 900 }]);
+    stampLineFmt([...sansLines, monoLine]);
+    expect(monoLine.fmt).toBeUndefined();
+    expect(sansLines[0].fmt).toEqual({ family: 'sans', size: undefined });
+  });
+
+  test('lines with no resolved fonts are left alone', () => {
+    const bare: RawLine = { text: 'x', indent: 10, y: 700, pageNum: 1 };
+    stampLineFmt([body(500), bare]);
+    expect(bare.fmt).toBeUndefined();
   });
 });

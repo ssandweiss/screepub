@@ -1,7 +1,7 @@
 // Adapted from an earlier table-read parser by the same author, reworked for
 // headless Bun/Node: modern pdf.js build + DOM shims, no browser worker.
 import './pdfjs-shims';
-import type { FamilyBucket, RawLine } from './types';
+import type { FamilyBucket, RawLine, SizeStep } from './types';
 import { getDocument, OPS } from 'pdfjs-dist/build/pdf.mjs';
 
 /**
@@ -269,6 +269,87 @@ export function familyBucket(name: string): FamilyBucket | undefined {
   if (!n) return undefined;
   for (const [re, bucket] of FAMILY_PATTERNS) if (re.test(n)) return bucket;
   return 'sans';
+}
+
+// Deviation thresholds (registry #18). A step needs BOTH a ratio outside the
+// band and >= 1.5pt of absolute change, so float jitter in a text matrix can
+// never mint one.
+const SIZE_SMALLER_RATIO = 0.85;
+const SIZE_BIGGER_RATIO = 1.15;
+const SIZE_BIGGEST_RATIO = 1.4;
+const SIZE_MIN_DELTA = 1.5;
+/** Share of a line's resolved characters that must agree on one deviation. */
+const FMT_AGREEMENT = 0.8;
+
+function sizeStep(size: number, dominant: number): SizeStep | undefined {
+  if (Math.abs(size - dominant) < SIZE_MIN_DELTA) return undefined;
+  const ratio = size / dominant;
+  if (ratio <= SIZE_SMALLER_RATIO) return '-1';
+  if (ratio > SIZE_BIGGEST_RATIO) return '+2';
+  if (ratio >= SIZE_BIGGER_RATIO) return '+1';
+  return undefined;
+}
+
+/** The key with the largest tally, or undefined for an empty map. */
+function argmax<T>(tally: Map<T, number>): T | undefined {
+  let best: T | undefined;
+  let bestN = -1;
+  for (const [k, n] of tally) {
+    if (n > bestN) {
+      best = k;
+      bestN = n;
+    }
+  }
+  return best;
+}
+
+/**
+ * Stamp `fmt` on every line that deviates from the document's dominant font.
+ *
+ * Runs over the WHOLE document, after every page, because "dominant" is a
+ * document-level fact: a chyron page set entirely in Helvetica is still a
+ * deviation from a Courier script. Weighted by character count so a page of
+ * one-word sans lines cannot outvote the body.
+ *
+ * A uniform Courier-12 screenplay produces zero fmt anywhere, by construction:
+ * every run agrees with the dominant, so neither tally below is ever non-empty.
+ */
+export function stampLineFmt(lines: RawLine[]): void {
+  const docFamily = new Map<FamilyBucket, number>();
+  const docSize = new Map<number, number>();
+  for (const line of lines) {
+    for (const run of line.fonts ?? []) {
+      docFamily.set(run.bucket, (docFamily.get(run.bucket) ?? 0) + run.chars);
+      docSize.set(run.size, (docSize.get(run.size) ?? 0) + run.chars);
+    }
+  }
+  const domFamily = argmax(docFamily);
+  const domSize = argmax(docSize);
+  if (domFamily === undefined || domSize === undefined || domSize <= 0) return;
+
+  for (const line of lines) {
+    const runs = line.fonts;
+    if (!runs || runs.length === 0) continue;
+    const total = runs.reduce((n, r) => n + r.chars, 0);
+    if (total === 0) continue;
+
+    const byFamily = new Map<FamilyBucket, number>();
+    const byStep = new Map<SizeStep, number>();
+    for (const run of runs) {
+      if (run.bucket !== domFamily) {
+        byFamily.set(run.bucket, (byFamily.get(run.bucket) ?? 0) + run.chars);
+      }
+      const step = sizeStep(run.size, domSize);
+      if (step) byStep.set(step, (byStep.get(step) ?? 0) + run.chars);
+    }
+    const agreed = <T>(tally: Map<T, number>): T | undefined => {
+      for (const [k, n] of tally) if (n / total >= FMT_AGREEMENT) return k;
+      return undefined;
+    };
+    const family = agreed(byFamily);
+    const size = agreed(byStep);
+    if (family || size) line.fmt = { family, size };
+  }
 }
 
 /**
