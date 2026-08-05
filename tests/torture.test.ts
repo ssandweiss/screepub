@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll } from 'bun:test';
 import { extractDocument } from '../src/parser/extract';
+import { toFountain } from '../src/fountain/serialize';
 import { parseLines } from '../src/parser/index';
 import type { ElementType, ParsedScreenplay } from '../src/parser/types';
 
@@ -9,6 +10,7 @@ import type { ElementType, ParsedScreenplay } from '../src/parser/types';
 
 let doc: ParsedScreenplay;
 let styledAll: string;
+let fountain: string;
 
 beforeAll(async () => {
   const bytes = await Bun.file('tests/fixtures/torture.pdf').arrayBuffer();
@@ -16,6 +18,8 @@ beforeAll(async () => {
   const { lines } = await extractDocument(new Uint8Array(bytes));
   doc = parseLines(lines);
   styledAll = doc.elements.map((e) => e.styledText ?? e.text).join('\n');
+  // Note PLACEMENT is a serializer fact, so assert it against real output.
+  fountain = toFountain(doc);
 });
 
 describe('the proof sheet parses', () => {
@@ -160,5 +164,35 @@ describe('defects this fixture surfaced', () => {
     const el = doc.elements.find((e) => e.sceneNumber === '42');
     expect(el).toBeDefined();
     expect(el!.type).toBe('scene');
+  });
+});
+
+describe('block font shifts', () => {
+  test('a family shift becomes a note glued above its action block', () => {
+    expect(fountain).toContain('[[fmt: sans]]\nCHYRON: EVERY NAME HERE IS INVENTED.');
+  });
+
+  test('all three size steps appear, each on its own block', () => {
+    expect(fountain).toContain('[[fmt: -1]]\nA footnote, set smaller than the body.');
+    expect(fountain).toContain('[[fmt: +1]]\nThe index card, enlarged for the reader.');
+    expect(fountain).toContain('[[fmt: +2]]\nA SIGN, VERY LARGE INDEED');
+  });
+
+  test('a dialogue shift leads the line instead', () => {
+    expect(fountain).toContain('[[fmt: sans]] A text message, in the phone');
+  });
+
+  test('the body itself carries no notes', () => {
+    // A uniform Courier-12 screenplay must produce zero fmt by construction;
+    // only the five deliberately-shifted blocks may have one.
+    expect(fountain.match(/\[\[fmt:/g)!.length).toBe(5);
+  });
+
+  test('a shifted block never merges with the plain action around it', () => {
+    const chyron = doc.elements.find((e) => e.text.startsWith('CHYRON:'));
+    expect(chyron).toBeDefined();
+    expect(chyron!.type).toBe('action');
+    expect(chyron!.text).toBe('CHYRON: EVERY NAME HERE IS INVENTED.');
+    expect(chyron!.fmt).toEqual({ family: 'sans', size: undefined });
   });
 });

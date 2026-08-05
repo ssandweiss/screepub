@@ -30,7 +30,8 @@ LINES_PER_PAGE = 55
 # names through commonObjs, which is what src/parser/extract.ts regexes for
 # /bold|black|heavy/ and /italic|oblique/.
 FONTS = {"F1": "Courier", "F2": "Courier-Bold",
-         "F3": "Courier-Oblique", "F4": "Courier-BoldOblique"}
+         "F3": "Courier-Oblique", "F4": "Courier-BoldOblique",
+         "F5": "Helvetica"}
 
 CHAR_W = 7.2                   # 12pt Courier advance: 0.1" at 10 chars/inch
 
@@ -165,8 +166,9 @@ def esc(s):
 
 # --- inline markup, for the torture kind ---------------------------------
 
-# u draws a real underline; k, r and w draw DECOYS the parser must reject.
-MARKUP = re.compile(r"\{(/?)([biukrw])\}")
+# b/i are font STYLES; u/k/r/w are DRAWN rules (one real, three decoys);
+# f/t/z/g are block font SHIFTS, which registry 18 reads back out of the PDF.
+MARKUP = re.compile(r"\{(/?)([biukrwftzg])\}")
 
 
 def parse_markup(s):
@@ -282,10 +284,25 @@ def layout():
 # parser cannot see it from font data alone (registry 9d).
 DRAWN = {"u", "k", "r", "w"}
 
+# Block font shifts (registry 18). f picks the second FACE; t/z/g pick a
+# SIZE, chosen to land one on each side of every threshold in that entry:
+#   10/12 = 0.83 -> -1     15/12 = 1.25 -> +1     18/12 = 1.50 -> +2
+SHIFT_SIZE = {"t": 10.0, "z": 15.0, "g": 18.0}
+SHIFTS = {"f"} | set(SHIFT_SIZE)
+
+
+def size_for(styles):
+    for s in styles:
+        if s in SHIFT_SIZE:
+            return SHIFT_SIZE[s]
+    return 12.0
+
 
 def font_for(styles):
     """Style set -> font resource key."""
-    s = set(styles) - DRAWN
+    if "f" in styles:
+        return "F5"                  # a family shift, not a weight or slope
+    s = set(styles) - DRAWN - SHIFTS
     if s == {"b", "i"}:
         return "F4"
     if s == {"b"}:
@@ -317,7 +334,7 @@ def styled_row_ops(x_in, y, runs):
     for run in runs:
         text, styles = run["text"], run["styles"]
         if text:
-            ops += [f"/{font_for(styles)} 12 Tf",
+            ops += [f"/{font_for(styles)} {size_for(styles):g} Tf",
                     f"1 0 0 1 {x:.2f} {y:.2f} Tm", f"({esc(text)}) Tj"]
             w = len(text) * CHAR_W
             # A filled rectangle, not a stroked line. Real generators stroke;
