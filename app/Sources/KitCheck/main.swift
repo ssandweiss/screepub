@@ -1316,8 +1316,9 @@ if let markdown = try? String(contentsOf: notesFixture, encoding: .utf8) {
     }
     check(!titleText, "the # title line produces no block")
 
-    // No text lost. Every word in the source, minus markdown punctuation and
-    // the dropped title, must survive into some block.
+    // No text lost. Every word in the source, minus markdown punctuation,
+    // the dropped title LINE, and any HTML comment marker, must survive
+    // into some block.
     func words(_ s: String) -> Set<String> {
         Set(s.replacingOccurrences(of: "*", with: " ")
              .replacingOccurrences(of: "#", with: " ")
@@ -1334,7 +1335,36 @@ if let markdown = try? String(contentsOf: notesFixture, encoding: .utf8) {
         case .aside(let t): rendered += " " + t
         }
     }
-    let sourceWords = words(markdown).subtracting(["Screepub", "0.5.0"])
+    // Mirrors ReleaseNotes' own stripHTMLComments (private, so duplicated
+    // here rather than exposed as public API just for this check): a
+    // marker is markup, not prose, so it is excluded from what "no text
+    // lost" demands the parser keep — the same way the # title line is
+    // excluded below, and for the same reason.
+    func stripComments(_ s: String) -> String {
+        var result = ""
+        var remainder = Substring(s)
+        while let open = remainder.range(of: "<!--") {
+            result += remainder[remainder.startIndex..<open.lowerBound]
+            if let close = remainder.range(of: "-->", range: open.upperBound..<remainder.endIndex) {
+                remainder = remainder[close.upperBound...]
+            } else {
+                remainder = remainder[remainder.endIndex...]
+            }
+        }
+        result += remainder
+        return result
+    }
+    // Excluding the whole document minus a fixed word list would also
+    // excuse a lost "Screepub" or "0.5.0" wherever they appear in real
+    // prose (lines 8, 36, 41 of this fixture use "Screepub"). Filtering
+    // just the title LINE keeps the check blind only to what it should be:
+    // the one line the parser is specified to drop.
+    let bodyOnly = markdown
+        .components(separatedBy: .newlines)
+        .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("# ") }
+        .map(stripComments)
+        .joined(separator: "\n")
+    let sourceWords = words(bodyOnly)
     let missing = sourceWords.subtracting(words(rendered))
     check(missing.isEmpty, "no text is lost in parsing (missing: \(missing.sorted().prefix(5)))")
 } else {
@@ -1344,6 +1374,24 @@ if let markdown = try? String(contentsOf: notesFixture, encoding: .utf8) {
 check(ReleaseNotes.parse("").isEmpty, "empty input parses to no blocks")
 check(ReleaseNotes.parse("Mystery: [a link](x) and `code`.").count == 1,
       "unrecognized syntax degrades to one paragraph rather than vanishing")
+
+// GitHub hides a release-notes-template.md marker like
+// "<!-- caveat: registry-17 -->" because it renders markdown to HTML; our
+// sheet renders these blocks as plain SwiftUI Text, so a marker left in
+// would show up to the reader as literal text. The parser must drop it
+// while keeping the prose it trails.
+let markerBlocks = ReleaseNotes.parse(
+    "- Inert if ignored, so this is safe. <!-- caveat: registry-17 -->"
+)
+check(markerBlocks.count == 1, "a marker line still parses to exactly one block")
+if case .bullet(_, let body)? = markerBlocks.first {
+    check(body.contains("Inert if ignored, so this is safe."),
+          "the marker bullet keeps its prose")
+    check(!body.contains("<!--") && !body.contains("-->") && !body.contains("registry-17"),
+          "the marker bullet drops the comment tags and marker text alike")
+} else {
+    check(false, "a bullet with a trailing HTML comment still parses to a bullet")
+}
 
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

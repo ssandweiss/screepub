@@ -43,7 +43,7 @@ public enum ReleaseNotes {
         }
 
         for raw in markdown.components(separatedBy: .newlines) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
+            let line = stripHTMLComments(raw).trimmingCharacters(in: .whitespaces)
 
             if line.isEmpty { flush(); continue }
             if line.hasPrefix("## ") {
@@ -93,5 +93,36 @@ public enum ReleaseNotes {
     /// rather than half-rendered. A stray asterisk reads worse than none.
     private static func unemphasize(_ text: String) -> String {
         text.replacingOccurrences(of: "**", with: "")
+    }
+
+    /// Removes `<!-- ... -->` spans, such as the template's
+    /// `<!-- caveat: registry-17 -->` markers. GitHub hides these because it
+    /// renders markdown to HTML, where a comment is invisible; our sheet
+    /// renders these blocks as plain SwiftUI Text, not HTML, so a marker
+    /// left in would show up to the reader as literal `<!-- ... -->`. A
+    /// marker is punctuation for the release process, not prose the reader
+    /// is meant to see, so dropping it is the same call as dropping the `#`
+    /// title, not a violation of "no text lost".
+    ///
+    /// Single-line only, applied per physical line before it is classified:
+    /// the documented convention always places a marker at the end of one
+    /// line, so this covers the real case without contorting the parser for
+    /// a comment spanning multiple lines.
+    private static func stripHTMLComments(_ line: String) -> String {
+        guard line.contains("<!--") else { return line }
+        var result = ""
+        var remainder = Substring(line)
+        while let open = remainder.range(of: "<!--") {
+            result += remainder[remainder.startIndex..<open.lowerBound]
+            if let close = remainder.range(of: "-->", range: open.upperBound..<remainder.endIndex) {
+                remainder = remainder[close.upperBound...]
+            } else {
+                // Unterminated on this line: drop the rest rather than leak
+                // a dangling "<!--".
+                remainder = remainder[remainder.endIndex...]
+            }
+        }
+        result += remainder
+        return result
     }
 }
