@@ -1284,7 +1284,7 @@ do {
 do {
     _ = try UpdateCheck.candidates(from: Data("not json".utf8))
     check(false, "malformed JSON should throw")
-} catch UpdateCheckError.malformedResponse {
+} catch UpdateCheckError.malformedResponse(_) {
     check(true, "malformed JSON throws malformedResponse")
 } catch {
     check(false, "wrong error for malformed JSON: \(error)")
@@ -1460,6 +1460,43 @@ check(ReleaseNotes.parse("- ").isEmpty,
       "a bullet marker with nothing after it yields no block, not a stray dash")
 check(ReleaseNotes.parse("## **Bold** Heading") == [.section("Bold Heading")],
       "a heading's inline bold is flattened, same as every other block")
+
+// — Update error descriptions —
+// These strings reach an NSAlert in manualUpdateCheck(). Without
+// LocalizedError, Swift bridges to NSError and localizedDescription becomes
+// "The operation couldn't be completed. (UpdateCheckError error 2.)", which
+// is what the user was being shown.
+let describedErrors: [(UpdateCheckError, String)] = [
+    (.rateLimited, "rateLimited"),
+    (.network("HTTP 503"), "network"),
+    (.malformedResponse("index 1: key 'draft' not found"), "malformedResponse"),
+    (.noDownloadableAsset, "noDownloadableAsset"),
+]
+for (error, label) in describedErrors {
+    check(error.errorDescription?.isEmpty == false,
+          "\(label) has a non-empty errorDescription")
+    // The assertion that actually fails if the conformance is ever dropped.
+    check(error.localizedDescription.contains("couldn't be completed") == false
+            && error.localizedDescription.contains("couldn’t be completed") == false,
+          "\(label) does not fall back to Foundation's placeholder")
+}
+
+check(UpdateCheckError.network("HTTP 503").localizedDescription.contains("503"),
+      "network carries its detail into the description")
+check(UpdateCheckError.malformedResponse("key 'draft' not found")
+        .localizedDescription.contains("key 'draft' not found"),
+      "malformedResponse carries its detail into the description")
+
+// The boundary: proves the `try?` was really replaced, rather than the
+// payload being filled with a constant.
+do {
+    _ = try UpdateCheck.candidates(from: Data("not json".utf8))
+    check(false, "malformed JSON should throw")
+} catch UpdateCheckError.malformedResponse(let detail) {
+    check(!detail.isEmpty, "a decode failure carries the decoder's own reason")
+} catch {
+    check(false, "wrong error for malformed JSON: \(error)")
+}
 
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

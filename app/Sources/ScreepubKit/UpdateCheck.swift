@@ -69,12 +69,33 @@ public struct AvailableUpdate: Equatable, Identifiable, Sendable {
     }
 }
 
-public enum UpdateCheckError: Error, Equatable {
+public enum UpdateCheckError: Error, Equatable, LocalizedError {
     case rateLimited
     case network(String)
-    case malformedResponse
+    /// Carries the decoder's own reason. One malformed element fails the
+    /// whole batch of up to thirty releases, so the index it names is the
+    /// entire diagnosis.
+    case malformedResponse(String)
     /// The release exists but carries no .dmg — a half-uploaded release, say.
     case noDownloadableAsset
+
+    /// Read aloud by the alert in `manualUpdateCheck()`. Without this,
+    /// `localizedDescription` is Foundation's "The operation couldn't be
+    /// completed. (UpdateCheckError error N.)" and `network`'s payload never
+    /// reaches anyone. These say what happened; the alert supplies the
+    /// apology, so these must not add a second one.
+    public var errorDescription: String? {
+        switch self {
+        case .rateLimited:
+            return "GitHub limits unauthenticated checks to 60 an hour per network address."
+        case .network(let detail):
+            return detail
+        case .malformedResponse(let detail):
+            return "GitHub's response could not be read: \(detail)"
+        case .noDownloadableAsset:
+            return "The newest release has no .dmg attached yet."
+        }
+    }
 }
 
 /// Asks GitHub whether a newer release exists. Deliberately not a framework:
@@ -187,8 +208,13 @@ public enum UpdateCheck {
     /// Separate from `select` so both halves of the check are testable and
     /// only the URLSession call in `latest` is not.
     public static func candidates(from data: Data) throws -> [ReleaseCandidate] {
-        guard let releases = try? JSONDecoder().decode([GitHubRelease].self, from: data) else {
-            throw UpdateCheckError.malformedResponse
+        let releases: [GitHubRelease]
+        do {
+            releases = try JSONDecoder().decode([GitHubRelease].self, from: data)
+        } catch {
+            // DecodingError names the array index and the key. That is the
+            // whole diagnosis when one bad element fails thirty releases.
+            throw UpdateCheckError.malformedResponse(error.localizedDescription)
         }
         return releases.map { release in
             ReleaseCandidate(
