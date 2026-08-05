@@ -192,13 +192,24 @@ Pinned below the scroll region, not inside it:
 ### 4. `app/Sources/ScreepubApp/ContentView.swift`
 
 `VIEW RELEASE NOTES` stops calling `NSWorkspace`. It dismisses the popover
-and sets `@State private var showReleaseNotes = false` to true; ContentView
-presents the sheet with `.sheet(isPresented:)`.
+and hands ContentView the update it already holds; ContentView presents the
+sheet with `.sheet(item:)` over `@State private var releaseNotesUpdate:
+AvailableUpdate?`, so `AvailableUpdate` conforms to `Identifiable` keyed on
+`version`.
 
 The sheet is presented from ContentView rather than from inside the popover
 deliberately. A sheet presented by a view that is itself being dismissed
 races its own presenter, and the popover dismisses the moment its button
 fires.
+
+It carries the update rather than a boolean for a second reason, found in
+review. A boolean plus a content closure that re-reads `updates.available`
+are two facts that can disagree: `checkNow()` can clear `available` either
+while the sheet is open or during the one-hop deferral before it opens, and
+either way the sheet renders with no content. Its dismiss controls live
+inside that content, so the result is a modal with nothing to press.
+`.sheet(item:)` makes "presented" and "has content" the same fact, which
+removes both cases rather than guarding them.
 
 ## Testing
 
