@@ -2,7 +2,7 @@
 // headless Bun/Node: modern pdf.js build + DOM shims, no browser worker.
 import './pdfjs-shims';
 import type { RawLine } from './types';
-import { getDocument } from 'pdfjs-dist/build/pdf.mjs';
+import { getDocument, OPS } from 'pdfjs-dist/build/pdf.mjs';
 
 /**
  * Extract raw lines from a PDF buffer.
@@ -100,6 +100,143 @@ export function groupItemsIntoLines(
 interface LineItems {
   y: number;
   items: TextItem[];
+}
+
+/**
+ * A drawn horizontal rule that might be an underline, in PDF user space —
+ * the same space text baselines live in (origin bottom-left).
+ */
+export interface UnderlineMark {
+  x0: number;
+  x1: number;
+  y: number;
+}
+
+interface OpList {
+  fnArray: ArrayLike<number>;
+  argsArray: ArrayLike<unknown>;
+}
+
+// Geometry bounds, calibrated 2026-08-04 against the local generator set.
+// Real underlines measured 0.0-0.6pt tall, 36-168pt wide, and sat 1.5-3.0pt
+// below their baseline. Every constant has a decoy in the torture fixture.
+const MARK_MAX_HEIGHT = 2.5;       // taller is a box or a filled bar
+const MARK_MIN_WIDTH = 4;          // narrower is a bullet or a tick
+const MARK_MAX_WIDTH_FRAC = 0.85;  // wider is a header/footer rule
+const MARK_BELOW = 3.5;            // deepest a mark may sit under a baseline
+const MARK_ABOVE = 0.5;            // a strikethrough sits far higher than this
+const MARK_MIN_OVERLAP = 0.6;      // fraction of the item a mark must cover
+
+/** m ∘ t — PDF's `cm` post-multiplies onto the current matrix. */
+function concat(m: number[], t: number[]): number[] {
+  return [
+    m[0] * t[0] + m[2] * t[1],
+    m[1] * t[0] + m[3] * t[1],
+    m[0] * t[2] + m[2] * t[3],
+    m[1] * t[2] + m[3] * t[3],
+    m[0] * t[4] + m[2] * t[5] + m[4],
+    m[1] * t[4] + m[3] * t[5] + m[5],
+  ];
+}
+
+/**
+ * Walk a page's operator list for drawn rules that could be underlines.
+ *
+ * pdf.js folds all path painting into `constructPath`, whose args are
+ * [paintOp, packedPathData, minMax]. The minMax bounding box alone separates
+ * an underline (flat and short) from a box (tall) or a page rule (wide), so
+ * the packed path data is never decoded. If a generator ever batches several
+ * underlines into one path with several subpaths, decoding that array into
+ * per-subpath bboxes is the refinement — not built until a real script needs it.
+ *
+ * Best-effort by design, like `stampFontStyles`: any failure yields no marks,
+ * which is exactly today's behavior.
+ */
+export function collectUnderlineMarks(opList: OpList, pageWidth: number): UnderlineMark[] {
+  const marks: UnderlineMark[] = [];
+  try {
+    const { fnArray, argsArray } = opList;
+    let m = [1, 0, 0, 1, 0, 0];
+    const stack: number[][] = [];
+
+    for (let i = 0; i < fnArray.length; i++) {
+      const fn = fnArray[i];
+
+      if (fn === OPS.save) {
+        stack.push(m);
+        continue;
+      }
+      if (fn === OPS.restore) {
+        m = stack.pop() ?? [1, 0, 0, 1, 0, 0];
+        continue;
+      }
+      if (fn === OPS.transform) {
+        m = concat(m, argsArray[i] as number[]);
+        continue;
+      }
+      if (fn !== OPS.constructPath) continue;
+
+      const args = argsArray[i] as [number, unknown, ArrayLike<number>] | null;
+      // endPath is the clip-path spelling (`W n`): it builds geometry and
+      // paints nothing. Every full-page box the browser-print generator draws
+      // is one. Every OTHER paint op is accepted — real underlines are
+      // STROKED, not filled, so requiring a fill would detect nothing real.
+      if (!args || args[0] === OPS.endPath) continue;
+      const bb = args[2];
+      if (!bb || bb.length < 4) continue;
+
+      // Skew or rotation: the bbox stops describing an axis-aligned rule, and
+      // screenplays do not underline on a slant. Skip rather than guess.
+      if (Math.abs(m[1]) > 1e-6 || Math.abs(m[2]) > 1e-6) continue;
+
+      // BOTH corners, then min/max. Final Draft draws its underlines under a
+      // y-flip ([1,0,0,-1,0,pageHeight]); transforming one corner, or treating
+      // a flip as "rotated, skip it", puts the mark hundreds of points off and
+      // no baseline ever matches.
+      const ax = m[0] * bb[0] + m[2] * bb[1] + m[4];
+      const ay = m[1] * bb[0] + m[3] * bb[1] + m[5];
+      const bx = m[0] * bb[2] + m[2] * bb[3] + m[4];
+      const by = m[1] * bb[2] + m[3] * bb[3] + m[5];
+      const x0 = Math.min(ax, bx);
+      const x1 = Math.max(ax, bx);
+      const y0 = Math.min(ay, by);
+      const y1 = Math.max(ay, by);
+
+      const width = x1 - x0;
+      if (y1 - y0 > MARK_MAX_HEIGHT) continue;
+      if (width < MARK_MIN_WIDTH) continue;
+      if (width >= pageWidth * MARK_MAX_WIDTH_FRAC) continue;
+
+      marks.push({ x0, x1, y: (y0 + y1) / 2 });
+    }
+  } catch {
+    return [];
+  }
+  return marks;
+}
+
+/**
+ * True when `mark` underlines the text item spanning [x0, x1) on `baseline`.
+ * Pure geometry, so it is testable without a PDF.
+ *
+ * The band excludes a strikethrough (which sits mid x-height, ABOVE the
+ * baseline) and the row below's own underline (12pt away at screenplay
+ * spacing). The overlap floor keeps a rule under part of a run from marking
+ * the whole run: item granularity means the alternative to dropping it is
+ * wrapping characters that are not underlined.
+ */
+export function markUnderlinesItem(
+  mark: UnderlineMark,
+  x0: number,
+  x1: number,
+  baseline: number,
+): boolean {
+  if (mark.y > baseline + MARK_ABOVE) return false;
+  if (mark.y < baseline - MARK_BELOW) return false;
+  const width = x1 - x0;
+  if (width <= 0) return false;
+  const overlap = Math.min(x1, mark.x1) - Math.max(x0, mark.x0);
+  return overlap / width >= MARK_MIN_OVERLAP;
 }
 
 /**

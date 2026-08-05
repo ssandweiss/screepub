@@ -1,5 +1,7 @@
+import '../src/parser/pdfjs-shims';
 import { describe, test, expect } from 'bun:test';
-import { groupItemsIntoLines } from '../src/parser/extract';
+import { collectUnderlineMarks, groupItemsIntoLines, markUnderlinesItem } from '../src/parser/extract';
+import { OPS } from 'pdfjs-dist/build/pdf.mjs';
 
 function item(str: string, x: number, y: number) {
   return { str, transform: [1, 0, 0, 1, x, y] };
@@ -255,5 +257,149 @@ describe('dual dialogue marking', () => {
     expect(lines[0].dualRight).toBeUndefined();
     expect(lines[2].text).toBe('DEV');
     expect(lines[2].dualRight).toBe(true);
+  });
+});
+
+describe('collectUnderlineMarks', () => {
+  const PAGE = 612;
+
+  /** Build a one-op operator list drawing a path with bbox [x0,y0,x1,y1]. */
+  function paths(
+    entries: { bbox: [number, number, number, number]; paint?: number }[],
+    prefix: { fn: number; args: unknown[] }[] = [],
+  ) {
+    const fnArray: number[] = prefix.map((p) => p.fn);
+    const argsArray: unknown[] = prefix.map((p) => p.args);
+    for (const e of entries) {
+      fnArray.push(OPS.constructPath);
+      argsArray.push([e.paint ?? OPS.stroke, [], Float32Array.from(e.bbox)]);
+    }
+    return { fnArray, argsArray };
+  }
+
+  /** pdf.js hands back a real Float32Array, so 266.4 arrives as
+   * 266.3999938964844. These are geometry assertions, not bit assertions. */
+  const rounded = (marks: { x0: number; x1: number; y: number }[]) =>
+    marks.map((m) => ({ x0: +m.x0.toFixed(2), x1: +m.x1.toFixed(2), y: +m.y.toFixed(2) }));
+
+  test('a flat, short, filled rule is a mark', () => {
+    // The invented fixture's shape: a 72pt x 0.6pt filled rect.
+    const marks = collectUnderlineMarks(
+      paths([{ bbox: [201.6, 562.0, 273.6, 562.6], paint: OPS.fill }]),
+      PAGE,
+    );
+    expect(rounded(marks)).toEqual([{ x0: 201.6, x1: 273.6, y: 562.3 }]);
+  });
+
+  test('a zero-height STROKED rule is a mark too', () => {
+    // Every real underline in the local set is a stroke with a zero-height
+    // bbox, not a filled rect. Requiring a fill would detect nothing real.
+    const marks = collectUnderlineMarks(
+      paths([{ bbox: [266.4, 548.5, 346.4, 548.5], paint: OPS.stroke }]),
+      PAGE,
+    );
+    expect(rounded(marks)).toEqual([{ x0: 266.4, x1: 346.4, y: 548.5 }]);
+  });
+
+  test('a tall box is not a mark', () => {
+    expect(collectUnderlineMarks(paths([{ bbox: [100, 500, 300, 512] }]), PAGE)).toEqual([]);
+  });
+
+  test('a hairline shorter than 4pt is not a mark', () => {
+    expect(collectUnderlineMarks(paths([{ bbox: [100, 500, 103, 500] }]), PAGE)).toEqual([]);
+  });
+
+  test('a page-wide rule is furniture, not a mark', () => {
+    // Final Draft's header rules span the full measure; an underline never does.
+    expect(collectUnderlineMarks(paths([{ bbox: [0, 744, 612, 744] }]), PAGE)).toEqual([]);
+  });
+
+  test('endPath constructs geometry but paints nothing', () => {
+    // `W n` clip paths. chromium.pdf draws 34 of them, all full-page boxes.
+    expect(
+      collectUnderlineMarks(paths([{ bbox: [100, 500, 200, 500], paint: OPS.endPath }]), PAGE),
+    ).toEqual([]);
+  });
+
+  test('a y-flip CTM is applied, not skipped', () => {
+    // final-draft.pdf draws its underlines under [1,0,0,-1,0,792]. Untransformed
+    // the mark lands at y=287; the real baseline is at 505.
+    const marks = collectUnderlineMarks(
+      paths([{ bbox: [222, 287, 390, 287] }], [
+        { fn: OPS.save, args: [] },
+        { fn: OPS.transform, args: [1, 0, 0, -1, 0, 792] },
+      ]),
+      PAGE,
+    );
+    expect(marks).toEqual([{ x0: 222, x1: 390, y: 505 }]);
+  });
+
+  test('restore pops the CTM back', () => {
+    const marks = collectUnderlineMarks(
+      paths([{ bbox: [222, 287, 390, 287] }], [
+        { fn: OPS.save, args: [] },
+        { fn: OPS.transform, args: [1, 0, 0, -1, 0, 792] },
+        { fn: OPS.restore, args: [] },
+      ]),
+      PAGE,
+    );
+    expect(marks).toEqual([{ x0: 222, x1: 390, y: 287 }]);
+  });
+
+  test('a rotated CTM is skipped rather than guessed at', () => {
+    const marks = collectUnderlineMarks(
+      paths([{ bbox: [222, 287, 390, 287] }], [
+        { fn: OPS.transform, args: [0, 1, -1, 0, 0, 0] },
+      ]),
+      PAGE,
+    );
+    expect(marks).toEqual([]);
+  });
+
+  test('a malformed operator list yields no marks instead of throwing', () => {
+    expect(collectUnderlineMarks({ fnArray: [OPS.constructPath], argsArray: [null] }, PAGE)).toEqual([]);
+    expect(collectUnderlineMarks(null as unknown as { fnArray: number[]; argsArray: unknown[] }, PAGE)).toEqual([]);
+  });
+});
+
+describe('markUnderlinesItem', () => {
+  const mark = (y: number, x0 = 100, x1 = 200) => ({ x0, x1, y });
+
+  test('a mark 2pt under the baseline, fully covering the item, matches', () => {
+    expect(markUnderlinesItem(mark(498), 100, 200, 500)).toBe(true);
+  });
+
+  test('the measured range of real generators all matches', () => {
+    // -1.5 (highland p8/p9), -1.7 (torture), -2.0 (final draft), -3.0 (highland p6)
+    for (const d of [-1.5, -1.7, -2.0, -3.0]) {
+      expect(markUnderlinesItem(mark(500 + d), 100, 200, 500), `d=${d}`).toBe(true);
+    }
+  });
+
+  test('a strikethrough sits above the baseline and does not match', () => {
+    expect(markUnderlinesItem(mark(503.5), 100, 200, 500)).toBe(false);
+  });
+
+  test('a table border 6pt below the baseline does not match', () => {
+    expect(markUnderlinesItem(mark(494), 100, 200, 500)).toBe(false);
+  });
+
+  test("the next line's mark does not match this line", () => {
+    // 12pt line spacing: the row below's underline sits at 488 - 2.
+    expect(markUnderlinesItem(mark(486), 100, 200, 500)).toBe(false);
+  });
+
+  test('a mark covering less than 60% of the item does not match', () => {
+    // highland p8: a 36pt rule under a 129.5pt item. Marking the whole item
+    // underlined would put _ around 13 characters that are not underlined.
+    expect(markUnderlinesItem(mark(498, 100, 136), 100, 229.5, 500)).toBe(false);
+  });
+
+  test('a mark covering 60% or more does match', () => {
+    expect(markUnderlinesItem(mark(498, 100, 160), 100, 200, 500)).toBe(true);
+  });
+
+  test('a zero-width item never matches', () => {
+    expect(markUnderlinesItem(mark(498), 100, 100, 500)).toBe(false);
   });
 });
