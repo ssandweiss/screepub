@@ -338,3 +338,57 @@ describe('inline emphasis', () => {
     expect(out).toContain('<i>d1</i>');
   });
 });
+
+describe('font shifts', () => {
+  const html = (src: string, format = resolveFormatOptions({})) => {
+    const { tokens } = new Fountain().parse(src, true);
+    return tokensToMobiHtml(tokens, { title: 'T' }, format);
+  };
+
+  test('a size step wraps the action in a font tag', () => {
+    expect(html('INT. A - DAY\n\n[[fmt: +2]]\nA SIGN.\n')).toContain(
+      '<p><font size="+2">A SIGN.</font></p>',
+    );
+  });
+
+  test('all three steps map', () => {
+    expect(html('INT. A - DAY\n\n[[fmt: -1]]\nSmall.\n')).toContain('<font size="-1">');
+    expect(html('INT. A - DAY\n\n[[fmt: +1]]\nMedium.\n')).toContain('<font size="+1">');
+  });
+
+  test('dialogue size steps land too', () => {
+    expect(html('INT. A - DAY\n\n@WREN\n[[fmt: +1]] Read it back.\n')).toContain(
+      '<font size="+1">Read it back.</font>',
+    );
+  });
+
+  test('family is dropped: MOBI 6 face support is not reliable', () => {
+    const out = html('INT. A - DAY\n\n[[fmt: sans]]\nCHYRON.\n');
+    expect(out).toContain('<p>CHYRON.</p>');
+    expect(out).not.toContain('face=');
+    expect(out).not.toContain('fmt-sans');
+  });
+
+  test('a family+size note keeps the size and drops the family', () => {
+    expect(html('INT. A - DAY\n\n[[fmt: sans +2]]\nA SIGN.\n')).toContain(
+      '<p><font size="+2">A SIGN.</font></p>',
+    );
+  });
+
+  test('with the knob off the note vanishes and no font tag appears', () => {
+    const out = html(
+      'INT. A - DAY\n\n[[fmt: +2]]\nA SIGN.\n',
+      resolveFormatOptions({ preserveFontShifts: false }),
+    );
+    expect(out).toContain('<p>A SIGN.</p>');
+    // Scoped to the body: the generated title page sets its own title in
+    // <font size="+2">, so a document-wide check would never fail.
+    expect(out).not.toContain('<font size="+2">A SIGN.');
+  });
+
+  test('notes are invisible here too', () => {
+    const out = html('INT. A - DAY\n\nHe leaves [[check this]] quickly.\n');
+    expect(out).toContain('He leaves quickly.');
+    expect(out).not.toContain('[[');
+  });
+});
