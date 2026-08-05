@@ -1053,7 +1053,7 @@ Expected: clean.
 the CLI summary line against the recorded tables:
 
 ```bash
-for f in tests/fixtures/screenplay.pdf tests/fixtures/torture.pdf; do bun src/cli.ts "$f" --out /tmp/p1-sweep; done
+for f in screenplay torture; do bun src/cli.ts "tests/fixtures/$f.pdf" -o /tmp/p1-sweep/$f.epub --fountain /tmp/p1-sweep/$f.fountain --mobi; done
 ```
 
 Expected: `screenplay.pdf` reports 5 pages · 5 scenes · 3 characters, unchanged —
@@ -1063,27 +1063,49 @@ it draws no paths at all, so any drift there is a bug in the shared refactor of
 - [ ] **Step 4: epubcheck.**
 
 ```bash
-epubcheck /tmp/p1-sweep/*.epub
+epubcheck /tmp/p1-sweep/screenplay.epub && epubcheck /tmp/p1-sweep/torture.epub
 ```
 
 Expected: 0 errors. Phase 1 emits no new markup — `_x_` already rendered as
 `span.underline` — so an error here means something else broke.
 
 - [ ] **Step 5: real-PDF sweep, by generator.** The gitignored root `/fixtures/`
-set is in the MAIN checkout, not this worktree:
+set is in the MAIN checkout, not this worktree. Do a real A/B: the question is
+not "are there underscores" but "what moved". Generate baseline outputs by
+temporarily swapping in the pre-Phase-1 parser, then diff the `.fountain`s —
+the corpus diff is this repo's tool for "does this actually matter?".
 
 ```bash
 R=/Users/CWP_MBP_SGS2/Documents/CODING_PROJECTS/Projects/02_Darkwell/Screepub/fixtures
-for f in "$R"/final-draft.pdf "$R"/highland.pdf "$R"/celtx.pdf "$R"/fade-in.pdf "$R"/chromium.pdf; do bun src/cli.ts "$f" --out /tmp/p1-real; done
-grep -c '_' /tmp/p1-real/*.fountain
+cp src/parser/extract.ts /tmp/extract.new.ts
+git show eed4174:src/parser/extract.ts > src/parser/extract.ts
+for f in final-draft highland celtx fade-in chromium; do bun src/cli.ts "$R/$f.pdf" -o /tmp/base/$f.epub --fountain /tmp/base/$f.fountain; done
+cp /tmp/extract.new.ts src/parser/extract.ts   # MUST restore; verify with git diff
+for f in final-draft highland celtx fade-in chromium; do bun src/cli.ts "$R/$f.pdf" -o /tmp/new/$f.epub --fountain /tmp/new/$f.fountain; done
+for f in final-draft highland celtx fade-in chromium; do echo "$f $(diff /tmp/base/$f.fountain /tmp/new/$f.fountain | grep -c '^[<>]')"; done
 ```
 
-Expected, from the probe table above: `final-draft` gains underscores (1 mark in
-its first 10 pages, ~43 paths across them); `highland` gains 2 of its 4 (the
-partial-item pair is the documented bound); `celtx` and `fade-in` gain exactly
-zero, because they draw no paths at all; `chromium` gains zero, because its 34
-paths are clip boxes and full-page fills. Page/scene/character counts must not
-move for any of them.
+Measured 2026-08-04 (changed `.fountain` lines; every summary line identical):
+
+| PDF | changed | why |
+|---|---|---|
+| final-draft | **0** | its one mark is on page 1, the TITLE page, which never reaches body serialization |
+| celtx | **0** | draws no paths at all |
+| fade-in | **0** | draws no paths at all |
+| highland | 8 (4 lines gained `_`) | 62 marks survived geometry across 108 pages; only 5 matched a baseline |
+| chromium | 14 (7 lines gained `_`) | real browser `text-decoration: underline` |
+
+The last row is the one worth pausing on. Its 8 matches all have mark width
+EXACTLY equal to item width at a constant `dy = -1.2` — the signature of a
+browser drawing a decoration under a text run, i.e. genuine underlines, not
+false positives. (An earlier 10-page probe found only clip boxes there and
+predicted zero; the full document says otherwise.) Highland is the reassuring
+row in the other direction: 57 of its 62 geometrically-valid marks matched
+nothing, so the y-window and overlap floor are doing real work against real
+document furniture.
+
+**Never let a real title, author or character name reach an assertion, a doc or a
+screenshot.** Read these outputs; do not paste them anywhere.
 
 **Never let a real title, author or character name reach an assertion, a doc or a
 screenshot.** Read these outputs; do not paste them anywhere.
