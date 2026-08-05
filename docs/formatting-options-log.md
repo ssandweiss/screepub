@@ -11,6 +11,13 @@ written as a **toggle or slider in the Mac app** (the reader window's rail;
 app. Entries below marked "not built" remain future work; everything else
 is live.
 
+**Coverage of these entries by the committed torture fixture is tracked in
+`tools/torture-manifest.json`**, one row per entry, and
+`tests/torture-coverage.test.ts` fails when an entry has no decision
+recorded there. A row saying `"covered": false` with a reason is a
+decision; silence is not. So adding an entry below means adding its row,
+and the suite will say so if you forget.
+
 ## Layout & flow
 
 ### 1. Continuous scene flow (no page break per scene)

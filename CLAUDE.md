@@ -79,8 +79,23 @@ epubcheck <out.epub>        # validate output (brew-installed)
   `tools/make-fixture.py`); root `/fixtures/` holds real scripts and is
   gitignored — never commit it, and never let a real title, author, or
   character name reach an assertion, a doc, or a screenshot.
+- Committed fixtures: `screenplay.pdf` (clean happy path), `prose.pdf` and
+  `blank-pages.pdf` (the not-a-screenplay and scanned guards), and
+  **`torture.pdf`** — 14 sheets exercising every content-driven registry
+  behavior, whose coverage is tracked row-by-row in
+  `tools/torture-manifest.json`. `bun tools/device-checklist.ts` prints the
+  device-side half of that manifest for a hardware pass. All four regenerate
+  from `make-fixture.py`, and `tests/fixture-stability.test.ts` fails if the
+  first three stop reproducing byte-for-byte.
 - Fixture sweep + epubcheck after any stage-1/CSS change. Test
   end-to-end with real PDFs too; outputs land in the app library folder.
+- **The corpus diff is the tool for "does this actually matter?"** Convert
+  every script in root `/fixtures/` with and without a change and diff the
+  `.fountain`. It is what proved the dual-dialogue fix was fixture-only, the
+  page-furniture fix was worth shipping (celtx 19 lines), and a pdf.js bump
+  was inert. Synthetic fixtures cannot answer that question.
+- **Rebuild `torture.pdf` before any device pass.** A stale build once put
+  an already-fixed defect in front of a reviewer and nearly cost a verdict.
 - After engine changes, rebuild the app bundle (it embeds the sidecar).
 
 ## Context

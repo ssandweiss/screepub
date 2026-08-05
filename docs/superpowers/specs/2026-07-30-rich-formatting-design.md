@@ -33,8 +33,14 @@ Teach the pipeline to preserve richer formatting from screenplay PDFs:
   renders i/b (registry §9d).
 - Underline is a documented §9d limitation: drawn as vector graphics, never
   detected. Both renderers already handle `_..._` (EPUB `span.underline`,
-  MOBI `<u>`; the MOBI replacement landed in the v0.4.2 merge train), so the
-  gap is purely detection. The MOBI replacement has no pinning test.
+  MOBI `<u>`), so the gap is purely detection. The MOBI replacement has no
+  pinning test.
+  **Provenance corrected 2026-08-04:** this spec previously said the MOBI
+  replacement landed in the v0.4.2 merge train. It did not. `git log -S'<u>'
+  -- src/mobi/` returns only the squashed root commit, so it has been there
+  since the repo went public. The conclusion is unaffected (the code exists
+  either way, so phase 1 still touches no renderer production code), but the
+  date was wrong and is worth not repeating.
 - Font family and size are discarded after the bold/italic check. Fountain has
   no syntax for either.
 
@@ -95,8 +101,9 @@ Teach the pipeline to preserve richer formatting from screenplay PDFs:
 ### Rendering
 
 - EPUB: no change (underscore replacement + `span.underline` CSS exist).
-- MOBI: no change (the `_..._` → `<u>` replacement already exists as of the
-  v0.4.2 merge train); phase 1 only adds the missing pinning test.
+- MOBI: no change (the `_..._` → `<u>` replacement has existed since the root
+  commit, not since v0.4.2 as this spec first claimed); phase 1 only adds the
+  missing pinning test.
 
 ### Testing (TDD, failing tests first)
 
