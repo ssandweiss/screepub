@@ -14,9 +14,13 @@
 // keep, margin and alignment knob is EPUB territory. Stage-1 knobs (#8,
 // #8a, #10a's mode, #13a's markers) arrive already baked into the
 // .fountain and need nothing here.
+// It also reads preserveFontShifts (#18), but only the SIZE arm: <font
+// size> is a primitive this dialect has, while MOBI 6 face support is too
+// unreliable to spend markup on, so family stays EPUB territory.
 import type { Token } from 'fountain-js';
 import type { FormatOptions } from '../options';
 import { isMiniSlug } from '../fountain/slug';
+import { fmtSizeStep, stripNotes } from '../fountain/notes';
 
 export interface MobiMeta {
   title: string;
@@ -98,7 +102,12 @@ export function tokensToMobiHtml(
   };
 
   for (const t of tokens.filter((t) => !t.is_title)) {
-    const text = t.text ?? '';
+    const raw = t.text ?? '';
+    // Read the shift before stripping. Every token type is stripped in one
+    // place: Fountain notes are invisible by spec.
+    const step = format.preserveFontShifts ? fmtSizeStep(raw) : undefined;
+    const sized = (s: string) => (step ? `<font size="${step}">${s}</font>` : s);
+    const text = stripNotes(raw);
     switch (t.type) {
       case 'scene_heading': {
         closeSpeech();
@@ -114,7 +123,7 @@ export function tokensToMobiHtml(
       case 'action':
       case 'lyrics':
         closeSpeech();
-        push(`<p>${inline(esc(text))}</p>`);
+        push(`<p>${sized(inline(esc(text)))}</p>`);
         break;
       case 'dual_dialogue_begin':
         dual = { left: [], right: [], side: 'left' };
@@ -138,7 +147,7 @@ export function tokensToMobiHtml(
         if (speech) speech.push(`<i>${esc(text)}</i>`);
         break;
       case 'dialogue':
-        if (speech) speech.push(inline(esc(text)).replace(/\n/g, '<br/>'));
+        if (speech) speech.push(sized(inline(esc(text)).replace(/\n/g, '<br/>')));
         break;
       case 'dialogue_end':
         if (dual && speech) {

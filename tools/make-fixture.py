@@ -30,7 +30,8 @@ LINES_PER_PAGE = 55
 # names through commonObjs, which is what src/parser/extract.ts regexes for
 # /bold|black|heavy/ and /italic|oblique/.
 FONTS = {"F1": "Courier", "F2": "Courier-Bold",
-         "F3": "Courier-Oblique", "F4": "Courier-BoldOblique"}
+         "F3": "Courier-Oblique", "F4": "Courier-BoldOblique",
+         "F5": "Helvetica"}
 
 CHAR_W = 7.2                   # 12pt Courier advance: 0.1" at 10 chars/inch
 
@@ -165,7 +166,9 @@ def esc(s):
 
 # --- inline markup, for the torture kind ---------------------------------
 
-MARKUP = re.compile(r"\{(/?)([biu])\}")
+# b/i are font STYLES; u/k/r/w are DRAWN rules (one real, three decoys);
+# f/t/z/g are block font SHIFTS, which registry 18 reads back out of the PDF.
+MARKUP = re.compile(r"\{(/?)([biukrwftzg])\}")
 
 
 def parse_markup(s):
@@ -276,14 +279,30 @@ def layout():
     return pages
 
 
-def font_for(styles):
-    """Style set -> font resource key.
+# Styles that are DRAWN rather than selected. They never change which font a
+# run uses, which mirrors how PDFs actually carry underline and is why the
+# parser cannot see it from font data alone (registry 9d).
+DRAWN = {"u", "k", "r", "w"}
 
-    Underline is orthogonal: it is DRAWN, not selected, so it never changes
-    which font a run uses. That mirrors how PDFs actually carry underline,
-    which is why the parser cannot see it from font data alone (registry 9d).
-    """
-    s = set(styles) - {"u"}
+# Block font shifts (registry 18). f picks the second FACE; t/z/g pick a
+# SIZE, chosen to land one on each side of every threshold in that entry:
+#   10/12 = 0.83 -> -1     15/12 = 1.25 -> +1     18/12 = 1.50 -> +2
+SHIFT_SIZE = {"t": 10.0, "z": 15.0, "g": 18.0}
+SHIFTS = {"f"} | set(SHIFT_SIZE)
+
+
+def size_for(styles):
+    for s in styles:
+        if s in SHIFT_SIZE:
+            return SHIFT_SIZE[s]
+    return 12.0
+
+
+def font_for(styles):
+    """Style set -> font resource key."""
+    if "f" in styles:
+        return "F5"                  # a family shift, not a weight or slope
+    s = set(styles) - DRAWN - SHIFTS
     if s == {"b", "i"}:
         return "F4"
     if s == {"b"}:
@@ -294,20 +313,41 @@ def font_for(styles):
 
 
 def styled_row_ops(x_in, y, runs):
-    """-> (text operators, underline rectangles) for one laid-out line."""
+    """-> (text operators, drawn rectangles) for one laid-out line.
+
+    Four rule shapes, one real and three decoys. Each decoy is rejected by a
+    DIFFERENT filter in collectUnderlineMarks/markUnderlinesItem, so a
+    loosened threshold shows up as a stray underscore in the emitted Fountain:
+
+      u  real underline   0.6pt tall, run-width, 2.0pt under the baseline
+      k  strikethrough    same bar at baseline + 3.5 (mid x-height) -> the
+                          y-window rejects anything above the baseline
+      r  table border     same bar at baseline - 6.0 -> below the window, and
+                          6pt ABOVE the next row's baseline, so it is out of
+                          that row's window too
+      w  page-wide rule   0.5in margins (540pt = 88% of the page) at the real
+                          underline offset -> only the furniture-width filter
+                          saves it, over real text with 100% overlap
+    """
     ops, rects = [], []
     x = x_in * PT
     for run in runs:
         text, styles = run["text"], run["styles"]
         if text:
-            ops += [f"/{font_for(styles)} 12 Tf",
+            ops += [f"/{font_for(styles)} {size_for(styles):g} Tf",
                     f"1 0 0 1 {x:.2f} {y:.2f} Tm", f"({esc(text)}) Tj"]
+            w = len(text) * CHAR_W
+            # A filled rectangle, not a stroked line. Real generators stroke;
+            # filling here proves the detector accepts both paint ops.
             if "u" in styles:
-                # A filled rectangle, not a stroked line: the rich-formatting
-                # spec's detector keys on a flat bbox (<= 2.5pt tall, >= 4pt
-                # wide) sitting in a band just under the baseline.
-                rects.append(f"0 g {x:.2f} {y - 2.0:.2f} "
-                             f"{len(text) * CHAR_W:.2f} 0.6 re f")
+                rects.append(f"0 g {x:.2f} {y - 2.0:.2f} {w:.2f} 0.6 re f")
+            if "k" in styles:
+                rects.append(f"0 g {x:.2f} {y + 3.5:.2f} {w:.2f} 0.6 re f")
+            if "r" in styles:
+                rects.append(f"0 g {x:.2f} {y - 6.0:.2f} {w:.2f} 0.6 re f")
+            if "w" in styles:
+                rects.append(f"0 g {0.5 * PT:.2f} {y - 2.0:.2f} "
+                             f"{PAGE_W - 1.0 * PT:.2f} 0.6 re f")
         x += len(text) * CHAR_W
     return ops, rects
 

@@ -5,6 +5,27 @@ export type ElementType =
   | "scene" | "character" | "dialogue" | "action"
   | "parenthetical" | "transition" | "page-number" | "mini-slug";
 
+/** Coarse font-family buckets. Deliberately four: a screenplay's own face,
+ * and the three kinds of thing a chyron/insert/letter is ever set in. */
+export type FamilyBucket = 'mono' | 'serif' | 'sans' | 'cursive';
+
+/** Coarse size steps relative to the document's dominant size. */
+export type SizeStep = '-1' | '+1' | '+2';
+
+/** A block-level font shift. At least one field is always present. */
+export interface Fmt {
+  family?: FamilyBucket;
+  size?: SizeStep;
+}
+
+/** Characters of one line set in one (bucket, size) pair. Runs whose font
+ * never resolved are omitted, so shares below are over resolved characters. */
+export interface FontRun {
+  bucket: FamilyBucket;
+  size: number;
+  chars: number;
+}
+
 export interface ScreenplayElement {
   type: ElementType;
   text: string;
@@ -22,6 +43,8 @@ export interface ScreenplayElement {
   styledText?: string;
   /** cue of the RIGHT column of a simultaneous (dual) exchange */
   dualRight?: boolean;
+  /** block-level font shift, serialized as a [[fmt: ...]] note (registry #18) */
+  fmt?: Fmt;
 }
 
 export interface CharacterInfo {
@@ -55,6 +78,10 @@ export interface RawLine {
   styled?: string;
   /** cue line opening the right column of a dual-dialogue region */
   dualRight?: boolean;
+  /** per-run font tallies, consumed by the document-dominant pass */
+  fonts?: FontRun[];
+  /** block-level font shift relative to the document's dominant font */
+  fmt?: Fmt;
 }
 
 // Grouped text block
@@ -62,6 +89,7 @@ export interface TextBlock {
   lines: RawLine[];
   text: string;
   styledText?: string;
+  fmt?: Fmt;
   dualRight?: boolean;
   indent: number; // first line indent
   minIndent: number;

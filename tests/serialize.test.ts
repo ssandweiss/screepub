@@ -337,3 +337,61 @@ describe('styled text emission', () => {
     expect(out).toContain('@JACK\n(scream singing)\nLa la la');
   });
 });
+
+describe('font-shift notes', () => {
+  test('an action note is glued directly above its block, no blank line', () => {
+    const out = toFountain(screenplay([
+      el({ text: 'INT. NEWSROOM - DAY', type: 'scene' }),
+      el({ text: 'CHYRON: BREAKING.', type: 'action', fmt: { family: 'sans' } }),
+    ]));
+    expect(out).toContain('[[fmt: sans]]\nCHYRON: BREAKING.');
+  });
+
+  test('a dialogue note leads the line, space separated', () => {
+    const out = toFountain(screenplay([
+      el({ text: 'WREN', type: 'character', character: 'WREN' }),
+      el({ text: 'Read it back.', type: 'dialogue', character: 'WREN', fmt: { family: 'sans' } }),
+    ]));
+    expect(out).toContain('@WREN\n[[fmt: sans]] Read it back.');
+  });
+
+  test('family and size ride one note, family first', () => {
+    const out = toFountain(screenplay([
+      el({ text: 'A SIGN.', type: 'action', fmt: { family: 'sans', size: '+2' } }),
+    ]));
+    expect(out).toContain('[[fmt: sans +2]]\nA SIGN.');
+  });
+
+  test('a size-only shift emits the size alone', () => {
+    const out = toFountain(screenplay([
+      el({ text: 'INSERT: THE CARD.', type: 'action', fmt: { size: '+1' } }),
+    ]));
+    expect(out).toContain('[[fmt: +1]]\nINSERT: THE CARD.');
+  });
+
+  test('an element with no fmt emits no note', () => {
+    expect(toFountain(screenplay([el({ text: 'Plain action.', type: 'action' })]))).not.toContain('[[');
+  });
+
+  test('only action and dialogue carry notes', () => {
+    // Markers in a cue, parenthetical or slug break recognition — the same
+    // rule styledText already lives under (registry 9d).
+    const out = toFountain(screenplay([
+      el({ text: 'INT. A - DAY', type: 'scene', fmt: { family: 'sans' } }),
+      el({ text: 'WREN', type: 'character', character: 'WREN', fmt: { family: 'sans' } }),
+      el({ text: '(beat)', type: 'parenthetical', fmt: { family: 'sans' } }),
+      el({ text: 'Hello.', type: 'dialogue', character: 'WREN' }),
+      el({ text: 'CUT TO:', type: 'transition', fmt: { size: '+1' } }),
+      el({ text: 'LATER', type: 'mini-slug', fmt: { size: '+1' } }),
+    ]));
+    expect(out).not.toContain('[[');
+  });
+
+  test('the note survives the forced-action prefix', () => {
+    // "!" forcing must stay at the head of the TEXT, not of the note.
+    const out = toFountain(screenplay([
+      el({ text: '.45 ON THE TABLE', type: 'action', fmt: { size: '+1' } }),
+    ]));
+    expect(out).toContain('[[fmt: +1]]\n!.45 ON THE TABLE');
+  });
+});

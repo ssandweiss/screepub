@@ -1,8 +1,8 @@
 // Adapted from an earlier table-read parser by the same author, reworked for
 // headless Bun/Node: modern pdf.js build + DOM shims, no browser worker.
 import './pdfjs-shims';
-import type { RawLine } from './types';
-import { getDocument } from 'pdfjs-dist/build/pdf.mjs';
+import type { FamilyBucket, FontRun, RawLine, SizeStep } from './types';
+import { getDocument, OPS } from 'pdfjs-dist/build/pdf.mjs';
 
 /**
  * Extract raw lines from a PDF buffer.
@@ -28,11 +28,18 @@ export async function extractDocument(
     const page = await pdf.getPage(pageNum);
     const viewport = page.getViewport({ scale: 1.0 });
     const textContent = await page.getTextContent();
-    await stampFontStyles(page, textContent.items);
+    const ops = await operatorList(page);
+    stampFontStyles(page, textContent.items);
+    if (ops) stampUnderlines(textContent.items, ops, viewport.width);
 
     const pageLines = groupItemsIntoLines(textContent.items, viewport.width, pageNum);
     allLines.push(...pageLines);
   }
+
+  // Dominant font is a DOCUMENT fact, so this runs once, after every page:
+  // a chyron page set entirely in Helvetica is still a deviation from a
+  // Courier script (registry #18).
+  stampLineFmt(allLines);
 
   return { lines: allLines, pageCount: pdf.numPages };
 }
@@ -43,6 +50,10 @@ interface TextItem {
   fontName?: string;
   italic?: boolean;
   bold?: boolean;
+  /** a rule was DRAWN under this item — never readable from font data */
+  underline?: boolean;
+  /** coarse family bucket from the resolved PostScript name (registry #18) */
+  bucket?: FamilyBucket;
   /** actual rendered width from pdf.js — much more accurate than the
    * len*6 estimate (which false-splits names like "Marlowe" → "Mar lowe") */
   width?: number;
@@ -103,31 +114,294 @@ interface LineItems {
 }
 
 /**
- * Mark each item bold/italic from its font's PostScript name (e.g.
- * "CourierPrime-Italic"). getOperatorList() forces font resolution into
- * page.commonObjs — getTextContent alone doesn't load fonts. Best-effort:
- * failures leave items unstyled.
+ * A drawn horizontal rule that might be an underline, in PDF user space —
+ * the same space text baselines live in (origin bottom-left).
  */
-async function stampFontStyles(
-  page: { getOperatorList(): Promise<unknown>; commonObjs: { get(id: string): unknown } },
-  items: unknown[],
-): Promise<void> {
+export interface UnderlineMark {
+  x0: number;
+  x1: number;
+  y: number;
+}
+
+interface OpList {
+  fnArray: ArrayLike<number>;
+  argsArray: ArrayLike<unknown>;
+}
+
+// Geometry bounds, calibrated 2026-08-04 against the local generator set.
+// Real underlines measured 0.0-0.6pt tall, 36-168pt wide, and sat 1.5-3.0pt
+// below their baseline. Every constant has a decoy in the torture fixture.
+const MARK_MAX_HEIGHT = 2.5;       // taller is a box or a filled bar
+const MARK_MIN_WIDTH = 4;          // narrower is a bullet or a tick
+const MARK_MAX_WIDTH_FRAC = 0.85;  // wider is a header/footer rule
+const MARK_BELOW = 3.5;            // deepest a mark may sit under a baseline
+const MARK_ABOVE = 0.5;            // a strikethrough sits far higher than this
+const MARK_MIN_OVERLAP = 0.6;      // fraction of the item a mark must cover
+
+/** m ∘ t — PDF's `cm` post-multiplies onto the current matrix. */
+function concat(m: number[], t: number[]): number[] {
+  return [
+    m[0] * t[0] + m[2] * t[1],
+    m[1] * t[0] + m[3] * t[1],
+    m[0] * t[2] + m[2] * t[3],
+    m[1] * t[2] + m[3] * t[3],
+    m[0] * t[4] + m[2] * t[5] + m[4],
+    m[1] * t[4] + m[3] * t[5] + m[5],
+  ];
+}
+
+/**
+ * Walk a page's operator list for drawn rules that could be underlines.
+ *
+ * pdf.js folds all path painting into `constructPath`, whose args are
+ * [paintOp, packedPathData, minMax]. The minMax bounding box alone separates
+ * an underline (flat and short) from a box (tall) or a page rule (wide), so
+ * the packed path data is never decoded. If a generator ever batches several
+ * underlines into one path with several subpaths, decoding that array into
+ * per-subpath bboxes is the refinement — not built until a real script needs it.
+ *
+ * Best-effort by design, like `stampFontStyles`: any failure yields no marks,
+ * which is exactly today's behavior.
+ */
+export function collectUnderlineMarks(opList: OpList, pageWidth: number): UnderlineMark[] {
+  const marks: UnderlineMark[] = [];
   try {
-    await page.getOperatorList();
+    const { fnArray, argsArray } = opList;
+    let m = [1, 0, 0, 1, 0, 0];
+    const stack: number[][] = [];
+
+    for (let i = 0; i < fnArray.length; i++) {
+      const fn = fnArray[i];
+
+      if (fn === OPS.save) {
+        stack.push(m);
+        continue;
+      }
+      if (fn === OPS.restore) {
+        m = stack.pop() ?? [1, 0, 0, 1, 0, 0];
+        continue;
+      }
+      if (fn === OPS.transform) {
+        m = concat(m, argsArray[i] as number[]);
+        continue;
+      }
+      if (fn !== OPS.constructPath) continue;
+
+      const args = argsArray[i] as [number, unknown, ArrayLike<number>] | null;
+      // endPath is the clip-path spelling (`W n`): it builds geometry and
+      // paints nothing. Every full-page box the browser-print generator draws
+      // is one. Every OTHER paint op is accepted — real underlines are
+      // STROKED, not filled, so requiring a fill would detect nothing real.
+      if (!args || args[0] === OPS.endPath) continue;
+      const bb = args[2];
+      if (!bb || bb.length < 4) continue;
+
+      // Skew or rotation: the bbox stops describing an axis-aligned rule, and
+      // screenplays do not underline on a slant. Skip rather than guess.
+      if (Math.abs(m[1]) > 1e-6 || Math.abs(m[2]) > 1e-6) continue;
+
+      // BOTH corners, then min/max. Final Draft draws its underlines under a
+      // y-flip ([1,0,0,-1,0,pageHeight]); transforming one corner, or treating
+      // a flip as "rotated, skip it", puts the mark hundreds of points off and
+      // no baseline ever matches.
+      const ax = m[0] * bb[0] + m[2] * bb[1] + m[4];
+      const ay = m[1] * bb[0] + m[3] * bb[1] + m[5];
+      const bx = m[0] * bb[2] + m[2] * bb[3] + m[4];
+      const by = m[1] * bb[2] + m[3] * bb[3] + m[5];
+      const x0 = Math.min(ax, bx);
+      const x1 = Math.max(ax, bx);
+      const y0 = Math.min(ay, by);
+      const y1 = Math.max(ay, by);
+
+      const width = x1 - x0;
+      if (y1 - y0 > MARK_MAX_HEIGHT) continue;
+      if (width < MARK_MIN_WIDTH) continue;
+      if (width >= pageWidth * MARK_MAX_WIDTH_FRAC) continue;
+
+      marks.push({ x0, x1, y: (y0 + y1) / 2 });
+    }
   } catch {
-    return;
+    return [];
   }
-  const byFont = new Map<string, { italic: boolean; bold: boolean }>();
+  return marks;
+}
+
+/**
+ * True when `mark` underlines the text item spanning [x0, x1) on `baseline`.
+ * Pure geometry, so it is testable without a PDF.
+ *
+ * The band excludes a strikethrough (which sits mid x-height, ABOVE the
+ * baseline) and the row below's own underline (12pt away at screenplay
+ * spacing). The overlap floor keeps a rule under part of a run from marking
+ * the whole run: item granularity means the alternative to dropping it is
+ * wrapping characters that are not underlined.
+ */
+export function markUnderlinesItem(
+  mark: UnderlineMark,
+  x0: number,
+  x1: number,
+  baseline: number,
+): boolean {
+  if (mark.y > baseline + MARK_ABOVE) return false;
+  if (mark.y < baseline - MARK_BELOW) return false;
+  const width = x1 - x0;
+  if (width <= 0) return false;
+  const overlap = Math.min(x1, mark.x1) - Math.max(x0, mark.x0);
+  return overlap / width >= MARK_MIN_OVERLAP;
+}
+
+/**
+ * PostScript base name → coarse family bucket.
+ *
+ * Matched against the name lowercased with its subset prefix ("AAAAAB+") and
+ * every non-alphanumeric stripped, so "Letter Gothic" and "LetterGothic" both
+ * read as "lettergothic". Two traps this shape avoids:
+ *   - bare "gothic" would swallow Century Gothic, which is a sans;
+ *   - bare "roman" would swallow Helvetica-Roman and AvenirNext-Roman, where
+ *     "-Roman" is the REGULAR weight, not the family. Times matches "times".
+ * Weight and slope tokens (bold, black, heavy, italic, oblique) match nothing
+ * here on purpose: they are style, and style is registry 9d's business.
+ */
+const FAMILY_PATTERNS: [RegExp, FamilyBucket][] = [
+  [/courier|mono|lettergothic|prestige/, 'mono'],
+  [/times|georgia|garamond|palatino|caslon|baskerville|minion/, 'serif'],
+  [/script|hand|brush|comic/, 'cursive'],
+];
+
+export function familyBucket(name: string): FamilyBucket | undefined {
+  const n = String(name ?? '')
+    .replace(/^[A-Z]{6}\+/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+  if (!n) return undefined;
+  for (const [re, bucket] of FAMILY_PATTERNS) if (re.test(n)) return bucket;
+  return 'sans';
+}
+
+// Deviation thresholds (registry #18). A step needs BOTH a ratio outside the
+// band and >= 1.5pt of absolute change, so float jitter in a text matrix can
+// never mint one.
+const SIZE_SMALLER_RATIO = 0.85;
+const SIZE_BIGGER_RATIO = 1.15;
+const SIZE_BIGGEST_RATIO = 1.4;
+const SIZE_MIN_DELTA = 1.5;
+/** Share of a line's resolved characters that must agree on one deviation. */
+const FMT_AGREEMENT = 0.8;
+
+function sizeStep(size: number, dominant: number): SizeStep | undefined {
+  if (Math.abs(size - dominant) < SIZE_MIN_DELTA) return undefined;
+  const ratio = size / dominant;
+  if (ratio <= SIZE_SMALLER_RATIO) return '-1';
+  if (ratio > SIZE_BIGGEST_RATIO) return '+2';
+  if (ratio >= SIZE_BIGGER_RATIO) return '+1';
+  return undefined;
+}
+
+/** The key with the largest tally, or undefined for an empty map. */
+function argmax<T>(tally: Map<T, number>): T | undefined {
+  let best: T | undefined;
+  let bestN = -1;
+  for (const [k, n] of tally) {
+    if (n > bestN) {
+      best = k;
+      bestN = n;
+    }
+  }
+  return best;
+}
+
+/**
+ * Stamp `fmt` on every line that deviates from the document's dominant font.
+ *
+ * Runs over the WHOLE document, after every page, because "dominant" is a
+ * document-level fact: a chyron page set entirely in Helvetica is still a
+ * deviation from a Courier script. Weighted by character count so a page of
+ * one-word sans lines cannot outvote the body.
+ *
+ * A uniform Courier-12 screenplay produces zero fmt anywhere, by construction:
+ * every run agrees with the dominant, so neither tally below is ever non-empty.
+ */
+export function stampLineFmt(lines: RawLine[]): void {
+  const docFamily = new Map<FamilyBucket, number>();
+  const docSize = new Map<number, number>();
+  for (const line of lines) {
+    for (const run of line.fonts ?? []) {
+      docFamily.set(run.bucket, (docFamily.get(run.bucket) ?? 0) + run.chars);
+      docSize.set(run.size, (docSize.get(run.size) ?? 0) + run.chars);
+    }
+  }
+  const domFamily = argmax(docFamily);
+  const domSize = argmax(docSize);
+  if (domFamily === undefined || domSize === undefined || domSize <= 0) return;
+
+  for (const line of lines) {
+    const runs = line.fonts;
+    if (!runs || runs.length === 0) continue;
+    const total = runs.reduce((n, r) => n + r.chars, 0);
+    if (total === 0) continue;
+
+    const byFamily = new Map<FamilyBucket, number>();
+    const byStep = new Map<SizeStep, number>();
+    for (const run of runs) {
+      if (run.bucket !== domFamily) {
+        byFamily.set(run.bucket, (byFamily.get(run.bucket) ?? 0) + run.chars);
+      }
+      const step = sizeStep(run.size, domSize);
+      if (step) byStep.set(step, (byStep.get(step) ?? 0) + run.chars);
+    }
+    const agreed = <T>(tally: Map<T, number>): T | undefined => {
+      for (const [k, n] of tally) if (n / total >= FMT_AGREEMENT) return k;
+      return undefined;
+    };
+    const family = agreed(byFamily);
+    const size = agreed(byStep);
+    if (family || size) line.fmt = { family, size };
+  }
+}
+
+/**
+ * getOperatorList, best-effort. This call is ALSO what forces font resolution
+ * into `page.commonObjs` — getTextContent alone does not load fonts — so
+ * `stampFontStyles` depends on it having run first, and both passes share the
+ * single call rather than paying for it twice.
+ */
+async function operatorList(page: {
+  getOperatorList(): Promise<unknown>;
+}): Promise<OpList | null> {
+  try {
+    return (await page.getOperatorList()) as OpList;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Mark each item bold/italic from its font's PostScript name (e.g.
+ * "CourierPrime-Italic"). Best-effort: an unresolved font leaves its items
+ * plain, which is also what happens when `operatorList` above returned null.
+ */
+function stampFontStyles(
+  page: { commonObjs: { get(id: string): unknown } },
+  items: unknown[],
+): void {
+  const byFont = new Map<string, { italic: boolean; bold: boolean; bucket?: FamilyBucket }>();
   for (const raw of items) {
     const item = raw as TextItem;
     if (!item.fontName || byFont.has(item.fontName)) continue;
-    let flags = { italic: false, bold: false };
+    let flags: { italic: boolean; bold: boolean; bucket?: FamilyBucket } = {
+      italic: false,
+      bold: false,
+    };
     try {
       const font = page.commonObjs.get(item.fontName) as { name?: string } | null;
       const name = String(font?.name ?? '');
-      flags = { italic: /italic|oblique/i.test(name), bold: /bold|black|heavy/i.test(name) };
+      flags = {
+        italic: /italic|oblique/i.test(name),
+        bold: /bold|black|heavy/i.test(name),
+        bucket: familyBucket(name),
+      };
     } catch {
-      // unresolved font — leave plain
+      // unresolved font — leave plain and unbucketed
     }
     byFont.set(item.fontName, flags);
   }
@@ -137,6 +411,48 @@ async function stampFontStyles(
     if (flags) {
       item.italic = flags.italic;
       item.bold = flags.bold;
+      item.bucket = flags.bucket;
+    }
+  }
+}
+
+/**
+ * Per-run font tallies for a line's items, merging equal neighbours.
+ *
+ * Size comes from the text matrix's vertical scale, which is `transform[3]`
+ * for the unrotated text screenplays are made of; the absolute value keeps a
+ * flipped matrix from reporting a negative size. Items whose font never
+ * resolved are skipped entirely, so the shares in `stampLineFmt` are over
+ * resolved characters rather than being diluted by unknowns.
+ */
+function fontRuns(items: TextItem[]): FontRun[] | undefined {
+  const out: FontRun[] = [];
+  for (const item of items) {
+    const chars = item.str.trim().length;
+    if (!chars || !item.bucket) continue;
+    const size = Math.round(Math.abs(item.transform[3]) * 10) / 10;
+    const last = out[out.length - 1];
+    if (last && last.bucket === item.bucket && last.size === size) last.chars += chars;
+    else out.push({ bucket: item.bucket, size, chars });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Mark each item underlined when a drawn rule sits in the band below its
+ * baseline. Underline is DRAWN, not selected, so unlike bold/italic it can
+ * never be read from font data (registry 9d).
+ */
+function stampUnderlines(items: unknown[], opList: OpList, pageWidth: number): void {
+  const marks = collectUnderlineMarks(opList, pageWidth);
+  if (marks.length === 0) return;
+  for (const raw of items) {
+    const item = raw as TextItem;
+    if (!item.str || !item.str.trim() || !item.transform) continue;
+    const x0 = item.transform[4];
+    const baseline = item.transform[5];
+    if (marks.some((m) => markUnderlinesItem(m, x0, endX(item), baseline))) {
+      item.underline = true;
     }
   }
 }
@@ -167,7 +483,24 @@ function joinItems(items: TextItem[]): string {
   return text.replace(/ {2,}/g, ' ').trim();
 }
 
-const EMPHASIS_MARK: Record<string, string> = { i: '*', b: '**', bi: '***' };
+/**
+ * Fountain emphasis as OPEN/CLOSE pairs. A mixed mark is not a palindrome —
+ * `**_x_**` closes in the mirror order — so one string per style no longer
+ * works. Canonical nesting puts the underscore innermost and the stars
+ * outside, which is the order both renderers' regexes already unwrap (triple
+ * stars, then double, then single, then underscore).
+ *
+ * Keys are built as b→i→u, so every subset of {b,i,u} appears exactly once.
+ */
+const EMPHASIS_MARK: Record<string, [string, string]> = {
+  b: ['**', '**'],
+  i: ['*', '*'],
+  u: ['_', '_'],
+  bi: ['***', '***'],
+  bu: ['**_', '_**'],
+  iu: ['*_', '_*'],
+  biu: ['***_', '_***'],
+};
 
 /**
  * Join a line producing both plain text and (when fonts vary) a styled
@@ -184,7 +517,9 @@ function joinLine(items: TextItem[]): { text: string; styled?: string } {
     const x = item.transform[4];
     if (item.str === prevStr && Math.abs(x - prevX) < 2) continue;
     const hasWord = /[\p{L}\p{N}]{2}/u.test(item.str);
-    const style = hasWord ? `${item.bold ? 'b' : ''}${item.italic ? 'i' : ''}` : '';
+    const style = hasWord
+      ? `${item.bold ? 'b' : ''}${item.italic ? 'i' : ''}${item.underline ? 'u' : ''}`
+      : '';
     runs.push({ str: item.str, gapBefore: prevEndX >= 0 && x - prevEndX > 5, style });
     prevEndX = endX(item);
     prevX = x;
@@ -211,10 +546,10 @@ function joinLine(items: TextItem[]): { text: string; styled?: string } {
       styled += clean;
       continue;
     }
-    const mark = EMPHASIS_MARK[g.style] ?? '*';
+    const [open, close] = EMPHASIS_MARK[g.style] ?? ['*', '*'];
     const lead = clean.match(/^\s*/)![0];
     const trail = clean.match(/\s*$/)![0];
-    styled += `${lead}${mark}${core}${mark}${trail}`;
+    styled += `${lead}${open}${core}${close}${trail}`;
   }
   styled = styled.replace(/ {2,}/g, ' ').trim();
   return { text: plain, styled: styled !== plain ? styled : undefined };
@@ -306,7 +641,10 @@ function deinterleaveDualDialogue(
       if (text) {
         const indent = Math.round((lines[i].items[0].transform[4] / pageWidth) * 100);
         const styled = text === joined.text ? joined.styled : undefined;
-        out.push({ text, indent, y: lines[i].y, pageNum, styled });
+        // Dual-column lines below deliberately carry no `fonts`, and so no
+        // fmt: that pass joins its columns to strings without retaining the
+        // per-column items (registry #10a, #18's bounds).
+        out.push({ text, indent, y: lines[i].y, pageNum, styled, fonts: fontRuns(lines[i].items) });
       }
       i++;
       continue;

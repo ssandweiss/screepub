@@ -31,6 +31,7 @@ public enum ScriptSettings {
         var dualDialogue: String?
         var justifyText: Bool?
         var printSplitMinimums: Bool?
+        var preserveFontShifts: Bool?
     }
 
     nonisolated public static func load(forFountain fountain: URL, fallback: FormatSettings) -> FormatSettings {
@@ -57,6 +58,7 @@ public enum ScriptSettings {
         if let v = partial.dualDialogue { merged.dualDialogue = v }
         if let v = partial.justifyText { merged.justifyText = v }
         if let v = partial.printSplitMinimums { merged.printSplitMinimums = v }
+        if let v = partial.preserveFontShifts { merged.preserveFontShifts = v }
         return merged
     }
 

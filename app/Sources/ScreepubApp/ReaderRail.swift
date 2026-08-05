@@ -57,6 +57,14 @@ struct ReaderRail: View {
                     Text("Sans").tag("sans")
                 }
                 Toggle("Justify body text", isOn: binding(\.justifyText))
+                // Belongs here, not in "From the PDF": the shifts are written
+                // into the .fountain when the PDF is read and stay there
+                // whatever this says, so flipping it re-renders the preview
+                // immediately instead of waiting for the next conversion.
+                Toggle("Keep the PDF's font shifts", isOn: binding(\.preserveFontShifts))
+                Text("Renders inserts, chyrons and on-screen text in the face and size the script drew them in. Off sets every block in the body typeface.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("Content") {
                 Toggle("Title page", isOn: binding(\.includeTitlePage))

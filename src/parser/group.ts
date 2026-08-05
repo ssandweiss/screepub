@@ -1,5 +1,10 @@
-import type { RawLine, TextBlock } from './types';
+import type { Fmt, RawLine, TextBlock } from './types';
 import { INDENT_RANGES } from './types';
+
+/** Two fmts are the same shift. Both undefined counts as the same. */
+function sameFmt(a: Fmt | undefined, b: Fmt | undefined): boolean {
+  return a?.family === b?.family && a?.size === b?.size;
+}
 
 /**
  * Group raw PDF lines into logical text blocks.
@@ -46,6 +51,11 @@ function shouldBreak(
 
   // Page break
   if (line.pageNum !== prevLine.pageNum) return true;
+
+  // A font shift is a block boundary (registry #18): a chyron glued to the
+  // action above it must isolate, or the block would carry no fmt at all and
+  // the shift would vanish.
+  if (!sameFmt(line.fmt, prevLine.fmt)) return true;
 
   // Scene headings always start new blocks
   if (isSceneHeading(line.text)) return true;
@@ -99,10 +109,17 @@ function buildBlock(lines: RawLine[]): TextBlock {
     ? lines.map((l) => l.styled ?? l.text).join(' ')
     : undefined;
 
+  // Block-level only, by design: every line must agree, or the block carries
+  // no shift. shouldBreak above already splits on disagreement, so this is
+  // the belt to that brace rather than a second policy.
+  const first = lines[0].fmt;
+  const fmt = lines.every((l) => sameFmt(l.fmt, first)) ? first : undefined;
+
   return {
     lines,
     text,
     styledText,
+    fmt,
     dualRight: lines.some((l) => l.dualRight) || undefined,
     indent: lines[0].indent,
     minIndent: Math.min(...indents),

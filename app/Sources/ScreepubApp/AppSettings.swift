@@ -51,7 +51,8 @@ enum AppSettings {
             showPageMarkers: bool("fmtPageMarkers", def.showPageMarkers),
             dualDialogue: d.string(forKey: "fmtDual") ?? def.dualDialogue,
             justifyText: bool("fmtJustify", def.justifyText),
-            printSplitMinimums: bool("fmtSplitMinimums", def.printSplitMinimums)
+            printSplitMinimums: bool("fmtSplitMinimums", def.printSplitMinimums),
+            preserveFontShifts: bool("fmtFontShifts", def.preserveFontShifts)
         )
     }
 
@@ -76,6 +77,7 @@ enum AppSettings {
         d.set(s.dualDialogue, forKey: "fmtDual")
         d.set(s.justifyText, forKey: "fmtJustify")
         d.set(s.printSplitMinimums, forKey: "fmtSplitMinimums")
+        d.set(s.preserveFontShifts, forKey: "fmtFontShifts")
     }
 
     /// Reset all formatting keys so @AppStorage bindings fall back to defaults.
@@ -83,7 +85,8 @@ enum AppSettings {
         for key in ["fmtScenePageBreaks", "fmtDialogueMargin", "fmtCueIndent", "fmtParenIndent",
                     "fmtSpacing", "fmtKeepHeading", "fmtKeepSpeeches", "fmtFont", "fmtRejoin",
                     "fmtContd", "fmtCueAlign", "fmtTitlePage", "fmtSceneNumbers",
-                    "fmtPageMarkers", "fmtDual", "fmtJustify", "fmtSplitMinimums"] {
+                    "fmtPageMarkers", "fmtDual", "fmtJustify", "fmtSplitMinimums",
+                    "fmtFontShifts"] {
             UserDefaults.standard.removeObject(forKey: key)
         }
     }

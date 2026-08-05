@@ -16,6 +16,21 @@ const CONTD = /\(\s*CONT['’]?D\.?\s*\)/i;
 // Leading chars that carry Fountain meaning at line start; ! forces action.
 const NEEDS_FORCE = /^[!.>=~@#]/;
 
+/**
+ * A block's font shift as a Fountain note (registry #18).
+ *
+ * Notes are the one channel the format guarantees is BOTH lossless through a
+ * tokenizer and invisible in output, so a tool that has never heard of
+ * Screepub ignores this and a reader never sees it. Emitted unconditionally:
+ * the `.fountain` is the app's cache boundary, so it must be byte-stable under
+ * settings flips — `preserveFontShifts` gates rendering, not serialization.
+ */
+function fmtNote(fmt: ScreenplayElement['fmt']): string | null {
+  if (!fmt) return null;
+  const parts = [fmt.family, fmt.size].filter(Boolean);
+  return parts.length > 0 ? `[[fmt: ${parts.join(' ')}]]` : null;
+}
+
 /** Title-case an ALL-CAPS string; leave mixed-case text untouched. */
 function humanizeCaps(text: string): string {
   if (text !== text.toUpperCase()) return text;
@@ -195,8 +210,10 @@ export function toFountain(
         break;
       case 'dialogue': {
         const line = (el.styledText ?? el.text).trim();
-        if (block) block.push(line);
-        else out.push(line); // stray dialogue without a cue reads as action
+        const note = fmtNote(el.fmt);
+        const withNote = note ? `${note} ${line}` : line;
+        if (block) block.push(withNote);
+        else out.push(withNote); // stray dialogue without a cue reads as action
         break;
       }
       case 'scene':
@@ -230,11 +247,17 @@ export function toFountain(
         out.push(/^\./.test(text) ? `!${text}` : `.${text}`);
         break;
       default: {
-        // action — the only type left, and the only one here allowed to
-        // carry its styled variant (a future type falls back to plain).
+        // action — the only type left, and the only one here besides dialogue
+        // allowed to carry a styled variant or an fmt note (a future type
+        // falls back to plain and unmarked).
         closeBlock();
         const body = el.type === 'action' ? (el.styledText ?? el.text).trim() : text;
-        out.push(NEEDS_FORCE.test(body) ? `!${body}` : body);
+        const forced = NEEDS_FORCE.test(body) ? `!${body}` : body;
+        const note = el.type === 'action' ? fmtNote(el.fmt) : null;
+        // Glued directly above with a single newline and NO blank line: that
+        // is what makes fountain-js fold the note into the block's own token
+        // instead of emitting a standalone one.
+        out.push(note ? `${note}\n${forced}` : forced);
       }
     }
   }

@@ -4,7 +4,7 @@ import { rescueCues } from '../src/parser/rescue';
 import { groupBlocks } from '../src/parser/group';
 import { detectTitlePages } from '../src/parser/title-page';
 import type { ScreenplayElement } from '../src/parser/types';
-import type { TextBlock, RawLine } from '../src/parser/types';
+import type { Fmt, TextBlock, RawLine } from '../src/parser/types';
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -1185,5 +1185,70 @@ describe('rescueCues', () => {
     ];
     rescueCues(elements, [blk(40), blk(30)]);
     expect(elements[0].type).toBe('action');
+  });
+});
+
+describe('font shifts and block boundaries', () => {
+  const ln = (text: string, y: number, fmt?: Fmt): RawLine =>
+    ({ text, indent: 10, y, pageNum: 1, fmt });
+
+  test('a block takes the fmt every one of its lines agrees on', () => {
+    const blocks = groupBlocks([
+      ln('A chyron line', 700, { family: 'sans' }),
+      ln('and its second line', 688, { family: 'sans' }),
+    ]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].fmt).toEqual({ family: 'sans' });
+  });
+
+  test('lines that disagree leave the block unmarked', () => {
+    const blocks = groupBlocks([
+      ln('A chyron line', 700, { family: 'sans' }),
+      ln('and a plain one', 688, undefined),
+    ]);
+    // They also do not merge: the fmt change is a block break.
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].fmt).toEqual({ family: 'sans' });
+    expect(blocks[1].fmt).toBeUndefined();
+  });
+
+  test('an fmt change breaks a block that would otherwise merge', () => {
+    // Same indent, same page, 12pt apart: without the fmt these are one block.
+    const blocks = groupBlocks([
+      ln('plain action', 700),
+      ln('SHOUTED IN ANOTHER FACE', 688, { family: 'sans' }),
+      ln('plain again', 676),
+    ]);
+    expect(blocks.map((b) => b.text)).toEqual([
+      'plain action',
+      'SHOUTED IN ANOTHER FACE',
+      'plain again',
+    ]);
+  });
+
+  test('a size change breaks a block just like a family change', () => {
+    const blocks = groupBlocks([
+      ln('plain action', 700),
+      ln('INSERT: THE CARD', 688, { size: '+1' }),
+    ]);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[1].fmt).toEqual({ size: '+1' });
+  });
+
+  test('lines with the same fmt still merge normally', () => {
+    const blocks = groupBlocks([
+      ln('one', 700, { family: 'sans', size: '+1' }),
+      ln('two', 688, { family: 'sans', size: '+1' }),
+    ]);
+    expect(blocks).toHaveLength(1);
+  });
+
+  test('fmt rides from block to element without touching classification', () => {
+    // fmt is never a classification input: the parser stays option-free.
+    const block = groupBlocks([ln('CHYRON: LIVE.', 700, { family: 'sans' })])[0];
+    resetCounter();
+    const el = classifyBlock(block, null);
+    expect(el.type).toBe('action');
+    expect(el.fmt).toEqual({ family: 'sans' });
   });
 });

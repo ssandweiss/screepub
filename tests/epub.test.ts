@@ -4,9 +4,9 @@ import { Fountain } from 'fountain-js';
 import JSZip from 'jszip';
 import { tokensToBody, tokensToPreviewHtml } from '../src/epub/html';
 import { buildEpub } from '../src/epub/build';
-import { SCREENPLAY_CSS } from '../src/epub/css';
+import { SCREENPLAY_CSS, screenplayCss } from '../src/epub/css';
 import { ruleFor, eachRule } from './css-rules';
-import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
+import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions } from '../src/options';
 // Stage-2's copy, straight from the module that owns it — both renderers
 // import it from here, so the test reads the same definition they do.
 import { PRIMARY_SLUG } from '../src/fountain/slug';
@@ -390,6 +390,21 @@ describe('inline emphasis in XHTML', () => {
     expect(file.xhtml).toContain('<span class="underline">underlined</span>');
   });
 
+  test('mixed marks unwrap with the underscore innermost', () => {
+    // The nesting joinLine emits for a bold+underlined run. Stars are
+    // replaced before underscores, so this composes without a special case —
+    // asserted here rather than assumed, on both renderers.
+    const tokens = new Fountain().parse(
+      'INT. A - DAY\n\nThe stamp is **_VOID_** and ***_LOUD_*** and *_soft_*.\n', true,
+    ).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toContain('<strong><span class="underline">VOID</span></strong>');
+    expect(file.xhtml).toContain(
+      '<strong><em><span class="underline">LOUD</span></em></strong>',
+    );
+    expect(file.xhtml).toContain('<em><span class="underline">soft</span></em>');
+  });
+
   test('escaping still applies inside emphasized text', () => {
     const tokens = new Fountain().parse('INT. A - DAY\n\nA *5 < 6* case.\n', true).tokens;
     const [file] = tokensToBody(tokens).files;
@@ -600,16 +615,38 @@ describe('mini-slug rendering', () => {
   test('every class the stylesheet styles is one a renderer emits', () => {
     // The regression this suite exists for: p.mini-slug was styled for
     // months while no code path ever emitted the class.
+    // Two kinds of evidence, both counting as "a renderer emits it":
+    // a `class="..."` literal in the renderer source, and — for classes
+    // assembled at runtime rather than written out, like the registry #18
+    // fmt-* set — real rendered output. The second is the stronger form:
+    // it proves emission by executing the renderer, not by grepping it.
+    const fmtProbe = tokensToBody(
+      new Fountain().parse(
+        'INT. A - DAY\n\n[[fmt: mono -1]]\nOne.\n\n[[fmt: serif +1]]\nTwo.\n\n'
+        + '[[fmt: sans +2]]\nThree.\n\n[[fmt: cursive]]\nFour.\n',
+        true,
+      ).tokens,
+    ).files[0].xhtml;
     const emitted = readFileSync(new URL('../src/epub/html.ts', import.meta.url), 'utf8')
-      + readFileSync(new URL('../src/epub/build.ts', import.meta.url), 'utf8');
+      + readFileSync(new URL('../src/epub/build.ts', import.meta.url), 'utf8')
+      + fmtProbe;
     // Every class in every selector, descendants included (p.credit inside
     // section.titlepage counts) — comments stripped first, or "e.g." reads
     // as a class named "g".
     const selectors = [...SCREENPLAY_CSS.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{/g)];
     const styled = selectors.flatMap((s) => [...s[1].matchAll(/\.([a-z][a-z0-9-]*)/g)].map((m) => m[1]));
     expect(new Set(styled).size).toBeGreaterThan(12);
+    // Parse class LISTS, not whole attributes: a paragraph can carry several
+    // classes (`class="action fmt-sans"`), so a containment check against
+    // `class="action"` would miss both of them. Interpolations are blanked
+    // first so the source's `class="action${fmt}"` reads as `action`.
+    const emittedClasses = new Set(
+      [...emitted.replace(/\$\{[^}]*\}/g, '').matchAll(/class="([^"]*)"/g)]
+        .flatMap((m) => m[1].split(/\s+/))
+        .filter(Boolean),
+    );
     for (const cls of new Set(styled)) {
-      expect(emitted).toContain(`class="${cls}"`);
+      expect(emittedClasses.has(cls), `no renderer emits .${cls}`).toBe(true);
     }
   });
 });
@@ -638,5 +675,74 @@ describe('tokensToPreviewHtml', () => {
   test('empty tokens still fall back to a styled document', () => {
     const html = tokensToPreviewHtml([]);
     expect(html).toContain('<style>');
+  });
+});
+
+// ── block font shifts (registry #18) ─────────────────────
+
+describe('font shifts', () => {
+  const render = (src: string, format = DEFAULT_FORMAT_OPTIONS) => {
+    const { tokens } = new Fountain().parse(src, true);
+    return tokensToBody(tokens, { format }).files[0].xhtml;
+  };
+
+  test('a leading fmt note becomes classes on the action paragraph', () => {
+    const out = render('INT. A - DAY\n\n[[fmt: sans]]\nCHYRON: LIVE.\n');
+    expect(out).toContain('<p class="action fmt-sans">CHYRON: LIVE.</p>');
+  });
+
+  test('family and size both land', () => {
+    const out = render('INT. A - DAY\n\n[[fmt: sans +2]]\nA SIGN.\n');
+    expect(out).toContain('<p class="action fmt-sans fmt-plus2">A SIGN.</p>');
+  });
+
+  test('every dialogue paragraph of the token gets the classes', () => {
+    const out = render('INT. A - DAY\n\n@WREN\n[[fmt: mono -1]] one\ntwo\n');
+    expect(out).toContain('<p class="dialogue fmt-mono fmt-minus1">one</p>');
+    expect(out).toContain('<p class="dialogue fmt-mono fmt-minus1">two</p>');
+  });
+
+  test('with the knob off the note still vanishes but adds no classes', () => {
+    const out = render(
+      'INT. A - DAY\n\n[[fmt: sans]]\nCHYRON: LIVE.\n',
+      resolveFormatOptions({ preserveFontShifts: false }),
+    );
+    expect(out).toContain('<p class="action">CHYRON: LIVE.</p>');
+    expect(out).not.toContain('fmt-sans');
+  });
+
+  test('notes are invisible everywhere, knob or no knob', () => {
+    // Fountain says notes never render. Before registry #18 they rendered as
+    // literal text; this is the general fix, not just an fmt one.
+    for (const format of [DEFAULT_FORMAT_OPTIONS,
+                          resolveFormatOptions({ preserveFontShifts: false })]) {
+      const out = render('INT. A - DAY\n\nHe leaves [[check this]] quickly.\n', format);
+      expect(out).toContain('He leaves quickly.');
+      expect(out).not.toContain('[[');
+      expect(out).not.toContain('check this');
+    }
+  });
+
+  test('a malformed fmt note strips clean and adds nothing', () => {
+    const out = render('INT. A - DAY\n\n[[fmt: chartreuse]]\nStill fine.\n');
+    expect(out).toContain('<p class="action">Still fine.</p>');
+    expect(out).not.toContain('[[');
+  });
+
+  test('the stylesheet carries all seven classes, in em and CSS 2.1 syntax', () => {
+    const css = screenplayCss(DEFAULT_FORMAT_OPTIONS);
+    for (const cls of ['.fmt-mono', '.fmt-serif', '.fmt-sans', '.fmt-cursive']) {
+      expect(ruleFor(css, cls), cls).toContain('font-family');
+    }
+    expect(ruleFor(css, '.fmt-minus1')).toContain('font-size: 0.85em');
+    expect(ruleFor(css, '.fmt-plus1')).toContain('font-size: 1.2em');
+    expect(ruleFor(css, '.fmt-plus2')).toContain('font-size: 1.5em');
+    // The invariants: no max-width, no line-height, no CSS3 value functions.
+    const rules = ['.fmt-mono', '.fmt-serif', '.fmt-sans', '.fmt-cursive',
+                   '.fmt-minus1', '.fmt-plus1', '.fmt-plus2']
+      .map((c) => ruleFor(css, c)).join('\n');
+    expect(rules).not.toContain('max-width');
+    expect(rules).not.toContain('line-height');
+    expect(rules).not.toMatch(/\b(min|max|clamp|var)\(/);
   });
 });

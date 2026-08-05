@@ -161,6 +161,25 @@ CONTENT = [
                "then stops."),
     ("action", "Punctuation only{b},{/b} styled by itself."),
     ("action", "This word is {u}underlined{/u} with drawn vector art."),
+    # Three drawn rules that are NOT underlines, one per rejection filter.
+    # See styled_row_ops in make-fixture.py for what each one draws.
+    ("action", "This phrase is {k}struck through{/k}, above the baseline."),
+    ("action", "A table rules a border {r}below this cell{/r}, further down."),
+    ("action", "A page-wide rule crosses {w}this whole line{/w} of text."),
+    # Block-level font shifts (registry 18). Each is a WHOLE line in the
+    # deviant font: fmt is block-level by design, and an inline shift is an
+    # explicit non-goal. Keep these SHORT — the layout measures every line at
+    # Courier 12, so an 18pt line of 60 characters would run off the page.
+    ("action", "{f}CHYRON: EVERY NAME HERE IS INVENTED.{/f}"),
+    ("action", "{t}A footnote, set smaller than the body.{/t}"),
+    # Mixed case on purpose. "INSERT: THE INDEX CARD" classifies as a
+    # MINI-SLUG (INSERT: is a secondary-slug keyword), and a mini-slug never
+    # carries a note — markers break slug recognition, registry 5b/9d — so
+    # that phrasing would silently test nothing.
+    ("action", "{z}The index card, enlarged for the reader.{/z}"),
+    ("action", "{g}A SIGN, VERY LARGE INDEED{/g}"),
+    ("character", "WREN"),
+    ("dialogue", "{f}A text message, in the phone's own face.{/f}"),
     ("character", "CASSIUS"),
     ("dialogue", "Dialogue can be {b}bold{/b} too."),
     ("character", "ODILE"),

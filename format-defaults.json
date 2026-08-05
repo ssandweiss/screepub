@@ -15,5 +15,6 @@
   "showPageMarkers": false,
   "dualDialogue": "sideBySide",
   "justifyText": false,
-  "printSplitMinimums": true
+  "printSplitMinimums": true,
+  "preserveFontShifts": true
 }
