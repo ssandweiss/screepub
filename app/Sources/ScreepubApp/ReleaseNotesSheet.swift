@@ -13,7 +13,7 @@ struct ReleaseNotesSheet: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    ForEach(update.notes, id: \.version) { note in
+                    ForEach(Array(update.notes.enumerated()), id: \.offset) { _, note in
                         VStack(alignment: .leading, spacing: 10) {
                             Slugline(text: "SCREEPUB \(note.version)")
                             let blocks = ReleaseNotes.parse(note.markdown)
@@ -75,6 +75,10 @@ struct ReleaseNotesSheet: View {
                 Text("\u{2022}")
                     .font(Theme.courier(12))
                     .foregroundStyle(Theme.inkMuted)
+                    // Decorative: the lead/body text already carries the
+                    // full meaning, so VoiceOver should not also speak
+                    // "bullet" before every single item.
+                    .accessibilityHidden(true)
                 Group {
                     if let lead {
                         Text(lead).font(Theme.courier(12, .bold))
