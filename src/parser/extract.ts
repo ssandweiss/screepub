@@ -28,7 +28,9 @@ export async function extractDocument(
     const page = await pdf.getPage(pageNum);
     const viewport = page.getViewport({ scale: 1.0 });
     const textContent = await page.getTextContent();
-    await stampFontStyles(page, textContent.items);
+    const ops = await operatorList(page);
+    stampFontStyles(page, textContent.items);
+    if (ops) stampUnderlines(textContent.items, ops, viewport.width);
 
     const pageLines = groupItemsIntoLines(textContent.items, viewport.width, pageNum);
     allLines.push(...pageLines);
@@ -43,6 +45,8 @@ interface TextItem {
   fontName?: string;
   italic?: boolean;
   bold?: boolean;
+  /** a rule was DRAWN under this item — never readable from font data */
+  underline?: boolean;
   /** actual rendered width from pdf.js — much more accurate than the
    * len*6 estimate (which false-splits names like "Marlowe" → "Mar lowe") */
   width?: number;
@@ -240,20 +244,30 @@ export function markUnderlinesItem(
 }
 
 /**
- * Mark each item bold/italic from its font's PostScript name (e.g.
- * "CourierPrime-Italic"). getOperatorList() forces font resolution into
- * page.commonObjs — getTextContent alone doesn't load fonts. Best-effort:
- * failures leave items unstyled.
+ * getOperatorList, best-effort. This call is ALSO what forces font resolution
+ * into `page.commonObjs` — getTextContent alone does not load fonts — so
+ * `stampFontStyles` depends on it having run first, and both passes share the
+ * single call rather than paying for it twice.
  */
-async function stampFontStyles(
-  page: { getOperatorList(): Promise<unknown>; commonObjs: { get(id: string): unknown } },
-  items: unknown[],
-): Promise<void> {
+async function operatorList(page: {
+  getOperatorList(): Promise<unknown>;
+}): Promise<OpList | null> {
   try {
-    await page.getOperatorList();
+    return (await page.getOperatorList()) as OpList;
   } catch {
-    return;
+    return null;
   }
+}
+
+/**
+ * Mark each item bold/italic from its font's PostScript name (e.g.
+ * "CourierPrime-Italic"). Best-effort: an unresolved font leaves its items
+ * plain, which is also what happens when `operatorList` above returned null.
+ */
+function stampFontStyles(
+  page: { commonObjs: { get(id: string): unknown } },
+  items: unknown[],
+): void {
   const byFont = new Map<string, { italic: boolean; bold: boolean }>();
   for (const raw of items) {
     const item = raw as TextItem;
@@ -274,6 +288,25 @@ async function stampFontStyles(
     if (flags) {
       item.italic = flags.italic;
       item.bold = flags.bold;
+    }
+  }
+}
+
+/**
+ * Mark each item underlined when a drawn rule sits in the band below its
+ * baseline. Underline is DRAWN, not selected, so unlike bold/italic it can
+ * never be read from font data (registry 9d).
+ */
+function stampUnderlines(items: unknown[], opList: OpList, pageWidth: number): void {
+  const marks = collectUnderlineMarks(opList, pageWidth);
+  if (marks.length === 0) return;
+  for (const raw of items) {
+    const item = raw as TextItem;
+    if (!item.str || !item.str.trim() || !item.transform) continue;
+    const x0 = item.transform[4];
+    const baseline = item.transform[5];
+    if (marks.some((m) => markUnderlinesItem(m, x0, endX(item), baseline))) {
+      item.underline = true;
     }
   }
 }

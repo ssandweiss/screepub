@@ -523,11 +523,47 @@ In `extractDocument`, replace the single line `await stampFontStyles(page, textC
 - [ ] **Step 2: Run the suite to verify nothing regressed**
 
 Run: `bun test && bunx tsc --noEmit`
-Expected: PASS everywhere EXCEPT `tests/torture.test.ts`, which now fails on
-`underline is NOT detected yet (registry 9d)`. That failure is the signal the
-pass works end to end — the test's own comment says so — and Task 5 flips it.
-Everything else must stay green: `screenplay.pdf` draws no paths, so no other
-fixture changes.
+Expected: the WHOLE suite green, `tests/torture.test.ts` included. The stamping
+is not yet observable in any output — `joinLine` does not read `underline` until
+Task 3 — so `underline is NOT detected yet (registry 9d)` still passes here and
+flips in Task 5. A green run is therefore not evidence this task worked.
+
+- [ ] **Step 2b: Prove the stamping actually fires**
+
+Because Step 2 cannot see it, check it directly. Write this to `.p1tmp/check.ts`
+(a scratch dir inside the worktree, so the relative import resolves), run it,
+then delete the directory:
+
+```ts
+import '../src/parser/pdfjs-shims';
+import { getDocument } from 'pdfjs-dist/build/pdf.mjs';
+import { collectUnderlineMarks, markUnderlinesItem } from '../src/parser/extract';
+
+const bytes = new Uint8Array(await Bun.file('tests/fixtures/torture.pdf').arrayBuffer());
+const pdf = await getDocument({ data: bytes }).promise;
+for (let p = 1; p <= pdf.numPages; p++) {
+  const page = await pdf.getPage(p);
+  const vp = page.getViewport({ scale: 1.0 });
+  const ops = await page.getOperatorList();
+  const tc = await page.getTextContent();
+  const marks = collectUnderlineMarks(ops as never, vp.width);
+  if (!marks.length) continue;
+  console.log(`page ${p}: ${marks.length} mark(s)`, JSON.stringify(marks));
+  for (const it of tc.items as any[]) {
+    if (!it.str?.trim()) continue;
+    const x0 = it.transform[4], x1 = x0 + (it.width ?? it.str.length * 6);
+    if (marks.some((m) => markUnderlinesItem(m, x0, x1, it.transform[5])))
+      console.log('   UNDERLINED ->', JSON.stringify(it.str));
+  }
+}
+```
+
+Expected, exactly — one mark in fifteen pages, on the one item it belongs to:
+
+```
+page 8: 1 mark(s) [{"x0":201.60000610351562,"x1":273.6000061035156,"y":562.2999877929688}]
+   UNDERLINED -> "underlined"
+```
 
 - [ ] **Step 3: Commit**
 
