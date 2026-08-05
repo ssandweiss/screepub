@@ -200,8 +200,12 @@ describe('whitespace normalization', () => {
 });
 
 describe('inline style detection', () => {
-  const styled = (str: string, x: number, y: number, flags: { italic?: boolean; bold?: boolean }) =>
-    ({ str, transform: [1, 0, 0, 1, x, y], ...flags });
+  const styled = (
+    str: string,
+    x: number,
+    y: number,
+    flags: { italic?: boolean; bold?: boolean; underline?: boolean },
+  ) => ({ str, transform: [1, 0, 0, 1, x, y], ...flags });
 
   test('an italic run inside a plain line gains fountain emphasis markers', () => {
     const lines = groupItemsIntoLines(
@@ -239,6 +243,51 @@ describe('inline style detection', () => {
 
   test('uniform plain lines carry no styled variant', () => {
     const lines = groupItemsIntoLines([styled('Just action.', 110, 700, {})], 612, 1);
+    expect(lines[0].styled).toBeUndefined();
+  });
+
+  test('an underlined run gains underscores', () => {
+    const lines = groupItemsIntoLines(
+      [
+        styled('This word is ', 110, 700, {}),
+        styled('underlined', 200, 700, { underline: true }),
+        styled(' with drawn art', 300, 700, {}),
+      ],
+      612,
+      1,
+    );
+    expect(lines[0].text).toBe('This word is underlined with drawn art');
+    expect(lines[0].styled).toBe('This word is _underlined_ with drawn art');
+  });
+
+  test('mixed marks nest with the underscore innermost', () => {
+    // Not a palindrome: the close mirrors the open. Both renderers unwrap
+    // stars first and underscores last, which is exactly this nesting.
+    // Two-letter words on purpose: a one-character run is punctuation-only by
+    // the guard above and never carries style at all.
+    const lines = groupItemsIntoLines(
+      [
+        styled('bold ', 110, 700, { underline: true, bold: true }),
+        styled('slant ', 160, 700, { underline: true, italic: true }),
+        styled('both', 220, 700, { underline: true, bold: true, italic: true }),
+      ],
+      612,
+      1,
+    );
+    expect(lines[0].styled).toBe('**_bold_** *_slant_* ***_both_***');
+  });
+
+  test('a punctuation-only underlined item never wraps alone', () => {
+    const lines = groupItemsIntoLines(
+      [
+        styled('by Nora Vance', 110, 700, {}),
+        styled(',', 189, 700, { underline: true }),
+        styled(' the b-side', 195, 700, {}),
+      ],
+      612,
+      1,
+    );
+    expect(lines[0].text).toBe('by Nora Vance, the b-side');
     expect(lines[0].styled).toBeUndefined();
   });
 });

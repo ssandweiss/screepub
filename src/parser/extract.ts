@@ -337,7 +337,24 @@ function joinItems(items: TextItem[]): string {
   return text.replace(/ {2,}/g, ' ').trim();
 }
 
-const EMPHASIS_MARK: Record<string, string> = { i: '*', b: '**', bi: '***' };
+/**
+ * Fountain emphasis as OPEN/CLOSE pairs. A mixed mark is not a palindrome —
+ * `**_x_**` closes in the mirror order — so one string per style no longer
+ * works. Canonical nesting puts the underscore innermost and the stars
+ * outside, which is the order both renderers' regexes already unwrap (triple
+ * stars, then double, then single, then underscore).
+ *
+ * Keys are built as b→i→u, so every subset of {b,i,u} appears exactly once.
+ */
+const EMPHASIS_MARK: Record<string, [string, string]> = {
+  b: ['**', '**'],
+  i: ['*', '*'],
+  u: ['_', '_'],
+  bi: ['***', '***'],
+  bu: ['**_', '_**'],
+  iu: ['*_', '_*'],
+  biu: ['***_', '_***'],
+};
 
 /**
  * Join a line producing both plain text and (when fonts vary) a styled
@@ -354,7 +371,9 @@ function joinLine(items: TextItem[]): { text: string; styled?: string } {
     const x = item.transform[4];
     if (item.str === prevStr && Math.abs(x - prevX) < 2) continue;
     const hasWord = /[\p{L}\p{N}]{2}/u.test(item.str);
-    const style = hasWord ? `${item.bold ? 'b' : ''}${item.italic ? 'i' : ''}` : '';
+    const style = hasWord
+      ? `${item.bold ? 'b' : ''}${item.italic ? 'i' : ''}${item.underline ? 'u' : ''}`
+      : '';
     runs.push({ str: item.str, gapBefore: prevEndX >= 0 && x - prevEndX > 5, style });
     prevEndX = endX(item);
     prevX = x;
@@ -381,10 +400,10 @@ function joinLine(items: TextItem[]): { text: string; styled?: string } {
       styled += clean;
       continue;
     }
-    const mark = EMPHASIS_MARK[g.style] ?? '*';
+    const [open, close] = EMPHASIS_MARK[g.style] ?? ['*', '*'];
     const lead = clean.match(/^\s*/)![0];
     const trail = clean.match(/\s*$/)![0];
-    styled += `${lead}${mark}${core}${mark}${trail}`;
+    styled += `${lead}${open}${core}${close}${trail}`;
   }
   styled = styled.replace(/ {2,}/g, ' ').trim();
   return { text: plain, styled: styled !== plain ? styled : undefined };
