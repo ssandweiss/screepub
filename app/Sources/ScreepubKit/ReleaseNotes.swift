@@ -62,6 +62,17 @@ public enum ReleaseNotes {
         for raw in normalized.components(separatedBy: .newlines) {
             let line = stripHTMLComments(raw).trimmingCharacters(in: .whitespaces)
 
+            // release.yml appends a machine-generated trailer to the
+            // committed notes before publishing them as the GitHub release
+            // body: "\n\n---\n\n", then an install paragraph and a fenced
+            // SHA-256 block (see the "Publish GitHub Release" step in
+            // .github/workflows/release.yml). That trailer is process
+            // furniture, not authored prose — the same class of thing as
+            // the `# ` title or an `<!-- ... -->` marker below — so a line
+            // that is exactly `---` ends the document here: flush whatever
+            // is pending and stop, dropping everything after it.
+            if line == "---" { flush(); break }
+
             // A bare bullet marker with nothing after it ("- ", which trims
             // to "-") is content-free: treat it like a blank line rather
             // than let it fall through to a stray "-" paragraph.

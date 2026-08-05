@@ -1285,8 +1285,12 @@ do {
 }
 
 // — Release notes parsing —
-// The committed 0.5.0 notes are the fixture because release.yml publishes
-// that exact file as the GitHub release body.
+// The committed 0.5.0 notes are the fixture, but they are only the PROSE
+// half of what GitHub actually publishes: release.yml copies this file
+// verbatim and then appends a machine-generated trailer ("\n\n---\n\n",
+// an install paragraph, and a fenced SHA-256 block — see the "Publish
+// GitHub Release" step). ReleaseNotes.parse stops at that "---" rather
+// than rendering the trailer, which the equality check below proves.
 let notesFixture = repoRoot.appendingPathComponent("docs/releases/0.5.0.md")
 if let markdown = try? String(contentsOf: notesFixture, encoding: .utf8) {
     let blocks = ReleaseNotes.parse(markdown)
@@ -1303,6 +1307,26 @@ if let markdown = try? String(contentsOf: notesFixture, encoding: .utf8) {
         .replacingOccurrences(of: "\n", with: "\r\n")
     check(ReleaseNotes.parse(crlfMarkdown) == blocks,
           "CRLF line endings parse to the same blocks as LF")
+
+    // The real GitHub release body, synthesized the way release.yml's
+    // "Publish GitHub Release" step actually builds it: this file's bytes,
+    // then its literal appended trailer. Parsing that full body must equal
+    // parsing the file alone — this is the assertion that would have
+    // caught the trailer rendering as five extra blocks (a "---"
+    // paragraph, two install paragraphs, a "SHA-256:" line, and one long
+    // paragraph of raw hex) on every version shown in the sheet.
+    let publishedTrailer = "\n\n---\n\n"
+        + "Notarized universal build for macOS 14+ (Apple Silicon and Intel).\n\n"
+        + "**Install:** download `Screepub-macOS.dmg`, open it, drag Screepub to Applications, and double-click.\n\n"
+        + "SHA-256:\n"
+        + "\n```\n"
+        + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  Screepub-macOS.dmg\n"
+        + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  screepub-cli-macos-arm64.tar.gz\n"
+        + "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc  screepub-cli-macos-x64.tar.gz\n"
+        + "```\n"
+    let publishedBody = markdown + publishedTrailer
+    check(ReleaseNotes.parse(publishedBody) == blocks,
+          "the release.yml trailer (---, install paragraphs, SHA-256 block) parses identically to the notes file alone")
 
     var sections = 0, bullets = 0, paragraphs = 0, asides = 0
     var leads: [String] = []
