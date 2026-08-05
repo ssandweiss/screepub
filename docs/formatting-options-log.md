@@ -634,7 +634,7 @@ and the suite will say so if you forget.
   ("Jo hn Sm ith") and sharpens dual-dialogue boundaries.
 - **Code:** `src/parser/extract.ts` (`endX`).
 
-### 9d. Inline bold/italic pass-through
+### 9d. Inline bold/italic/underline pass-through
 - **What:** per-item font styles detected from PostScript names
   ("CourierPrime-Italic" etc.; getOperatorList forces font resolution —
   getTextContent alone doesn't load fonts). Styled runs travel as
@@ -643,10 +643,31 @@ and the suite will say so if you forget.
   dialogue/action emit styled (markers would break cue/parenthetical/
   slug recognition). Rendered as em/strong (EPUB) and i/b (MOBI).
   Punctuation-only styled items never wrap alone (no "*,*").
-- **Limitation:** underline is drawn as vector graphics in PDFs, not
-  font data — NOT detected. The renderers do support `_underline_`
-  markers, so hand-edits to the .fountain render correctly.
-- **Code:** `src/parser/extract.ts` (`stampFontStyles`, `joinLine`),
+- **Underline (2026-08-04):** PDFs DRAW underline as vector art rather than
+  selecting a font, so it is invisible to the font-name check above. A single
+  walk of each page's operator list collects drawn rules — pdf.js folds all
+  painting into `constructPath`, whose `minMax` bbox alone separates a rule
+  from a box — and an item is underlined when a mark sits 0.5pt above to
+  3.5pt below its baseline and covers ≥ 60% of its width. Marks must be
+  ≤ 2.5pt tall, ≥ 4pt wide, and < 85% of the page (header rules). The CTM is
+  tracked through save/restore/transform: Final Draft draws under a y-flip
+  ([1,0,0,-1,0,H]), so both bbox corners are transformed and min/maxed, and
+  only genuinely skewed matrices are skipped. Every paint op counts except
+  `endPath` (`W n` clip paths, which paint nothing) — real underlines are
+  STROKED with a zero-height bbox, not filled. Marks nest with the underscore
+  innermost (`**_x_**`), which is the order both renderers already unwrap.
+- **Measured bound:** detection is per text ITEM, so a rule under only PART of
+  a pdf.js run is dropped rather than applied to the whole run. Two of
+  Highland's four underlines in the local set are that shape (a 36pt rule
+  under a 129pt item). The trade is deliberate: a false positive puts
+  underscores around text that is not underlined in a shipped book, a false
+  negative just preserves the pre-2026-08-04 behavior. Fixing it means
+  splitting an item at character offsets, which needs per-glyph advances.
+- **Decoys (torture fixture, page 6):** a strikethrough, a table-cell border
+  below the text band, and a page-wide rule sit beside the real underline,
+  each rejected by a different filter, each asserted silent.
+- **Code:** `src/parser/extract.ts` (`stampFontStyles`, `stampUnderlines`,
+  `collectUnderlineMarks`, `markUnderlinesItem`, `joinLine`),
   `src/epub/html.ts` + `src/mobi/html.ts` (`inlineEmphasis`/`inline`).
 
 ### 9e. Cue extensions tolerate a missing closing period

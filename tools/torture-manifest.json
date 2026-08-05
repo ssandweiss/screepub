@@ -87,9 +87,9 @@
     "covered": true, "page": 5, "side": "source",
     "how": "wrapped action and dialogue throughout, which must rejoin into single elements rather than per-line fragments" },
 
-  { "entry": "9d", "title": "Inline bold/italic pass-through",
+  { "entry": "9d", "title": "Inline bold/italic/underline pass-through",
     "covered": true, "page": 6, "side": "both",
-    "how": "bold, italic and bold-italic runs in action and dialogue, a run crossing a wrap boundary, and a punctuation-only styled item. Vector underlines are present and asserted NOT detected, per this entry's own limitation" },
+    "how": "bold, italic and bold-italic runs in action and dialogue, a run crossing a wrap boundary, and a punctuation-only styled item; plus a drawn underline asserted to reach styledText, and three drawn rules (strikethrough, table border, page-wide rule) asserted NOT to" },
 
   { "entry": "9e", "title": "Cue extensions tolerate a missing closing period",
     "covered": true, "page": 3, "side": "source",
