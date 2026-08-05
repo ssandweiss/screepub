@@ -31,6 +31,7 @@ struct ContentView: View {
     @AppStorage(AppSettings.updateOptInKey) private var updateOptIn = false
     @ObservedObject private var updates = UpdateController.shared
     @State private var showUpdatePopover = false
+    @State private var showReleaseNotes = false
     /// Last destination the user actually sent to. Empty on first run, when
     /// the ordering in ResultActions.routes supplies the opening guess.
     @AppStorage("lastDestination") private var lastDestination = ""
@@ -83,6 +84,11 @@ struct ContentView: View {
             // Opting in IS the request to check — do the first one right
             // away rather than making the user relaunch to see it work.
             if on { Task { await updates.checkIfDue() } }
+        }
+        .sheet(isPresented: $showReleaseNotes) {
+            if let update = updates.available {
+                ReleaseNotesSheet(update: update)
+            }
         }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             guard let provider = providers.first else { return false }
@@ -176,7 +182,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .help("Install the update, or read the release notes")
                 .popover(isPresented: $showUpdatePopover, arrowEdge: .top) {
-                    UpdatePopover(update: update)
+                    UpdatePopover(update: update) { showReleaseNotes = true }
                 }
             }
         case .downloading(let fraction):
@@ -907,6 +913,10 @@ private struct FooterProgressBar: View {
 /// States plainly what will happen before anything happens.
 private struct UpdatePopover: View {
     let update: AvailableUpdate
+    /// Raised instead of opening a browser. ContentView owns the sheet,
+    /// because a sheet presented by a view that is itself dismissing races
+    /// its own presenter, and this popover dismisses as the button fires.
+    let onReadNotes: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -926,7 +936,10 @@ private struct UpdatePopover: View {
             }
             .buttonStyle(BradButtonStyle())
             Button("VIEW RELEASE NOTES") {
-                NSWorkspace.shared.open(update.releaseNotesURL)
+                dismiss()
+                // One hop after the popover has gone, so the sheet is not
+                // presented by a view on its way out.
+                Task { @MainActor in onReadNotes() }
             }
             .buttonStyle(MarginButtonStyle())
         }
