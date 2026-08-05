@@ -606,13 +606,43 @@ git commit -m "Docs: KFX keep truth replaces the stale PDF claim; two new CSS in
 
 ---
 
-## Phase B: rich-formatting phase 1 (underline)
+## Phase B: rich-formatting phase 1 (underline) — DONE 2026-08-04
 
-Not detailed here on purpose. At phase start, run superpowers:writing-plans against `../specs/2026-07-30-rich-formatting-design.md` §Phase 1 and save as `2026-07-30-rich-formatting-phase1.md`. Scope reminders for that plan: parser-only (`src/parser/extract.ts` + make-fixture.py + tests); the three underline decoys include the Beat table-border shape; MOBI/EPUB renderers unchanged except the missing MOBI `<u>` pinning test.
+Plan: **`2026-08-04-rich-formatting-phase1.md`** (the date is when it was
+written, per the repo's filename convention, not the `2026-07-30-` this
+section originally predicted).
 
-## Phase C: rich-formatting phase 2 (font family/size)
+Landed as specced, with three corrections the pdf.js 6.2.108 re-probe forced —
+the spec was de-risked against 6.1.200. Real underlines are STROKED with a
+zero-height bbox rather than filled, so a fill check would have detected
+nothing real; Final Draft draws them under a y-flip CTM, which "skip rotated
+matrices" would have placed 200pt from any baseline; and the 60% overlap floor
+drops partial-item underlines (two of Highland's), recorded in §9d as a
+measured bound rather than left as folklore.
 
-Same procedure: plan written at phase start as `2026-07-30-rich-formatting-phase2.md`, against spec §Phase 2. It inherits from Phase A: `tokensToMobiHtml` already takes FormatOptions (extend, don't re-plumb), and the `printSplitMinimums` commits are the worked example for the `preserveFontShifts` knob ritual (options.ts → format-defaults.json → options.test.ts → FormatSettings → PartialFormatSettings → AppSettings trio → kit-check → rail).
+Corpus diff: Final Draft, Celtx and Fade In unchanged (Final Draft's one mark
+is on its title page); Highland gained 4 underlined lines, Chromium 7 — real
+browser `text-decoration`, mark width exactly equal to item width throughout.
+
+## Phase C: rich-formatting phase 2 (font family/size) — DONE 2026-08-04
+
+Plan: **`2026-08-04-rich-formatting-phase2.md`**. Inherited from Phase A as
+intended: `tokensToMobiHtml` already took FormatOptions, and the
+`printSplitMinimums` commits were the worked example for the
+`preserveFontShifts` ritual.
+
+One spec correction: bare `roman` is dropped from the serif matcher, because
+"-Roman" is the PostScript REGULAR weight (Helvetica-Roman, AvenirNext-Roman)
+and `times` already covers the family — the same trap the spec already calls
+out for bare "gothic".
+
+**Read this before assuming the feature is exercised:** the `.fountain` of
+every real script in the local set is byte-identical before and after Phase C.
+Four of the five generators are single-face and single-size; Fade In has 7
+shifted lines and all 7 are on its TITLE page, which never reaches body
+serialization. So registry #18 is exercised by the invented fixture only. That
+is a fact about this corpus, not about the feature — but it means the device
+pass below is the first time a font shift will be looked at on hardware.
 
 ## Phase D: the combined device pass (Sam-owned, one sideload session)
 

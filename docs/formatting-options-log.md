@@ -983,10 +983,19 @@ and the suite will say so if you forget.
   PDF's actual fonts is also out of scope; the classes name generic stacks.
 - **Uniform scripts are untouched:** a single-face, single-size screenplay
   produces zero fmt anywhere by construction, so its `.fountain` and both its
-  outputs are byte-identical to before this entry. Measured 2026-08-04 across
-  the local set: Final Draft, Highland, Celtx and Chromium each produce 0 fmt
-  lines; Fade In produces 7 out of 3266 (five `sans` from an AvenirNext run,
-  two `sans +2` from a 36pt display face), and is the live case.
+  outputs are byte-identical to before this entry.
+- **Measured on the real corpus (2026-08-04), and the honest result:** the
+  `.fountain` of every script in the local set is byte-identical before and
+  after this entry — **zero** notes emitted across all five generators. Final
+  Draft, Highland, Celtx and Chromium are single-face, single-size and
+  produce no shifted lines at all. Fade In produces 7 shifted lines out of
+  3266 (five `sans` from an AvenirNext run, two `sans +2` from a 36pt display
+  face) and still emits no note, because **all seven are on its TITLE page**,
+  which never reaches body serialization. So this entry is exercised only by
+  the invented fixture today. That is a statement about this corpus, not
+  about the feature: chyrons, inserts and on-screen text are ordinary
+  screenplay furniture, and none of these five happen to carry one in the
+  body. Worth re-measuring when a script that does joins the set.
 - **App option:** "Keep the PDF's font shifts" (reader rail, Text group).
 - **Device verdict: pending —** next KFX pass. Does a `+2` block render
   larger without breaking the keep around it, and does a family class survive
