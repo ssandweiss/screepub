@@ -1,7 +1,7 @@
 // Adapted from an earlier table-read parser by the same author, reworked for
 // headless Bun/Node: modern pdf.js build + DOM shims, no browser worker.
 import './pdfjs-shims';
-import type { FamilyBucket, RawLine, SizeStep } from './types';
+import type { FamilyBucket, FontRun, RawLine, SizeStep } from './types';
 import { getDocument, OPS } from 'pdfjs-dist/build/pdf.mjs';
 
 /**
@@ -36,6 +36,11 @@ export async function extractDocument(
     allLines.push(...pageLines);
   }
 
+  // Dominant font is a DOCUMENT fact, so this runs once, after every page:
+  // a chyron page set entirely in Helvetica is still a deviation from a
+  // Courier script (registry #18).
+  stampLineFmt(allLines);
+
   return { lines: allLines, pageCount: pdf.numPages };
 }
 
@@ -47,6 +52,8 @@ interface TextItem {
   bold?: boolean;
   /** a rule was DRAWN under this item — never readable from font data */
   underline?: boolean;
+  /** coarse family bucket from the resolved PostScript name (registry #18) */
+  bucket?: FamilyBucket;
   /** actual rendered width from pdf.js — much more accurate than the
    * len*6 estimate (which false-splits names like "Marlowe" → "Mar lowe") */
   width?: number;
@@ -377,17 +384,24 @@ function stampFontStyles(
   page: { commonObjs: { get(id: string): unknown } },
   items: unknown[],
 ): void {
-  const byFont = new Map<string, { italic: boolean; bold: boolean }>();
+  const byFont = new Map<string, { italic: boolean; bold: boolean; bucket?: FamilyBucket }>();
   for (const raw of items) {
     const item = raw as TextItem;
     if (!item.fontName || byFont.has(item.fontName)) continue;
-    let flags = { italic: false, bold: false };
+    let flags: { italic: boolean; bold: boolean; bucket?: FamilyBucket } = {
+      italic: false,
+      bold: false,
+    };
     try {
       const font = page.commonObjs.get(item.fontName) as { name?: string } | null;
       const name = String(font?.name ?? '');
-      flags = { italic: /italic|oblique/i.test(name), bold: /bold|black|heavy/i.test(name) };
+      flags = {
+        italic: /italic|oblique/i.test(name),
+        bold: /bold|black|heavy/i.test(name),
+        bucket: familyBucket(name),
+      };
     } catch {
-      // unresolved font — leave plain
+      // unresolved font — leave plain and unbucketed
     }
     byFont.set(item.fontName, flags);
   }
@@ -397,8 +411,31 @@ function stampFontStyles(
     if (flags) {
       item.italic = flags.italic;
       item.bold = flags.bold;
+      item.bucket = flags.bucket;
     }
   }
+}
+
+/**
+ * Per-run font tallies for a line's items, merging equal neighbours.
+ *
+ * Size comes from the text matrix's vertical scale, which is `transform[3]`
+ * for the unrotated text screenplays are made of; the absolute value keeps a
+ * flipped matrix from reporting a negative size. Items whose font never
+ * resolved are skipped entirely, so the shares in `stampLineFmt` are over
+ * resolved characters rather than being diluted by unknowns.
+ */
+function fontRuns(items: TextItem[]): FontRun[] | undefined {
+  const out: FontRun[] = [];
+  for (const item of items) {
+    const chars = item.str.trim().length;
+    if (!chars || !item.bucket) continue;
+    const size = Math.round(Math.abs(item.transform[3]) * 10) / 10;
+    const last = out[out.length - 1];
+    if (last && last.bucket === item.bucket && last.size === size) last.chars += chars;
+    else out.push({ bucket: item.bucket, size, chars });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /**
@@ -604,7 +641,10 @@ function deinterleaveDualDialogue(
       if (text) {
         const indent = Math.round((lines[i].items[0].transform[4] / pageWidth) * 100);
         const styled = text === joined.text ? joined.styled : undefined;
-        out.push({ text, indent, y: lines[i].y, pageNum, styled });
+        // Dual-column lines below deliberately carry no `fonts`, and so no
+        // fmt: that pass joins its columns to strings without retaining the
+        // per-column items (registry #10a, #18's bounds).
+        out.push({ text, indent, y: lines[i].y, pageNum, styled, fonts: fontRuns(lines[i].items) });
       }
       i++;
       continue;

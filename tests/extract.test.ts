@@ -600,3 +600,45 @@ describe('stampLineFmt', () => {
     expect(bare.fmt).toBeUndefined();
   });
 });
+
+describe('font runs on extracted lines', () => {
+  const sized = (str: string, x: number, y: number, size: number, bucket?: string) =>
+    ({ str, transform: [size, 0, 0, size, x, y], bucket });
+
+  test('a line records its per-run bucket and size, by trimmed length', () => {
+    const lines = groupItemsIntoLines(
+      [sized('CHYRON: ', 110, 700, 12, 'mono'), sized('LIVE', 170, 700, 18, 'sans')],
+      612,
+      1,
+    );
+    expect(lines[0].fonts).toEqual([
+      { bucket: 'mono', size: 12, chars: 7 },
+      { bucket: 'sans', size: 18, chars: 4 },
+    ]);
+  });
+
+  test('adjacent runs with the same bucket and size merge', () => {
+    const lines = groupItemsIntoLines(
+      [sized('one ', 110, 700, 12, 'mono'), sized('two', 150, 700, 12, 'mono')],
+      612,
+      1,
+    );
+    expect(lines[0].fonts).toEqual([{ bucket: 'mono', size: 12, chars: 6 }]);
+  });
+
+  test('an item whose font never resolved contributes nothing', () => {
+    const lines = groupItemsIntoLines(
+      [sized('seen', 110, 700, 12, 'mono'), sized('unseen', 160, 700, 12, undefined)],
+      612,
+      1,
+    );
+    expect(lines[0].fonts).toEqual([{ bucket: 'mono', size: 12, chars: 4 }]);
+  });
+
+  test('a negative vertical scale still reports a positive size', () => {
+    const flipped = { str: 'flipped', transform: [12, 0, 0, -12, 110, 700], bucket: 'mono' };
+    expect(groupItemsIntoLines([flipped], 612, 1)[0].fonts).toEqual([
+      { bucket: 'mono', size: 12, chars: 7 },
+    ]);
+  });
+});
