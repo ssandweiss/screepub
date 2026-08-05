@@ -928,3 +928,71 @@ and the suite will say so if you forget.
   reflow is impossible in a fixed e-book, so a conversion-time preset is
   the mechanism. Adding a preset: extend the `DevicePreset` enum only —
   the two menus and kit-check iterate `allCases`.
+
+### 18. Block font shifts (option, default ON; 2026-08-04)
+- **What:** `preserveFontShifts` renders block-level font family and size
+  shifts the PDF carried — text-message inserts, chyrons, letters, on-screen
+  title cards. The parser computes the document's dominant (family bucket,
+  size) weighted by CHARACTER COUNT, and stamps a line with `fmt` when ≥ 80%
+  of its resolved characters agree on one deviation. Blocks take the shift
+  only when every line agrees, and an fmt change breaks a block, so a chyron
+  glued to plain action isolates instead of vanishing.
+- **Vocabulary:** family ∈ `mono|serif|sans|cursive`, size ∈ `-1|+1|+2`.
+  Serialized as Fountain notes: `[[fmt: sans]]`, `[[fmt: +2]]`,
+  `[[fmt: sans +2]]` — on its own line glued above an action block, inline
+  ahead of a dialogue line. The notes channel is lossless through fountain-js
+  and invisible by spec, so a tool that never heard of Screepub ignores it.
+- **Thresholds:** size step from the ratio to the dominant — ≤ 0.85 is `-1`,
+  1.15–1.4 is `+1`, > 1.4 is `+2` — each additionally requiring ≥ 1.5pt of
+  absolute change, so float jitter in a text matrix can never mint a step.
+  Size is the text matrix's vertical scale (`transform[3]`, absolute).
+  Family buckets on the PostScript base name with its subset prefix stripped,
+  lowercased, non-alphanumerics removed: `courier|mono|lettergothic|prestige`
+  → mono, `times|georgia|garamond|palatino|caslon|baskerville|minion` →
+  serif, `script|hand|brush|comic` → cursive, everything else sans. Bare
+  "gothic" is excluded (Century Gothic is a sans) and so is bare "roman"
+  ("-Roman" is the REGULAR weight of Helvetica-Roman and AvenirNext-Roman;
+  Times matches on "times" anyway). Weight and slope tokens match nothing
+  here: style is #9d's business.
+- **Always serialized, knob gates RENDERING:** the `.fountain` carries the
+  notes whatever the setting, because it is the app's cache boundary and must
+  be byte-stable under a settings flip — flipping this re-renders without
+  re-parsing the PDF. That is also why its rail control sits in "Text" with
+  the other render-time knobs, not in "From the PDF".
+- **Note stripping (general correction):** both renderers now strip ALL
+  `[[...]]` notes from rendered text. Before this entry we emitted none and
+  stripped none, so a hand-written note rendered as literal text, which the
+  Fountain spec forbids. One copy in `src/fountain/notes.ts`, imported by
+  both renderers (the #5b precedent).
+- **Rendering:** EPUB adds `fmt-mono|fmt-serif|fmt-sans|fmt-cursive` and
+  `fmt-minus1|fmt-plus1|fmt-plus2` to the block's paragraphs; sizes are
+  0.85/1.2/1.5em (vertical-in-em invariant, no line-height, no max-width, no
+  CSS3 value functions). A family class sits on the paragraph, so it locally
+  overrides the body `fontFamily` option (#6). MOBI renders the size arm as
+  `<font size="-1|+1|+2">` and DROPS family: MOBI 6 face support is not
+  reliable enough to spend the markup on.
+- **Bounds:** block-level only — inline (mid-line) family/size runs are an
+  explicit non-goal. Only action and dialogue carry notes, so a shifted line
+  that classifies as a cue, parenthetical, transition or MINI-SLUG loses its
+  shift: markers break slug recognition (#5b, #9d). That is not theoretical —
+  the fixture's `+1` case first read "INSERT: THE INDEX CARD", which is a
+  secondary-slug shape, and tested nothing. Dual-dialogue lines carry no fmt
+  either: the column-partition pass (#10a) joins its columns to strings
+  without retaining the per-column items, and a simultaneous exchange in a
+  deviant face is rare enough not to justify restructuring it. Embedding the
+  PDF's actual fonts is also out of scope; the classes name generic stacks.
+- **Uniform scripts are untouched:** a single-face, single-size screenplay
+  produces zero fmt anywhere by construction, so its `.fountain` and both its
+  outputs are byte-identical to before this entry. Measured 2026-08-04 across
+  the local set: Final Draft, Highland, Celtx and Chromium each produce 0 fmt
+  lines; Fade In produces 7 out of 3266 (five `sans` from an AvenirNext run,
+  two `sans +2` from a 36pt display face), and is the live case.
+- **App option:** "Keep the PDF's font shifts" (reader rail, Text group).
+- **Device verdict: pending —** next KFX pass. Does a `+2` block render
+  larger without breaking the keep around it, and does a family class survive
+  the Publisher Font toggle (#6b's meta should make it hold in Apple Books)?
+- **Code:** `src/parser/extract.ts` (`familyBucket`, `fontRuns`,
+  `stampLineFmt`), `src/parser/group.ts`, `src/parser/classify.ts`,
+  `src/fountain/serialize.ts` (`fmtNote`), `src/fountain/notes.ts`,
+  `src/epub/html.ts` + `src/epub/css.ts`, `src/mobi/html.ts`,
+  `src/options.ts`, app FormatSettings + ReaderRail.

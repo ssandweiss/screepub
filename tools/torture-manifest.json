@@ -129,5 +129,9 @@
 
   { "entry": "15", "title": "Not-a-screenplay guard",
     "covered": false,
-    "why": "a screenplay fixture cannot also be a non-screenplay. prose.pdf owns this" }
+    "why": "a screenplay fixture cannot also be a non-screenplay. prose.pdf owns this" },
+
+  { "entry": "18", "title": "Block font shifts",
+    "covered": true, "page": 6, "side": "both",
+    "how": "a chyron action block in Helvetica, three inserts at 10/15/18pt covering -1/+1/+2, and a dialogue line in the second face; each asserted to emit the exact [[fmt: ...]] note, and the rest of the fixture asserted to emit none" }
 ]
