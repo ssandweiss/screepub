@@ -1498,5 +1498,29 @@ do {
     check(false, "wrong error for malformed JSON: \(error)")
 }
 
+// The stronger boundary: a non-empty string alone doesn't prove the detail
+// is the decoder's OWN reason rather than a hardcoded stand-in like
+// "decode failed", which "not json" above can't rule out either since it
+// has no array to index into. A syntactically valid array with one bad
+// element can: the detail must name both the missing key and which
+// element was bad.
+do {
+    let oneBadElement = """
+    [
+      {"tag_name":"v0.6.0","html_url":"https://example.invalid/6","draft":false,
+       "prerelease":false,"body":"ok","assets":[]},
+      {"html_url":"https://example.invalid/5","draft":false,
+       "prerelease":false,"body":"ok","assets":[]}
+    ]
+    """
+    _ = try UpdateCheck.candidates(from: Data(oneBadElement.utf8))
+    check(false, "a release missing tag_name should throw")
+} catch UpdateCheckError.malformedResponse(let detail) {
+    check(detail.contains("tag_name"), "the decode failure names the missing key")
+    check(detail.contains("1"), "the decode failure names which element was bad")
+} catch {
+    check(false, "wrong error for a missing key: \(error)")
+}
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

@@ -72,9 +72,10 @@ public struct AvailableUpdate: Equatable, Identifiable, Sendable {
 public enum UpdateCheckError: Error, Equatable, LocalizedError {
     case rateLimited
     case network(String)
-    /// Carries the decoder's own reason. One malformed element fails the
-    /// whole batch of up to thirty releases, so the index it names is the
-    /// entire diagnosis.
+    /// Carries the failing key and array index. Those live on the decoding
+    /// error's own Context, not in its generic localizedDescription. One
+    /// malformed element fails the whole batch of up to thirty releases,
+    /// so that detail is the entire diagnosis.
     case malformedResponse(String)
     /// The release exists but carries no .dmg — a half-uploaded release, say.
     case noDownloadableAsset
@@ -87,9 +88,9 @@ public enum UpdateCheckError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .rateLimited:
-            return "GitHub limits unauthenticated checks to 60 an hour per network address."
+            return "GitHub limits unauthenticated checks to 60 an hour per network."
         case .network(let detail):
-            return detail
+            return "\(detail) Check your connection and try again."
         case .malformedResponse(let detail):
             return "GitHub's response could not be read: \(detail)"
         case .noDownloadableAsset:
@@ -211,9 +212,11 @@ public enum UpdateCheck {
         let releases: [GitHubRelease]
         do {
             releases = try JSONDecoder().decode([GitHubRelease].self, from: data)
+        } catch let error as DecodingError {
+            // `describe` reads the index and key from Context; the plain
+            // localizedDescription below drops both.
+            throw UpdateCheckError.malformedResponse(Self.describe(error))
         } catch {
-            // DecodingError names the array index and the key. That is the
-            // whole diagnosis when one bad element fails thirty releases.
             throw UpdateCheckError.malformedResponse(error.localizedDescription)
         }
         return releases.map { release in
@@ -227,6 +230,31 @@ public enum UpdateCheck {
                 isPrerelease: release.prerelease
             )
         }
+    }
+
+    /// `DecodingError.localizedDescription` is a generic Foundation
+    /// sentence: it drops the index and key, which are the entire
+    /// diagnosis when one bad element fails a batch of thirty. Those live
+    /// on the error's Context, so read them directly.
+    private static func describe(_ error: DecodingError) -> String {
+        let context: DecodingError.Context
+        let what: String
+        switch error {
+        case .keyNotFound(let key, let ctx):
+            context = ctx; what = "missing key \"\(key.stringValue)\""
+        case .typeMismatch(let type, let ctx):
+            context = ctx; what = "wrong type, expected \(type)"
+        case .valueNotFound(let type, let ctx):
+            context = ctx; what = "no value for \(type)"
+        case .dataCorrupted(let ctx):
+            context = ctx; what = "unreadable data"
+        @unknown default:
+            return "unreadable data"
+        }
+        let path = context.codingPath
+            .map { $0.intValue.map { i in "[\(i)]" } ?? $0.stringValue }
+            .joined(separator: ".")
+        return path.isEmpty ? what : "\(what) at \(path)"
     }
 
     /// Picks the update to offer and the notes to show with it. Pure: no
@@ -297,7 +325,7 @@ public enum UpdateCheck {
                 throw UpdateCheckError.rateLimited
             }
             guard (200..<300).contains(http.statusCode) else {
-                throw UpdateCheckError.network("HTTP \(http.statusCode)")
+                throw UpdateCheckError.network("GitHub returned HTTP \(http.statusCode).")
             }
         }
 
