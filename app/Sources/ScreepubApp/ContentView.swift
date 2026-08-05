@@ -89,8 +89,8 @@ struct ContentView: View {
         // fire on this WindowGroup's window opening/closing, which is a
         // fact NSApp.windows can't reliably tell apart from the Script
         // Preview or Settings windows also being open.
-        .onAppear { updates.mainWindowOpen = true }
-        .onDisappear { updates.mainWindowOpen = false }
+        .onAppear { updates.mainWindowAppeared() }
+        .onDisappear { updates.mainWindowDisappeared() }
         // No onChange(of: updates.available) guard here on purpose. That
         // guard existed because the sheet's content used to be looked up
         // FROM `updates.available` at presentation time (`if let update =
