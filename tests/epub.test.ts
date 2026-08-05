@@ -390,6 +390,21 @@ describe('inline emphasis in XHTML', () => {
     expect(file.xhtml).toContain('<span class="underline">underlined</span>');
   });
 
+  test('mixed marks unwrap with the underscore innermost', () => {
+    // The nesting joinLine emits for a bold+underlined run. Stars are
+    // replaced before underscores, so this composes without a special case —
+    // asserted here rather than assumed, on both renderers.
+    const tokens = new Fountain().parse(
+      'INT. A - DAY\n\nThe stamp is **_VOID_** and ***_LOUD_*** and *_soft_*.\n', true,
+    ).tokens;
+    const [file] = tokensToBody(tokens).files;
+    expect(file.xhtml).toContain('<strong><span class="underline">VOID</span></strong>');
+    expect(file.xhtml).toContain(
+      '<strong><em><span class="underline">LOUD</span></em></strong>',
+    );
+    expect(file.xhtml).toContain('<em><span class="underline">soft</span></em>');
+  });
+
   test('escaping still applies inside emphasized text', () => {
     const tokens = new Fountain().parse('INT. A - DAY\n\nA *5 < 6* case.\n', true).tokens;
     const [file] = tokensToBody(tokens).files;

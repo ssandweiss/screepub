@@ -304,3 +304,37 @@ Jack enters.
     expect(html).not.toMatch(/page-marker/);
   });
 });
+
+describe('inline emphasis', () => {
+  const html = (src: string) => {
+    const { tokens } = new Fountain().parse(src, true);
+    return tokensToMobiHtml(tokens, { title: 'T' }, resolveFormatOptions({}));
+  };
+
+  test('underscores become <u>', () => {
+    // Untested since it landed in the v0.4.2 merge train; rich-formatting
+    // phase 1 is the first thing that emits these underscores from a PDF
+    // rather than from a hand edit, so it stops being decorative here.
+    expect(html('INT. A - DAY\n\nThe sign reads _DO NOT ENTER_.\n')).toContain(
+      '<u>DO NOT ENTER</u>',
+    );
+  });
+
+  test('mixed marks unwrap with the underscore innermost', () => {
+    // The nesting joinLine emits for a bold+underlined run. Stars are
+    // replaced before underscores, so this composes without a special case.
+    expect(html('INT. A - DAY\n\nThe stamp is **_VOID_** now.\n')).toContain(
+      '<b><u>VOID</u></b>',
+    );
+    expect(html('INT. A - DAY\n\nAll three: ***_LOUD_*** here.\n')).toContain(
+      '<b><i><u>LOUD</u></i></b>',
+    );
+  });
+
+  test('bold, italic and bold-italic keep their existing tags', () => {
+    const out = html('INT. A - DAY\n\nA ***b1*** and **c1** and *d1*.\n');
+    expect(out).toContain('<b><i>b1</i></b>');
+    expect(out).toContain('<b>c1</b>');
+    expect(out).toContain('<i>d1</i>');
+  });
+});
