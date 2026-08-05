@@ -13,7 +13,20 @@ struct ReleaseNotesSheet: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    ForEach(Array(update.notes.enumerated()), id: \.offset) { _, note in
+                    ForEach(Array(update.notes.enumerated()), id: \.offset) { index, note in
+                        // A version boundary has to read as unmistakably
+                        // stronger than a paragraph-to-section gap inside
+                        // one version (10 spacing + 6 top padding = 16):
+                        // the rule, plus this same 22pt spacing landing on
+                        // both sides of it, is what makes "a new release
+                        // starts here" obvious at a glance. Not before the
+                        // first version, which has nothing above it to
+                        // separate from.
+                        if index > 0 {
+                            Rectangle()
+                                .fill(Theme.inkFaint)
+                                .frame(height: 1)
+                        }
                         VStack(alignment: .leading, spacing: 10) {
                             Slugline(text: "SCREEPUB \(note.version)")
                             let blocks = ReleaseNotes.parse(note.markdown)
@@ -106,6 +119,11 @@ struct ReleaseNotesSheet: View {
                 .foregroundStyle(Theme.inkMuted)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
+                // Matches .section's top padding: without it the closing
+                // footnote sits the same 10pt under the last bullet as any
+                // other block and reads as one more oddly-styled list
+                // item, not the document closer it actually is.
+                .padding(.top, 6)
         }
     }
 }
