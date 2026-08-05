@@ -109,23 +109,33 @@ describe('rich formatting', () => {
     expect(styledAll).not.toContain('*,*');
   });
 
-  // ---------------------------------------------------------------------
-  // EXPECTED FAIL WHEN RICH-FORMATTING PHASE 1 LANDS.
-  //
-  // Registry 9d records underline as NOT detected: it is drawn as vector
-  // art, not font data. The rich-formatting spec's phase 1 changes exactly
-  // that. When it lands, this assertion fails, and that failure is the
-  // SIGNAL to flip it, not a bug to work around.
-  //
-  // The first assertion matters as much as the second: checking only for
-  // the absence of "_" would also pass if the sentence vanished entirely,
-  // so a regression that dropped the text would read as success.
-  // ---------------------------------------------------------------------
-  test('underline is NOT detected yet (registry 9d)', () => {
+  test('a drawn underline reaches styledText as underscores', () => {
     const el = doc.elements.find((e) => e.text.includes('underlined'));
     expect(el).toBeDefined();
+    // The plain text must still be clean: classification never sees markers.
     expect(el!.text).toBe('This word is underlined with drawn vector art.');
-    expect(el!.styledText ?? '').not.toContain('_');
+    expect(el!.styledText).toBe('This word is _underlined_ with drawn vector art.');
+  });
+
+  // Three rules the detector must REJECT, each caught by a different filter,
+  // each drawn beside the real underline on the same page. A loosened
+  // threshold shows up here as a stray underscore rather than as silence.
+  test('a strikethrough is not an underline', () => {
+    const el = doc.elements.find((e) => e.text.includes('struck through'));
+    expect(el).toBeDefined();
+    expect(el!.styledText ?? el!.text).not.toContain('_');
+  });
+
+  test('a table border below the text band is not an underline', () => {
+    const el = doc.elements.find((e) => e.text.includes('below this cell'));
+    expect(el).toBeDefined();
+    expect(el!.styledText ?? el!.text).not.toContain('_');
+  });
+
+  test('a page-wide rule is furniture, not an underline', () => {
+    const el = doc.elements.find((e) => e.text.includes('this whole line'));
+    expect(el).toBeDefined();
+    expect(el!.styledText ?? el!.text).not.toContain('_');
   });
 });
 

@@ -916,9 +916,9 @@ python3 tools/make-fixture.py --emit-layout torture | python3 -c "import json,sy
 python3 tools/make-fixture.py torture tests/fixtures/torture.pdf
 ```
 
-Expected: `15 pages` both before and after the content edit (run the first command
+Expected: `14 pages` both before and after the content edit (run the first command
 on a stashed tree if you want the before value), and the build prints
-`15 pages -> tests/fixtures/torture.pdf`. Three actions add six rows to a page
+`14 pages -> tests/fixtures/torture.pdf`. Three actions add six rows to a page
 that has room for them.
 
 If the page count changed, or `make-fixture.py` exits with an `atline:` error,
@@ -934,6 +934,29 @@ Expected: full suite green, clean typecheck. `tests/fixture-stability.test.ts`
 stays green (it does not pin the torture fixture);
 `tests/torture-layout.test.ts` and `tests/torture-markup.test.ts` stay green (the
 `underline` field still keys on `u` alone).
+
+- [ ] **Step 6b: Prove the decoys are drawn, not merely absent**
+
+Three tests asserting "no underscore appears" would pass just as well if the
+decoy rectangles were never emitted. Confirm they are, and that each dies to a
+different filter:
+
+```bash
+python3 - <<'PY'
+import re
+raw = open('tests/fixtures/torture.pdf','rb').read().decode('latin-1')
+for x,y,w,h in re.findall(r'0 g ([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+) re f', raw):
+    print(f"x={x:>8} y={y:>8} w={w:>8} h={h}")
+PY
+```
+
+Expected: exactly four rules — 72.00 wide (the real underline), 100.80 (the
+strikethrough, 3.5pt HIGHER in y than its text row), 108.00 (the table border,
+6pt lower), and 540.00 (the page-wide rule, 88% of 612). Then re-run the
+Step 2b scratch script: it must report `4 path(s) drawn -> 3 survived the
+geometry filters` on that page, with `MATCHED -> "underlined"` as the only
+match. Three survivors, one match: the width filter kills the page rule, and
+the y-window kills the other two.
 
 - [ ] **Step 7: Commit**
 

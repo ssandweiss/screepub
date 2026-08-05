@@ -161,6 +161,11 @@ CONTENT = [
                "then stops."),
     ("action", "Punctuation only{b},{/b} styled by itself."),
     ("action", "This word is {u}underlined{/u} with drawn vector art."),
+    # Three drawn rules that are NOT underlines, one per rejection filter.
+    # See styled_row_ops in make-fixture.py for what each one draws.
+    ("action", "This phrase is {k}struck through{/k}, above the baseline."),
+    ("action", "A table rules a border {r}below this cell{/r}, further down."),
+    ("action", "A page-wide rule crosses {w}this whole line{/w} of text."),
     ("character", "CASSIUS"),
     ("dialogue", "Dialogue can be {b}bold{/b} too."),
     ("character", "ODILE"),

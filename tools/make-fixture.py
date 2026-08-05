@@ -165,7 +165,8 @@ def esc(s):
 
 # --- inline markup, for the torture kind ---------------------------------
 
-MARKUP = re.compile(r"\{(/?)([biu])\}")
+# u draws a real underline; k, r and w draw DECOYS the parser must reject.
+MARKUP = re.compile(r"\{(/?)([biukrw])\}")
 
 
 def parse_markup(s):
@@ -276,14 +277,15 @@ def layout():
     return pages
 
 
-def font_for(styles):
-    """Style set -> font resource key.
+# Styles that are DRAWN rather than selected. They never change which font a
+# run uses, which mirrors how PDFs actually carry underline and is why the
+# parser cannot see it from font data alone (registry 9d).
+DRAWN = {"u", "k", "r", "w"}
 
-    Underline is orthogonal: it is DRAWN, not selected, so it never changes
-    which font a run uses. That mirrors how PDFs actually carry underline,
-    which is why the parser cannot see it from font data alone (registry 9d).
-    """
-    s = set(styles) - {"u"}
+
+def font_for(styles):
+    """Style set -> font resource key."""
+    s = set(styles) - DRAWN
     if s == {"b", "i"}:
         return "F4"
     if s == {"b"}:
@@ -294,7 +296,22 @@ def font_for(styles):
 
 
 def styled_row_ops(x_in, y, runs):
-    """-> (text operators, underline rectangles) for one laid-out line."""
+    """-> (text operators, drawn rectangles) for one laid-out line.
+
+    Four rule shapes, one real and three decoys. Each decoy is rejected by a
+    DIFFERENT filter in collectUnderlineMarks/markUnderlinesItem, so a
+    loosened threshold shows up as a stray underscore in the emitted Fountain:
+
+      u  real underline   0.6pt tall, run-width, 2.0pt under the baseline
+      k  strikethrough    same bar at baseline + 3.5 (mid x-height) -> the
+                          y-window rejects anything above the baseline
+      r  table border     same bar at baseline - 6.0 -> below the window, and
+                          6pt ABOVE the next row's baseline, so it is out of
+                          that row's window too
+      w  page-wide rule   0.5in margins (540pt = 88% of the page) at the real
+                          underline offset -> only the furniture-width filter
+                          saves it, over real text with 100% overlap
+    """
     ops, rects = [], []
     x = x_in * PT
     for run in runs:
@@ -302,12 +319,18 @@ def styled_row_ops(x_in, y, runs):
         if text:
             ops += [f"/{font_for(styles)} 12 Tf",
                     f"1 0 0 1 {x:.2f} {y:.2f} Tm", f"({esc(text)}) Tj"]
+            w = len(text) * CHAR_W
+            # A filled rectangle, not a stroked line. Real generators stroke;
+            # filling here proves the detector accepts both paint ops.
             if "u" in styles:
-                # A filled rectangle, not a stroked line: the rich-formatting
-                # spec's detector keys on a flat bbox (<= 2.5pt tall, >= 4pt
-                # wide) sitting in a band just under the baseline.
-                rects.append(f"0 g {x:.2f} {y - 2.0:.2f} "
-                             f"{len(text) * CHAR_W:.2f} 0.6 re f")
+                rects.append(f"0 g {x:.2f} {y - 2.0:.2f} {w:.2f} 0.6 re f")
+            if "k" in styles:
+                rects.append(f"0 g {x:.2f} {y + 3.5:.2f} {w:.2f} 0.6 re f")
+            if "r" in styles:
+                rects.append(f"0 g {x:.2f} {y - 6.0:.2f} {w:.2f} 0.6 re f")
+            if "w" in styles:
+                rects.append(f"0 g {0.5 * PT:.2f} {y - 2.0:.2f} "
+                             f"{PAGE_W - 1.0 * PT:.2f} 0.6 re f")
         x += len(text) * CHAR_W
     return ops, rects
 
