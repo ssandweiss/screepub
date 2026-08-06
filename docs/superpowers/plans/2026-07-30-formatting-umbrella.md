@@ -648,14 +648,27 @@ pass below is the first time a font shift will be looked at on hardware.
 
 One KFX build + one Apple Books handoff of a real script carrying: a MULTI-paragraph speech and a long action block near page seams, the set's longest speech, a CUT TO: near a seam, a dual-dialogue exchange, an underlined phrase (post-B), and a font-shifted insert (post-C). Verdicts to land, each in its registry slot:
 
-- [ ] #17 printSplitMinimums: 2+2 holds at seams; OFF gives 1+1. Use a multi-paragraph speech or action, never a short speech: #8b's always-on keep moves a short speech whole and would validate the wrong rule.
-- [ ] #8c keepSpeechesWhole ON: kept speech moves whole; gap size noted; the oversize speech breaks bare without blank pages.
-- [ ] #16 transitions: no CUT TO: opens a page.
-- [ ] #10b tall dual exchange behavior.
-- [ ] Apple Books: ragged-right holds with the user's Justify setting ON (item 5's meta).
-- [ ] Post-B/C: underline renders on device; font shifts render and degrade sanely.
+- [x] #17 printSplitMinimums: landed 2026-08-04 (`7709abe`), with #16 and #10b.
+- [x] #16 transitions: no CUT TO: opens a page. Landed 2026-08-04.
+- [x] #10b tall dual exchange behavior. Landed 2026-08-04.
+- [x] #8c keepSpeechesWhole: mechanism landed 2026-08-04 (`49ee23c`); the TASTE
+      judgment its verdict said was still missing landed 2026-08-06. Both arms
+      went on device as one A/B, differing in exactly one CSS rule and titled
+      distinctly so they were tellable apart. OFF preferred on reading
+      quality, no defect in ON. The white-space cost is still unquantified.
+- [x] Post-B/C: underline renders and its three decoys stay clean (#9d);
+      font shifts render, and the family survives the publisher-font toggle in
+      BOTH states, which is better than the slot expected (#18). 2026-08-06.
+- [ ] **Apple Books: ragged-right holds with the user's Justify setting ON**
+      (#6b's `ibooks:specified-fonts` meta). Still open, and now the only
+      thing left in Phase D. #18's family arm is also untested there, so one
+      Books handoff would close both. The EPUB arm is already built:
+      `~/Desktop/screepub-device-pass/A-defaults.epub`.
 
 After the pass: registry verdict edits, app bundle rebuild if anything changed, and the umbrella is done.
+
+**Status 2026-08-06:** every Kindle-side verdict is closed. Phase D, and with
+it this umbrella, is done except the single Apple Books item above.
 
 ---
 

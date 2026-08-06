@@ -571,6 +571,17 @@ and the suite will say so if you forget.
   much page height went unused, so "HOLDS" here means the mechanism works
   and looks acceptable, not that the trade was judged and preferred. The
   default stays OFF for that reason. Apple Books remains untested.
+  **The trade was judged on 2026-08-06, and OFF won.** The gap the paragraph
+  above names is now closed. Both arms went on the device as one A/B, the two
+  builds differing in exactly one CSS rule (`.dialogue-block` gaining
+  `page-break-inside: avoid`, `break-inside: avoid` and the column spelling),
+  and titled distinctly so they could be told apart in the library. Sam read
+  both and preferred the OFF arm on overall reading quality. No defect in the
+  ON arm: it holds, as the 08-04 pass found, and this is taste rather than a
+  failure. Still not a MEASUREMENT: nobody counted unused page height, so the
+  cost remains unquantified and the preference is a reader's judgment on one
+  device at one font size. That is enough to keep the default where it is,
+  and not enough to call the option a mistake.
   A first pass at this was invalidated and redone: the build carried the
   split-speech defect (fixed in 0.5.1), which put hard breaks mid-sentence
   and would have been read as a keep failure. Rebuild the fixture against
@@ -666,6 +677,13 @@ and the suite will say so if you forget.
 - **Decoys (torture fixture, page 6):** a strikethrough, a table-cell border
   below the text band, and a page-wide rule sit beside the real underline,
   each rejected by a different filter, each asserted silent.
+- **Device verdict 2026-08-06: RENDERS, and the decoys stay clean.**
+  Sideloaded KFX on the Kindle, the torture fixture's sheet 6. The underlined
+  word rendered underlined; the struck phrase, the table border and the
+  page-wide rule all rendered with no underline, which is the half that would
+  have shown a loosened threshold. Only detection was at issue here, since
+  `span.underline` already shipped, so this closes the entry rather than
+  opening a rendering question. Apple Books untested.
 - **Code:** `src/parser/extract.ts` (`stampFontStyles`, `stampUnderlines`,
   `collectUnderlineMarks`, `markUnderlinesItem`, `joinLine`),
   `src/epub/html.ts` + `src/mobi/html.ts` (`inlineEmphasis`/`inline`).
@@ -997,9 +1015,24 @@ and the suite will say so if you forget.
   screenplay furniture, and none of these five happen to carry one in the
   body. Worth re-measuring when a script that does joins the set.
 - **App option:** "Keep the PDF's font shifts" (reader rail, Text group).
-- **Device verdict: pending —** next KFX pass. Does a `+2` block render
-  larger without breaking the keep around it, and does a family class survive
-  the Publisher Font toggle (#6b's meta should make it hold in Apple Books)?
+- **Device verdict 2026-08-06: RENDERS, and the family survives the
+  publisher-font toggle in BOTH states.** Sideloaded KFX on the Kindle, the
+  torture fixture's sheet 6, read against merged main. All five shifted
+  blocks rendered distinctly from the body: the Helvetica chyron and the
+  text-message dialogue line in a visibly different face, and the three size
+  steps visibly smaller, larger and largest. No keep broke around the `+2`
+  block, which was the specific risk this slot named.
+  The publisher-font result is the surprise, and the better one. The slot
+  expected the family to survive only with the reader's publisher-font option
+  ON; it held with the option OFF too. KFX metadata carries
+  `override_kindle_font=False`, which is the likely reason. Treat that as the
+  mechanism, not as proven causation: one device, one firmware.
+  **What this verdict does NOT cover:** Apple Books is untested, so #6b's
+  `ibooks:specified-fonts` meta is still unexercised for this entry. And the
+  fixture remains the only thing that exercises #18 at all, because no real
+  script in the local set carries a body font shift. A generator that sets
+  its inserts differently could still bucket in a way this fixture cannot
+  predict.
 - **Code:** `src/parser/extract.ts` (`familyBucket`, `fontRuns`,
   `stampLineFmt`), `src/parser/group.ts`, `src/parser/classify.ts`,
   `src/fountain/serialize.ts` (`fmtNote`), `src/fountain/notes.ts`,
