@@ -928,8 +928,9 @@ and the suite will say so if you forget.
   beside the real engine output — so the window that could show you a
   change was the one that could not make four of them
   (`keepSceneHeadingWithScene`, `includeTitlePage`, `rejoinSplitDialogue`,
-  `contdMode`). The rail now owns all 16 (15 at the move, plus #8c's
-  `keepSpeechesWhole`), grouped Page / Dialogue / Text / Content / From
+  `contdMode`). The rail now owns all 18 (15 at the move, plus #8c's
+  `keepSpeechesWhole`, #17's `printSplitMinimums` and #18's
+  `preserveFontShifts`), grouped Page / Dialogue / Text / Content / From
   the PDF. Settings keeps General (library, updates) and Devices (default
   preset, KFX toolchain, tolino/reMarkable notes). **Adding a knob means
   adding one control to `ReaderRail.swift`** — there is deliberately no

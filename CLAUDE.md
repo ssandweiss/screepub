@@ -26,7 +26,11 @@ epubcheck <out.epub>        # validate output (brew-installed)
 - `src/fountain/serialize.ts` — elements → Fountain. The `.fountain` is a
   durable artifact and the app's cache boundary. Beside it,
   `src/fountain/slug.ts` owns the stage-2 `PRIMARY_SLUG`/`isMiniSlug`
-  discriminator both renderers import (registry #5b).
+  discriminator both renderers import (registry #5b), and
+  `src/fountain/notes.ts` is the second module of that kind: the one copy
+  of `[[...]]` note stripping and `[[fmt: ...]]` parsing, imported by BOTH
+  renderers (registry #18). Notes are invisible by spec, so anything that
+  renders token text has to strip them; two regexes would drift.
 - `src/epub/` + `src/mobi/` — fountain-js tokens → EPUB3 (jszip) / MOBI 6
   (hand-built PalmDB container for dependency-free USB sideload).
 - `src/options.ts` — FormatOptions, the single knob surface: CLI

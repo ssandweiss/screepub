@@ -227,7 +227,7 @@ bun src/cli.ts <input.pdf | input.fountain> [options]
 ### Fountain input — partial support
 
 PDF is the primary path. `.fountain` input is **partially supported**: the
-render pipeline runs in full and 14 of the 16 formatting options apply
+render pipeline runs in full and 16 of the 18 formatting options apply
 normally, but two do not, because they are consumed in
 `src/fountain/serialize.ts` — upstream of the `.fountain` itself, where the
 pipeline's durable artifact begins. One piece of Fountain syntax also
@@ -279,7 +279,8 @@ src/
   parser/     PDF → classified elements (geometry-driven: elements are
               classified by where they sit on the page, never by regex)
   fountain/   elements → Fountain (title block, CONT'D normalization,
-              dual-dialogue-safe, styled-text pass-through)
+              dual-dialogue-safe, styled-text pass-through, font-shift
+              notes; slug.ts and notes.ts are shared by both renderers)
   epub/       fountain-js tokens → EPUB3 (jszip, options-driven CSS)
   mobi/       tokens → MOBI 6 (hand-built PalmDB container)
   options.ts  FormatOptions — the single knob surface
