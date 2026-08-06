@@ -1,0 +1,137 @@
+<!-- @dsCard group="Components" -->
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .smash {
+    font-family: var(--font-structure);
+    font-weight: 700;
+    font-size: var(--text-ui);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    text-align: right;
+    margin: 0 0 1.4rem;
+  }
+  .fault {
+    font-family: var(--font-structure);
+    font-weight: 700;
+    font-size: var(--text-body);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--alarm);
+    margin: 0 0 0.9rem;
+  }
+  .fault-body {
+    font-family: var(--font-structure);
+    font-size: var(--text-ui);
+    line-height: 1.6;
+    color: var(--ink);
+    margin: 0 0 var(--space-6);
+    max-width: 52ch;
+  }
+  .ways { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+  .way {
+    font-family: var(--font-structure);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: var(--radius);
+    border: none;
+    cursor: pointer;
+    background: none;
+  }
+  .way-first {
+    font-size: var(--text-label);
+    background: var(--brass);
+    color: var(--ink-on-brass);
+    padding: 6px 26px;
+  }
+  .way-first:hover:not(:disabled) { background: var(--brass-highlight); }
+  .way-second {
+    font-size: var(--text-label);
+    color: var(--ink);
+    box-shadow: inset 0 0 0 1.2px var(--ink);
+    padding: 6px 26px;
+  }
+  .way-second:hover:not(:disabled) { background: var(--hole); }
+  .way-third { font-size: var(--text-note); color: var(--ink-muted); padding: 0; letter-spacing: 0.06em; }
+  .way-third:hover { color: var(--ink); }
+  .way:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  /* Previews are self-contained: DesignSync carries brand/** but each file
+     is opened on its own, so this cannot borrow .devices from
+     device-table.html. */
+  .codes { width: 100%; border-collapse: collapse; font-size: var(--text-code); margin-top: var(--space-7); }
+  .codes th {
+    font-family: var(--font-structure);
+    font-weight: 700;
+    font-size: var(--text-label);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: left;
+    color: var(--ink-muted);
+    padding: 0 var(--space-4) 0.7rem 0;
+    border-bottom: 1px solid var(--hole);
+  }
+  .codes td {
+    padding: 0.85rem var(--space-4) 0.85rem 0;
+    border-bottom: 1px solid var(--hole);
+    color: var(--ink-soft);
+    vertical-align: top;
+  }
+  .codes .code-name { color: var(--ink); font-family: var(--font-structure); font-size: var(--text-ui); }
+  .scroll { overflow-x: auto; }
+</style>
+<div class="page">
+<div class="sheet">
+  <p class="smash">Smash cut to:</p>
+  <h2 class="fault">Int. scanned pdf, no text - day</h2>
+  <p class="fault-body">
+    This looks like a scanned or image-only PDF. Run OCR on it first, then
+    drop it again.
+  </p>
+  <div class="ways">
+    <button class="way way-first">Convert anyway</button>
+    <button class="way way-second">Back to one</button>
+    <button class="way way-third">Report a bug</button>
+  </div>
+
+  <div class="scroll"><table class="codes">
+    <thead>
+      <tr><th>Code</th><th>Reads as</th><th>First way out</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="code-name">scanned</td>
+        <td>Scanned PDF, no text</td>
+        <td>Run OCR, then drop it again</td>
+      </tr>
+      <tr>
+        <td class="code-name">not-screenplay</td>
+        <td>Not a screenplay</td>
+        <td>Convert anyway, which overrides the guard</td>
+      </tr>
+      <tr>
+        <td class="code-name">password</td>
+        <td>Locked PDF</td>
+        <td>Remove the password and retry</td>
+      </tr>
+      <tr>
+        <td class="code-name">engine-missing</td>
+        <td>Missing engine</td>
+        <td>Report a bug: the build is broken, not the file</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <p class="caption">
+    The heading names the cause, not the failure. "Scanned PDF, no text" tells
+    you what to do next; "Something went wrong" does not. Alarm is used here
+    and on untested device rows, nowhere else.
+  </p>
+  <p class="caption">
+    Three ways out, always. Convert anyway appears only for
+    <code class="code">not-screenplay</code>, because that is the one guard a
+    reader can meaningfully overrule; the other codes describe a file the
+    engine genuinely cannot read.
+  </p>
+</div>
+</div>

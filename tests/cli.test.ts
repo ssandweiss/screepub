@@ -201,3 +201,42 @@ describe('conversion error mapping', () => {
       .toBe('unreadable');
   });
 });
+
+// --json's contract is that stdout is EXACTLY one parseable object: the app
+// decodes it with JSONDecoder and a stray line would break every conversion.
+// Progress therefore rides on stderr, and this is the test that keeps it
+// there.
+describe('cli --progress', () => {
+  test('keeps stdout a single JSON object while reporting on stderr', async () => {
+    const { stdout, stderr, exitCode } = await runCli([
+      `${FIXTURES}screenplay.pdf`, '-o', `${SCRATCH}/prog.epub`, '--no-fountain',
+      '--json', '--progress',
+    ]);
+    expect(exitCode).toBe(0);
+
+    // The whole of stdout, parsed as one value. Not "the first line".
+    const result = JSON.parse(stdout);
+    expect(result.ok).toBe(true);
+
+    const ticks = stderr.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l).progress);
+    expect(ticks.length).toBeGreaterThan(0);
+    for (const t of ticks) {
+      expect(['parse', 'render']).toContain(t.stage);
+      expect(t.percent).toBeGreaterThanOrEqual(0);
+      expect(t.percent).toBeLessThanOrEqual(100);
+    }
+
+    // A bar that goes backwards is worse than no bar.
+    const percents = ticks.map((t: { percent: number }) => t.percent);
+    expect([...percents].sort((a, b) => a - b)).toEqual(percents);
+    expect(percents.at(-1)).toBe(100);
+  }, 60000);
+
+  test('is opt-in: no --progress means no stderr', async () => {
+    const { stderr, exitCode } = await runCli([
+      `${FIXTURES}screenplay.pdf`, '-o', `${SCRATCH}/noprog.epub`, '--no-fountain', '--json',
+    ]);
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+  }, 60000);
+});

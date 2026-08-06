@@ -44,7 +44,22 @@ export interface ConvertOptions {
   mobi?: boolean;
   /** formatting knobs (partial; merged over defaults) */
   format?: Partial<FormatOptions>;
+  /**
+   * Called as the conversion advances, so a caller can show determinate
+   * progress instead of a spinner. `fraction` is 0..1 across the whole
+   * pipeline, not just the current stage.
+   */
+  onProgress?: (stage: ConvertStage, fraction: number) => void;
 }
+
+/** The stages a caller can be told about, in the order they occur. */
+export type ConvertStage = 'parse' | 'render';
+
+/**
+ * Page extraction dominates wall-clock on any real script, so it owns most
+ * of the bar. Rendering is comparatively fixed-cost and gets the tail.
+ */
+const PARSE_SHARE = 0.85;
 
 export interface ConvertResult {
   epub: Uint8Array;
@@ -94,7 +109,9 @@ export async function convertPdf(
 ): Promise<ConvertResult> {
   const warnings: string[] = [];
 
-  const { lines, pageCount } = await extractDocument(pdfBytes);
+  const { lines, pageCount } = await extractDocument(pdfBytes, undefined, (page, pages) =>
+    opts.onProgress?.('parse', (page / pages) * PARSE_SHARE),
+  );
   if (lines.length < pageCount * MIN_LINES_PER_PAGE) {
     throw new ScannedPdfError(pageCount, lines.length);
   }
@@ -112,7 +129,9 @@ export async function convertPdf(
   const format = resolveFormatOptions(opts.format);
   const meta = resolveMeta(extractTitleMeta(screenplay.elements), opts);
   const fountainText = toFountain(screenplay, { title: meta.title, author: meta.author }, format);
+  opts.onProgress?.('render', PARSE_SHARE);
   const { epub, mobi, previewHtml } = await renderBooks(fountainText, meta, opts.mobi ?? false, format);
+  opts.onProgress?.('render', 1);
 
   return { epub, mobi, previewHtml, fountainText, screenplay, meta, warnings };
 }

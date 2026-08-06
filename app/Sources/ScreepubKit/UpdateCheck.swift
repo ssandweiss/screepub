@@ -1,24 +1,102 @@
 import Foundation
 
-/// A release newer than the one running.
-public struct AvailableUpdate: Equatable, Sendable {
+/// One version's notes, exactly as published.
+public struct ReleaseNote: Equatable, Sendable {
     public let version: String
-    public let downloadURL: URL
-    public let releaseNotesURL: URL
+    public let markdown: String
 
-    public init(version: String, downloadURL: URL, releaseNotesURL: URL) {
+    public init(version: String, markdown: String) {
         self.version = version
-        self.downloadURL = downloadURL
-        self.releaseNotesURL = releaseNotesURL
+        self.markdown = markdown
     }
 }
 
-public enum UpdateCheckError: Error, Equatable {
+/// A release as `select` sees it. GitHub's JSON shape stays private in
+/// `GitHubRelease`; this is the public seam so selection can be tested
+/// without a network and without exposing the wire format.
+public struct ReleaseCandidate: Equatable, Sendable {
+    public let tag: String
+    public let notesURL: URL
+    public let dmgURL: URL?
+    public let body: String?
+    public let isDraft: Bool
+    public let isPrerelease: Bool
+
+    public init(
+        tag: String,
+        notesURL: URL,
+        dmgURL: URL?,
+        body: String?,
+        isDraft: Bool = false,
+        isPrerelease: Bool = false
+    ) {
+        self.tag = tag
+        self.notesURL = notesURL
+        self.dmgURL = dmgURL
+        self.body = body
+        self.isDraft = isDraft
+        self.isPrerelease = isPrerelease
+    }
+}
+
+/// A release newer than the one running.
+///
+/// `Identifiable` so the app can present its release-notes sheet with
+/// `.sheet(item:)` over the update itself rather than a separate boolean
+/// flag: the sheet then cannot exist without the content it needs, which a
+/// flag-plus-optional-lookup can't guarantee once the two fall out of sync.
+public struct AvailableUpdate: Equatable, Identifiable, Sendable {
+    public let version: String
+    public let downloadURL: URL
+    public let releaseNotesURL: URL
+    /// Every version newer than the installed one, newest first.
+    public let notes: [ReleaseNote]
+
+    /// The version is already the natural key: two `AvailableUpdate`
+    /// values for the same tag are the same update.
+    public var id: String { version }
+
+    public init(
+        version: String,
+        downloadURL: URL,
+        releaseNotesURL: URL,
+        notes: [ReleaseNote] = []
+    ) {
+        self.version = version
+        self.downloadURL = downloadURL
+        self.releaseNotesURL = releaseNotesURL
+        self.notes = notes
+    }
+}
+
+public enum UpdateCheckError: Error, Equatable, LocalizedError {
     case rateLimited
     case network(String)
-    case malformedResponse
+    /// Carries the failing key and array index. Those live on the decoding
+    /// error's own Context, not in its generic localizedDescription. One
+    /// malformed element fails the whole batch of up to thirty releases,
+    /// so that detail is the entire diagnosis.
+    case malformedResponse(String)
     /// The release exists but carries no .dmg — a half-uploaded release, say.
     case noDownloadableAsset
+
+    /// Read aloud by the alert in `manualUpdateCheck()`. Without this,
+    /// `localizedDescription` is Foundation's "The operation couldn't be
+    /// completed. (UpdateCheckError error N.)" and `network`'s payload never
+    /// reaches anyone. These say what happened; the alert supplies the
+    /// apology, so these must not add a second one.
+    public var errorDescription: String? {
+        switch self {
+        case .rateLimited:
+            return "GitHub limits unauthenticated checks to 60 an hour per network."
+        case .network(let detail):
+            return "\(detail) Check your connection and try again."
+        case .malformedResponse(let detail):
+            return "GitHub's response could not be read: \(detail)"
+        case .noDownloadableAsset:
+            return "The newest release has no .dmg attached yet."
+        }
+    }
 }
 
 /// Asks GitHub whether a newer release exists. Deliberately not a framework:
@@ -125,6 +203,94 @@ public enum UpdateCheck {
         return (core.split(separator: ".").map { Int($0) ?? 0 }, pre)
     }
 
+    // MARK: - Choosing
+
+    /// Decodes GitHub's releases array into the public candidate shape.
+    /// Separate from `select` so both halves of the check are testable and
+    /// only the URLSession call in `latest` is not.
+    public static func candidates(from data: Data) throws -> [ReleaseCandidate] {
+        let releases: [GitHubRelease]
+        do {
+            releases = try JSONDecoder().decode([GitHubRelease].self, from: data)
+        } catch let error as DecodingError {
+            // `describe` reads the index and key from Context; the plain
+            // localizedDescription below drops both.
+            throw UpdateCheckError.malformedResponse(Self.describe(error))
+        } catch {
+            throw UpdateCheckError.malformedResponse(error.localizedDescription)
+        }
+        return releases.map { release in
+            ReleaseCandidate(
+                tag: release.tagName,
+                notesURL: release.htmlURL,
+                dmgURL: release.assets
+                    .first(where: { $0.name.hasSuffix(".dmg") })?.browserDownloadURL,
+                body: release.body,
+                isDraft: release.draft,
+                isPrerelease: release.prerelease
+            )
+        }
+    }
+
+    /// `DecodingError.localizedDescription` is a generic Foundation
+    /// sentence: it drops the index and key, which are the entire
+    /// diagnosis when one bad element fails a batch of thirty. Those live
+    /// on the error's Context, so read them directly.
+    private static func describe(_ error: DecodingError) -> String {
+        let context: DecodingError.Context
+        let what: String
+        switch error {
+        case .keyNotFound(let key, let ctx):
+            context = ctx; what = "missing key \"\(key.stringValue)\""
+        case .typeMismatch(let type, let ctx):
+            context = ctx; what = "wrong type, expected \(type)"
+        case .valueNotFound(let type, let ctx):
+            context = ctx; what = "no value for \(type)"
+        case .dataCorrupted(let ctx):
+            context = ctx; what = "unreadable data"
+        @unknown default:
+            return "unreadable data"
+        }
+        let path = context.codingPath
+            .map { $0.intValue.map { i in "[\(i)]" } ?? $0.stringValue }
+            .joined(separator: ".")
+        return path.isEmpty ? what : "\(what) at \(path)"
+    }
+
+    /// Picks the update to offer and the notes to show with it. Pure: no
+    /// network, no clock. Drafts and prereleases are GitHub's own flags on
+    /// the release, which is a different thing from a semver pre-release
+    /// tag inside the version string; `isNewer` handles the latter.
+    public static func select(
+        releases: [ReleaseCandidate],
+        currentVersion: String
+    ) throws -> AvailableUpdate? {
+        let newer = releases
+            .filter { !$0.isDraft && !$0.isPrerelease }
+            .filter { isNewer($0.tag, than: currentVersion) }
+            // Sorted with the same comparison used to filter, rather than
+            // trusting the order GitHub returned.
+            .sorted { isNewer($0.tag, than: $1.tag) }
+
+        guard let newest = newer.first else { return nil }
+        guard let dmg = newest.dmgURL else {
+            throw UpdateCheckError.noDownloadableAsset
+        }
+
+        return AvailableUpdate(
+            version: normalized(newest.tag),
+            downloadURL: dmg,
+            releaseNotesURL: newest.notesURL,
+            notes: newer.map {
+                ReleaseNote(
+                    version: normalized($0.tag),
+                    markdown: $0.body?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                )
+            }
+        )
+    }
+
     // MARK: - Asking GitHub
 
     /// Returns the newer release, or nil when already current.
@@ -133,7 +299,11 @@ public enum UpdateCheck {
         repository: String = defaultRepository,
         session: URLSession = .shared
     ) async throws -> AvailableUpdate? {
-        let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
+        // The list, not /latest: the sheet shows every version since the
+        // installed one. 30 is a bound rather than a page size — a reader
+        // more than 30 releases behind sees the newest 30, which beats
+        // paginating for a case that will not happen.
+        let url = URL(string: "https://api.github.com/repos/\(repository)/releases?per_page=30")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -155,21 +325,13 @@ public enum UpdateCheck {
                 throw UpdateCheckError.rateLimited
             }
             guard (200..<300).contains(http.statusCode) else {
-                throw UpdateCheckError.network("HTTP \(http.statusCode)")
+                throw UpdateCheckError.network("GitHub returned HTTP \(http.statusCode).")
             }
         }
 
-        guard let release = try? JSONDecoder().decode(GitHubRelease.self, from: data) else {
-            throw UpdateCheckError.malformedResponse
-        }
-        guard isNewer(release.tagName, than: currentVersion) else { return nil }
-        guard let dmg = release.assets.first(where: { $0.name.hasSuffix(".dmg") }) else {
-            throw UpdateCheckError.noDownloadableAsset
-        }
-        return AvailableUpdate(
-            version: normalized(release.tagName),
-            downloadURL: dmg.browserDownloadURL,
-            releaseNotesURL: release.htmlURL
+        return try select(
+            releases: try candidates(from: data),
+            currentVersion: currentVersion
         )
     }
 
@@ -177,6 +339,9 @@ public enum UpdateCheck {
         let tagName: String
         let htmlURL: URL
         let assets: [Asset]
+        let body: String?
+        let draft: Bool
+        let prerelease: Bool
 
         struct Asset: Decodable {
             let name: String
@@ -191,7 +356,7 @@ public enum UpdateCheck {
         enum CodingKeys: String, CodingKey {
             case tagName = "tag_name"
             case htmlURL = "html_url"
-            case assets
+            case assets, body, draft, prerelease
         }
     }
 }

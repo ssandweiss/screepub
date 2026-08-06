@@ -2,6 +2,7 @@ import '../src/parser/pdfjs-shims';
 import { describe, test, expect } from 'bun:test';
 import {
   collectUnderlineMarks,
+  extractDocument,
   familyBucket,
   groupItemsIntoLines,
   markUnderlinesItem,
@@ -640,5 +641,35 @@ describe('font runs on extracted lines', () => {
     expect(groupItemsIntoLines([flipped], 612, 1)[0].fonts).toEqual([
       { bucket: 'mono', size: 12, chars: 7 },
     ]);
+  });
+});
+
+describe('extractDocument progress', () => {
+  // The app showed an indeterminate spinner during conversion because the
+  // engine reported nothing until it was finished. Page extraction is the
+  // long stage and already counts pages, so it is where a real fraction
+  // comes from.
+  const bytes = async () =>
+    new Uint8Array(await Bun.file('tests/fixtures/screenplay.pdf').arrayBuffer());
+
+  test('reports one progress tick per page, with the total', async () => {
+    const ticks: { page: number; pages: number }[] = [];
+    // getDocument transfers the buffer, so each call needs its own bytes.
+    const { pageCount } = await extractDocument(await bytes(), undefined, (page, pages) =>
+      ticks.push({ page, pages }),
+    );
+
+    expect(pageCount).toBe(5);
+    expect(ticks).toHaveLength(5);
+    expect(ticks.map((t) => t.page)).toEqual([1, 2, 3, 4, 5]);
+    // Every tick carries the same total so a fraction is computable from
+    // the first one, without waiting to learn the denominator.
+    expect(ticks.every((t) => t.pages === 5)).toBe(true);
+  });
+
+  test('is optional: extraction works with no callback', async () => {
+    const { pageCount, lines } = await extractDocument(await bytes());
+    expect(pageCount).toBe(5);
+    expect(lines.length).toBeGreaterThan(0);
   });
 });

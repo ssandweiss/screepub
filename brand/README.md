@@ -16,21 +16,33 @@ this file is the operating manual.
 
 ## The pinning rule
 
-Five tokens (`paper`, `ink`, `brass`, `alarm`, `hole`) are shared with the Mac
-app. `app/Sources/ScreepubApp/Theme.swift` is the source and `tokens.json`
-mirrors it. `tests/brand-tokens.test.ts` parses the Swift and fails if they
-disagree, the same arrangement `format-defaults.json` has with
-`options.test.ts`.
+Seven tokens (`paper`, `ink`, `ink-muted`, `ink-on-brass`, `brass`, `alarm`,
+`hole`) are shared with the Mac app. `app/Sources/ScreepubApp/Theme.swift` is
+the source and `tokens.json` mirrors it. `tests/brand-tokens.test.ts` parses
+the Swift and fails if they disagree, the same arrangement
+`format-defaults.json` has with `options.test.ts`.
 
 **If that test fails, change `tokens.json`, not the app.** Change the app only
 when you mean to change the app, and then update `tokens.json` to match.
 
-The other tokens are web-only. `Theme.swift` has exactly two text weights and
-the second, `inkFaint`, is `ink` at 55% alpha. That blends to `#7F7C74` on
-paper, which measures 3.73:1 and fails WCAG AA for normal text. It is fine for
-a one-line caption in a native window and wrong for a web page, so the web has
-its own `ink-muted` at `#6D6960` (4.90:1) and an `ink-soft` for prose that the
-app never needed.
+Token names are kebab-case, Swift properties are camelCase. Where the two
+differ, the token carries an explicit `swift` field (`ink-on-brass` →
+`inkOnBrass`) rather than the test guessing at a conversion.
+
+Two of those seven exist because a color that is right in one place is wrong
+in another:
+
+- `ink-on-brass` is the label on a brass button, and it is deliberately the
+  same in both modes. `ink` flips to cream in dark mode while `brass` holds,
+  which put the site's primary call to action at 1.67:1. Pinned, it is 7.98:1
+  either way. A test also reads the components and fails if anything sets
+  `var(--ink)` on a `var(--brass)` ground again.
+- `ink-muted` is secondary TEXT. `inkFaint` is `ink` at 55% alpha, which
+  blends to `#7F7C74` on paper: 3.73:1, failing AA. The web split this off
+  first and the app has now adopted it, so `inkFaint` is for hairlines,
+  strokes and fills only. If a reader has to read it, it is `ink-muted`.
+
+`ink-soft`, for long prose, remains web-only: the app has no running text.
 
 ## Adding a color
 

@@ -13,7 +13,15 @@ const pairs: [label: string, fgToken: string, fg: string, bg: string, floor: num
   ['ink on paper',              'ink',       colors.ink.light,         colors.paper.light, 7],
   ['ink-soft on paper',         'ink-soft',  colors['ink-soft'].light, colors.paper.light,  7],
   ['ink-muted on paper',        'ink-muted', colors['ink-muted'].light, colors.paper.light, 4.5],
-  ['ink on brass',              'ink',       colors.ink.light,         colors.brass.light,  7],
+  // Both modes, because brass does not change and neither may its label.
+  // `ink` itself is deliberately NOT paired against brass: it flips to cream
+  // in dark mode and lands at 1.67:1, which is the bug ink-on-brass exists
+  // to prevent.
+  ['ink-on-brass on brass',       'ink-on-brass', colors['ink-on-brass'].light, colors.brass.light, 7],
+  ['ink-on-brass on brass, dark', 'ink-on-brass', colors['ink-on-brass'].dark,  colors.brass.dark,  7],
+  // The brad button's hover ground. Same label on a lighter stop of the same
+  // ramp, so it must clear the floor too rather than being assumed safe.
+  ['ink-on-brass on brass-highlight', 'ink-on-brass', colors['ink-on-brass'].light, colors['brass-highlight'].light, 7],
   ['alarm on paper',            'alarm',     colors.alarm.light,       colors.paper.light,  4.5],
   ['ink on paper, dark',        'ink',       colors.ink.dark,          colors.paper.dark,   7],
   ['ink-soft on paper, dark',   'ink-soft',  colors['ink-soft'].dark,  colors.paper.dark,   7],
@@ -45,16 +53,20 @@ describe('brand tokens', () => {
       ([, v]: [string, any]) => v.from === 'Theme.swift',
     );
 
-    expect(pinned.length).toBe(5);
+    expect(pinned.length).toBe(7);
 
     for (const [name, value] of pinned as [string, any][]) {
-      expect(theme[name], `Theme.swift has no color named ${name}`).toBeDefined();
+      // Token names are kebab-case for CSS; Swift properties are camelCase.
+      // Where they differ the token carries an explicit `swift` field rather
+      // than this test guessing at a conversion.
+      const swiftName = value.swift ?? name;
+      expect(theme[swiftName], `Theme.swift has no color named ${swiftName}`).toBeDefined();
       expect(
-        cssValue(theme[name].light),
+        cssValue(theme[swiftName].light),
         `${name} light drifted from Theme.swift; Theme.swift is the source, so fix brand/tokens.json to match`,
       ).toBe(value.light);
       expect(
-        cssValue(theme[name].dark),
+        cssValue(theme[swiftName].dark),
         `${name} dark drifted from Theme.swift; Theme.swift is the source, so fix brand/tokens.json to match`,
       ).toBe(value.dark);
     }
@@ -128,6 +140,63 @@ describe('brand tokens', () => {
       const ratio = contrast(fromHex(fg), fromHex(bg));
       expect(ratio, `${label} is ${ratio.toFixed(2)}:1, needs ${floor}:1`).toBeGreaterThanOrEqual(floor);
     }
+  });
+
+  test('nothing sets a mode-flipping ink on a fixed brass ground', async () => {
+    // The pair table above proves the TOKEN values are sound. It cannot see
+    // a component that pairs them wrongly, which is how the brass button
+    // shipped at 1.67:1 in dark mode: --brass holds across modes, --ink does
+    // not, and buttons.html put one on the other. This reads the components
+    // and fails on that specific combination.
+    const dir = new URL('../brand/components/', import.meta.url);
+    const files = [...new Bun.Glob('*.html').scanSync({ cwd: Bun.fileURLToPath(dir) })];
+    expect(files.length).toBeGreaterThan(0);
+
+    for (const file of files) {
+      const css = await Bun.file(new URL(file, dir)).text();
+      // Rules that paint a brass background, captured with their body.
+      for (const [rule] of css.matchAll(/\{[^{}]*background:\s*var\(--brass\)[^{}]*\}/g)) {
+        expect(
+          /color:\s*var\(--ink\)/.test(rule),
+          `${file} sets color:var(--ink) on a var(--brass) background. ` +
+            `--ink flips to cream in dark mode and lands at 1.67:1 there. ` +
+            `Use --ink-on-brass, which is fixed in both modes.`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  test('interactive components declare hover and keyboard focus', async () => {
+    // A control with no hover response reads as text, and a control with no
+    // focus-visible rule is only reachable by keyboard if the browser's own
+    // ring happens to show over the component's ground. Both were missing
+    // from buttons.html while :active and :disabled were present, so absence
+    // here is a live gap rather than a hypothetical one.
+    const css = await Bun.file(
+      new URL('../brand/components/buttons.html', import.meta.url),
+    ).text();
+
+    expect(/:hover/.test(css), 'buttons.html declares no :hover state').toBe(true);
+    expect(
+      /:focus-visible/.test(css),
+      'buttons.html declares no :focus-visible state',
+    ).toBe(true);
+
+    // Both variants, not just whichever one happened to get styled.
+    for (const variant of ['btn-brad', 'btn-outline']) {
+      expect(
+        new RegExp(`\\.${variant}:hover`).test(css),
+        `.${variant} has no :hover state`,
+      ).toBe(true);
+    }
+
+    // .btn sets text-decoration and display specifically so anchors can wear
+    // it, and the download CTA is an <a>. :enabled matches only form
+    // controls, so gating hover on it silently drops every link variant.
+    expect(
+      /:hover:enabled/.test(css),
+      'hover is gated on :enabled, which no <a> ever matches; use :not(:disabled)',
+    ).toBe(false);
   });
 
   test('the contrast pair table covers every text-bearing token', () => {

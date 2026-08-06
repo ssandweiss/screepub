@@ -1064,5 +1064,469 @@ if kfxStatus.ready {
     print("  --  KFX toolchain incomplete on this machine; conversion untested here")
 }
 
+// — Engine progress and cancellation —
+// The conversion page showed an indeterminate spinner because the engine
+// said nothing until it finished. These checks cover the reporting channel
+// and the cancel path; the engine's own share is covered by
+// tests/cli.test.ts and tests/extract.test.ts.
+let fixture = repoRoot.appendingPathComponent("tests/fixtures/screenplay.pdf")
+
+if Engine.binaryURL() == nil {
+    print("  --  no engine binary; run bun build first. Engine checks skipped")
+} else if !FileManager.default.fileExists(atPath: fixture.path) {
+    print("  --  committed fixture missing; Engine checks skipped")
+} else {
+    // Progress arrives, climbs, and finishes. The callback fires on the
+    // pipe's read queue, so the collector has to be safe to share.
+    final class Ticks: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [Double] = []
+        func add(_ v: Double) { lock.lock(); values.append(v); lock.unlock() }
+        var all: [Double] { lock.lock(); defer { lock.unlock() }; return values }
+    }
+    let ticks = Ticks()
+    do {
+        let result = try Engine.convert(
+            input: fixture, force: false, outputDir: tempDir("progress"),
+            includeMobi: false,
+            onProgress: { _, fraction in ticks.add(fraction) }
+        )
+        check(result.ok, "engine converts the committed fixture")
+
+        let seen = ticks.all
+        check(!seen.isEmpty, "conversion reported progress at least once")
+        check(seen == seen.sorted(), "reported progress never goes backwards")
+        check(seen.last.map { $0 >= 0.99 } ?? false, "progress reaches 100% at the end")
+    } catch {
+        check(false, "engine conversion with progress threw: \(error)")
+    }
+
+    // Cancelling before the run starts is the deterministic half of the
+    // cancel path: a mid-flight cancel on a five-page fixture would race the
+    // conversion itself. Both go through the same adopt/terminate gate.
+    let control = ConversionControl()
+    control.cancel()
+    do {
+        _ = try Engine.convert(
+            input: fixture, force: false, outputDir: tempDir("cancelled"),
+            includeMobi: false, control: control
+        )
+        check(false, "a pre-cancelled conversion should not return a result")
+    } catch EngineFailure.cancelled {
+        check(true, "a cancelled conversion throws EngineFailure.cancelled")
+    } catch {
+        check(false, "cancelled conversion threw the wrong error: \(error)")
+    }
+
+    // Progress is opt-in: no callback means no --progress flag, so stderr
+    // stays the diagnostic channel it has always been.
+    do {
+        let quiet = try Engine.convert(
+            input: fixture, force: false, outputDir: tempDir("quiet"), includeMobi: false
+        )
+        check(quiet.ok, "conversion without a progress callback still succeeds")
+    } catch {
+        check(false, "conversion without progress threw: \(error)")
+    }
+}
+
+// — Update selection —
+// Pure over ReleaseCandidate, so every rule below is checked without a
+// network. GitHubRelease stays private; this is the seam kit-check can reach.
+func candidate(
+    _ tag: String,
+    dmg: Bool = true,
+    body: String? = "notes",
+    draft: Bool = false,
+    prerelease: Bool = false
+) -> ReleaseCandidate {
+    ReleaseCandidate(
+        tag: tag,
+        notesURL: URL(string: "https://example.invalid/\(tag)")!,
+        dmgURL: dmg ? URL(string: "https://example.invalid/\(tag).dmg")! : nil,
+        body: body,
+        isDraft: draft,
+        isPrerelease: prerelease
+    )
+}
+
+do {
+    let picked = try UpdateCheck.select(
+        releases: [candidate("v0.6.0"), candidate("v0.5.0"), candidate("v0.4.2")],
+        currentVersion: "0.4.2"
+    )
+    check(picked?.version == "0.6.0", "selection takes the newest release")
+    check(picked?.notes.map(\.version) == ["0.6.0", "0.5.0"],
+          "notes cover every version newer than the installed one")
+    // The app presents the release-notes sheet with .sheet(item:), which
+    // identifies presentations by this id — it has to track `version`
+    // exactly, or two different releases could collide onto one
+    // presentation (or a genuine update stop being seen as "new").
+    check(picked?.id == picked?.version,
+          "AvailableUpdate.id is its version, the key .sheet(item:) presents on")
+} catch {
+    check(false, "selection threw unexpectedly: \(error)")
+}
+
+do {
+    // The newest release sits in the MIDDLE of the input array, not first
+    // or last. That defeats a naive `.first` (picks v0.5.0) AND a naive
+    // `.last`-after-reversal fix (picks v0.6.0) — only an actual sort by
+    // version, not by position, lands on v0.9.0 here.
+    let picked = try UpdateCheck.select(
+        releases: [candidate("v0.5.0"), candidate("v0.9.0"), candidate("v0.6.0")],
+        currentVersion: "0.4.2"
+    )
+    check(picked?.version == "0.9.0", "selection finds the newest release when it's not first in the input")
+    check(picked?.notes.map(\.version) == ["0.9.0", "0.6.0", "0.5.0"],
+          "notes stay newest-first regardless of input order")
+} catch {
+    check(false, "scrambled-order selection threw unexpectedly: \(error)")
+}
+
+do {
+    let picked = try UpdateCheck.select(
+        releases: [candidate("v0.7.0", draft: true),
+                   candidate("v0.6.5", prerelease: true),
+                   candidate("v0.6.0")],
+        currentVersion: "0.4.2"
+    )
+    check(picked?.version == "0.6.0", "drafts and prereleases are skipped")
+    check(picked?.notes.count == 1, "skipped releases contribute no notes")
+} catch {
+    check(false, "draft/prerelease selection threw: \(error)")
+}
+
+do {
+    let none = try UpdateCheck.select(
+        releases: [candidate("v0.4.2"), candidate("v0.4.1")],
+        currentVersion: "0.4.2"
+    )
+    check(none == nil, "nothing newer means no update")
+} catch {
+    check(false, "up-to-date selection threw: \(error)")
+}
+
+do {
+    _ = try UpdateCheck.select(
+        releases: [candidate("v0.6.0", dmg: false)],
+        currentVersion: "0.4.2"
+    )
+    check(false, "a newest release with no .dmg should throw")
+} catch UpdateCheckError.noDownloadableAsset {
+    check(true, "a newest release with no .dmg throws noDownloadableAsset")
+} catch {
+    check(false, "wrong error for a missing .dmg: \(error)")
+}
+
+do {
+    let picked = try UpdateCheck.select(
+        releases: [candidate("v0.6.0", body: nil)],
+        currentVersion: "0.4.2"
+    )
+    check(picked?.notes.first?.markdown == "",
+          "a release with no body still contributes an empty note")
+} catch {
+    check(false, "nil-body selection threw: \(error)")
+}
+
+// — Update decoding —
+// The exact shape GitHub returns, including the body field the old decoder
+// silently dropped.
+// v0.6.0 and v0.5.0 stay first/last so the pre-existing body/dmg assertions
+// below still target them unchanged; the draft and prerelease releases sit
+// in between, each with its own .dmg so they are otherwise valid releases
+// and the flag under test is the only thing distinguishing them.
+let releasesJSON = """
+[
+  {"tag_name":"v0.6.0","html_url":"https://example.invalid/6","draft":false,
+   "prerelease":false,"body":"# Screepub 0.6.0\\n\\nNewer.",
+   "assets":[{"name":"Screepub-0.6.0.dmg",
+              "browser_download_url":"https://example.invalid/6.dmg"}]},
+  {"tag_name":"v0.7.0","html_url":"https://example.invalid/7","draft":true,
+   "prerelease":false,"body":"# Screepub 0.7.0\\n\\nDraft.",
+   "assets":[{"name":"Screepub-0.7.0.dmg",
+              "browser_download_url":"https://example.invalid/7.dmg"}]},
+  {"tag_name":"v0.6.5","html_url":"https://example.invalid/6.5","draft":false,
+   "prerelease":true,"body":"# Screepub 0.6.5\\n\\nPrerelease.",
+   "assets":[{"name":"Screepub-0.6.5.dmg",
+              "browser_download_url":"https://example.invalid/6.5.dmg"}]},
+  {"tag_name":"v0.5.0","html_url":"https://example.invalid/5","draft":false,
+   "prerelease":false,"body":"# Screepub 0.5.0\\n\\nOlder.","assets":[]}
+]
+"""
+do {
+    let decoded = try UpdateCheck.candidates(from: Data(releasesJSON.utf8))
+    check(decoded.count == 4, "decoding reads every release in the array")
+    check(decoded.first?.body?.contains("Newer.") == true,
+          "the release body is decoded, not dropped")
+    check(decoded.first?.dmgURL != nil, "the .dmg asset is found")
+    check(decoded.last?.dmgURL == nil, "a release with no assets has no dmgURL")
+
+    // isDraft/isPrerelease gate whether select() can ever offer this release
+    // as an update, so each flag is checked propagating true on the release
+    // that sets it, and false on releases that don't set it — a mapping
+    // that hardcodes either value, or swaps the two fields, fails one of
+    // these four checks.
+    let draftCandidate = decoded.first(where: { $0.tag == "v0.7.0" })
+    check(draftCandidate?.isDraft == true,
+          "the draft flag propagates from GitHub's JSON to the candidate")
+    let prereleaseCandidate = decoded.first(where: { $0.tag == "v0.6.5" })
+    check(prereleaseCandidate?.isPrerelease == true,
+          "the prerelease flag propagates from GitHub's JSON to the candidate")
+
+    let plainNewer = decoded.first(where: { $0.tag == "v0.6.0" })
+    check(plainNewer?.isDraft == false, "an ordinary release decodes isDraft false")
+    check(plainNewer?.isPrerelease == false, "an ordinary release decodes isPrerelease false")
+    let plainOlder = decoded.first(where: { $0.tag == "v0.5.0" })
+    check(plainOlder?.isDraft == false, "the other ordinary release decodes isDraft false")
+    check(plainOlder?.isPrerelease == false, "the other ordinary release decodes isPrerelease false")
+} catch {
+    check(false, "decoding valid release JSON threw: \(error)")
+}
+
+do {
+    _ = try UpdateCheck.candidates(from: Data("not json".utf8))
+    check(false, "malformed JSON should throw")
+} catch UpdateCheckError.malformedResponse(_) {
+    check(true, "malformed JSON throws malformedResponse")
+} catch {
+    check(false, "wrong error for malformed JSON: \(error)")
+}
+
+// — Release notes parsing —
+// The committed 0.5.0 notes are the fixture, but they are only the PROSE
+// half of what GitHub actually publishes: release.yml copies this file
+// verbatim and then appends a machine-generated trailer ("\n\n---\n\n",
+// an install paragraph, and a fenced SHA-256 block — see the "Publish
+// GitHub Release" step). ReleaseNotes.parse stops at that "---" rather
+// than rendering the trailer, which the equality check below proves.
+let notesFixture = repoRoot.appendingPathComponent("docs/releases/0.5.0.md")
+if let markdown = try? String(contentsOf: notesFixture, encoding: .utf8) {
+    let blocks = ReleaseNotes.parse(markdown)
+
+    // CRLF must parse identically to LF: components(separatedBy: .newlines)
+    // splits "\r" and "\n" independently rather than treating "\r\n" as one
+    // separator, so an unnormalized CRLF file turns every real line break
+    // into a phantom blank line and shatters blocks mid-sentence. Equality
+    // against the LF parse is the strong form a reviewer asked for: a
+    // block-COUNT check alone could miss two shatters that happened to sum
+    // back to the same total.
+    let crlfMarkdown = markdown
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\n", with: "\r\n")
+    check(ReleaseNotes.parse(crlfMarkdown) == blocks,
+          "CRLF line endings parse to the same blocks as LF")
+
+    // The real GitHub release body, synthesized the way release.yml's
+    // "Publish GitHub Release" step actually builds it: this file's bytes,
+    // then its literal appended trailer. Parsing that full body must equal
+    // parsing the file alone — this is the assertion that would have
+    // caught the trailer rendering as five extra blocks (a "---"
+    // paragraph, two install paragraphs, a "SHA-256:" line, and one long
+    // paragraph of raw hex) on every version shown in the sheet.
+    let publishedTrailer = "\n\n---\n\n"
+        + "Notarized universal build for macOS 14+ (Apple Silicon and Intel).\n\n"
+        + "**Install:** download `Screepub-macOS.dmg`, open it, drag Screepub to Applications, and double-click.\n\n"
+        + "SHA-256:\n"
+        + "\n```\n"
+        + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  Screepub-macOS.dmg\n"
+        + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  screepub-cli-macos-arm64.tar.gz\n"
+        + "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc  screepub-cli-macos-x64.tar.gz\n"
+        + "```\n"
+    let publishedBody = markdown + publishedTrailer
+    check(ReleaseNotes.parse(publishedBody) == blocks,
+          "the release.yml trailer (---, install paragraphs, SHA-256 block) parses identically to the notes file alone")
+
+    var sections = 0, bullets = 0, paragraphs = 0, asides = 0
+    var leads: [String] = []
+    for block in blocks {
+        switch block {
+        case .section: sections += 1
+        case .bullet(let lead, _): bullets += 1; if let lead { leads.append(lead) }
+        case .paragraph: paragraphs += 1
+        case .aside: asides += 1
+        }
+    }
+    check(sections >= 1, "parses ## headings into sections")
+    check(bullets >= 1, "parses - lines into bullets")
+    check(paragraphs >= 1, "parses prose into paragraphs")
+    check(asides == 1, "parses the trailing italic note into an aside")
+
+    check(leads.contains("No more orphaned lines."),
+          "a bold lead becomes the bullet's lead, without asterisks")
+
+    let titleText = blocks.contains { block in
+        if case .section(let t) = block { return t.contains("Screepub 0.5.0") }
+        if case .paragraph(let t) = block { return t.contains("# Screepub") }
+        return false
+    }
+    check(!titleText, "the # title line produces no block")
+
+    // No text lost. Every word in the source, minus markdown punctuation,
+    // the dropped title LINE, and any HTML comment marker, must survive
+    // into some block — checked by COUNT, not just membership. A Set
+    // comparison cannot see a single dropped occurrence of a word that
+    // recurs elsewhere: proof is dropping "page" from the lede alone
+    // ("about page turns" -> "about turns") still passes a Set diff,
+    // because "page" survives in other bullets in this same fixture.
+    func wordCounts(_ s: String) -> [String: Int] {
+        s.replacingOccurrences(of: "*", with: " ")
+         .replacingOccurrences(of: "#", with: " ")
+         .replacingOccurrences(of: "-", with: " ")
+         .split(whereSeparator: { $0 == " " || $0.isNewline })
+         .reduce(into: [:]) { counts, word in counts[String(word), default: 0] += 1 }
+    }
+    var rendered = ""
+    for block in blocks {
+        switch block {
+        case .section(let t): rendered += " " + t
+        case .bullet(let lead, let body): rendered += " " + (lead ?? "") + " " + body
+        case .paragraph(let t): rendered += " " + t
+        case .aside(let t): rendered += " " + t
+        }
+    }
+    // Mirrors ReleaseNotes' own stripHTMLComments (private, so duplicated
+    // here rather than exposed as public API just for this check): a
+    // marker is markup, not prose, so it is excluded from what "no text
+    // lost" demands the parser keep — the same way the # title line is
+    // excluded below, and for the same reason.
+    func stripComments(_ s: String) -> String {
+        var result = ""
+        var remainder = Substring(s)
+        while let open = remainder.range(of: "<!--") {
+            result += remainder[remainder.startIndex..<open.lowerBound]
+            if let close = remainder.range(of: "-->", range: open.upperBound..<remainder.endIndex) {
+                remainder = remainder[close.upperBound...]
+            } else {
+                remainder = remainder[remainder.endIndex...]
+            }
+        }
+        result += remainder
+        return result
+    }
+    // Excluding the whole document minus a fixed word list would also
+    // excuse a lost "Screepub" or "0.5.0" wherever they appear in real
+    // prose (lines 8, 36, 41 of this fixture use "Screepub"). Filtering
+    // just the title LINE keeps the check blind only to what it should be:
+    // the one line the parser is specified to drop.
+    let bodyOnly = markdown
+        .components(separatedBy: .newlines)
+        .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("# ") }
+        .map(stripComments)
+        .joined(separator: "\n")
+    let sourceCounts = wordCounts(bodyOnly)
+    let renderedCounts = wordCounts(rendered)
+    let shortfalls = sourceCounts.compactMap { word, needed -> String? in
+        let have = renderedCounts[word] ?? 0
+        guard have < needed else { return nil }
+        return "\(word): \(have)/\(needed)"
+    }.sorted()
+    check(shortfalls.isEmpty, "no text is lost in parsing (shortfalls: \(shortfalls.prefix(5)))")
+} else {
+    check(false, "could not read the 0.5.0 notes fixture")
+}
+
+check(ReleaseNotes.parse("").isEmpty, "empty input parses to no blocks")
+check(ReleaseNotes.parse("Mystery: [a link](x) and `code`.").count == 1,
+      "unrecognized syntax degrades to one paragraph rather than vanishing")
+
+// GitHub hides a release-notes-template.md marker like
+// "<!-- caveat: registry-17 -->" because it renders markdown to HTML; our
+// sheet renders these blocks as plain SwiftUI Text, so a marker left in
+// would show up to the reader as literal text. The parser must drop it
+// while keeping the prose it trails.
+let markerBlocks = ReleaseNotes.parse(
+    "- Inert if ignored, so this is safe. <!-- caveat: registry-17 -->"
+)
+check(markerBlocks.count == 1, "a marker line still parses to exactly one block")
+if case .bullet(_, let body)? = markerBlocks.first {
+    check(body.contains("Inert if ignored, so this is safe."),
+          "the marker bullet keeps its prose")
+    check(!body.contains("<!--") && !body.contains("-->") && !body.contains("registry-17"),
+          "the marker bullet drops the comment tags and marker text alike")
+} else {
+    check(false, "a bullet with a trailing HTML comment still parses to a bullet")
+}
+
+// — adversarial inputs: markdown punctuation with no content behind it —
+// flush() used to check emptiness on the joined text BEFORE splitLead and
+// unemphasize stripped markdown, so a line that was only "**" survived as
+// an empty block. Re-checked AFTER the strip, all four of these must
+// vanish rather than produce a stray empty bullet, paragraph, or dash.
+check(ReleaseNotes.parse("- **").isEmpty,
+      "a bullet that is only markdown punctuation yields no block")
+check(ReleaseNotes.parse("**").isEmpty,
+      "a paragraph that is only markdown punctuation yields no block")
+check(ReleaseNotes.parse("- ****").isEmpty,
+      "a fully-empty bold bullet yields no block rather than an empty-but-non-nil lead")
+check(ReleaseNotes.parse("- ").isEmpty,
+      "a bullet marker with nothing after it yields no block, not a stray dash")
+check(ReleaseNotes.parse("## **Bold** Heading") == [.section("Bold Heading")],
+      "a heading's inline bold is flattened, same as every other block")
+
+// — Update error descriptions —
+// These strings reach an NSAlert in manualUpdateCheck(). Without
+// LocalizedError, Swift bridges to NSError and localizedDescription becomes
+// "The operation couldn't be completed. (UpdateCheckError error 2.)", which
+// is what the user was being shown.
+let describedErrors: [(UpdateCheckError, String)] = [
+    (.rateLimited, "rateLimited"),
+    (.network("HTTP 503"), "network"),
+    (.malformedResponse("index 1: key 'draft' not found"), "malformedResponse"),
+    (.noDownloadableAsset, "noDownloadableAsset"),
+]
+for (error, label) in describedErrors {
+    check(error.errorDescription?.isEmpty == false,
+          "\(label) has a non-empty errorDescription")
+    // The assertion that actually fails if the conformance is ever dropped.
+    check(error.localizedDescription.contains("couldn't be completed") == false
+            && error.localizedDescription.contains("couldn’t be completed") == false,
+          "\(label) does not fall back to Foundation's placeholder")
+}
+
+check(UpdateCheckError.network("HTTP 503").localizedDescription.contains("503"),
+      "network carries its detail into the description")
+check(UpdateCheckError.malformedResponse("key 'draft' not found")
+        .localizedDescription.contains("key 'draft' not found"),
+      "malformedResponse carries its detail into the description")
+
+// Invalid JSON, which reaches describe()'s .dataCorrupted arm with an empty
+// codingPath. That arm has no decoder-sourced text to check, so non-empty is
+// the strongest assertion it admits. The missing-key case below is what
+// proves a real reason reached the payload rather than a constant.
+do {
+    _ = try UpdateCheck.candidates(from: Data("not json".utf8))
+    check(false, "malformed JSON should throw")
+} catch UpdateCheckError.malformedResponse(let detail) {
+    check(!detail.isEmpty, "a decode failure carries the decoder's own reason")
+} catch {
+    check(false, "wrong error for malformed JSON: \(error)")
+}
+
+// The stronger boundary: a non-empty string alone doesn't prove the detail
+// is the decoder's OWN reason rather than a hardcoded stand-in like
+// "decode failed", which "not json" above can't rule out either since it
+// has no array to index into. A syntactically valid array with one bad
+// element can: the detail must name both the missing key and which
+// element was bad.
+do {
+    let oneBadElement = """
+    [
+      {"tag_name":"v0.6.0","html_url":"https://example.invalid/6","draft":false,
+       "prerelease":false,"body":"ok","assets":[]},
+      {"html_url":"https://example.invalid/5","draft":false,
+       "prerelease":false,"body":"ok","assets":[]}
+    ]
+    """
+    _ = try UpdateCheck.candidates(from: Data(oneBadElement.utf8))
+    check(false, "a release missing tag_name should throw")
+} catch UpdateCheckError.malformedResponse(let detail) {
+    check(detail.contains("tag_name"), "the decode failure names the missing key")
+    check(detail.contains("1"), "the decode failure names which element was bad")
+} catch {
+    check(false, "wrong error for a missing key: \(error)")
+}
+
 print(failures == 0 ? "kit-check: all passed" : "kit-check: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

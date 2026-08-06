@@ -4,32 +4,50 @@
   .btn {
     font-family: var(--font-structure);
     font-weight: 700;
-    font-size: 13px;
+    font-size: var(--text-ui);
     letter-spacing: 0.09em;
     text-transform: uppercase;
     padding: 10px 30px;
-    border-radius: 3px;
+    border-radius: var(--radius);
     border: none;
     cursor: pointer;
     display: inline-block;
     text-decoration: none;
-    transition: opacity 0.1s ease-out, transform 0.1s ease-out;
+    transition: opacity var(--motion-press) var(--ease), transform var(--motion-press) var(--ease),
+                background var(--motion-press) var(--ease);
   }
-  .btn-brad { background: var(--brass); color: var(--ink); }
+  .btn-brad { background: var(--brass); color: var(--ink-on-brass); }
+  /* Hover is anticipation, active is commitment, so hover brightens and
+     active dims. The hover value is the brass ramp's own highlight stop,
+     not a filter: the metal catches the light rather than washing out. */
+  .btn-brad:hover:not(:disabled) { background: var(--brass-highlight); }
   .btn-brad:active { opacity: 0.75; transform: scale(0.985); }
   .btn-outline {
     background: none;
     color: var(--ink);
     box-shadow: inset 0 0 0 1.2px var(--ink);
   }
+  /* --hole is the ink tint already used for punched holes and hairlines,
+     so the outline button fills with the page's own shadow, not a new gray. */
+  .btn-outline:hover:not(:disabled) { background: var(--hole); }
   .btn-outline:active { opacity: 0.7; }
   .btn:disabled { opacity: 0.35; cursor: default; }
+  /* Keyboard focus was previously whatever the browser drew, which over
+     brass is unreliable. Offset so the ring never sits on the brass itself. */
+  .btn:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .btn { transition: none; }
+    .btn-brad:active { transform: none; }
+  }
 </style>
 <div class="page">
 <div class="sheet">
   <h2 class="slug">Buttons</h2>
   <div class="row">
-    <button class="btn btn-brad">Download for Mac</button>
+    <a class="btn btn-brad" href="#">Download for Mac</a>
     <button class="btn btn-outline">Read the docs</button>
     <button class="btn btn-brad" disabled>Send to Kindle</button>
   </div>
@@ -37,7 +55,15 @@
     The brad button is the page's one brass object besides the fasteners, so
     there is never more than one on screen. Disabled is held at 35% opacity,
     not hidden: it is waiting for hardware, and saying so is the point.
-    Ink on brass measures 8.0:1.
+    The label uses <code class="code">--ink-on-brass</code>, which is fixed in
+    both modes because brass is: 7.98:1 either way. Plain
+    <code class="code">--ink</code> would flip to cream in dark mode and land
+    at 1.67:1. The download is an <code class="code">&lt;a&gt;</code> and the
+    others are <code class="code">&lt;button&gt;</code>, which is why the
+    hover rules key off <code class="code">:not(:disabled)</code> and not
+    <code class="code">:enabled</code>: an anchor never matches
+    <code class="code">:enabled</code>, so the real download link would have
+    silently had no hover at all.
   </p>
 </div>
 </div>

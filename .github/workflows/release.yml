@@ -186,11 +186,15 @@ jobs:
           # accepts a `-rc1`-style suffix, so prereleases are a supported
           # concept -- but nothing downstream honored that until now.
           # Without --prerelease, `gh release create` marks EVERY tag,
-          # including v0.5.0-rc1, as a normal release, and
-          # `GET /releases/latest` (which app/Sources/ScreepubKit/
-          # UpdateCheck.swift polls) returns the newest normal release.
-          # A release candidate would become "the latest release" for
-          # every user's updater the moment its tag pushed.
+          # including v0.5.0-rc1, as a normal release. app/Sources/
+          # ScreepubKit/UpdateCheck.swift no longer polls
+          # `GET /releases/latest`; for the in-app notes sheet it lists
+          # every release (`/releases?per_page=30`) and its own select()
+          # filters out anything GitHub marks isPrerelease. That filter
+          # reads the very flag this step sets, so it reinforces the need
+          # for --prerelease rather than replacing it: skip this flag and
+          # a release candidate becomes an ordinary release both to
+          # GitHub and to select().
           # Expanded below with the ${arr[@]+...} guard, never bare.
           # The runner is macOS, whose bash is 3.2, where expanding an EMPTY
           # array under `set -u` is an unbound-variable error rather than

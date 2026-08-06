@@ -17,7 +17,30 @@ final class UpdateController: ObservableObject {
     }
 
     @Published var available: AvailableUpdate?
+    /// The update whose notes should be on screen, or nil for no sheet.
+    /// Lives here rather than in ContentView because two surfaces raise the
+    /// same sheet now: the footer popover, and the menu bar's Check for
+    /// Updates alert, which has no view context of its own.
+    @Published var notesRequest: AvailableUpdate?
     @Published var phase: Phase = .idle
+    /// How many ContentViews are in the window hierarchy, kept current by
+    /// their own onAppear/onDisappear. The menu bar's Check for Updates
+    /// needs this rather than scanning `NSApp.windows`, because this app can
+    /// also have a Script Preview window and a Settings window open, and
+    /// both are regular, visible, main-capable windows too, despite neither
+    /// hosting the release-notes sheet.
+    ///
+    /// A count rather than a flag because `WindowGroup` gives Cmd-N for
+    /// free: with two main windows open, closing one would drive a flag to
+    /// false while the other is still there, and the next check would open a
+    /// third. Not `@Published`: it is read once per menu click, never
+    /// observed by a view.
+    private var mainWindows = 0
+
+    var mainWindowOpen: Bool { mainWindows > 0 }
+
+    func mainWindowAppeared() { mainWindows += 1 }
+    func mainWindowDisappeared() { mainWindows = max(0, mainWindows - 1) }
 
     var busy: Bool {
         switch phase {

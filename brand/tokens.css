@@ -11,6 +11,7 @@
   --ground: #23272F;
   --alarm: #AF3220;
   --hole: rgba(29,27,22,0.10);
+  --ink-on-brass: #1D1B16;
 
   --brass-specular: #FDF1CE;
   --brass-highlight: #F6D486;
@@ -21,6 +22,51 @@
 
   --font-structure: 'Courier Prime', 'Courier New', ui-monospace, monospace;
   --font-prose: 'Literata', Georgia, 'Times New Roman', serif;
+
+  /* Type scale. Named by role, not by t-shirt size, because this system
+     already names things by what they are (slug, prose, caption). Every
+     step is a size the components were already setting: the scale was
+     derived from the pages, not imposed on them, so adopting it changed
+     nothing visually. Add a step only when no existing one fits. */
+  --text-fine: 10px;      /* "or", constraint lines */
+  --text-note: 11px;      /* state labels, tertiary buttons, read-outs */
+  --text-label: 12px;     /* table headers, button labels */
+  --text-ui: 13px;        /* structure text, sluglines in furniture */
+  --text-caption: 14px;   /* captions under a component */
+  --text-code: 15px;      /* code, table body */
+  --text-body: 17px;      /* prose, section sluglines */
+  --text-lede: 18px;      /* the byline under a title */
+  --text-title: 30px;     /* page title, narrow viewports */
+  --text-display: 44px;   /* page title */
+
+  /* Radius. Three steps, all of them values Theme.swift already uses.
+     shot-frame's stray 4px was the only disagreement and is now --well. */
+  --radius-mark: 2px;     /* toggle boxes, rubber stamps */
+  --radius: 3px;          /* buttons and controls */
+  --radius-well: 5px;     /* large containers: drop well, shot frame */
+
+  /* Motion. The app animates presses at 0.1s and state changes at 0.2s;
+     the web had 0.1s inline in one file and nothing anywhere else. */
+  --motion-press: 0.1s;
+  --motion-state: 0.2s;
+  --ease: ease-out;
+
+  /* Spacing ramp. Adopted wherever a component's existing value matched a
+     step exactly, so adoption moved nothing. Eight one-offs are still
+     literal on purpose: 0.7, 0.75, 0.85, 0.9, 1.1, 1.4, 1.5 and 1.8rem.
+     Snapping those to the nearest step would have changed the design
+     rather than described it, and that is a separate decision from having
+     a ramp at all. New work picks from the ramp. */
+  --space-1: 0.4rem;
+  --space-2: 0.6rem;
+  --space-3: 0.8rem;
+  --space-4: 1rem;
+  --space-5: 1.2rem;
+  --space-6: 1.6rem;
+  --space-7: 2rem;
+  --space-8: 2.5rem;
+  --space-9: 3rem;
+  --space-10: 3.5rem;
 
   --page-max: 1000px;
   --binding-margin: 17.6%;

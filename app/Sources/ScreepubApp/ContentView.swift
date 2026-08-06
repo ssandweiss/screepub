@@ -18,6 +18,9 @@ struct ContentView: View {
     @State private var remarkableUp = false
     @State private var lastInput: URL?
     @State private var transferNote: String?
+    @State private var convertFraction: Double?
+    @State private var convertStage: ConvertStage = .parse
+    @State private var conversionControl: ConversionControl?
     @AppStorage("koboKepub") private var koboKepub = false
     @State private var showEmailGuide = false
     /// First-launch gate: false shows the welcome page in place of the
@@ -81,6 +84,26 @@ struct ContentView: View {
             // away rather than making the user relaunch to see it work.
             if on { Task { await updates.checkIfDue() } }
         }
+        // Tracks this view's own presence for manualUpdateCheck's reopen
+        // guard (see UpdateController.mainWindowOpen): onAppear/onDisappear
+        // fire on this WindowGroup's window opening/closing, which is a
+        // fact NSApp.windows can't reliably tell apart from the Script
+        // Preview or Settings windows also being open.
+        .onAppear { updates.mainWindowAppeared() }
+        .onDisappear { updates.mainWindowDisappeared() }
+        // No onChange(of: updates.available) guard here on purpose. That
+        // guard existed because the sheet's content used to be looked up
+        // FROM `updates.available` at presentation time (`if let update =
+        // updates.available { ReleaseNotesSheet(...) }`), so a background
+        // check nulling `available` made the content vanish out from under
+        // an still-presented sheet. `.sheet(item:)` below presents
+        // `updates.notesRequest`'s own captured value: once set, it is
+        // independent of `updates.available` until the sheet dismisses and
+        // SwiftUI nils the binding itself, so there is no longer a state
+        // where the sheet is showing but its content is gone.
+        .sheet(item: $updates.notesRequest) { update in
+            ReleaseNotesSheet(update: update)
+        }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             guard let provider = providers.first else { return false }
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -120,19 +143,20 @@ struct ContentView: View {
         VStack {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 Spacer()
-                Text(pageNumber)
-                    .font(Theme.courier(12))
-                    .foregroundStyle(Theme.inkFaint)
                 SettingsLink {
                     Image(systemName: "gearshape.fill")
                         .font(.system(size: 13))
-                        .foregroundStyle(Theme.inkFaint)
+                        .foregroundStyle(Theme.inkMuted)
                 }
                 .buttonStyle(.plain)
                 .help("Settings (⌘,)")
             }
             .padding(.horizontal, 22)
-            .padding(.top, 26)
+            // The window is .hiddenTitleBar, but SwiftUI still reserves the
+            // title bar's safe area, which pushed the gear well below the
+            // traffic lights on the other side. Ignoring that inset lets it
+            // sit on their line.
+            .padding(.top, 10)
             Spacer()
             // Footer margins: a newer revision announces itself bottom-left,
             // and the draft-revision mark prints bottom-right — dev builds
@@ -144,12 +168,13 @@ struct ContentView: View {
                 Text("rev. \(appVersion)")
                     .font(Theme.courier(9))
                     .kerning(0.4)
-                    .foregroundStyle(Theme.inkFaint)
+                    .foregroundStyle(Theme.inkMuted)
                     .textSelection(.enabled)
             }
             .padding(.horizontal, 22)
             .padding(.bottom, 8)
         }
+        .ignoresSafeArea(.container, edges: .top)
     }
 
     /// The bottom-left footer narrates the updater: an available revision,
@@ -171,7 +196,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .help("Install the update, or read the release notes")
                 .popover(isPresented: $showUpdatePopover, arrowEdge: .top) {
-                    UpdatePopover(update: update)
+                    UpdatePopover(update: update) { updates.notesRequest = $0 }
                 }
             }
         case .downloading(let fraction):
@@ -196,6 +221,7 @@ struct ContentView: View {
         case .failed(let message):
             Button {
                 if let update = updates.available {
+                    // Deliberate, not an oversight: the in-app install just failed, so this fallback goes to the browser, not a sheet whose headline button would retry the same failing install.
                     NSWorkspace.shared.open(update.releaseNotesURL)
                 }
             } label: {
@@ -208,15 +234,6 @@ struct ContentView: View {
                     .multilineTextAlignment(.leading)
             }
             .buttonStyle(.plain)
-        }
-    }
-
-    private var pageNumber: String {
-        switch state {
-        case .idle: return ""
-        case .converting: return "…"
-        case .done(let r): return r.pages.map { "\($0)." } ?? "1."
-        case .failed: return "1."
         }
     }
 
@@ -251,7 +268,7 @@ struct ContentView: View {
                     .toggleStyle(MarginToggleStyle(size: 12, color: Theme.ink))
                 Text("(one anonymous request to GitHub, at most daily: app name and version, nothing else. Stays off unless you check this; change your mind anytime in Settings.)")
                     .font(Theme.courier(10))
-                    .foregroundStyle(Theme.inkFaint)
+                    .foregroundStyle(Theme.inkMuted)
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -290,10 +307,18 @@ struct ContentView: View {
                     .foregroundStyle(Theme.ink)
                 Text("or")
                     .font(Theme.courier(10))
-                    .foregroundStyle(Theme.inkFaint)
+                    .foregroundStyle(Theme.inkMuted)
                 Button("CHOOSE PDF…  ⌘O") { choose() }
                     .buttonStyle(OutlineButtonStyle())
                     .keyboardShortcut("o")
+                // The two guards that are properties of the file itself, said
+                // before the drop instead of after the wait. `scanned` and
+                // `password` both fail in convert.ts only once the engine has
+                // opened the PDF; a reader can check both at a glance.
+                Text("Needs selectable text, not a scan. No password.")
+                    .font(Theme.courier(10))
+                    .foregroundStyle(Theme.inkMuted)
+                    .padding(.top, 2)
             }
             .padding(.vertical, 24)
             .frame(maxWidth: .infinity)
@@ -365,14 +390,51 @@ struct ContentView: View {
                 .font(Theme.courier(13))
                 .foregroundStyle(Theme.ink)
                 .lineSpacing(4)
-            ProgressView()
-                .controlSize(.small)
-                .tint(Theme.brass)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 12)
+
+            // Determinate wherever the engine has told us where it is. It
+            // reports per page while parsing, which is the long stage, so a
+            // real script spends nearly all its wait on a moving bar. The
+            // spinner remains only for the moment before the first tick.
+            VStack(spacing: 10) {
+                if let fraction = convertFraction {
+                    FooterProgressBar(fraction: fraction)
+                        .frame(width: 220)
+                    Text(convertLabel(fraction))
+                        .font(Theme.courier(11))
+                        .foregroundStyle(Theme.inkMuted)
+                        .monospacedDigit()
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Theme.brass)
+                    Text("starting up")
+                        .font(Theme.courier(11))
+                        .foregroundStyle(Theme.inkMuted)
+                }
+                Button("CANCEL") { cancelConversion() }
+                    .buttonStyle(MarginButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                    .padding(.top, 2)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, 12)
+
             Spacer()
             Transition(text: "PLEASE STAND BY:")
         }
+    }
+
+    /// "parsing pages (42%)" — the stage, then the number, matching the
+    /// updater's existing "downloading rev. X (42%)" shape.
+    private func convertLabel(_ fraction: Double) -> String {
+        let stageWord = convertStage == .render ? "building the book" : "parsing pages"
+        return "\(stageWord) (\(Int(fraction * 100))%)"
+    }
+
+    private func cancelConversion() {
+        conversionControl?.cancel()
+        conversionControl = nil
+        state = .idle
     }
 
     // MARK: - Done: the script announces itself
@@ -380,9 +442,6 @@ struct ContentView: View {
     private func resultPage(_ result: EngineResult) -> some View {
         let epub = result.epubPath.map { URL(fileURLWithPath: $0) }
         return VStack(spacing: 0) {
-            Slugline(text: "INT. YOUR LIBRARY - NIGHT")
-                .padding(.bottom, 18)
-
             // The converted script gets a speech: cue, parenthetical, dialogue.
             VStack(spacing: 5) {
                 Text((result.title ?? "Untitled").uppercased())
@@ -393,7 +452,7 @@ struct ContentView: View {
                 if let author = result.author {
                     Text("(by \(author))")
                         .font(Theme.courier(12))
-                        .foregroundStyle(Theme.inkFaint)
+                        .foregroundStyle(Theme.inkMuted)
                 }
                 if let pages = result.pages, let scenes = result.scenes, let chars = result.characters {
                     Text("\(pages) pages. \(scenes) scenes.\n\(chars) speaking characters.")
@@ -432,7 +491,7 @@ struct ContentView: View {
             if let note = transferNote {
                 Text("(\(note))")
                     .font(Theme.courier(11))
-                    .foregroundStyle(Theme.inkFaint)
+                    .foregroundStyle(Theme.inkMuted)
                     .multilineTextAlignment(.center)
                     .lineSpacing(2)
                     .padding(.top, 10)
@@ -466,7 +525,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private func transferButtons(result: EngineResult, epub: URL, title: String?) -> some View {
-        VStack(spacing: 9) {
+        VStack(spacing: 13) {
             if let fountainPath = fountainPath(for: result) {
                 // Outlined, not brass: SEND is the page's one primary action,
                 // and preview shouldn't compete with it.
@@ -534,7 +593,7 @@ struct ContentView: View {
                         Text("SEND TO:")
                             .font(Theme.courier(12, .bold))
                             .kerning(0.8)
-                            .foregroundStyle(Theme.inkFaint)
+                            .foregroundStyle(Theme.inkMuted)
                         HStack(spacing: 6) {
                             Text(chosen.title.uppercased())
                                 .font(Theme.courier(13, .bold))
@@ -561,7 +620,7 @@ struct ContentView: View {
                 // the instruction, so it steps forward in brass.
                 Text("(\(chosen.detail))")
                     .font(Theme.courier(10))
-                    .foregroundStyle(chosen.available ? Theme.inkFaint : Theme.brass)
+                    .foregroundStyle(chosen.available ? Theme.inkMuted : Theme.brass)
                     .frame(maxWidth: .infinity, alignment: .center)
 
                 // Kobo's format choice lives here, at the moment it applies,
@@ -584,7 +643,7 @@ struct ContentView: View {
                     } label: {
                         Text("first time? the two-step Amazon setup")
                             .font(Theme.courier(10))
-                            .foregroundStyle(Theme.inkFaint)
+                            .foregroundStyle(Theme.inkMuted)
                             .underline()
                     }
                     .buttonStyle(.plain)
@@ -607,7 +666,7 @@ struct ContentView: View {
             .buttonStyle(BradButtonStyle())
             .disabled(!chosen.available)
 
-            HStack(spacing: 22) {
+            HStack(spacing: 30) {
                 Button("SHOW IN FINDER") {
                     NSWorkspace.shared.activateFileViewerSelecting([epub])
                 }
@@ -618,7 +677,7 @@ struct ContentView: View {
                 }
             }
             .buttonStyle(MarginButtonStyle())
-            .padding(.top, 6)
+            .padding(.top, 12)
         }
     }
 
@@ -669,6 +728,10 @@ struct ContentView: View {
         transferNote = nil
         lastInput = url
         state = .converting(url.lastPathComponent)
+        convertFraction = nil
+        convertStage = .parse
+        let control = ConversionControl()
+        conversionControl = control
         Task {
             let outputDir = AppSettings.outputFolder
             let stem = url.deletingPathExtension().lastPathComponent
@@ -680,8 +743,29 @@ struct ContentView: View {
                 : outputDir.appendingPathComponent(stem).appendingPathExtension("fountain")
             let format = ScriptSettings.load(forFountain: prospectiveFountain, fallback: AppSettings.formatSettings())
             let outcome: Result<EngineResult, Error> = await Task.detached {
-                Result { try Engine.convert(input: url, force: force, outputDir: outputDir, format: format) }
+                Result {
+                    try Engine.convert(
+                        input: url, force: force, outputDir: outputDir, format: format,
+                        control: control,
+                        onProgress: { stage, fraction in
+                            Task { @MainActor in
+                                convertStage = stage
+                                // Never let the bar walk backwards: a late
+                                // parse tick arriving after render started
+                                // would otherwise drop it.
+                                convertFraction = max(convertFraction ?? 0, fraction)
+                            }
+                        }
+                    )
+                }
             }.value
+
+            // A cancelled run has already been put back to idle by the
+            // button. Landing a result now would resurrect a page the user
+            // dismissed, so cancellation swallows its own outcome.
+            guard conversionControl === control else { return }
+            conversionControl = nil
+            if case .failure(EngineFailure.cancelled) = outcome { return }
 
             switch outcome {
             case .success(let result) where result.ok:
@@ -844,6 +928,14 @@ private struct FooterProgressBar: View {
 /// States plainly what will happen before anything happens.
 private struct UpdatePopover: View {
     let update: AvailableUpdate
+    /// Raised instead of opening a browser, with the update this popover
+    /// already holds handed straight to the caller — not a flag that
+    /// leaves ContentView to re-look `updates.available` up later, which is
+    /// exactly the window a concurrent check can clear it in. ContentView
+    /// owns the sheet, because a sheet presented by a view that is itself
+    /// dismissing races its own presenter, and this popover dismisses as
+    /// the button fires.
+    let onReadNotes: (AvailableUpdate) -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -854,7 +946,7 @@ private struct UpdatePopover: View {
                 .foregroundStyle(Theme.ink)
             Text(UpdateController.installConsentText)
                 .font(Theme.courier(10))
-                .foregroundStyle(Theme.inkFaint)
+                .foregroundStyle(Theme.inkMuted)
                 .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
             Button("INSTALL AND RELAUNCH") {
@@ -863,7 +955,14 @@ private struct UpdatePopover: View {
             }
             .buttonStyle(BradButtonStyle())
             Button("VIEW RELEASE NOTES") {
-                NSWorkspace.shared.open(update.releaseNotesURL)
+                dismiss()
+                // One hop after the popover has gone, so the sheet is not
+                // presented by a view on its way out. `update` is this
+                // popover's own already-captured value, not a fresh look at
+                // `updates.available` after the hop, so a check that lands
+                // in that window and clears it cannot pull the rug out from
+                // under a presentation that has already been decided.
+                Task { @MainActor in onReadNotes(update) }
             }
             .buttonStyle(MarginButtonStyle())
         }
@@ -913,7 +1012,7 @@ private struct EmailSetupGuide: View {
                 .foregroundStyle(Theme.ink)
             Text(body)
                 .font(Theme.courier(11))
-                .foregroundStyle(Theme.inkFaint)
+                .foregroundStyle(Theme.inkMuted)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
