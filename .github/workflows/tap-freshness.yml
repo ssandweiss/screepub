@@ -1,0 +1,102 @@
+# The tap is a different repo, it is excluded from this one locally, and no
+# release job touches it — so no gate here has ever failed for forgetting
+# it. It was forgotten for FIVE releases: the per-arch restructure was
+# written and locally tested at v0.4.2 but never committed, so every
+# `brew install` served v0.3.0, from a single `screepub-macOS` asset the
+# release workflow had already stopped producing.
+#
+# This job does not bump the tap. It makes forgetting to bump it visible,
+# which is the part that was missing. docs/release-secrets.md describes the
+# full automation (a `tap` job committing to ssandweiss/homebrew-tap with a
+# fine-grained PAT); this needs no secret, because both repos are public.
+#
+# It checks the SHAs too, not just the version. A version bumped without its
+# checksums looks correct in the file and fails at a stranger's prompt.
+#
+# EXPECTED: this goes red the moment a release publishes and stays red until
+# the tap is bumped. That is the alarm working, not a bug.
+# Least privilege + pinned actions, matching ci.yml.
+name: tap-freshness
+on:
+  schedule:
+    - cron: '0 15 * * 1' # Mondays 15:00 UTC, an hour after weekly-toolchain
+  workflow_dispatch:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  tap-matches-newest-release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAP: ssandweiss/homebrew-tap
+    steps:
+      - name: Compare the tap against the newest release
+        run: |
+          set -euo pipefail
+
+          # What a `brew install` today ought to land on.
+          LATEST="$(gh release list --repo "$GITHUB_REPOSITORY" \
+            --exclude-drafts --exclude-pre-releases --limit 1 \
+            --json tagName -q '.[0].tagName')"
+          LATEST="${LATEST#v}"
+          if [ -z "$LATEST" ]; then
+            echo "::error::no published, non-prerelease release to compare against"
+            exit 1
+          fi
+
+          fetch() { gh api "repos/$TAP/contents/$1" -q .content | base64 -d; }
+          CASK="$(fetch Casks/screepub.rb)"
+          FORMULA="$(fetch Formula/screepub.rb)"
+
+          # The cask carries an explicit `version "x.y.z"`. The formula
+          # deliberately has none (it audits as redundant), so its version
+          # lives literally in both download urls and both must agree.
+          CASK_V="$(printf '%s\n' "$CASK" \
+            | sed -n 's/^[[:space:]]*version "\([^"]*\)".*/\1/p' | head -1)"
+          FORMULA_V="$(printf '%s\n' "$FORMULA" \
+            | sed -n 's|.*/releases/download/v\([^/]*\)/.*|\1|p' | sort -u)"
+
+          echo "newest release: $LATEST"
+          echo "cask pins:      ${CASK_V:-<none found>}"
+          echo "formula pins:   $(printf '%s' "$FORMULA_V" | tr '\n' ' ')"
+
+          FAIL=0
+          if [ "$CASK_V" != "$LATEST" ]; then
+            echo "::error::the cask pins ${CASK_V:-nothing} but the newest release is $LATEST"
+            FAIL=1
+          fi
+          if [ "$(printf '%s\n' "$FORMULA_V" | grep -c .)" -ne 1 ]; then
+            echo "::error::the formula's two download urls disagree: $(printf '%s' "$FORMULA_V" | tr '\n' ' ')"
+            FAIL=1
+          elif [ "$FORMULA_V" != "$LATEST" ]; then
+            echo "::error::the formula pins $FORMULA_V but the newest release is $LATEST"
+            FAIL=1
+          fi
+
+          # Checksums. GitHub reports a digest per asset, so this needs no
+          # download. A right version with a wrong SHA still breaks installs.
+          digest() {
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$LATEST" \
+              -q ".assets[] | select(.name == \"$1\") | .digest" | sed 's/^sha256://'
+          }
+          check_sha() { # <asset> <human name> <file contents>
+            local want; want="$(digest "$1")"
+            if [ -z "$want" ]; then
+              echo "::error::release v$LATEST has no asset named $1"
+              FAIL=1
+            elif ! printf '%s\n' "$3" | grep -q "$want"; then
+              echo "::error::$2 does not carry the SHA-256 of $1 ($want)"
+              FAIL=1
+            fi
+          }
+          check_sha "Screepub-macOS.dmg"              "the cask"    "$CASK"
+          check_sha "screepub-cli-macos-arm64.tar.gz" "the formula" "$FORMULA"
+          check_sha "screepub-cli-macos-x64.tar.gz"   "the formula" "$FORMULA"
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo "::notice::Bump https://github.com/$TAP — see docs/release-secrets.md, 'Bumping the tap by hand'. The release job's summary carries the three SHAs."
+            exit 1
+          fi
+          echo "The tap serves $LATEST, with matching checksums."

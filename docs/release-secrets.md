@@ -68,20 +68,31 @@ Then do the real acceptance test: download the DMG on a **different Mac**,
 open it, drag to Applications, double-click, and convert a PDF — that's
 what confirms notarization + the sidecar entitlements are correct.
 
-## The Homebrew tap: flipped to per-arch, DONE 2026-07-31 at v0.4.2
+## The Homebrew tap: flipped to per-arch, DONE 2026-08-07 at v0.5.2
 
-**Status: done.** The section below is kept for the reasoning; the
-paste-ready block in it was WRONG and the correction is recorded at the
-end. The tap now installs `v0.4.2` on both architectures, verified with
-`brew style`, `brew audit --strict` on the formula and the cask, and a
-real `brew install` that upgraded 0.3.0 to 0.4.2 and ran the binary.
+**Status: done and pushed** (`ssandweiss/homebrew-tap@a2034f3`). The
+section below is kept for the reasoning; the paste-ready block in it was
+WRONG and the correction is recorded at the end. The tap installs
+`v0.5.2` on both architectures, verified with `brew style` and
+`brew audit --strict` on the formula and the cask, and with all three
+SHA-256s checked against the digests GitHub reports for the release
+assets rather than against the release prose that quotes them.
 
-**Why it went stale for three releases:** `homebrew-tap/` is a separate
-repo checked out inside this one and hidden from `git status` by
-`.git/info/exclude`, which is local-only. Nothing in CI touches it, so a
-release could never fail for forgetting it. Flipping the formula was
-skipped at v0.4.0, v0.4.1 and v0.4.2 for exactly that reason. The
-systemic fix is below under "Keeping it from going stale again".
+**Why it went stale for FIVE releases, and the real lesson:** the
+per-arch flip was written and locally verified at v0.4.2, and this file
+recorded it as done. It was never committed. `homebrew-tap/` is a
+separate repo checked out inside this one and hidden from `git status`
+by `.git/info/exclude`, which is local-only, so an uncommitted change in
+it looks exactly like no change at all. Every `brew install` from v0.3.0
+through v0.5.2 therefore served **0.3.0**, from a single
+`screepub-macOS` asset the release workflow had long since stopped
+producing.
+
+So the failure was not "the files never got edited." They were edited,
+and the edit was verified by a real `brew install`. The failure was that
+nothing outside one laptop could see whether that edit had ever shipped,
+and this file was written from the working tree instead of from the
+remote. Check the PUBLISHED state, never the local one.
 
 ### The original note (reasoning still correct)
 
@@ -168,13 +179,26 @@ The tap is invisible to every existing gate: it is a different repo, it
 is excluded locally, and no release job touches it. Two options, in
 ascending order of effort:
 
-- **Floor:** `app/release.sh` already computes all three SHAs and throws
-  them at stdout. Capture them into `$GITHUB_STEP_SUMMARY` so the manual
-  edit is copy-paste instead of a download-and-hash chore.
-- **Real fix:** a `tap` job in `release.yml` that commits the formula and
-  cask update to `ssandweiss/homebrew-tap` directly. Needs a seventh
-  secret: a fine-grained PAT scoped to `contents:write` on that repo
-  only, which would get its own entry in the secrets table above.
+- **Floor: LANDED 2026-08-07.** `release.yml`'s "Tap bump crib sheet"
+  step writes the version and all three SHAs into
+  `$GITHUB_STEP_SUMMARY`, so the manual edit is paste-and-commit instead
+  of a download-and-hash chore.
+- **Real fix: still open.** A `tap` job in `release.yml` that commits the
+  formula and cask update to `ssandweiss/homebrew-tap` directly. Needs a
+  seventh secret: a fine-grained PAT scoped to `contents:write` on that
+  repo only, which would get its own entry in the secrets table above.
 
-Until one of those lands, the tap will keep going stale, because nothing
-makes forgetting it visible.
+Neither of those is what actually failed, though, so a third thing
+landed alongside them:
+
+- **The alarm: `.github/workflows/tap-freshness.yml`, LANDED
+  2026-08-07.** Weekly, on `workflow_dispatch`, and on every published
+  release, it reads the tap's cask and formula STRAIGHT FROM GITHUB and
+  fails when either pins something other than the newest release, or
+  carries a SHA that does not match what GitHub reports for that
+  release's assets. No secret needed, because both repos are public. It
+  reads the remote rather than any checkout, which is precisely the
+  blind spot that hid five releases.
+
+  Expect it to go red the moment a release publishes, and to stay red
+  until the tap is bumped. That is the alarm working, not a bug.

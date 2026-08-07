@@ -243,3 +243,30 @@ jobs:
             --clobber
 
           gh release edit "$TAG" --draft=false ${PRE[@]+"${PRE[@]}"}
+
+      # The tap has to be bumped by hand, in another repo, and the three
+      # SHAs it needs were previously thrown at stdout where nothing caught
+      # them. Put them somewhere a person can copy from, so the bump is
+      # paste-and-commit instead of download-and-hash. tap-freshness.yml is
+      # what notices when it does not happen.
+      - name: Tap bump crib sheet
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          V="${VERSION#v}"
+          # Plain command substitution and no arrays: this job runs on
+          # macos-15, whose bash is 3.2, and a bash-3.2 array trap has
+          # already killed one release here after notarization.
+          DMG="$(shasum -a 256 app/dist/Screepub-macOS.dmg | cut -d' ' -f1)"
+          ARM="$(shasum -a 256 app/dist/screepub-cli-macos-arm64.tar.gz | cut -d' ' -f1)"
+          X64="$(shasum -a 256 app/dist/screepub-cli-macos-x64.tar.gz | cut -d' ' -f1)"
+          {
+            printf '## Bump ssandweiss/homebrew-tap to %s\n\n' "$V"
+            printf '`Casks/screepub.rb`\n\n```ruby\n'
+            printf '  version "%s"\n  sha256 "%s"\n' "$V" "$DMG"
+            printf '```\n\n`Formula/screepub.rb` (the tag is literal in BOTH urls)\n\n```ruby\n'
+            printf '    url ".../download/v%s/screepub-cli-macos-arm64.tar.gz"\n    sha256 "%s"\n' "$V" "$ARM"
+            printf '    url ".../download/v%s/screepub-cli-macos-x64.tar.gz"\n    sha256 "%s"\n' "$V" "$X64"
+            printf '```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
