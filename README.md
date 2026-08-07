@@ -28,6 +28,7 @@ Screepub reads the script the way a person does. It looks at how the scenes, cue
 - **Or send it yourself.** Save a copy to your Desktop, or drag the file straight out of the window into a new message, and email it to your Kindle from whatever mail app you use.
 - **Look before you send.** A built-in reader shows exactly how the script will read on the device, with formatting controls — margins, spacing, optional page numbers — that update live as you adjust them.
 - **Built for real scripts.** Dual dialogue, revision marks, watermarks, page-break interruptions, offbeat character cues — the messy stuff in production drafts. Screepub sorts it out instead of choking on it.
+- **Emphasis survives the trip.** Bold, italic and underlined words come through as written, and a chyron, insert or text message set in its own typeface keeps that look instead of flattening into the body font.
 - **Free and open source.** No account, no subscription, no catch.
 
 ![The built-in reader, with the formatting rail open beside a converted script](assets/screenshot-reader.png)
@@ -216,6 +217,7 @@ bun src/cli.ts <input.pdf | input.fountain> [options]
 | --- | --- |
 | `-o, --output <file>` | EPUB path (default `<input>.epub`; companions follow it) |
 | `--mobi` | also write a MOBI 6 (dependency-free USB sideload) |
+| `--preview-html <file>` | also write the script as one self-contained HTML file |
 | `--fountain <file>` / `--no-fountain` | intermediate `.fountain` control |
 | `--options <file.json>` | formatting knobs (see the registry) |
 | `--title` / `--author` | override detected metadata |

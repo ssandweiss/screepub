@@ -15,7 +15,7 @@ Swift dependencies.
 
 ---
 
-## pdfjs-dist 6.1.200 — Apache License 2.0
+## pdfjs-dist 6.2.108 — Apache License 2.0
 
 PDF parsing and text extraction. Copyright Mozilla Foundation and pdf.js
 contributors. <https://github.com/mozilla/pdf.js>

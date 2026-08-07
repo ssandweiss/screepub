@@ -10,6 +10,18 @@ see [Influencing this list](#influencing-this-list).
 
 ## Now
 
+- **Images in the script, carried into the e-book.** Filmmakers put pictures
+  in scripts: storyboard panels, a reference photo, a lookbook page, a
+  designed title card. Screepub reads the text around them and drops every
+  one. The work comes in three parts, and each is useful on its own:
+  recognising that a page holds an image and where it sits, passing it
+  through into the e-book at a sensible size, and promoting a full-page
+  image at the front into the book's actual cover, so a script with a
+  designed title page shows up as artwork in your library instead of a row
+  of identical grey rectangles. Two honest limits: most e-ink screens are
+  greyscale, so a colour image will read as black and white on a Kindle
+  whatever we do, and a script padded with full-page photographs makes a
+  file too large to email to a `@kindle.com` address.
 - **Windows and Linux builds of the command-line converter.** The engine is
   already portable; only the release workflow is Mac-only. This is the
   single biggest increase in who can use Screepub.
