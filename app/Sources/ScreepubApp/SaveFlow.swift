@@ -18,11 +18,15 @@ enum SaveFlow {
     /// two concurrent exports racing the same sibling artifact paths).
     private static var inFlight = false
 
+    /// `status` takes the line to show, or nil to clear it. Nil rather than
+    /// "" because both call sites render the line inside furniture — the
+    /// result page parenthesizes it — so an empty string shows as an empty
+    /// parenthetical instead of as nothing.
     static func present(
         epub: URL,
         fountainPath: String?,
         settings: FormatSettings,
-        status: @escaping @MainActor (String) -> Void,
+        status: @escaping @MainActor (String?) -> Void,
         failure: @escaping @MainActor (String) -> Void
     ) {
         guard !inFlight else { return }
@@ -36,7 +40,17 @@ enum SaveFlow {
             let calibre = EbookConvert.isAvailable
             inFlight = false
             status("choose where to save")
-            ExportPanel.present(epub: epub, stem: stem, kfxReady: kfxReady) { destination, format in
+            ExportPanel.present(
+                epub: epub,
+                stem: stem,
+                kfxReady: kfxReady,
+                // The panel is gone and nothing was chosen, so the prompt
+                // that belonged to it goes too. Nothing else would ever
+                // clear it: the flow ends here, and both call sites would
+                // keep showing "choose where to save" until the next
+                // conversion or transfer wrote over it.
+                onCancel: { status(nil) }
+            ) { destination, format in
                 status("saving…")
                 // freshKindleArtifact spawns Calibre or the engine — keep it
                 // off the main actor or the whole UI stalls behind it.

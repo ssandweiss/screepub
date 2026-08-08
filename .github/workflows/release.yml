@@ -243,3 +243,75 @@ jobs:
             --clobber
 
           gh release edit "$TAG" --draft=false ${PRE[@]+"${PRE[@]}"}
+
+      # The fallback for when the `tap` job below cannot run (no TAP_TOKEN)
+      # or fails: the three SHAs, somewhere a person can copy from, so the
+      # bump is paste-and-commit rather than download-and-hash.
+      - name: Tap bump crib sheet
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          V="${VERSION#v}"
+          # Plain command substitution and no arrays: this job runs on
+          # macos-15, whose bash is 3.2, and a bash-3.2 array trap has
+          # already killed one release here after notarization.
+          DMG="$(shasum -a 256 app/dist/Screepub-macOS.dmg | cut -d' ' -f1)"
+          ARM="$(shasum -a 256 app/dist/screepub-cli-macos-arm64.tar.gz | cut -d' ' -f1)"
+          X64="$(shasum -a 256 app/dist/screepub-cli-macos-x64.tar.gz | cut -d' ' -f1)"
+          {
+            printf '## Bump ssandweiss/homebrew-tap to %s\n\n' "$V"
+            printf '`Casks/screepub.rb`\n\n```ruby\n'
+            printf '  version "%s"\n  sha256 "%s"\n' "$V" "$DMG"
+            printf '```\n\n`Formula/screepub.rb` (the tag is literal in BOTH urls)\n\n```ruby\n'
+            printf '    url ".../download/v%s/screepub-cli-macos-arm64.tar.gz"\n    sha256 "%s"\n' "$V" "$ARM"
+            printf '    url ".../download/v%s/screepub-cli-macos-x64.tar.gz"\n    sha256 "%s"\n' "$V" "$X64"
+            printf '```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Bump ssandweiss/homebrew-tap to the version just published. Separate
+  # job, `needs: release`, so it cannot start before the assets exist —
+  # tools/bump-tap.sh reads their digests and refuses to write anything
+  # without them.
+  #
+  # Degrades on purpose. Without TAP_TOKEN this notices and exits clean
+  # rather than failing the release: the crib sheet above still gets
+  # written, and tap-freshness.yml still goes red until somebody bumps by
+  # hand. Adding the secret is what turns the manual path automatic; the
+  # alarm is what makes either path honest.
+  tap:
+    needs: release
+    # A PRERELEASE must never become what `brew install` hands out. Matches
+    # the `PRE` test in the release job: a hyphen in the tag means prerelease.
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: macos-15   # `brew style` needs Homebrew, and casks are macOS-only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Bump the Homebrew tap
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          V="${VERSION#v}"
+          if [ -z "${TAP_TOKEN:-}" ]; then
+            echo "::notice::TAP_TOKEN is not set, so the tap was NOT bumped. Use the crib sheet in this run's summary, or see docs/release-secrets.md to add the secret and make this automatic. tap-freshness.yml will fail until the tap serves $V."
+            exit 0
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:$TAP_TOKEN@github.com/ssandweiss/homebrew-tap.git" tap
+          tools/bump-tap.sh "$V" tap
+          if git -C tap diff --quiet; then
+            echo "::notice::the tap already serves $V; nothing to commit"
+            exit 0
+          fi
+          # Never commit a tap that Homebrew itself rejects. This is style
+          # and syntax only; that the result is INSTALLABLE is what
+          # tap-freshness.yml confirms afterwards, from GitHub.
+          brew style tap/Formula/screepub.rb tap/Casks/screepub.rb
+          git -C tap -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -am "Screepub $V"
+          git -C tap push
+          echo "::notice::tap bumped to $V"

@@ -1,0 +1,52 @@
+# Does the published tap actually serve the newest release?
+#
+# The tap is a different repo, excluded from this one locally, and until
+# now no release job touched it — so no gate here ever failed for
+# forgetting it. It was forgotten for FIVE releases: the per-arch
+# restructure was written and locally tested at v0.4.2 but never
+# committed, so every `brew install` served v0.3.0, from a single
+# `screepub-macOS` asset the release workflow had already stopped
+# producing.
+#
+# release.yml's `tap` job now does the bumping. This is the check that the
+# bump actually happened and produced something installable — it reads the
+# tap FROM GITHUB rather than any checkout, which is the exact blind spot
+# that hid those five releases. Keep both: the bumper can be skipped (no
+# TAP_TOKEN), and a bumper that silently no-ops is the failure this whole
+# thread is about.
+#
+# The logic lives in tools/check-tap.sh so it can be run by hand.
+# Least privilege + pinned actions, matching ci.yml.
+name: tap-freshness
+on:
+  schedule:
+    - cron: '0 15 * * 1' # Mondays 15:00 UTC, an hour after weekly-toolchain
+  workflow_dispatch:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  tap-matches-newest-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check the tap against the newest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # On a release this races release.yml's `tap` job, which is still
+          # cloning and pushing. Retry rather than cry wolf; on the weekly
+          # run a stale tap will not fix itself, so check once and fail.
+          ATTEMPTS: ${{ github.event_name == 'release' && '10' || '1' }}
+        run: |
+          set -euo pipefail
+          n=1
+          while [ "$n" -le "$ATTEMPTS" ]; do
+            if tools/check-tap.sh; then exit 0; fi
+            if [ "$n" -lt "$ATTEMPTS" ]; then
+              echo "--- attempt $n of $ATTEMPTS: not bumped yet, waiting 60s ---"
+              sleep 60
+            fi
+            n=$((n + 1))
+          done
+          exit 1

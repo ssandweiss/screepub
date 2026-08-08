@@ -48,13 +48,21 @@ final class ExportAccessory: NSObject {
 
 enum ExportPanel {
     /// Save panel defaulting to the Desktop, with the purpose-labeled format
-    /// selector. `completion` runs only when the user confirms.
+    /// selector. `completion` runs only when the user confirms, and
+    /// `onCancel` when the panel closes without a choice.
+    ///
+    /// `onCancel` is required rather than optional on purpose. A caller
+    /// almost always announces the panel before opening it, and that
+    /// announcement is invisible from here — only the caller can take it
+    /// back. Making it optional is how the cancelled save came to leave
+    /// "choose where to save" on screen until the next conversion.
     @MainActor
     /// `kfxReady` comes from the caller's cached KFXToolchain status —
     /// probing it here would block the main thread on a spawned process.
     static func present(epub: URL,
                         stem: String,
                         kfxReady: Bool,
+                        onCancel: @escaping () -> Void,
                         completion: @escaping (URL, ExportFormat) -> Void) {
         let calibre = EbookConvert.isAvailable
         let formats = Export.available(for: epub, calibreAvailable: calibre)
@@ -69,7 +77,14 @@ enum ExportPanel {
         panel.accessoryView = accessory.view
 
         panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
+            // Anything short of a confirmed choice means no file was
+            // written: a Cancel, or the .OK-with-no-url case that is not
+            // supposed to happen. Both leave the caller's announcement
+            // standing with nothing coming to replace it, so both retract.
+            guard response == .OK, let url = panel.url else {
+                onCancel()
+                return
+            }
             completion(url, accessory.selected)
         }
     }

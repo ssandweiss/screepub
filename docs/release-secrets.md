@@ -40,6 +40,26 @@ base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy    # paste as AC_API_KEY_P8_BASE64
 - **`AC_API_KEY_ID`** — the key ID (the `XXXXXXXXXX` in the filename)
 - **`AC_API_ISSUER_ID`** — the Issuer ID shown at the top of that page
 
+## 3. `TAP_TOKEN` — OPTIONAL, and the only one whose absence is not fatal
+
+Without it the release still succeeds; the `tap` job just says so and
+exits clean, leaving the crib sheet in the run summary and the tap to be
+bumped by hand. With it, the tap bumps itself on every non-prerelease tag.
+
+GitHub → **Settings → Developer settings → Personal access tokens →
+Fine-grained tokens → Generate new token**:
+
+- **Resource owner:** `ssandweiss`
+- **Repository access:** *Only select repositories* → **`ssandweiss/homebrew-tap`**
+- **Permissions:** Repository permissions → **Contents: Read and write**.
+  Nothing else. That is the entire blast radius: it cannot touch this repo.
+- **Expiration:** a fine-grained token cannot be non-expiring beyond a year.
+  When it lapses, the `tap` job starts reporting "TAP_TOKEN is not set" and
+  `tap-freshness` goes red at the next release. That is a visible,
+  self-correcting failure, not a silent one.
+
+Paste as **`TAP_TOKEN`**.
+
 ## Sanity check
 
 **Updated 2026-07-31: a throwaway tag no longer works here.** Both the
@@ -68,20 +88,31 @@ Then do the real acceptance test: download the DMG on a **different Mac**,
 open it, drag to Applications, double-click, and convert a PDF — that's
 what confirms notarization + the sidecar entitlements are correct.
 
-## The Homebrew tap: flipped to per-arch, DONE 2026-07-31 at v0.4.2
+## The Homebrew tap: flipped to per-arch, DONE 2026-08-07 at v0.5.2
 
-**Status: done.** The section below is kept for the reasoning; the
-paste-ready block in it was WRONG and the correction is recorded at the
-end. The tap now installs `v0.4.2` on both architectures, verified with
-`brew style`, `brew audit --strict` on the formula and the cask, and a
-real `brew install` that upgraded 0.3.0 to 0.4.2 and ran the binary.
+**Status: done and pushed** (`ssandweiss/homebrew-tap@a2034f3`). The
+section below is kept for the reasoning; the paste-ready block in it was
+WRONG and the correction is recorded at the end. The tap installs
+`v0.5.2` on both architectures, verified with `brew style` and
+`brew audit --strict` on the formula and the cask, and with all three
+SHA-256s checked against the digests GitHub reports for the release
+assets rather than against the release prose that quotes them.
 
-**Why it went stale for three releases:** `homebrew-tap/` is a separate
-repo checked out inside this one and hidden from `git status` by
-`.git/info/exclude`, which is local-only. Nothing in CI touches it, so a
-release could never fail for forgetting it. Flipping the formula was
-skipped at v0.4.0, v0.4.1 and v0.4.2 for exactly that reason. The
-systemic fix is below under "Keeping it from going stale again".
+**Why it went stale for FIVE releases, and the real lesson:** the
+per-arch flip was written and locally verified at v0.4.2, and this file
+recorded it as done. It was never committed. `homebrew-tap/` is a
+separate repo checked out inside this one and hidden from `git status`
+by `.git/info/exclude`, which is local-only, so an uncommitted change in
+it looks exactly like no change at all. Every `brew install` from v0.3.0
+through v0.5.2 therefore served **0.3.0**, from a single
+`screepub-macOS` asset the release workflow had long since stopped
+producing.
+
+So the failure was not "the files never got edited." They were edited,
+and the edit was verified by a real `brew install`. The failure was that
+nothing outside one laptop could see whether that edit had ever shipped,
+and this file was written from the working tree instead of from the
+remote. Check the PUBLISHED state, never the local one.
 
 ### The original note (reasoning still correct)
 
@@ -164,17 +195,47 @@ clone pristine for `brew update`.
 
 ### Keeping it from going stale again
 
-The tap is invisible to every existing gate: it is a different repo, it
-is excluded locally, and no release job touches it. Two options, in
-ascending order of effort:
+All three pieces LANDED 2026-08-07. Two do the work, one keeps them
+honest:
 
-- **Floor:** `app/release.sh` already computes all three SHAs and throws
-  them at stdout. Capture them into `$GITHUB_STEP_SUMMARY` so the manual
-  edit is copy-paste instead of a download-and-hash chore.
-- **Real fix:** a `tap` job in `release.yml` that commits the formula and
-  cask update to `ssandweiss/homebrew-tap` directly. Needs a seventh
-  secret: a fine-grained PAT scoped to `contents:write` on that repo
-  only, which would get its own entry in the secrets table above.
+- **The bumper: `release.yml`'s `tap` job, running `tools/bump-tap.sh`.**
+  `needs: release`, so it cannot start before the assets exist. It clones
+  the tap, rewrites the cask's version and DMG SHA and the formula's two
+  urls and two SHAs, runs `brew style`, and commits. Checksums come from
+  the digests GitHub reports per asset, so nothing is downloaded and
+  nothing is re-hashed. Prereleases are skipped: a hyphen in the tag must
+  never become what `brew install` hands out.
 
-Until one of those lands, the tap will keep going stale, because nothing
-makes forgetting it visible.
+  Needs `TAP_TOKEN` (§3 above). **Without it the job does not fail the
+  release** — it says so and exits clean, leaving the crib sheet and the
+  manual path intact.
+
+- **The floor: `release.yml`'s "Tap bump crib sheet" step**, writing the
+  version and all three SHAs into `$GITHUB_STEP_SUMMARY`. This is the
+  fallback for a missing token or a failed bump, so the hand edit is
+  paste-and-commit rather than a download-and-hash chore.
+
+- **The alarm: `.github/workflows/tap-freshness.yml`, running
+  `tools/check-tap.sh`.** Weekly, on `workflow_dispatch`, and on every
+  published release. It reads the tap's cask and formula STRAIGHT FROM
+  GITHUB and fails when either pins something other than the newest
+  release, or carries a SHA that does not match that release's assets. No
+  secret needed, both repos being public.
+
+  Keep it even though the bumper exists. The bumper can be skipped, and a
+  bumper that silently no-ops is precisely the failure that hid five
+  releases. On a release trigger it retries for ten minutes, because it
+  races the bumper; on the weekly run it checks once, because a stale tap
+  will not fix itself while it waits.
+
+**Why the logic lives in `tools/*.sh` and not inline in the YAML:** these
+are the steps that have already failed silently once. Inline, they can
+only be tested by cutting a release. As scripts they can be run against
+the real repos, which is how `bump-tap.sh` was checked for the properties
+that matter: bumping to the version the tap already serves produces an
+EMPTY diff, bumping a tap that is a version behind restores it
+byte-for-byte, a restructured tap fails loudly instead of no-opping, and
+a tag with no release fails before touching anything. That last one found
+a real bug: `gh api` prints its 404 body on **stdout**, so an emptiness
+check accepted `{"message":"Not Found"...}` as a checksum. Both scripts
+now check the SHAPE of a digest, not merely that something came back.
