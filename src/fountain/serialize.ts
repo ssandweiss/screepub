@@ -136,6 +136,48 @@ function printedPageOffset(elements: ScreenplayElement[]): number | null {
   return best;
 }
 
+/** An emphasis run: a delimiter, content carrying no delimiter, the same
+ *  delimiter again. The parser stamps one run per source line, so runs are
+ *  never nested and this stays a safe match. */
+const EMPHASIS_RUN = /(\*{1,3}|_)([^*_]+?)\1/g;
+/** A slash sitting at a run's edge, with any space it brought along. */
+const EDGE_SLASH_LEAD = /^\s*\/\s*/;
+const EDGE_SLASH_TRAIL = /\s*\/\s*$/;
+
+/**
+ * Fountain treats `/*` … `*​/` as a boneyard comment and DELETES everything
+ * between them. Neither delimiter is ever written on purpose: emphasis is
+ * stamped one run per source line, so a lyric's `/` separator landing at a
+ * run's edge puts the delimiter hard against the slash. A 110-page script
+ * lost 63% of itself to exactly this, silently, because stage 1 was
+ * correct and fountain-js ate the file afterwards.
+ *
+ * The slash moves OUT of the run rather than getting a space beside it:
+ * Fountain forbids whitespace inside the delimiters, so `*text *` stops
+ * italicizing and renders literal asterisks. Moving it keeps both the
+ * slash and the emphasis.
+ *
+ * The final sweep is the part that matters. Emphasis is cosmetic and the
+ * artifact is not, so if any delimiter pair survives the rewrite, every
+ * marker on the line goes and the words stay.
+ */
+export function disarmBoneyard(styled: string): string {
+  const moved = styled.replace(EMPHASIS_RUN, (whole, delim: string, body: string) => {
+    const lead = EDGE_SLASH_LEAD.test(body);
+    const trail = EDGE_SLASH_TRAIL.test(body);
+    if (!lead && !trail) return whole;
+    let inner = body;
+    if (lead) inner = inner.replace(EDGE_SLASH_LEAD, '');
+    if (trail) inner = inner.replace(EDGE_SLASH_TRAIL, '');
+    // A run that was nothing but a slash keeps the slash and loses the
+    // emphasis it had no text to carry.
+    if (!inner.trim()) return ' / ';
+    return `${lead ? ' / ' : ''}${delim}${inner}${delim}${trail ? ' / ' : ''}`;
+  });
+  if (!moved.includes('/*') && !moved.includes('*/')) return moved;
+  return moved.replace(/\*{1,3}|_/g, '');
+}
+
 /** Serialize a parsed screenplay to Fountain text. */
 export function toFountain(
   screenplay: ParsedScreenplay,
@@ -209,7 +251,7 @@ export function toFountain(
         else out.push(text);
         break;
       case 'dialogue': {
-        const line = (el.styledText ?? el.text).trim();
+        const line = disarmBoneyard((el.styledText ?? el.text).trim());
         const note = fmtNote(el.fmt);
         const withNote = note ? `${note} ${line}` : line;
         if (block) block.push(withNote);
@@ -251,7 +293,9 @@ export function toFountain(
         // allowed to carry a styled variant or an fmt note (a future type
         // falls back to plain and unmarked).
         closeBlock();
-        const body = el.type === 'action' ? (el.styledText ?? el.text).trim() : text;
+        const body = el.type === 'action'
+          ? disarmBoneyard((el.styledText ?? el.text).trim())
+          : text;
         const forced = NEEDS_FORCE.test(body) ? `!${body}` : body;
         const note = el.type === 'action' ? fmtNote(el.fmt) : null;
         // Glued directly above with a single newline and NO blank line: that
