@@ -1,6 +1,6 @@
 {
   "name": "screepub",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Screenplay PDF → Fountain → reflowable EPUB3 CLI",
   "homepage": "https://github.com/ssandweiss/screepub",
   "repository": {
