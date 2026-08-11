@@ -126,12 +126,27 @@ function renderBlocks(
   // unbreakable wrapper so a cue never strands at a page bottom with its
   // speech on the next page — the wrapper form, which scene headings no
   // longer need.
+  // The keep closes BEFORE the first dialogue token, not after it. A
+  // dialogue token is a whole paragraph, so closing after it put an entire
+  // speech inside one break-inside: avoid block: an eleven-line speech that
+  // would not fit moved wholesale, ending the page two thirds of the way
+  // down, and keepSpeechesWhole was effectively on however it was set.
+  //
+  // What holds the speech together instead is the chain, every link of it
+  // device-settled: break-after: avoid binds a cue to what follows and
+  // binds ALONE (registry #5a), the same now carries a parenthetical into
+  // its dialogue, and orphans on p.dialogue keeps the print minimum of
+  // lines at the page edge (registry #17). The keep is left doing the one
+  // job a chain cannot: stopping a break INSIDE the cue-and-parenthetical
+  // group.
   const speechBlock = (cells: Cell[]): string => {
     const firstLine = cells.findIndex((c) => c.kind === 'dialogue');
-    const cut = firstLine === -1 ? cells.length : firstLine + 1;
+    const cut = firstLine === -1 ? cells.length : firstLine;
     const head = cells.slice(0, cut).map((c) => c.html).join('');
     const tail = cells.slice(cut).map((c) => c.html).join('');
-    return `<div class="dialogue-block">\n<div class="keep-together">\n${head}</div>\n${tail}</div>\n`;
+    // Stray dialogue with no cue ahead of it has nothing to keep.
+    const kept = head ? `<div class="keep-together">\n${head}</div>\n` : '';
+    return `<div class="dialogue-block">\n${kept}${tail}</div>\n`;
   };
   const closeSpeech = () => {
     if (!speech) return;

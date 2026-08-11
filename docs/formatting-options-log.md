@@ -489,6 +489,25 @@ and the suite will say so if you forget.
   `src/convert.ts` (`stageOneWarnings`, `CONTD_CUE`).
 
 ### 8b. Cue keeps its first dialogue line (always on)
+- **NARROWED 2026-08-11 — the keep no longer contains the speech.** The
+  wrapper closed AFTER the first dialogue TOKEN, and our serializer writes
+  a whole speech as one line, so that token is the entire speech: an
+  eleven-line speech sat inside one `break-inside: avoid` block. When it
+  would not fit, the renderer moved all of it and left the page ending two
+  thirds of the way down. That is precisely the oversized-chunk symptom #5
+  warns about, arriving from the keep instead of from the chain. It also
+  made `keepSpeechesWhole` (#8c) true in practice however it was set,
+  which is why that option looked inert on single-paragraph speeches.
+  The wrapper now closes BEFORE the first dialogue token, so it holds the
+  cue and any parenthetical and nothing else. What holds the speech to its
+  cue instead is the chain, every link already device-settled: `break-after:
+  avoid` on `p.character` binds and binds ALONE (#5a), and `orphans` on
+  `p.dialogue` keeps print's minimum at the page edge (#17).
+  **Parentheticals stay unchained on purpose** — see #5; adding that link
+  back would rebuild the same oversized chunk in a new place.
+  **Device verdict: PENDING.** Every primitive is separately confirmed, the
+  combination is not. Next Kindle pass: a speech long enough to need
+  splitting, at max font size, and confirm the cue does not strand.
 - **SUPERSEDED IN PART — device verdict (2026-07-29, same-day A/B on
   device):** the 2026-07-22 conclusion below was a fact about a FORMAT,
   recorded as a fact about the delivery route. Same script, same

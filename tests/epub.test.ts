@@ -354,16 +354,22 @@ describe('buildEpub', () => {
   });
 });
 
-// ── cue keeps with its first dialogue line ───────────────
+// ── the cue keep, and what it deliberately excludes ──────
 
+// CHANGED: the keep used to close AFTER the first dialogue token. Our
+// serializer writes a whole speech as ONE line, so that token is the
+// entire speech, and the keep became an unbreakable block as tall as the
+// speech. An eleven-line speech that would not fit moved wholesale and
+// left a page ending two thirds of the way down — the same blank-bottom
+// symptom registry #5 blames on oversized avoid chunks.
 describe('cue keep-with-dialogue wrapper', () => {
-  test('cue + parenthetical + first line share an unbreakable wrapper', () => {
+  test('the keep holds cue and parenthetical, and lets the speech split', () => {
     const tokens = new Fountain().parse(
       'INT. A - DAY\n\nHi.\n\n@JACK\n(tired)\nFirst line of speech.\nSecond line of speech.\n', true,
     ).tokens;
     const [file] = tokensToBody(tokens).files;
     expect(file.xhtml).toMatch(
-      /<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JACK<\/p>\s*<p class="parenthetical">\(tired\)<\/p>\s*<p class="dialogue">First line of speech\.<\/p>\s*<\/div>\s*<p class="dialogue">Second line of speech\.<\/p>\s*<\/div>/,
+      /<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JACK<\/p>\s*<p class="parenthetical">\(tired\)<\/p>\s*<\/div>\s*<p class="dialogue">First line of speech\.<\/p>\s*<p class="dialogue">Second line of speech\.<\/p>\s*<\/div>/,
     );
   });
 
@@ -371,7 +377,7 @@ describe('cue keep-with-dialogue wrapper', () => {
     const tokens = new Fountain().parse('INT. A - DAY\n\nHi.\n\n@JACK\nOnly line.\n', true).tokens;
     const [file] = tokensToBody(tokens).files;
     expect(file.xhtml).toMatch(
-      /<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JACK<\/p>\s*<p class="dialogue">Only line\.<\/p>\s*<\/div>\s*<\/div>/,
+      /<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JACK<\/p>\s*<\/div>\s*<p class="dialogue">Only line\.<\/p>\s*<\/div>/,
     );
   });
 });
@@ -744,5 +750,53 @@ describe('font shifts', () => {
     expect(rules).not.toContain('max-width');
     expect(rules).not.toContain('line-height');
     expect(rules).not.toMatch(/\b(min|max|clamp|var)\(/);
+  });
+});
+
+// ── the cue keep holds the cue, not the whole speech ─────────────────
+//
+// `.keep-together` carries break-inside: avoid, and it used to close
+// AFTER the first dialogue token. A dialogue token is a whole paragraph,
+// so an eleven-line speech became one unbreakable eleven-line block: when
+// it would not fit, the reader got a page ending two thirds of the way
+// down and the entire speech pushed over. It also made keepSpeechesWhole
+// true in practice no matter how the setting was left.
+//
+// The cue is bound to what follows by break-after: avoid on p.character
+// (registry #5a settled that it binds alone), and the first lines are held
+// by orphans on p.dialogue (registry #17). The keep only has to stop a cue
+// separating from a parenthetical.
+describe('the cue keep', () => {
+  const speech = (extra = '') => new Fountain().parse(
+    `@JACK\n${extra}This is a long speech that would run to many lines on a narrow screen and must be free to split across a page.\n`,
+    true,
+  ).tokens;
+
+  const xhtml = (tokens: ReturnType<typeof speech>) => tokensToBody(tokens).files[0].xhtml;
+
+  test('the dialogue paragraph is outside the keep, so it can split', () => {
+    const keep = /<div class="keep-together">([\s\S]*?)<\/div>/.exec(xhtml(speech()))?.[1] ?? '';
+    expect(keep).toContain('class="character"');
+    expect(keep).not.toContain('class="dialogue"');
+  });
+
+  test('a parenthetical still cannot separate from its cue', () => {
+    const keep = /<div class="keep-together">([\s\S]*?)<\/div>/.exec(xhtml(speech('(tired)\n')))?.[1] ?? '';
+    expect(keep).toContain('class="character"');
+    expect(keep).toContain('class="parenthetical"');
+    expect(keep).not.toContain('class="dialogue"');
+  });
+
+  test('the dialogue still renders, immediately after the keep', () => {
+    const body = xhtml(speech());
+    expect(body).toContain('class="dialogue"');
+    expect(body.indexOf('class="dialogue"')).toBeGreaterThan(body.indexOf('keep-together'));
+  });
+
+  test('the parenthetical is still NOT chained forward', () => {
+    // Registry #5: every avoid link grows the chunk a renderer pushes to
+    // the next page, and pushed chunks ARE the blank-bottom page this
+    // change exists to fix. Shrinking the keep must not smuggle one back.
+    expect(ruleFor(SCREENPLAY_CSS, 'p.parenthetical')).not.toContain('break-after');
   });
 });

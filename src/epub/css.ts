@@ -187,6 +187,10 @@ ${o.cueAlignment === 'centered'
   break-after: avoid;
 }
 
+/* Deliberately NOT chained forward. Registry #5: every avoid link grows
+   the unbreakable chunk a renderer pushes to the next page, and pushed
+   chunks are exactly the blank-bottom "weird page break" this file keeps
+   being asked to fix. A parenthetical breaks freely on purpose. */
 p.parenthetical {
 ${o.cueAlignment === 'centered'
     ? '  text-align: center;'
