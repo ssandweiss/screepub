@@ -240,16 +240,22 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
   // header comment. Default options, so the two gated-off entries
   // (`.dialogue-block`, `section.scene`) are absent by design.
   //
-  // Six of the seven entries carry BOTH spellings of their avoid, hence the
-  // twelve declarations. The seventh is the column-spelling shadow rule
+  // Five entries carry BOTH spellings of one avoid (10), and .keep-together
+  // carries both spellings of TWO — inside, so a cue cannot split from its
+  // parenthetical, and after, so the wrapper cannot split from the dialogue
+  // it introduces (4). Hence fourteen. That forward pair was added after a
+  // device read showed cues stranding: with the dialogue moved out of the
+  // wrapper, the cue is the wrapper's last child and break-after on
+  // p.character governs a break that no longer exists.
+  // The remaining entry is the column-spelling shadow rule
   // (-webkit-column-break-inside, css.ts), which re-lists two selectors
   // already named above for multicol-paginating engines; it matches neither
   // `page-break-inside` nor `break-inside`, so it adds an entry without
   // adding to the count.
-  test('the avoid inventory is closed — seven entries, twelve declarations', () => {
+  test('the avoid inventory is closed — seven entries, fourteen declarations', () => {
     const declarations =
       SCREENPLAY_CSS.match(/^\s*(?:page-)?break-(?:after|before|inside):\s*avoid;/gm) ?? [];
-    expect(declarations).toHaveLength(12);
+    expect(declarations).toHaveLength(14);
 
     expect(selectorsCarrying(/:\s*avoid;/)).toEqual([
       '.keep-together',
@@ -791,6 +797,18 @@ describe('the cue keep', () => {
     const body = xhtml(speech());
     expect(body).toContain('class="dialogue"');
     expect(body.indexOf('class="dialogue"')).toBeGreaterThan(body.indexOf('keep-together'));
+  });
+
+  test('the keep binds FORWARD to the dialogue it introduces', () => {
+    // Regression, found on device. Once the keep stopped containing the
+    // dialogue, the cue became the keep's LAST child, so break-after on
+    // p.character governs a break that does not exist. The break a reader
+    // actually hits is between the keep and the dialogue paragraph outside
+    // it, and only the keep can carry that one. Without this the cue
+    // strands at the foot of the page, which is the exact thing #8b exists
+    // to prevent.
+    expect(ruleFor(SCREENPLAY_CSS, '.keep-together')).toContain('break-after: avoid');
+    expect(ruleFor(SCREENPLAY_CSS, '.keep-together')).toContain('page-break-after: avoid');
   });
 
   test('the parenthetical is still NOT chained forward', () => {

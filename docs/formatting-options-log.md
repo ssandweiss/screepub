@@ -505,9 +505,23 @@ and the suite will say so if you forget.
   `p.dialogue` keeps print's minimum at the page edge (#17).
   **Parentheticals stay unchained on purpose** — see #5; adding that link
   back would rebuild the same oversized chunk in a new place.
-  **Device verdict: PENDING.** Every primitive is separately confirmed, the
-  combination is not. Next Kindle pass: a speech long enough to need
-  splitting, at max font size, and confirm the cue does not strand.
+  **Device verdict 2026-08-11: the narrowing STRANDED CUES, and why.**
+  First read on device after the change showed dialogue separating from its
+  character name. The cause was structural, not a renderer limit: with the
+  dialogue moved out of the wrapper, the cue became the wrapper's LAST
+  child, so `break-after: avoid` on `p.character` governed a break that no
+  longer existed. The break a reader meets is the one between the wrapper
+  and the dialogue paragraph outside it, and nothing carried it.
+  `.keep-together` now carries `break-after: avoid` itself (both spellings),
+  which is the link that was missing. The chunk stays bounded at wrapper +
+  the `orphans` minimum, not wrapper + speech, so this does not undo the
+  narrowing.
+  **Lesson worth more than the fix:** #5a settled that `break-after: avoid`
+  BINDS on this device, and that was true and irrelevant. The rule was on
+  the right element and the wrong side of a wrapper boundary. A verdict
+  about a PROPERTY does not transfer across a change in DOM shape.
+  **Still pending:** confirm on device that a long speech now splits across
+  the page break with its cue attached, at max font size.
 - **SUPERSEDED IN PART — device verdict (2026-07-29, same-day A/B on
   device):** the 2026-07-22 conclusion below was a fact about a FORMAT,
   recorded as a fact about the delivery route. Same script, same

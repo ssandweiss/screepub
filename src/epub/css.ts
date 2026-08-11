@@ -104,12 +104,32 @@ body {
   font-family: ${FONT_STACKS[o.fontFamily]};
 }
 ${sceneBreak}
-/* The cue keep: cue + parentheticals + first dialogue line share this
-   unbreakable wrapper so a cue never strands at a page bottom.
-   Container-level inside-avoid is the KDP-documented keep-together form. */
+/* The cue keep: cue + parentheticals share this unbreakable wrapper, and
+   it binds FORWARD to the dialogue that follows it, so a cue never strands
+   at a page bottom. Container-level inside-avoid is the KDP-documented
+   keep-together form.
+
+   Both halves are load-bearing and the forward half was learned on device.
+   The wrapper used to contain the first dialogue TOKEN, which our
+   serializer writes as the whole speech, so the keep was as tall as the
+   speech and pushed blank-bottomed pages. Taking the dialogue out fixed
+   that and broke this: the cue became the wrapper's LAST child, so
+   break-after on p.character governed a break that no longer existed, and
+   cues stranded again. The break a reader meets is the one between this
+   wrapper and the dialogue outside it, so the wrapper is the only thing
+   that can carry it.
+
+   The chunk this creates is bounded: wrapper + the orphans minimum of
+   dialogue lines (#17), not wrapper + speech. That bound is the whole
+   point, per #5 on avoid links growing pushed chunks.
+
+   NOTE: no backticks in this comment. It lives inside a template literal,
+   and a backtick here ends the stylesheet mid-sentence. */
 .keep-together {
   page-break-inside: avoid;
   break-inside: avoid;
+  page-break-after: avoid;
+  break-after: avoid;
 }
 
 /* Apple Books honors ONLY this older spelling; the Readium family
