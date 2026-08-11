@@ -680,16 +680,27 @@ function deinterleaveDualDialogue(
       // first body line. It carries no text, so nothing downstream loses
       // anything (joinItems re-inserts spaces from the surviving gaps).
       const items = lines[i].items.filter((it) => it.str.trim() !== '');
-      const straddles = items.some(
-        (it) => it.transform[4] < boundary - 6 && endX(it) > boundary + 6,
-      );
-      if (straddles) break; // full-width line — region over
 
       // Refine toward the right column's true text edge — only ever move
       // LEFT: indented lines (parentheticals) start deeper in the column
       // and must not drag the boundary onto normal dialogue lines.
+      //
+      // THE ORDER HERE IS LOAD-BEARING, and it used to be the other way
+      // round. The opening boundary only assumes the cue-to-body offset
+      // (13% of the page). A right column whose body starts LEFT of that
+      // guess while still running past it looks exactly like a full-width
+      // line, so the straddle test below ended the region on its own first
+      // body line: both cues fell back to action, and the two simultaneous
+      // speeches were concatenated into one sentence. A line that splits
+      // cleanly into two columns is by definition not full-width, so the
+      // split gets to speak first.
       const gapSplit = clusterSplit(items, pageWidth);
       if (gapSplit) boundary = Math.min(boundary, gapSplit.rightItems[0].transform[4] - 6);
+
+      const straddles = items.some(
+        (it) => it.transform[4] < boundary - 6 && endX(it) > boundary + 6,
+      );
+      if (straddles) break; // full-width line — region over
 
       const leftItems = items.filter((it) => it.transform[4] < boundary);
       const rightItems = items.filter((it) => it.transform[4] >= boundary);

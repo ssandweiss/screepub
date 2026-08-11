@@ -673,3 +673,35 @@ describe('extractDocument progress', () => {
     expect(lines.length).toBeGreaterThan(0);
   });
 });
+
+// ── dual dialogue: the boundary must refine before it judges ─────────
+//
+// Geometry lifted from a real script (page width 612): the right column's
+// CUE sits at x=424 but its BODY starts at x=332, an offset of 15% of the
+// page rather than the 13% the opening boundary assumes. That puts the
+// right column's own dialogue LEFT of the boundary while it still runs
+// past it, so the straddle test read a cleanly split two-column line as a
+// full-width one and ended the region on its first body line.
+//
+// What the reader got was both cues demoted to action and the two
+// speeches concatenated into one sentence: "Really great. Just okay."
+describe('dual dialogue body lines', () => {
+  const dual = () => groupItemsIntoLines([
+    item('LOU', 200, 219), item('SYD', 424, 219),
+    item('Really great.', 108, 207), item('Just okay.', 332, 207),
+  ], 612, 6);
+
+  test('the two speeches are not concatenated into one line', () => {
+    expect(dual().map((l) => l.text)).not.toContain('Really great. Just okay.');
+  });
+
+  test('each column keeps its own speech, left column first', () => {
+    expect(dual().map((l) => l.text)).toEqual(['LOU', 'Really great.', 'SYD', 'Just okay.']);
+  });
+
+  test("the right column's cue is marked for fountain's ^ syntax", () => {
+    const lines = dual();
+    expect(lines.find((l) => l.text === 'SYD')?.dualRight).toBe(true);
+    expect(lines.find((l) => l.text === 'LOU')?.dualRight).toBeUndefined();
+  });
+});
