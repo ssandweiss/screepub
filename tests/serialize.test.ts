@@ -395,3 +395,62 @@ describe('font-shift notes', () => {
     expect(out).toContain('[[fmt: +1]]\n!.45 ON THE TABLE');
   });
 });
+
+// ── boneyard delimiters must never be emitted ────────────
+//
+// Fountain deletes everything between `/*` and `*/`. Neither is ever
+// written on purpose: the parser stamps one emphasis run per source line,
+// so a lyric's `/` separator landing at a run boundary puts a `*` hard
+// against a `/`. A real 110-page script lost 63% of itself this way, in
+// silence, because stage 1 was perfectly correct and stage 2 ate the file.
+//
+// Note a naive fix of inserting a space does NOT work: Fountain requires
+// no whitespace inside the delimiters, so `*text *` stops italicizing and
+// renders literal asterisks. The slash has to move OUT of the run.
+
+describe('boneyard delimiters', () => {
+  const bothRuns = () => screenplay([
+    el({ text: 'SINGER', type: 'character', character: 'SINGER' }),
+    el({
+      text: 'Roll the tape, we ride tonight / Neon on the overpass',
+      styledText: '*Roll the tape, we ride tonight /* *Neon on the overpass*',
+      type: 'dialogue',
+    }),
+    el({ text: 'INT. DINER - NIGHT', type: 'scene', pageNum: 2 }),
+    el({ text: 'A jukebox coughs to life.', type: 'action', pageNum: 2 }),
+    el({ text: 'SINGER', type: 'character', character: 'SINGER', pageNum: 3 }),
+    el({
+      text: '/ And the morning takes it back',
+      styledText: '*/ And the morning takes it back*',
+      type: 'dialogue',
+      pageNum: 3,
+    }),
+    el({ text: 'INT. GARAGE - DAWN', type: 'scene', pageNum: 4 }),
+    el({ text: 'The last chord rings out.', type: 'action', pageNum: 4 }),
+  ]);
+
+  test('an emphasis run ending on a slash does not emit /*', () => {
+    expect(toFountain(bothRuns())).not.toContain('/*');
+  });
+
+  test('an emphasis run starting on a slash does not emit */', () => {
+    expect(toFountain(bothRuns())).not.toContain('*/');
+  });
+
+  test('nothing between the two lyrics is swallowed by fountain-js', () => {
+    // The bug in one assertion: everything between the delimiters vanished.
+    const tokens = new Fountain().parse(toFountain(bothRuns()), true).tokens ?? [];
+    const text = tokens.map((t) => t.text ?? '').join('\n');
+    expect(text).toContain('INT. DINER - NIGHT');
+    expect(text).toContain('A jukebox coughs to life.');
+    expect(text).toContain('INT. GARAGE - DAWN');
+    expect(text).toContain('The last chord rings out.');
+  });
+
+  test('the slash survives, and the words around it keep their emphasis', () => {
+    const out = toFountain(bothRuns());
+    expect(out).toContain('/');
+    expect(out).toContain('*Roll the tape, we ride tonight*');
+    expect(out).toContain('*And the morning takes it back*');
+  });
+});
