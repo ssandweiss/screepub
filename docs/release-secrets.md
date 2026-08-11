@@ -215,18 +215,32 @@ honest:
   fallback for a missing token or a failed bump, so the hand edit is
   paste-and-commit rather than a download-and-hash chore.
 
-- **The alarm: `.github/workflows/tap-freshness.yml`, running
-  `tools/check-tap.sh`.** Weekly, on `workflow_dispatch`, and on every
-  published release. It reads the tap's cask and formula STRAIGHT FROM
-  GITHUB and fails when either pins something other than the newest
-  release, or carries a SHA that does not match that release's assets. No
-  secret needed, both repos being public.
+- **The alarm, in two places, both running `tools/check-tap.sh`.** It
+  reads the tap's cask and formula STRAIGHT FROM GITHUB and fails when
+  either pins something other than the newest release, or carries a SHA
+  that does not match that release's assets. No secret needed, both repos
+  being public.
 
-  Keep it even though the bumper exists. The bumper can be skipped, and a
-  bumper that silently no-ops is precisely the failure that hid five
-  releases. On a release trigger it retries for ten minutes, because it
-  races the bumper; on the weekly run it checks once, because a stale tap
-  will not fix itself while it waits.
+  - `release.yml`'s **`tap-check`** job, `needs: tap`, is the per-release
+    check. A red job there means the release published fine and the tap
+    does not serve it yet.
+  - `.github/workflows/tap-freshness.yml` is weekly plus
+    `workflow_dispatch`, and catches drift BETWEEN releases: a tap edited
+    by hand, a release deleted, a formula half-bumped.
+
+  Keep the alarm even though the bumper exists. The bumper can be skipped
+  for want of a token, and a bumper that silently no-ops is precisely the
+  failure that hid five releases.
+
+  **The trap that cost a version to find:** `tap-freshness.yml` originally
+  also carried `on: release: [published]`, and at v0.5.3 that trigger did
+  not fire even once. GitHub does not start new workflow runs from events
+  raised by a workflow using the default `GITHUB_TOKEN`, and `release.yml`
+  creates the release with exactly that token. The trigger read as
+  coverage while providing none, which is the same shape as the tap
+  problem itself. **Anything that must run per release has to run INSIDE
+  the release workflow**, which is why `tap-check` is a job there and not
+  a trigger elsewhere.
 
 **Why the logic lives in `tools/*.sh` and not inline in the YAML:** these
 are the steps that have already failed silently once. Inline, they can

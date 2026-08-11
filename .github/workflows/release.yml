@@ -315,3 +315,40 @@ jobs:
             commit -q -am "Screepub $V"
           git -C tap push
           echo "::notice::tap bumped to $V"
+
+  # Did the bump actually produce something installable? Reads the tap FROM
+  # GITHUB, never a checkout, which is the blind spot that hid five
+  # releases.
+  #
+  # This lives HERE, in the release run, and not on a `release: published`
+  # trigger in tap-freshness.yml, because that trigger cannot work: GitHub
+  # does not start new workflow runs from events raised by a workflow using
+  # the default GITHUB_TOKEN, and the release above is created with exactly
+  # that token. It was tried at v0.5.3 and never fired once.
+  #
+  # A red job here means the release published fine and the tap does not
+  # serve it yet. That is the alarm, not a broken build. With no TAP_TOKEN
+  # it will fail every time until the tap is bumped by hand, which is the
+  # honest reading of "this release is not fully out".
+  tap-check:
+    needs: tap
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The tap serves this release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # `needs: tap` already sequences this after the push, so there is
+          # no race to retry away. A few seconds of API propagation is the
+          # only thing worth absorbing.
+          n=1
+          while [ "$n" -le 3 ]; do
+            if tools/check-tap.sh; then exit 0; fi
+            [ "$n" -lt 3 ] && { echo "--- attempt $n of 3, waiting 20s ---"; sleep 20; }
+            n=$((n + 1))
+          done
+          echo "::error::The release published, but the Homebrew tap does not serve it. Run: tools/bump-tap.sh ${GITHUB_REF_NAME#v} <tap-checkout>, then commit and push."
+          exit 1
