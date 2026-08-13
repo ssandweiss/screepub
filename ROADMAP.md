@@ -56,6 +56,16 @@ noise. Screepub already recognises revision marks and scene boundaries.
 character speaks — all of it is already computed during conversion and then
 thrown away. Useful if you read scripts in volume.
 
+**A guide inside the app, instead of in a README.** The most useful support
+writing this project has is the Send-to-Kindle setup, because Amazon silently
+discards documents from an unapproved sender address and gives you no error to
+search for. That text currently lives in a Markdown file on GitHub, which is
+exactly where the person hitting the problem is not. The same goes for what
+each output format is for, and why a Kindle that doesn't appear in Finder
+isn't broken. A short guide in the app, shown at the point each question
+actually comes up rather than as a wall of text on first launch, would reach
+the people the docs currently miss.
+
 **A running header that says which scene you're in.** On paper you keep your
 place with your thumb and the shape of the page. Reflowed onto a screen both
 of those go away, and it's easy to lose track of where a scene started once
