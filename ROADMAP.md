@@ -56,6 +56,15 @@ noise. Screepub already recognises revision marks and scene boundaries.
 character speaks — all of it is already computed during conversion and then
 thrown away. Useful if you read scripts in volume.
 
+**A running header that says which scene you're in.** On paper you keep your
+place with your thumb and the shape of the page. Reflowed onto a screen both
+of those go away, and it's easy to lose track of where a scene started once
+the slugline has scrolled off. Screepub already identifies every scene
+boundary while converting, so carrying the current slugline in a page header
+is mostly a formatting question. Two honest limits: sideloaded Kindles ignore
+most header styling, and a header costs a line of screen on a six-inch
+device, so it would ship as a toggle rather than always-on.
+
 **The screenplay typeface, everywhere.** Screepub asks each device for
 Courier Prime, the typeface of a printed script, but most devices don't
 carry it and quietly substitute their own typewriter font. Bundling the

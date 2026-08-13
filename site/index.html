@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Screepub</title>
+<style>
+:root{
+  --paper:#F7F2E6; --ink:#1D1B16; --ink-soft:#4A453A; --ink-muted:#6D6960;
+  --brass:#E8A33D; --ground:#23272F; --alarm:#AF3220; --hole:rgba(29,27,22,.10);
+  --ink-on-brass:#1D1B16;
+  --brass-specular:#FDF1CE; --brass-highlight:#F6D486;
+  --brass-shadow:#BE7C1E; --brass-rim:#8B5917;
+  --fs:'Courier Prime','Courier New',ui-monospace,monospace;
+  --fp:'Literata',Georgia,'Times New Roman',serif;
+  --canvas:1440px; --binding:12%; --gut:8%; --hole-center:4%;
+  --brad:clamp(20px,2.2vw,32px);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);font-family:var(--fp);-webkit-font-smoothing:antialiased}
+.canvas{max-width:var(--canvas);margin:0 auto;background:var(--paper);
+  box-shadow:0 3px 34px rgba(0,0,0,.5);position:relative;overflow:clip}
+.pad{padding-left:var(--binding);padding-right:var(--gut)}
+
+/* ---------- fixed furniture ---------- */
+.rail{position:fixed;top:0;bottom:0;left:50%;transform:translateX(-50%);
+  width:min(var(--canvas),100%);pointer-events:none;z-index:70}
+.rail i{position:absolute;left:var(--hole-center);width:var(--brad);height:var(--brad);
+  margin-left:calc(var(--brad)/-2);margin-top:calc(var(--brad)/-2);border-radius:50%;
+  background:radial-gradient(circle at 33% 27%,var(--brass-specular) 0%,
+    var(--brass-highlight) 17%,var(--brass) 45%,var(--brass-shadow) 76%,var(--brass-rim) 100%);
+  box-shadow:0 2px 5px rgba(29,27,22,.35),inset 0 0 0 1px rgba(122,81,22,.55)}
+.rail i.empty{background:var(--hole);
+  box-shadow:inset 0 2px 4px rgba(29,27,22,.32),0 1px 0 rgba(255,255,255,.35)}
+.rail i.b1{top:30.7%}.rail i.b2{top:50%}.rail i.b3{top:69.3%}
+
+.topbar{position:fixed;top:0;left:0;right:0;z-index:90;
+  transform:translateY(-101%);transition:transform .34s cubic-bezier(.32,.72,0,1)}
+.topbar.on{transform:none}
+.topbar .in{max-width:var(--canvas);margin:0 auto;background:var(--paper);
+  border-bottom:1px solid rgba(29,27,22,.12);
+  padding:10px var(--gut) 10px var(--binding);
+  display:flex;align-items:center;gap:24px}
+.topbar .who{font-family:var(--fs);font-weight:700;letter-spacing:.22em;
+  font-size:12px;color:var(--ink);text-decoration:none}
+.nav{display:flex;gap:20px;align-items:center}
+.nav a{font-family:var(--fs);font-size:11px;letter-spacing:.1em;color:var(--ink-muted);
+  text-decoration:none;padding:3px 0;border-bottom:1px solid transparent;
+  transition:color .18s,border-color .18s}
+.nav a:hover{color:var(--ink);border-bottom-color:var(--brass)}
+.gh{display:inline-flex;align-items:center;border-bottom:0!important}
+.gh svg{width:16px;height:16px;fill:currentColor;display:block}
+.gh:hover{color:var(--ink)}
+.topbar .sp{margin-left:auto}
+
+.btn{display:inline-block;text-decoration:none;
+  background:radial-gradient(circle at 33% 27%,var(--brass-highlight) 0%,
+    var(--brass) 45%,var(--brass-shadow) 100%);
+  color:var(--ink-on-brass);font-family:var(--fs);font-weight:700;
+  font-size:12px;letter-spacing:.09em;padding:11px 20px;border-radius:3px;
+  box-shadow:0 1px 3px rgba(29,27,22,.3)}
+.btn.lg{font-size:13px;padding:14px 24px}
+.fine{font-family:var(--fs);color:var(--ink-muted);font-size:11px;letter-spacing:.08em}
+
+/* ---------- act 1 ---------- */
+.mark{position:absolute;top:34px;left:var(--binding);font-family:var(--fs);
+  font-weight:700;letter-spacing:.22em;font-size:13px;color:var(--ink)}
+.topfine{position:absolute;top:35px;right:var(--gut);font-family:var(--fs);
+  font-size:11px;letter-spacing:.12em;color:var(--ink-muted)}
+/* position:relative is load-bearing: .scrollcue is absolute, and without a
+   positioned hero it anchors to .canvas and lands on top of the footer. */
+.hero{position:relative;min-height:100vh;padding-top:24vh;
+  display:flex;flex-direction:column;align-items:flex-start}
+.hero .lift{will-change:transform,opacity}
+h1{font-family:var(--fp);font-weight:400;font-size:clamp(30px,4.2vw,46px);
+  line-height:1.14;letter-spacing:-.014em;margin:0;max-width:15em;color:var(--ink)}
+h1 .answer{color:var(--ink-muted);display:block}
+/* Sits just under the headline rather than being pushed to the floor. */
+.hero .row{margin-top:44px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.scrollcue{position:absolute;bottom:34px;right:var(--gut);font-family:var(--fs);
+  font-size:11px;letter-spacing:.1em;color:var(--ink-muted)}
+
+/* ---------- the reader act ---------- */
+.act{position:relative}
+.act.two{height:360vh}
+.stick{position:sticky;top:0;height:100vh;overflow:hidden}
+
+.phase{position:absolute;top:8vh;left:var(--binding);right:var(--gut);z-index:6;
+  pointer-events:none;transition:opacity .28s ease-out}
+.phase.out{opacity:0}
+.phase.col{top:50%;transform:translateY(-50%);width:min(340px,28vw);right:auto}
+.slug{font-family:var(--fs);font-weight:700;letter-spacing:.06em;
+  color:var(--ink-muted);font-size:12px;margin-bottom:20px}
+h2{font-family:var(--fp);font-weight:400;font-size:clamp(24px,2.9vw,35px);
+  line-height:1.18;letter-spacing:-.012em;margin:0;max-width:16em;color:var(--ink)}
+h2 .answer{color:var(--ink-muted);display:block}
+.lead{font-family:var(--fp);color:var(--ink-soft);font-size:16px;
+  line-height:1.7;max-width:29em;margin:16px 0 0}
+
+.stage{position:absolute;inset:0;z-index:4;pointer-events:none}
+.dev{position:absolute;left:50%;top:50%;will-change:transform,opacity}
+.device{position:relative;background:#34332F;border-radius:16px;padding:16px 13px 34px;
+  box-shadow:0 10px 50px rgba(29,27,22,.42)}
+/* The wordmark rides the chin, where an e-reader carries its brand. */
+.chin{position:absolute;left:0;right:0;bottom:10px;text-align:center;
+  font-family:var(--fs);font-weight:700;font-size:12px;letter-spacing:.24em}
+.chin.plain{color:rgba(247,242,230,.62)}
+.chin.ours{color:var(--brass-highlight)}
+.screen{background:#E9E7E0;border-radius:2px;position:relative;overflow:hidden}
+
+/* Full bleed, and laid out ONCE at a fixed size then transform-scaled. A PDF
+   does not reflow, it scales, so scaling it is both the truthful behaviour and
+   the only way to stop words hopping between lines on every frame. */
+.pdfpage{position:absolute;top:0;left:0;width:320px;height:414px;
+  transform-origin:0 0;background:#FFFDF8;font-family:var(--fs);
+  font-size:6.27px;line-height:1.5;color:#2A2823;overflow:hidden;
+  padding-top:22px}
+.pdfpage>div{padding-left:17.6%;padding-right:11.8%}
+.pdfpage .s{font-weight:700;margin-bottom:.9em}
+.pdfpage .x{margin-bottom:.9em}
+.pdfpage .c{margin-left:37%;font-weight:700;padding-right:6%}
+.pdfpage .d{margin-left:17%;margin-right:14%;margin-bottom:.9em}
+.pdfpage .pg{text-align:right;margin-bottom:1.4em}
+.pdfpage .t{text-align:right;margin:.9em 0}
+.zoom{position:absolute;right:8px;bottom:8px;font-family:var(--fs);font-size:9px;
+  letter-spacing:.06em;color:var(--ink-muted);background:rgba(233,231,224,.94);
+  padding:2px 6px;border-radius:2px}
+
+/* device B is a working reader: a clipped viewport with a flow inside it */
+.ebook{position:absolute;inset:0;display:flex;flex-direction:column;color:#23211C}
+.ebook .view{flex:1 1 auto;overflow:hidden;min-height:0;position:relative}
+.ebook .flow{position:absolute;top:0;left:0;right:0;
+  transition:transform .3s cubic-bezier(.32,.72,0,1)}
+.ebook .s{font-weight:700}
+.ebook .c{font-weight:700}
+.ebook .t{text-align:right;color:#6D6960}
+/* A page number, nothing more. It read as a section header with a rule under
+   it, which promised a running-header feature that does not exist yet. */
+.ebook .pg{text-align:right;color:#8A857A;font-size:.82em}
+.ebook.nopg .pg{display:none}
+.ebook .loc{flex:0 0 auto;display:flex;justify-content:space-between;
+  font-family:var(--fs);font-size:10px;color:var(--ink-muted);letter-spacing:.06em;
+  border-top:1px solid rgba(29,27,22,.10)}
+
+/* Absolute, so it never adds height to .dev. Otherwise centring the taller box
+   lifts device B's screen out of line with device A's. */
+.pager{position:absolute;top:100%;left:0;right:0;margin-top:18px;
+  display:flex;align-items:center;justify-content:center;gap:16px;
+  opacity:0;transition:opacity .35s ease-out;pointer-events:none;
+  font-family:var(--fs);font-size:11px;letter-spacing:.1em;color:var(--ink-muted)}
+.pager.on{opacity:1;pointer-events:auto}
+.pager button{font:inherit;letter-spacing:inherit;color:var(--ink);
+  background:transparent;border:1px solid rgba(29,27,22,.24);border-radius:3px;
+  padding:7px 13px;cursor:pointer;transition:background .16s,border-color .16s}
+.pager button:hover:not(:disabled){background:rgba(232,163,61,.18);border-color:var(--brass)}
+.pager button:disabled{opacity:.32;cursor:default}
+.pager .count{min-width:8.5em;text-align:center}
+
+.panel{font-family:var(--fs);font-size:11px;letter-spacing:.06em;
+  color:var(--ink-soft);max-width:310px;margin-top:30px;
+  opacity:0;transition:opacity .35s ease-out}
+.panel.on{opacity:1;pointer-events:auto}
+.panel .row{display:flex;justify-content:space-between;align-items:center;
+  padding:11px 0;border-bottom:1px solid rgba(29,27,22,.12)}
+.panel .row>span:last-child{color:var(--ink);font-weight:700}
+/* Carries its own affordance: these two never change on their own, so nothing
+   tells you they are live unless the control says so. */
+.panel .pick{cursor:pointer;border-bottom:1px dashed rgba(29,27,22,.38);
+  transition:color .16s,border-color .16s}
+.panel .pick:after{content:'\2009\25B8';color:var(--brass);font-size:.9em}
+.panel .pick:hover{color:var(--brass-rim);border-bottom-color:var(--brass)}
+.meter{display:flex;gap:4px}
+.meter b{width:11px;height:11px;border-radius:1px;background:rgba(29,27,22,.15);
+  transition:background .16s ease-out,transform .16s ease-out}
+.meter b.f{background:var(--brass)}
+.meter.live b{cursor:pointer}
+.meter.live b:hover{transform:scaleY(1.35);background:var(--brass-highlight)}
+.panel .hintline{font-size:10px;letter-spacing:.1em;color:var(--ink-muted);margin-top:14px}
+
+/* ---------- drag and drop ---------- */
+.drop{padding-top:15vh;padding-bottom:15vh;border-top:1px solid rgba(29,27,22,.08)}
+.drop .cols{display:flex;gap:6%;align-items:center;flex-wrap:wrap}
+.drop .say{flex:1 1 300px;min-width:270px}
+.well{flex:1 1 430px;min-width:300px;max-width:540px;
+  border:2px dashed rgba(29,27,22,.22);border-radius:6px;height:330px;
+  position:relative;overflow:hidden;background:rgba(29,27,22,.025);
+  transition:border-color .3s,background .3s}
+.well.hot{border-color:var(--brass);background:rgba(232,163,61,.10)}
+.well .hint{position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center;font-family:var(--fs);font-size:12px;
+  letter-spacing:.09em;color:var(--ink-muted);transition:opacity .3s}
+.pdficon{position:absolute;width:66px;height:84px;background:#FFFDF8;
+  border:1px solid rgba(29,27,22,.22);border-radius:3px;
+  box-shadow:0 8px 22px rgba(29,27,22,.3);font-family:var(--fs);font-size:9px;
+  letter-spacing:.08em;color:var(--ink-muted);display:flex;align-items:flex-end;
+  justify-content:center;padding-bottom:8px;opacity:0}
+.result{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.94);
+  opacity:0;transition:opacity .4s,transform .4s;text-align:center;
+  font-family:var(--fs);font-size:12px;letter-spacing:.08em;color:var(--ink)}
+.result.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
+.result em{display:block;font-style:normal;color:var(--ink-muted);font-size:10px;margin-top:7px}
+
+/* ---------- audience ---------- */
+.beat{padding-top:15vh;padding-bottom:15vh;border-top:1px solid rgba(29,27,22,.08)}
+.who-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+  margin-top:46px;border-top:1px solid rgba(29,27,22,.12)}
+.who-card{padding:26px 26px 30px 0;border-bottom:1px solid rgba(29,27,22,.12)}
+.who-card .cue{font-family:var(--fs);font-weight:700;letter-spacing:.1em;
+  color:var(--ink);font-size:12px;margin-bottom:10px}
+.who-card .cue s{text-decoration:none;color:var(--brass);margin-right:8px}
+.who-card p{font-family:var(--fp);color:var(--ink-soft);font-size:15px;
+  line-height:1.62;margin:0;max-width:24em}
+.note{font-family:var(--fp);color:var(--ink-soft);font-size:14px;line-height:1.68;
+  border-left:2px solid var(--brass);padding-left:16px;margin:46px 0 34px;max-width:34em}
+.note a{color:var(--ink-soft)}
+.closer{display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-top:8px}
+.trans{font-family:var(--fs);letter-spacing:.07em;color:var(--ink-muted);
+  font-size:11px;text-align:right}
+.end{font-family:var(--fs);letter-spacing:.1em;color:var(--ink-muted);font-size:11px;
+  text-align:right;padding:30px var(--gut) 0 0;border-top:1px solid rgba(29,27,22,.08)}
+footer{font-family:var(--fs);font-size:10px;letter-spacing:.09em;color:var(--ink-muted);
+  padding:14px var(--gut) 26px var(--binding);
+  display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+footer a{color:var(--ink-muted);text-decoration:none;
+  border-bottom:1px solid transparent;transition:color .18s,border-color .18s}
+footer a:hover{color:var(--ink);border-bottom-color:var(--brass)}
+footer .gh svg{width:14px;height:14px}
+footer .right{margin-left:auto;opacity:.8}
+
+@media (max-height:560px){.rail i.b1,.rail i.b3{display:none}}
+@media (max-width:900px){
+  :root{--binding:16%;--gut:7%}
+  .act.two{height:380vh}
+  .nav{display:none}
+  .phase.col{width:auto;right:var(--gut)}
+}
+@media (prefers-reduced-motion:reduce){
+  .act.two{height:auto}
+  .stick{position:static;height:auto;overflow:visible;padding:11vh 0}
+  .phase{position:static;opacity:1!important;transform:none!important;margin-bottom:34px;
+    width:auto;pointer-events:auto}
+  .stage{position:static;display:flex;gap:44px;flex-wrap:wrap;
+    padding-left:var(--binding);padding-bottom:6vh;pointer-events:auto}
+  .dev{position:static!important;transform:none!important;opacity:1!important}
+  .panel,.pager{opacity:1;pointer-events:auto}
+  .topbar{transform:none}
+}
+</style>
+</head>
+<body>
+
+<div class="rail" aria-hidden="true"><i class="b1"></i><i class="empty b2"></i><i class="b3"></i></div>
+
+<div class="topbar" id="topbar">
+  <div class="in">
+    <a class="who" href="#top">SCREEPUB</a>
+    <span class="fine">FREE &amp; OPEN SOURCE</span>
+    <span class="sp"></span>
+    <nav class="nav">
+      <a href="https://github.com/ssandweiss/screepub/blob/main/ROADMAP.md">ROADMAP</a>
+      <a href="https://github.com/ssandweiss/screepub/issues">ISSUES</a>
+      <a class="gh" href="https://github.com/ssandweiss/screepub" aria-label="Screepub on GitHub" title="GitHub">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+    </nav>
+    <a class="btn" href="https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-macOS.dmg">DOWNLOAD FOR MACOS</a>
+  </div>
+</div>
+
+<div class="canvas" id="top">
+  <div class="mark">SCREEPUB</div>
+  <div class="topfine">FREE &amp; OPEN SOURCE</div>
+
+  <section class="hero pad" id="hero">
+    <div class="lift" id="heroLift">
+      <h1>Reading scripts on an e&#8209;reader shouldn't be difficult.
+        <span class="answer">Screepub makes it easy.</span></h1>
+      <div class="row">
+        <a class="btn lg" href="https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-macOS.dmg">DOWNLOAD FOR MACOS</a>
+        <span class="fine">NO ACCOUNT. WORKS OFFLINE.</span>
+      </div>
+    </div>
+    <div class="scrollcue">SCROLL &#8595;</div>
+  </section>
+
+  <section class="act two" id="act2">
+    <div class="stick">
+      <div class="phase" id="p1">
+        <div class="slug">INT. YOUR E-READER - PAGE ONE</div>
+        <h2>Reading PDFs on an e&#8209;reader sucks.</h2>
+      </div>
+      <div class="phase out" id="p2">
+        <div class="slug">INT. THE SAME SCENE - TWO FILES</div>
+        <h2>Read scripts natively.<span class="answer">Adjustable to your preferences.</span></h2>
+      </div>
+      <div class="phase col out" id="p3">
+        <div class="slug">INT. ANY TEXT SIZE - CONTINUOUS</div>
+        <h2>Set it how you read.</h2>
+        <p class="lead">Every setting here is live. Change one and the script reflows exactly the way it will on your reader.</p>
+        <div class="panel" id="panel">
+          <div class="row"><span>TEXT SIZE</span><span class="meter live" id="mSize" data-k="size"></span></div>
+          <div class="row"><span>MARGINS</span><span class="meter live" id="mMar" data-k="mar"></span></div>
+          <div class="row"><span>LINE SPACING</span><span class="meter live" id="mLine" data-k="lead"></span></div>
+          <div class="row"><span>TYPEFACE</span><span class="pick" id="pFont">COURIER PRIME</span></div>
+          <div class="row"><span>PAGE NUMBERS</span><span class="pick" id="pPg">ON</span></div>
+          <div class="hintline">EVERY VALUE HERE IS LIVE. CLICK ONE TO TAKE OVER.</div>
+        </div>
+      </div>
+
+      <div class="stage" id="stage">
+        <div class="dev" id="devA">
+          <div class="device"><div class="screen" id="scrA">
+            <div class="pdfpage" id="pdfp"></div>
+            <div class="zoom">100%</div>
+          </div><span class="chin plain">PDF</span></div>
+        </div>
+
+        <div class="dev" id="devB">
+          <div class="device"><div class="screen" id="scrB">
+            <div class="ebook" id="ebk">
+              <div class="view" id="ebkView"><div class="flow" id="ebkFlow"></div></div>
+              <div class="loc"><span id="locL">FIELD STATION</span><span id="locR">1 / 1</span></div>
+            </div>
+          </div><span class="chin ours">SCREEPUB</span></div>
+          <div class="pager" id="pager">
+            <button id="prev" type="button">&#8592; PREV</button>
+            <span class="count" id="pcount">PAGE 1 OF 1</span>
+            <button id="next" type="button">NEXT &#8594;</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="drop pad">
+    <div class="cols">
+      <div class="say">
+        <div class="slug">INT. THE APP - ONE STEP</div>
+        <h2>Drag and drop.</h2>
+        <p class="lead">It's that simple. Fine tune anything you like afterwards, and see exactly what the device gets.</p>
+      </div>
+      <div class="well" id="well">
+        <div class="hint" id="hint">DROP A SCREENPLAY HERE</div>
+        <div class="pdficon" id="pdficon">PDF</div>
+        <div class="result" id="result">FIELD-STATION.EPUB<em>READY TO SEND</em></div>
+      </div>
+    </div>
+    <div class="trans" style="margin-top:6vh">CUT TO:</div>
+  </section>
+
+  <section class="beat pad">
+    <div class="slug">INT. WHOEVER READS THESE</div>
+    <h2>Built for people who read scripts.</h2>
+    <div class="who-grid">
+      <div class="who-card">
+        <div class="cue"><s>&#9679;</s>WRITERS</div>
+        <p>Reading your own draft on something that isn't a laptop.</p>
+      </div>
+      <div class="who-card">
+        <div class="cue"><s>&#9679;</s>ACTORS</div>
+        <p>Working from sides, at a text size you can actually read.</p>
+      </div>
+      <div class="who-card">
+        <div class="cue"><s>&#9679;</s>EVERYONE ELSE</div>
+        <p>Anyone handed a production draft who would rather not read it hunched over a phone.</p>
+      </div>
+    </div>
+    <div class="note">Verified on a Kindle, over USB and by email. Kobo, tolino and reMarkable are written and code-tested, but nobody has plugged one in. <a href="https://github.com/ssandweiss/screepub#which-readers">The full device table is on GitHub.</a></div>
+    <div class="closer">
+      <a class="btn lg" href="https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-macOS.dmg">DOWNLOAD FOR MACOS</a>
+      <span class="fine">FREE. NO ACCOUNT. YOUR SCRIPT NEVER LEAVES YOUR MACHINE.</span>
+    </div>
+  </section>
+
+  <div class="end">FADE OUT.</div>
+  <footer>
+    <a class="gh" href="https://github.com/ssandweiss/screepub" aria-label="Screepub on GitHub" title="GitHub">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+    </a>
+    <a href="https://github.com/ssandweiss/screepub/blob/main/ROADMAP.md">ROADMAP</a>
+    <a href="https://github.com/ssandweiss/screepub/issues">ISSUES</a>
+    <a href="https://github.com/ssandweiss/screepub/blob/main/LICENSE">AGPL-3.0</a>
+    <span class="right">&#169; DARKWELL ENTERTAINMENT LLC</span>
+  </footer>
+</div>
+
+<script>
+/* The demo script. Invented for this page: no real title, author or character
+   name ever reaches the site. Page markers mirror what Screepub carries over
+   from the source PDF, and toggle with the PAGE NUMBERS setting. */
+window.SCENE = [
+  ['pg','14.'],
+  ['s','INT. FIELD STATION - NIGHT'],
+  ['x','The generator coughs once and dies. MARA works by the light of her phone, hands steady, and does not look up.'],
+  ['c','MARA'],['d','Give it a minute. It always comes back.'],
+  ['c','DELACROIX'],['d',"And if it doesn't?"],
+  ['x','She finds the housing bolt by feel. Turns it a quarter turn.'],
+  ['c','MARA'],['d','Then we do this in the dark.'],
+  ['x','The wind takes the tarp on the north wall and holds it open like a door nobody opened.'],
+  ['c','DELACROIX'],['d',"That's not an answer."],
+  ['c','MARA'],['d',"It's the one I have."],
+  ['x','He crosses to the window. Outside, the ridge is a black line against a slightly less black sky.'],
+  ['c','DELACROIX'],['d','Nineteen hours until the relief team. I counted.'],
+  ['c','MARA'],['d','Then stop counting.'],
+
+  ['pg','15.'],
+  ['x','The generator catches. Dies again. Catches.'],
+  ['x','Light comes up amber and unsteady, and the room assembles itself around them: the cot, the radio, the map with its four pins.'],
+  ['c','MARA (CONT’D)'],['d','There. Told you.'],
+  ['c','DELACROIX'],['d','You told me a minute. That was six.'],
+  ['c','MARA'],['d','I rounded.'],
+  ['x','She wipes her hands on her thigh and sits, finally, like the sitting costs her something.'],
+  ['c','DELACROIX'],['d','You should sleep.'],
+  ['c','MARA'],['d','You should stop saying that.'],
+  ['x','A long moment. The radio hisses, says nothing, hisses.'],
+  ['c','DELACROIX'],['d',"If the relief doesn't come."],
+  ['c','MARA'],['d',"They'll come."],
+  ['c','DELACROIX'],['d','If.'],
+
+  ['pg','16.'],
+  ['c','MARA'],['d','Then we walk out the way we walked in, and it takes four days instead of one, and you complain the entire time.'],
+  ['c','DELACROIX'],['d',"I don't complain."],
+  ['c','MARA'],['d',"You're complaining now."],
+  ['x',"He almost laughs. It is the first honest sound either of them has made all night."],
+  ['c','DELACROIX'],['d',"Get some sleep. I'll take the radio."],
+  ['x',"She doesn't argue, which frightens him more than the dark did."],
+  ['t','CUT TO:'],
+  ['s','INT. FIELD STATION - DAWN'],
+  ['x','Grey light. The tarp is down. The map is gone from the wall.'],
+
+  ['pg','17.'],
+  ['x','DELACROIX sits exactly where he sat, the handset still in his fist, asleep with his eyes open the way soldiers learn.'],
+  ['x','The radio speaks. One word, clipped, in a voice neither of them has heard.'],
+  ['x','He is awake before he knows he is awake.'],
+  ['c','DELACROIX'],['d','Say again.'],
+  ['x','Nothing. The hiss closes over the word like water.'],
+  ['c','DELACROIX (CONT’D)'],['d','Say again.'],
+  ['x','He turns the dial one notch, then back, then one notch the other way, hunting the frequency the way you hunt a name you have almost remembered.'],
+  ['c','MARA (O.S.)'],['d','What was it?'],
+
+  ['pg','18.'],
+  ['x','She is in the doorway. She has not slept and does not pretend otherwise.'],
+  ['c','DELACROIX'],['d',"A voice. One word. I couldn't hold it."],
+  ['c','MARA'],['d','Which word?'],
+  ['x','He looks at the handset, then at her.'],
+  ['c','DELACROIX'],['d','Ours.'],
+  ['x','Outside, very far off, something that is not the wind moves along the ridge.'],
+  ['t','FADE OUT.'],
+];
+</script>
+<script>
+(function(){
+var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+var $=function(i){return document.getElementById(i)};
+var clamp=function(v,a,b){return v<a?a:(v>b?b:v)};
+var lerp=function(a,b,t){return a+(b-a)*t};
+function ease(t){return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2}
+
+/* Kept inside a range a person would actually read at. The top of the old
+   ramp turned the slugline into a banner and left four words on screen. */
+var SIZE=[12.5,14.5,16.5,18.5,21];
+var MARG=[5.5,7,8.5,10,11.5];
+var LEAD=[1.38,1.44,1.50,1.56,1.62];
+var FONTS=[['COURIER PRIME',"'Courier Prime','Courier New',ui-monospace,monospace"],
+           ['LITERATA',"'Literata',Georgia,'Times New Roman',serif"],
+           ['SANS',"-apple-system,'Helvetica Neue',Arial,sans-serif"]];
+var vals={size:1,mar:2,lead:1};
+var dir ={size:1,mar:1,lead:1};
+/* Page markers default OFF: they are the source PDF's page numbers, and with
+   them on the reader opens on a rule instead of on the scene. */
+var fontIx=0, showPg=false, page=0, pages=1;
+
+var act2=$('act2'),stage=$('stage'),devA=$('devA'),devB=$('devB'),panel=$('panel');
+var p1=$('p1'),p2=$('p2'),p3=$('p3'),pager=$('pager');
+var scrA=$('scrA'),scrB=$('scrB'),pdfp=$('pdfp');
+var ebk=$('ebk'),ebkView=$('ebkView'),ebkFlow=$('ebkFlow');
+var locL=$('locL'),locR=$('locR'),pcount=$('pcount');
+var hero=$('hero'),heroLift=$('heroLift'),topbar=$('topbar');
+
+/* ----- build the script into both devices ----- */
+function render(list,into){
+  var h='';
+  for(var i=0;i<list.length;i++){
+    var cn=list[i][0], txt=list[i][1];
+    h+='<div class="'+cn+'">'+txt+'</div>';
+  }
+  into.innerHTML=h;
+}
+render(window.SCENE,ebkFlow);
+/* Exactly script page 14, blocks 0-19. Slicing past that ran a second page
+   marker into the middle of the sheet and clipped the last line in half. */
+render(window.SCENE.slice(0,20),pdfp);
+
+function meter(el,n){
+  if(!el)return;
+  if(el.childElementCount!==5){
+    var s='';for(var i=0;i<5;i++)s+='<b></b>';el.innerHTML=s;
+    if(el.classList.contains('live')){
+      var key=el.getAttribute('data-k');
+      for(var j=0;j<5;j++)(function(ix){
+        el.children[ix].addEventListener('click',function(){vals[key]=ix;claim();repaint()});
+      })(j);
+    }
+  }
+  for(var k=0;k<5;k++)el.children[k].className=(k<n?'f':'');
+}
+function prog(el){
+  var r=el.getBoundingClientRect(), span=r.height-innerHeight;
+  if(span<=0)return 0; return clamp(-r.top/span,0,1);
+}
+
+/* Devices size off the viewport rather than a fixed pixel size. */
+function heroSize(H){var h=clamp(H*0.60,340,560);return{h:h,w:h*0.77}}
+function pairSize(H){var h=clamp(H*0.42,290,400);return{h:h,w:h*0.77}}
+function zoomSize(W,H){var h=clamp(H*0.76,380,720);return{h:h,w:Math.min(h*0.77,W*0.40)}}
+
+/* Scale only. Never touch font-size here: changing it reflows the page and the
+   text jitters line to line as the device grows. 320px stands for 8.5in, which
+   is what puts the baked 6.27px font at a true 12pt.
+   COVER, not fit-to-width: the screen and the page are near but not identical
+   aspects (0.770 vs 0.773), and the zoom clamps width against canvas size, so
+   scaling by width alone leaves a grey band and reads as off-centre. Cover then
+   centre means the page always fills the screen and sits square in it. */
+function paintPdf(w,h){
+  scrA.style.width=w.toFixed(1)+'px'; scrA.style.height=h.toFixed(1)+'px';
+  var k=Math.max(w/320,h/414);
+  var ox=(w-320*k)/2, oy=(h-414*k)/2;
+  pdfp.style.transform='translate('+ox.toFixed(2)+'px,'+oy.toFixed(2)+'px) scale('+k.toFixed(4)+')';
+}
+
+/* Re-flow the reader, then repaginate. Page count falls out of the content
+   height over the viewport height, exactly the way a real reader does it. */
+function paintReader(iSize,iMar,iLead){
+  var fs=SIZE[iSize], mg=MARG[iMar], lh=LEAD[iLead];
+  ebk.style.fontFamily=FONTS[fontIx][1];
+  ebk.style.fontSize=fs+'px';
+  ebk.style.lineHeight=lh;
+  ebk.classList.toggle('nopg',!showPg);
+  ebkFlow.style.padding=mg+'% '+mg+'% 0';
+  ebk.querySelector('.loc').style.padding='7px '+mg+'%';
+  var kids=ebkFlow.children;
+  for(var i=0;i<kids.length;i++){
+    var k=kids[i],cn=k.className;
+    if(cn==='c'){k.style.margin='0 0 0 37%'}
+    else if(cn==='d'){k.style.margin='0 12% .85em 17%'}
+    else if(cn==='pg'){k.style.margin='1.4em 0 .9em'}
+    else {k.style.margin='0 0 .85em'}
+  }
+  var vh=ebkView.clientHeight||1;
+  pages=Math.max(1,Math.ceil(ebkFlow.scrollHeight/vh));
+  page=clamp(page,0,pages-1);
+  ebkFlow.style.transform='translateY('+(-page*vh)+'px)';
+  if(locR)locR.textContent=(page+1)+' / '+pages;
+  if(pcount)pcount.textContent='PAGE '+(page+1)+' OF '+pages;
+  if($('prev'))$('prev').disabled=(page===0);
+  if($('next'))$('next').disabled=(page>=pages-1);
+  meter($('mSize'),iSize+1); meter($('mMar'),iMar+1); meter($('mLine'),iLead+1);
+  $('pFont').textContent=FONTS[fontIx][0];
+  $('pPg').textContent=showPg?'ON':'OFF';
+}
+
+var lastT=0;
+function repaint(){layout(lastT)}
+
+function layout(t){
+  if(reduce||!act2)return;
+  lastT=t;
+  var W=stage.offsetWidth||innerWidth, H=innerHeight;
+
+  /* A arrives immediately, centre frame and large, and holds there. Then it
+     shrinks left to let B in, they hold level, A leaves, B takes over. */
+  var aIn   =ease(clamp(t/0.09,0,1));
+  var shrink=ease(clamp((t-0.26)/0.16,0,1));
+  var bIn   =ease(clamp((t-0.29)/0.13,0,1));
+  var aOut  =ease(clamp((t-0.56)/0.12,0,1));
+  var ze    =ease(clamp((t-0.56)/0.14,0,1));
+
+  p1.classList.toggle('out',t>=0.26);
+  p2.classList.toggle('out',t<0.26||t>=0.66);
+  p3.classList.toggle('out',t<0.66);
+  panel.classList.toggle('on',t>=0.70);
+  pager.classList.toggle('on',t>=0.70);
+  live=(t>=0.66&&t<=1);
+
+  var hs=heroSize(H), ps=pairSize(H), zs=zoomSize(W,H);
+  var aW=lerp(hs.w,ps.w,shrink), aH=lerp(hs.h,ps.h,shrink);
+  var bW=lerp(ps.w,zs.w,ze),     bH=lerp(ps.h,zs.h,ze);
+  paintPdf(aW,aH);
+  scrB.style.width=bW.toFixed(1)+'px'; scrB.style.height=bH.toFixed(1)+'px';
+
+  var cy=lerp(lerp(H*0.58,H*0.56,shrink),H*0.48,ze);
+  var ax=lerp(W*0.50,W*0.33,shrink)-W/2;
+  var bx=lerp(W*0.68,W*0.68,ze)-W/2;
+  var ay=(cy-H/2)+lerp(H*0.85,0,aIn)+aOut*H*1.1;
+  var by=(cy-H/2)+lerp(H*0.85,0,bIn);
+
+  devA.style.transform='translate(calc(-50% + '+ax.toFixed(1)+'px), calc(-50% + '+ay.toFixed(1)+'px))';
+  devA.style.opacity=(1-aOut).toFixed(2);
+  devB.style.transform='translate(calc(-50% + '+bx.toFixed(1)+'px), calc(-50% + '+by.toFixed(1)+'px))';
+  devB.style.opacity=bIn.toFixed(2);
+
+  paintReader(vals.size,vals.mar,vals.lead);
+}
+
+/* The settings are NOT scroll-driven. Scroll moves the composition; the reader
+   demonstrates itself on a timer. One parameter per tick, walked by a single
+   step, so something is always moving but never everything at once. A click
+   hands control over and freezes the cycle for HOLD_MS. */
+var HOLD_MS=18000, TICK_MS=900;
+var heldUntil=0, tickIx=0, live=false, cycle=null;
+/* Typeface is deliberately NOT in the rotation: swapping the face on its own
+   looks like a fault rather than a setting. It changes only on a click. */
+var ORDER=['size','mar','lead','size','lead','mar'];
+function walk(k,lo,hi){
+  var v=vals[k]+dir[k];
+  if(v>hi){v=hi-1;dir[k]=-1} else if(v<lo){v=lo+1;dir[k]=1}
+  vals[k]=clamp(v,lo,hi);
+}
+function autoTick(){
+  if(!live||Date.now()<heldUntil)return;
+  var k=ORDER[tickIx++%ORDER.length];
+  walk(k,0,4);
+  repaint();
+}
+function claim(){ heldUntil=Date.now()+HOLD_MS; }
+
+/* ----- reader controls ----- */
+function turn(d){
+  var vh=ebkView.clientHeight||1;
+  page=clamp(page+d,0,pages-1);
+  ebkFlow.style.transform='translateY('+(-page*vh)+'px)';
+  if(locR)locR.textContent=(page+1)+' / '+pages;
+  if(pcount)pcount.textContent='PAGE '+(page+1)+' OF '+pages;
+  $('prev').disabled=(page===0); $('next').disabled=(page>=pages-1);
+}
+$('prev').addEventListener('click',function(){claim();turn(-1)});
+$('next').addEventListener('click',function(){claim();turn(1)});
+$('pFont').addEventListener('click',function(){fontIx=(fontIx+1)%FONTS.length;claim();repaint()});
+$('pPg').addEventListener('click',function(){showPg=!showPg;claim();repaint()});
+if(!reduce)cycle=setInterval(autoTick,TICK_MS);
+
+/* ----- the drop, looping while in view ----- */
+var well=$('well'),icon=$('pdficon'),hint=$('hint'),result=$('result'),dropTimer=null;
+function runDrop(){
+  if(reduce||!icon)return;
+  icon.style.transition='none';icon.style.opacity='0';
+  icon.style.left='-84px';icon.style.top='30px';
+  result.classList.remove('on');well.classList.remove('hot');hint.style.opacity='1';
+  setTimeout(function(){
+    icon.style.transition='left 1.4s cubic-bezier(.4,0,.2,1),top 1.4s cubic-bezier(.4,0,.2,1),opacity .3s';
+    icon.style.opacity='1';
+    icon.style.left='calc(50% - 33px)';icon.style.top='calc(50% - 42px)';
+  },160);
+  setTimeout(function(){well.classList.add('hot');hint.style.opacity='0'},880);
+  setTimeout(function(){
+    icon.style.transition='opacity .3s';icon.style.opacity='0';result.classList.add('on');
+  },1900);
+  setTimeout(function(){well.classList.remove('hot')},2300);
+}
+if(well&&!reduce){
+  new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting){runDrop();if(!dropTimer)dropTimer=setInterval(runDrop,4200)}
+      else if(dropTimer){clearInterval(dropTimer);dropTimer=null}
+    });
+  },{threshold:.35}).observe(well);
+}
+
+function onScroll(){
+  if(!reduce&&hero){
+    var h=clamp(scrollY/(hero.offsetHeight*0.85),0,1), e=ease(h);
+    heroLift.style.opacity=(1-h*1.3).toFixed(3);
+    heroLift.style.transform='translateY('+(-e*80).toFixed(1)+'px)';
+    topbar.classList.toggle('on',scrollY>hero.offsetHeight*0.62);
+  }
+  if(act2)layout(prog(act2));
+}
+var tick=false;
+addEventListener('scroll',function(){
+  if(!tick){tick=true;requestAnimationFrame(function(){onScroll();tick=false})}
+},{passive:true});
+addEventListener('resize',onScroll);
+if(reduce){paintPdf(300,390);paintReader(2,2,2)} else {onScroll()}
+})();
+</script>
+</body>
+</html>

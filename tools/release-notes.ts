@@ -205,7 +205,7 @@ export function changedRegistryEntries(before: string, after: string): { entry: 
  *  this tool's own home. A change confined to these should report
  *  `userVisible: false` and skip a drafting pass — this branch's own
  *  commits (tools/ + tests/ only) are the worked example. */
-const NON_SHIPPING_PREFIXES = ['docs/', 'tests/', '.github/', 'tools/'];
+const NON_SHIPPING_PREFIXES = ['docs/', 'tests/', '.github/', 'tools/', 'site/', 'brand/'];
 
 /**
  * Whether ANY changed path ships to a reader.

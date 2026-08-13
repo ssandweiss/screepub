@@ -297,4 +297,16 @@ describe('isUserVisible', () => {
   test('a change under src/ is reader-visible', () => {
     expect(isUserVisible(['src/epub/css.ts', 'tests/x.test.ts'])).toBe(true);
   });
+
+  // The website and the brand previews ship to a browser, never into a
+  // converted book. Without these a week of site commits reports
+  // userVisible: true and pulls /release into drafting notes for a release
+  // where nothing a reader can see actually changed.
+  test('site/ and brand/ are not reader-visible', () => {
+    expect(isUserVisible(['site/index.html', 'brand/tokens.css'])).toBe(false);
+  });
+
+  test('a site change alongside a src change is still reader-visible', () => {
+    expect(isUserVisible(['site/index.html', 'src/options.ts'])).toBe(true);
+  });
 });
