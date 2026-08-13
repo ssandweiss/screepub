@@ -3,7 +3,16 @@
 # kit-check's conversion checks self-skip without Calibre — both stay green
 # on bare runners.
 name: ci
-on: [push, pull_request]
+# site/ and brand/ ship to a browser, not into a converted book, and neither
+# is touched by the engine suite. Skipping them keeps a copy edit off the
+# runners. Safe to path-filter because no check here is a required status:
+# a filtered-out job never reports, which would hang a PR under branch
+# protection. Re-check that if protection is ever turned on.
+on:
+  push:
+    paths-ignore: ['site/**', 'brand/**']
+  pull_request:
+    paths-ignore: ['site/**', 'brand/**']
 permissions:
   contents: read
 jobs:
