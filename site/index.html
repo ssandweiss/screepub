@@ -4,7 +4,37 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Screepub</title>
+<meta name="description" content="Screepub turns a screenplay PDF into an e-book that reflows on the reader you already own. Free, open source, and your script never leaves your machine.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#23272F">
+<!-- The two faces the page actually paints with, fetched before the CSS that
+     asks for them, so the first paint is not in the fallback stack. -->
+<link rel="preload" href="fonts/literata-400-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/courier-prime-400-latin.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+/* Self-hosted. The page then renders identically with no network at all, and
+   nothing about a visit is requested from a third party, which is the line the
+   app holds too. Both faces are SIL Open Font License 1.1, which is what makes
+   bundling them legal: see THIRD-PARTY-NOTICES.md. */
+@font-face{font-family:"Courier Prime";font-style:normal;font-weight:400;font-display:swap;
+  src:url(fonts/courier-prime-400-latin-ext.woff2) format("woff2");
+  unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF}
+@font-face{font-family:"Courier Prime";font-style:normal;font-weight:400;font-display:swap;
+  src:url(fonts/courier-prime-400-latin.woff2) format("woff2");
+  unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+@font-face{font-family:"Courier Prime";font-style:normal;font-weight:700;font-display:swap;
+  src:url(fonts/courier-prime-700-latin-ext.woff2) format("woff2");
+  unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF}
+@font-face{font-family:"Courier Prime";font-style:normal;font-weight:700;font-display:swap;
+  src:url(fonts/courier-prime-700-latin.woff2) format("woff2");
+  unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+@font-face{font-family:"Literata";font-style:normal;font-weight:400;font-display:swap;
+  src:url(fonts/literata-400-latin-ext.woff2) format("woff2");
+  unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF}
+@font-face{font-family:"Literata";font-style:normal;font-weight:400;font-display:swap;
+  src:url(fonts/literata-400-latin.woff2) format("woff2");
+  unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+
 :root{
   --paper:#F7F2E6; --ink:#1D1B16; --ink-soft:#4A453A; --ink-muted:#6D6960;
   --brass:#E8A33D; --ground:#23272F; --alarm:#AF3220; --hole:rgba(29,27,22,.10);
@@ -365,7 +395,7 @@ footer .right{margin-left:auto;opacity:.8}
         <p>Anyone handed a production draft who would rather not read it hunched over a phone.</p>
       </div>
     </div>
-    <div class="note">Verified on a Kindle, over USB and by email. Kobo, tolino and reMarkable are written and code-tested, but nobody has plugged one in. <a href="https://github.com/ssandweiss/screepub#which-readers">The full device table is on GitHub.</a></div>
+    <div class="note">Verified on a Kindle: over USB on the models that still mount as a drive, and by email on any of them. Newer Kindles speak MTP instead and never appear in Finder, so those go by email. Kobo, tolino and reMarkable are written and code-tested, but nobody has plugged one in. <a href="https://github.com/ssandweiss/screepub#which-readers">The full device table is on GitHub.</a></div>
     <div class="closer">
       <a class="btn lg" href="https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-macOS.dmg">DOWNLOAD FOR MACOS</a>
       <span class="fine">FREE. NO ACCOUNT. YOUR SCRIPT NEVER LEAVES YOUR MACHINE.</span>
