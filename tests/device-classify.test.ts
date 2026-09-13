@@ -63,6 +63,12 @@ test('a Windows drive root names itself by its drive designator, not an empty st
   expect(volumeName('D:\\')).toBe('D:');
 });
 
+test('a lowercase Windows drive root names itself by its drive designator too', () => {
+  // Same shared predicate as volumes.ts (src/device/paths.ts); the two copies
+  // had disagreed on letter case, and the permissive form is the correct one.
+  expect(volumeName('d:\\')).toBe('d:');
+});
+
 test('a Windows-shaped drive root with a .kobo signature still classifies as Kobo', () => {
   // Name-based detection (tolino) cannot work on a bare drive letter, but
   // signature-based detection (Kindle's documents/, Kobo's .kobo) does not

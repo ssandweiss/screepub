@@ -2,11 +2,12 @@
 // reality: what is actually mounted depends on what is physically plugged in.
 // Kept deliberately dumb, with injectable roots, so that all the real device
 // knowledge lives in classify.ts where it can be tested everywhere.
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { platform } from 'node:process';
 import { classify, volumeName } from './classify';
+import { isDirectory, isWindowsDriveRoot } from './paths';
 import type { ConnectedDevice } from './types';
 
 /** Where this OS mounts removable media. On Windows these are drive roots
@@ -23,25 +24,23 @@ export function volumeRoots(): string[] {
   return [`/run/media/${user}`, `/media/${user}`, '/media'];
 }
 
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
 /** True when `root` is itself a mountable volume rather than a directory
  * that CONTAINS volumes — the Windows drive-letter case. Pure and
  * OS-injectable (default: the real host) so the branch it drives in
  * enumerateVolumes is directly testable on every platform, not just
  * exercised as dead code gated on `platform === 'win32'`. */
 export function rootIsItselfAVolume(root: string, os: NodeJS.Platform = platform): boolean {
-  return os === 'win32' && /^[A-Z]:\\$/.test(root);
+  return os === 'win32' && isWindowsDriveRoot(root);
 }
 
 /** Every mounted volume path under the given roots (default: this platform's).
- * On Windows a root IS a volume; elsewhere a root CONTAINS volumes. */
+ * On Windows a root IS a volume; elsewhere a root CONTAINS volumes.
+ *
+ * DIVERGENCE from Device.swift, deliberately: it asks Foundation for mounted
+ * volumes with `.skipHiddenVolumes` and there is no equivalent here. A plain
+ * directory listing of a mount parent has no notion of a "hidden volume" to
+ * skip, and the classifier is signature-based — a hidden volume that has
+ * neither `documents/` nor `.kobo` is dropped by classify() anyway. */
 export function enumerateVolumes(roots: string[] = volumeRoots()): string[] {
   const found: string[] = [];
   for (const root of roots) {

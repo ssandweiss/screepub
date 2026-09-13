@@ -2,29 +2,19 @@
 // family is it? All device knowledge lives here, so it is testable with temp
 // directories on every platform. Enumerating what is actually mounted is
 // volumes.ts's job and is the only part that cannot be unit-tested.
-import { statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { isKindleVolume } from './kindle';
+import { isDirectory, isWindowsDriveRoot } from './paths';
 import type { DeviceKind } from './types';
 
-/** A bare Windows drive root, e.g. "D:\". It has no basename component
- * (path.basename returns '' for it on win32), so it is special-cased to the
- * drive designator instead — "D:\" -> "D:" — rather than surfacing an empty
- * device name. This is a pure string check, independent of the host
- * platform, so it is exercised the same way in tests everywhere. */
-const WINDOWS_DRIVE_ROOT = /^[A-Za-z]:\\$/;
-
+/** A bare Windows drive root has no basename component (path.basename
+ * returns '' for it on win32), so it is special-cased to the drive
+ * designator instead — "D:\" -> "D:" — rather than surfacing an empty
+ * device name. The predicate itself lives in paths.ts, shared with
+ * volumes.ts, because the two copies had already drifted on letter case. */
 export function volumeName(volume: string): string {
-  if (WINDOWS_DRIVE_ROOT.test(volume)) return volume.slice(0, -1);
+  if (isWindowsDriveRoot(volume)) return volume.slice(0, -1);
   return basename(volume);
-}
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
 }
 
 /** Vendor signature of a mounted volume, or null for a plain drive. Kobo

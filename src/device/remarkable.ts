@@ -58,6 +58,12 @@ export async function uploadToRemarkable(
   }
 
   // Fail the whole send before any bytes move or any state changes.
+  //
+  // DIVERGENCE from RemarkableDevice.swift, deliberately: it reads the size
+  // as `try? ... ?? 0`, so an unreadable file sails past the size guard as
+  // "0 bytes" and into the POST. Here statSync throws and the send stops —
+  // the safer behavior, and the honest one: a file we cannot stat is a file
+  // we cannot upload either.
   const size = statSync(file).size;
   if (size > REMARKABLE_MAX_UPLOAD_BYTES) {
     throw new RemarkableUploadError(

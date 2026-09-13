@@ -60,6 +60,14 @@ test('a drive root is itself a volume only on win32', () => {
   expect(rootIsItselfAVolume('D:\\', 'win32')).toBe(true);
 });
 
+test('a lowercase drive root is recognised too', () => {
+  // The predicate is shared with classify.ts (src/device/paths.ts) precisely
+  // because the two copies had drifted: this file's regex was [A-Z] only,
+  // which would have failed to recognise a lowercase root and handed the
+  // caller an empty volume name. Windows accepts either case.
+  expect(rootIsItselfAVolume('d:\\', 'win32')).toBe(true);
+});
+
 test('a drive-root-shaped string is not itself a volume off Windows', () => {
   expect(rootIsItselfAVolume('D:\\', 'linux')).toBe(false);
 });
