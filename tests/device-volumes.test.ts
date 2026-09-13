@@ -1,0 +1,52 @@
+import { test, expect } from 'bun:test';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+import { platform } from 'node:process';
+import { volumeRoots, enumerateVolumes, mountedDevices } from '../src/device/volumes';
+
+/** A fake mount root holding several "volumes", so enumeration is tested by
+ * injection and never against whatever is really plugged into this machine. */
+function mountRoot(volumes: Record<string, string[]>): string {
+  const root = mkdtempSync(join(tmpdir(), 'screepub-mounts-'));
+  for (const [name, subdirs] of Object.entries(volumes)) {
+    mkdirSync(join(root, name), { recursive: true });
+    for (const sub of subdirs) mkdirSync(join(root, name, sub), { recursive: true });
+  }
+  return root;
+}
+
+test('enumerate lists the directories under an injected root', () => {
+  const root = mountRoot({ Kindle: ['documents'], KOBOeReader: ['.kobo'], 'USB STICK': [] });
+  expect(enumerateVolumes([root]).map((p) => basename(p)).sort())
+    .toEqual(['KOBOeReader', 'Kindle', 'USB STICK'].sort());
+});
+
+test('enumerate ignores files and missing roots', () => {
+  const root = mountRoot({ Kindle: ['documents'] });
+  writeFileSync(join(root, 'loose-file.txt'), 'x');
+  const found = enumerateVolumes([root, join(tmpdir(), 'screepub-no-such-root')]);
+  expect(found.map((p) => basename(p))).toEqual(['Kindle']);
+});
+
+test('mountedDevices classifies what it finds and drops plain drives', () => {
+  const root = mountRoot({ Kindle: ['documents'], KOBOeReader: ['.kobo'], 'USB STICK': ['documents'] });
+  const devices = mountedDevices([root]);
+  expect(devices.map((d) => d.kind).sort()).toEqual(['kindle', 'kobo']);
+  expect(devices.find((d) => d.kind === 'kobo')?.name).toBe('KOBOeReader');
+  expect(devices.every((d) => d.volume !== null)).toBe(true);
+});
+
+test('mountedDevices on an empty root finds nothing', () => {
+  expect(mountedDevices([mountRoot({})])).toEqual([]);
+});
+
+test('the default roots are the right ones for this platform', () => {
+  const roots = volumeRoots();
+  if (platform === 'darwin') expect(roots).toEqual(['/Volumes']);
+  if (platform === 'linux') {
+    expect(roots.some((r) => r.startsWith('/run/media'))).toBe(true);
+    expect(roots).toContain('/media');
+  }
+  if (platform === 'win32') expect(roots.some((r) => /^[A-Z]:\\$/.test(r))).toBe(true);
+});
