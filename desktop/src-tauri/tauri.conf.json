@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Screepub",
+  "version": "0.6.0",
+  "identifier": "com.darkwell.screepub.desktop",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Screepub",
+        "width": 860,
+        "height": 620,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'"
+    }
+  },
+  "bundle": {
+    "externalBin": ["binaries/screepub-engine"],
+    "icon": ["icons/icon.png"]
+  }
+}

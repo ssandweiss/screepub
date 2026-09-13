@@ -33,3 +33,9 @@ __pycache__/
 
 # Superpowers worktrees (scratch, never committed)
 .worktrees/
+
+# Tauri desktop shell build outputs
+desktop/src-tauri/target/
+# The engine sidecar is a ~100 MB build output, produced by tools/build-sidecar.ts
+desktop/src-tauri/binaries/
+desktop/src-tauri/gen/

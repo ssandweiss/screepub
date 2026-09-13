@@ -1,0 +1,19 @@
+[package]
+name = "screepub-desktop"
+version = "0.6.0"
+edition = "2021"
+rust-version = "1.77"
+license = "AGPL-3.0-or-later"
+publish = false
+description = "Screepub desktop shell. A window around the engine; no logic lives here."
+
+[build-dependencies]
+tauri-build = "2"
+
+[dependencies]
+# No serde_json, on purpose and permanently. The engine's answer is an
+# opaque string on its way to the frontend; a JSON parser in this crate is
+# the first step to a decision being made in it.
+tauri = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
