@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { Fountain } from 'fountain-js';
 import JSZip from 'jszip';
-import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions } from '../src/options';
+import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from '../src/options';
 import { screenplayCss } from '../src/epub/css';
 import { ruleFor } from './css-rules';
 import { tokensToBody } from '../src/epub/html';
@@ -83,6 +83,25 @@ describe('resolveFormatOptions', () => {
     expect(
       resolveFormatOptions({ preserveFontShifts: 0 } as Record<string, unknown>).preserveFontShifts,
     ).toBe(true);
+  });
+
+  test('resolveFormatOptions merges over a supplied base, not just the defaults', () => {
+    const base: FormatOptions = { ...DEFAULT_FORMAT_OPTIONS, keepSpeechesWhole: true, justifyText: true };
+    const merged = resolveFormatOptions({ dialogueSideMarginPct: 9 }, base);
+    expect(merged.dialogueSideMarginPct).toBe(9);
+    // fields absent from the partial come from the BASE, not from the defaults
+    expect(merged.keepSpeechesWhole).toBe(true);
+    expect(merged.justifyText).toBe(true);
+  });
+
+  test('resolveFormatOptions still defaults its base to DEFAULT_FORMAT_OPTIONS', () => {
+    expect(resolveFormatOptions({})).toEqual(DEFAULT_FORMAT_OPTIONS);
+  });
+
+  test('an out-of-range value clamps against the base rather than being taken raw', () => {
+    const base: FormatOptions = { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 12 };
+    expect(resolveFormatOptions({ dialogueSideMarginPct: 999 }, base).dialogueSideMarginPct).toBe(30);
+    expect(resolveFormatOptions({ dialogueSideMarginPct: 'nope' }, base).dialogueSideMarginPct).toBe(12);
   });
 });
 
