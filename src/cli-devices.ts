@@ -3,6 +3,7 @@
 // process. Dispatch lives here rather than in cli.ts because cli.ts runs
 // main() on import and cannot be imported by a test.
 import { existsSync, statSync } from 'node:fs';
+import { extname } from 'node:path';
 import { CliError, errorMessage } from './cli-errors';
 import { listDevices, type ListDevicesOptions } from './device/list';
 import { deviceId, type ConnectedDevice, type DeviceKind } from './device/types';
@@ -134,10 +135,12 @@ export async function sendCommand(options: SendOptions): Promise<SendResult> {
     // Asked before the upload, not inferred from its error: cli-errors.ts's
     // rule is that detection is typed, never a substring of a message.
     if (!remarkableAccepts(options.file)) {
-      throw new CliError(
-        'unsupported-file',
-        `reMarkable accepts PDF and EPUB only — ${options.file} is neither`,
-      );
+      // The SAME sentence uploadToRemarkable would have thrown, because
+      // `send-failed` passes library text through verbatim and a user must not
+      // read two wordings for one fact. Unified toward the library, which is
+      // held byte-identical to RemarkableDevice.swift — see the note there.
+      const ext = extname(options.file).replace(/^\./, '').toLowerCase();
+      throw new CliError('unsupported-file', `reMarkable accepts PDF and EPUB, not .${ext}.`);
     }
     try {
       await uploadToRemarkable(options.file, options.remarkableEndpoint);

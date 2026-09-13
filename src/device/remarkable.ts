@@ -68,16 +68,15 @@ export async function uploadToRemarkable(
 ): Promise<void> {
   const ext = extname(file).replace(/^\./, '').toLowerCase();
   if (!remarkableAccepts(file)) {
-    // Word-for-word what cli-devices.ts's own pre-check says, because
-    // `send-failed` passes this text through verbatim: a user who hits the two
-    // guards from the CLI and from the Tauri shell would otherwise read two
-    // wordings for one fact. House convention for these messages is no
-    // trailing period, which is why the three below lost theirs. (This
-    // diverges from RemarkableDevice.swift's wording; the Swift app is being
-    // retired and its strings are not the source of truth any more.)
-    throw new RemarkableUploadError(
-      `reMarkable accepts PDF and EPUB only — ${file} is neither`,
-    );
+    // BYTE-IDENTICAL to RemarkableDevice.swift's wording, trailing period and
+    // all, as are the other three RemarkableUploadError messages below. Piece
+    // A ported this module from the Swift deliberately and its review verified
+    // the error text matched; the Swift stays the source of truth until the
+    // Mac app retires (piece F), KitCheck still runs against it, and a reader
+    // diffing the two modules must find them saying the same thing. Do not
+    // reword these while app/ exists — cli-devices.ts's own pre-check was
+    // brought into line with THIS text, not the other way round.
+    throw new RemarkableUploadError(`reMarkable accepts PDF and EPUB, not .${ext}.`);
   }
 
   // Fail the whole send before any bytes move or any state changes.
@@ -90,7 +89,7 @@ export async function uploadToRemarkable(
   const size = statSync(file).size;
   if (size > REMARKABLE_MAX_UPLOAD_BYTES) {
     throw new RemarkableUploadError(
-      `this file is ${Math.floor(size / (1024 * 1024))} MB; the tablet's USB web interface accepts up to 100 MB`,
+      `this file is ${Math.floor(size / (1024 * 1024))} MB; the tablet's USB web interface accepts up to 100 MB.`,
     );
   }
 
@@ -100,7 +99,7 @@ export async function uploadToRemarkable(
   });
   if (listing.status !== 200) {
     throw new RemarkableUploadError(
-      `couldn't open the tablet's root folder (HTTP ${listing.status}); nothing was uploaded`,
+      `couldn't open the tablet's root folder (HTTP ${listing.status}); nothing was uploaded.`,
     );
   }
 
@@ -114,6 +113,6 @@ export async function uploadToRemarkable(
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
-    throw new RemarkableUploadError(`reMarkable upload failed (HTTP ${response.status})`);
+    throw new RemarkableUploadError(`reMarkable upload failed (HTTP ${response.status}).`);
   }
 }

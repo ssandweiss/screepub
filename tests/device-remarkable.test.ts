@@ -81,7 +81,11 @@ test('only PDF and EPUB are accepted', async () => {
   s.reset();
   const azw3 = join(mkdtempSync(join(tmpdir(), 'screepub-test-')), 'Script.azw3');
   writeFileSync(azw3, 'x');
-  await expect(uploadToRemarkable(azw3, s.url)).rejects.toThrow('azw3');
+  // The literal `not .azw3.`, not the bare extension: the filename itself ends
+  // in .azw3, so a message that merely echoed the path would satisfy a looser
+  // assertion without ever naming the rule. This text is held byte-identical
+  // to RemarkableDevice.swift's — see the note beside the throw.
+  await expect(uploadToRemarkable(azw3, s.url)).rejects.toThrow('not .azw3.');
   expect(s.requests).toEqual([]);
 });
 
