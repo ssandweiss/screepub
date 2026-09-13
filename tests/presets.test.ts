@@ -1,0 +1,30 @@
+import { test, expect } from 'bun:test';
+import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
+import { DEVICE_PRESETS, matchingPreset } from '../src/settings/presets';
+
+test('the Kindle e-ink preset is exactly the defaults', () => {
+  expect(DEVICE_PRESETS.kindleEink.settings).toEqual(DEFAULT_FORMAT_OPTIONS);
+});
+
+test('the phone preset widens the column and drops side-by-side dual dialogue', () => {
+  expect(DEVICE_PRESETS.phone.settings).toEqual({
+    ...DEFAULT_FORMAT_OPTIONS,
+    dialogueSideMarginPct: 10,
+    dualDialogue: 'sequential',
+  });
+});
+
+test('matchingPreset names the preset whose settings match exactly', () => {
+  expect(matchingPreset(DEFAULT_FORMAT_OPTIONS)).toBe('kindleEink');
+  expect(matchingPreset(DEVICE_PRESETS.phone.settings)).toBe('phone');
+});
+
+test('matchingPreset returns null once a knob is tuned away from every preset', () => {
+  expect(matchingPreset({ ...DEFAULT_FORMAT_OPTIONS, cueIndentPct: 41 })).toBeNull();
+});
+
+test('every preset has a display name', () => {
+  for (const preset of Object.values(DEVICE_PRESETS)) {
+    expect(preset.displayName.length).toBeGreaterThan(0);
+  }
+});
