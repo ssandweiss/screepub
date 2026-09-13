@@ -2,9 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Screepub</title>
+    <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <p>probe</p>
+    <main>
+      <h1>Screepub</h1>
+      <p id="engine" class="muted">looking for the engine…</p>
+
+      <button id="convert" type="button">Choose a screenplay…</button>
+
+      <section id="result" hidden></section>
+      <section id="failure" hidden></section>
+    </main>
+    <script src="app.js"></script>
   </body>
 </html>

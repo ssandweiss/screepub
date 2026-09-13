@@ -1,0 +1,91 @@
+/* Deliberately plain. Piece D replaces this file with brand/components/.
+ *
+ * This directory has no build step and no bundler (see desktop/README.md),
+ * so it cannot `@import` or copy `brand/tokens.css` at build time, and the
+ * packaged app only ships what tauri.conf.json's `frontendDist` embeds —
+ * a file outside `desktop/ui/` would not be there to load. The seven
+ * values below are therefore inlined literally, not invented: they are
+ * `paper`, `ink`, `ink-muted`, `ink-on-brass`, `brass`, `ground` and
+ * `alarm` copied verbatim from `brand/tokens.css`, the same seven pinned
+ * to `Theme.swift` and checked by tests/brand-tokens.test.ts. Piece D's
+ * real build can share the source file directly instead of this copy.
+ */
+:root {
+  color-scheme: light dark;
+  --paper: #f7f2e6;
+  --ink: #1d1b16;
+  --ink-muted: #6d6960;
+  --ink-on-brass: #1d1b16;
+  --brass: #e8a33d;
+  --ground: #23272f;
+  --alarm: #af3220;
+  --radius: 3px;
+  font-family:
+    'Literata', Georgia, 'Times New Roman', serif; /* --font-prose fallback stack */
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #1e1c19;
+    --ink: #e8e2d3;
+    --ink-muted: #8f887c;
+    --ground: #141517;
+    --alarm: #ea7a65;
+  }
+}
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+}
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+h1 {
+  font-size: 1.25rem;
+  margin: 0 0 0.25rem;
+}
+h2 {
+  font-size: 1.1rem;
+  margin: 0 0 0.25rem;
+}
+button {
+  font: inherit;
+  padding: 0.6rem 1rem;
+  margin: 1rem 0;
+  background: var(--brass);
+  color: var(--ink-on-brass);
+  border: 1px solid var(--ground);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+section {
+  border-top: 1px solid var(--ink-muted);
+  padding-top: 1rem;
+  margin-top: 1rem;
+}
+.muted {
+  color: var(--ink-muted);
+}
+.bad {
+  color: var(--alarm);
+}
+.warning {
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+.path,
+pre {
+  font-family:
+    'Courier Prime', 'Courier New', ui-monospace,
+    monospace; /* --font-structure fallback stack */
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--ink-muted);
+}
