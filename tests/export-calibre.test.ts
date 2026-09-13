@@ -3,6 +3,7 @@ import { accessSync, constants, mkdtempSync, writeFileSync, readFileSync, chmodS
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { platform } from 'node:process';
+import JSZip from 'jszip';
 import {
   CALIBRE_FORMAT_GUARDS,
   calibreTool,
@@ -162,7 +163,19 @@ withCalibre('toAzw3 produces an .azw3 beside the EPUB', async () => {
   expect(readFileSync(out).length).toBeGreaterThan(0);
 }, 120_000);
 
-withCalibre('toKepub names its output .kepub.epub for Kobo', async () => {
+withCalibre('toKepub names its output .kepub.epub AND emits koboSpan markup', async () => {
+  // The filename alone proves nothing: the BROKEN single-step form produces
+  // a file with this same name -- a plain EPUB with no koboSpan markup at
+  // all. koboSpan is the only assertion that discriminates the two, which is
+  // why kit-check asserted both halves (KitCheck/main.swift:349-350) and why
+  // the fake-tool test above cannot stand in for it: it self-skips on every
+  // machine that actually has Calibre.
   const out = await toKepub(await minimalEpub());
   expect(out.endsWith('.kepub.epub')).toBe(true);
+  // kit-check used zipgrep; an EPUB is a deflated zip, so the marker is not
+  // in the raw bytes and the entries have to be inflated to see it.
+  const zip = await JSZip.loadAsync(readFileSync(out));
+  const entries = Object.values(zip.files).filter((f) => !f.dir);
+  const texts = await Promise.all(entries.map((f) => f.async('string')));
+  expect(texts.some((t) => t.includes('koboSpan'))).toBe(true);
 }, 120_000);
