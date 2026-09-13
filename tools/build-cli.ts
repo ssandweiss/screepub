@@ -12,7 +12,9 @@
 //   bun tools/build-cli.ts --version 0.6.0 --out dist/
 //   bun tools/build-cli.ts --version 0.6.0 --out dist/ --only windows-x64
 
-import { closeSync, openSync, readSync } from 'node:fs';
+import { closeSync, openSync, readSync, readFileSync } from 'node:fs';
+import { join, isAbsolute, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
 
 export type BinaryFormat =
   | 'elf-x86-64'
@@ -77,5 +79,163 @@ export function readBinaryFormat(path: string): BinaryFormat {
     return detectBinaryFormat(head.subarray(0, read));
   } finally {
     closeSync(fd);
+  }
+}
+
+export type TargetId = 'linux-x64' | 'linux-arm64' | 'windows-x64';
+
+export interface Target {
+  id: TargetId;
+  /** The value for `bun build --compile --target=`. */
+  bunTarget: string;
+  /** What the compiled output must be. Checked, never assumed. */
+  format: BinaryFormat;
+  packaging: 'tar.gz' | 'zip';
+  /** The name the binary has INSIDE the archive, so `tar -xzf` and
+   *  `Expand-Archive` both drop a runnable `screepub` in the cwd — the same
+   *  arrangement as the macOS tarballs app/release.sh produces. */
+  binaryName: string;
+  archiveName: string;
+}
+
+/** No darwin row, ever. See the file header. */
+export const TARGETS: readonly Target[] = [
+  {
+    id: 'linux-x64',
+    bunTarget: 'bun-linux-x64',
+    format: 'elf-x86-64',
+    packaging: 'tar.gz',
+    binaryName: 'screepub',
+    archiveName: 'screepub-cli-linux-x64.tar.gz',
+  },
+  {
+    // Asahi, Raspberry Pi, ARM servers — and the machine this is developed
+    // on, so it is the Linux target that gets exercised daily.
+    id: 'linux-arm64',
+    bunTarget: 'bun-linux-arm64',
+    format: 'elf-aarch64',
+    packaging: 'tar.gz',
+    binaryName: 'screepub',
+    archiveName: 'screepub-cli-linux-arm64.tar.gz',
+  },
+  {
+    id: 'windows-x64',
+    bunTarget: 'bun-windows-x64',
+    format: 'pe-x86-64',
+    packaging: 'zip',
+    binaryName: 'screepub.exe',
+    archiveName: 'screepub-cli-windows-x64.zip',
+  },
+];
+
+/** Per-target build directory: all three would otherwise compile to the
+ *  same `screepub` and overwrite each other. */
+export function buildDir(target: Target, outDir: string): string {
+  return join(outDir, target.id);
+}
+
+/** What we hand `--outfile`. Never carries `.exe`: bun appends it for the
+ *  windows target, and passing it would produce `screepub.exe.exe`. */
+export function compileOutfile(target: Target, outDir: string): string {
+  return join(buildDir(target, outDir), 'screepub');
+}
+
+/** Where the compiled binary actually lands. */
+export function binaryPath(target: Target, outDir: string): string {
+  return join(buildDir(target, outDir), target.binaryName);
+}
+
+/** Archives sit flat in the output directory, so SHA256SUMS names them
+ *  without a path. */
+export function archivePath(target: Target, outDir: string): string {
+  return join(outDir, target.archiveName);
+}
+
+/** Which target, if any, this machine can actually execute. Pure, so the
+ *  mapping is tested rather than only observed on whatever host ran the
+ *  suite. macOS answers `undefined` on purpose: this tool builds no macOS
+ *  artifact, so a Mac has no host target here. */
+export function targetIdForHost(platform: string, arch: string): TargetId | undefined {
+  if (platform === 'linux' && arch === 'x64') return 'linux-x64';
+  if (platform === 'linux' && arch === 'arm64') return 'linux-arm64';
+  if (platform === 'win32' && arch === 'x64') return 'windows-x64';
+  return undefined;
+}
+
+export function hostTarget(): Target | undefined {
+  const id = targetIdForHost(process.platform, process.arch);
+  return id ? TARGETS.find((t) => t.id === id) : undefined;
+}
+
+/** The repo root, from this file's location: the tool is run from anywhere
+ *  and must still find package.json and src/cli.ts. */
+export const REPO_DIR = join(import.meta.dir, '..');
+
+const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
+
+export interface BuildArgs {
+  version: string;
+  outDir: string;
+  only: TargetId[];
+}
+
+export function parseBuildArgs(argv: string[]): BuildArgs {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      version: { type: 'string' },
+      out: { type: 'string' },
+      only: { type: 'string', multiple: true },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+
+  const version = (values.version ?? '').replace(/^v/, '');
+  if (!VERSION_RE.test(version)) {
+    throw new Error(
+      `build-cli: --version must be MAJOR.MINOR.PATCH (got ${values.version ?? '<missing>'})`,
+    );
+  }
+  if (!values.out) {
+    throw new Error(
+      'build-cli: --out <dir> is required. There is no default: each artifact is 39-119 MB, ' +
+        'and a default would write a quarter of a gigabyte somewhere you did not ask for.',
+    );
+  }
+
+  const known = TARGETS.map((t) => t.id);
+  const requested = (values.only ?? [])
+    .flatMap((s) => s.split(','))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const id of requested) {
+    if (!known.includes(id as TargetId)) {
+      throw new Error(`build-cli: unknown target "${id}"; known targets are ${known.join(', ')}`);
+    }
+  }
+
+  return {
+    version,
+    outDir: isAbsolute(values.out) ? values.out : resolve(values.out),
+    only: (requested.length ? requested : known) as TargetId[],
+  };
+}
+
+/** `screepub --version` reports package.json's version, inlined at compile
+ *  time; the --version flag changes nothing about the binary. So the flag's
+ *  job is to be CHECKED. app/release.sh applies the same guard on the macOS
+ *  side, and for the same reason: a binary that disagrees with its tag lies
+ *  about itself in every bug report it ever appears in. */
+export function assertPackageVersion(version: string, repoDir: string = REPO_DIR): void {
+  const pkg = JSON.parse(readFileSync(join(repoDir, 'package.json'), 'utf8')) as {
+    version?: string;
+  };
+  if (pkg.version !== version) {
+    throw new Error(
+      `build-cli: package.json says ${pkg.version} but --version says ${version}. ` +
+        '`screepub --version` reports package.json inlined at compile time, so this binary ' +
+        'would misreport itself. Bump package.json, or build the version it already names.',
+    );
   }
 }
