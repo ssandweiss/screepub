@@ -16,19 +16,26 @@
 //
 // Two different sources answer "what is the Rust triple?", for two
 // different questions. For --target/--all, it is the PINNED constant in
-// tools/sidecar-targets.ts's SIDECAR_TARGETS: cross-compiling for a machine
-// you are not on, there is no toolchain to ask, and that table is
-// cross-pinned against build-cli.ts's release matrix so it cannot drift
-// silently. For --host, it is asked of THIS machine's own rustc
-// (hostSidecarTarget, in tools/sidecar-targets.ts) rather than mapped from
-// process.platform/process.arch: Node's platform/arch enum has no gnu/musl
-// axis (glibc and musl Linux both report 'linux'/'x64'), so a value derived
-// from it can silently name the wrong libc even when the OS and CPU guesses
-// are right — and Task 1 already showed what that failure looks like: cargo
-// build succeeds, the sidecar bundles under the wrong name, and the app
-// fails at runtime with a bare "No such file or directory" naming no file.
-// Anyone running --host is about to `cargo build` on this same machine, so
-// asking its own rustc is both correct and always available.
+// tools/sidecar-targets.ts's SIDECAR_TARGETS — which has Linux musl rows
+// (bun-linux-x64-musl, bun-linux-arm64-musl) alongside the glibc ones: Bun
+// really does compile musl-linked Linux binaries, this was verified on this
+// machine, not assumed. Cross-compiling for a machine you are not on, there
+// is no toolchain to ask, and the table is cross-pinned against
+// build-cli.ts's release matrix so it cannot drift silently. For --host, it
+// is asked of THIS machine's own rustc (hostSidecarTarget, in
+// tools/sidecar-targets.ts) rather than mapped from process.platform/
+// process.arch: Node's platform/arch enum has no gnu/musl axis (glibc and
+// musl Linux both report 'linux'/'x64'), so a value derived from it can
+// silently name the wrong libc even when the OS and CPU guesses are right.
+// hostSidecarTarget uses that same rustc answer to pick the musl BunTarget
+// too, not only the filename — naming a sidecar correctly but building it
+// from the glibc row is still a build that fails on a musl host, just
+// loudly instead of silently. Task 1 already showed what the fully silent
+// version looks like: cargo build succeeds, the sidecar bundles under the
+// wrong name, and the app fails at runtime with a bare "No such file or
+// directory" naming no file. Anyone running --host is about to `cargo
+// build` on this same machine, so asking its own rustc is both correct and
+// always available.
 
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { join, isAbsolute, resolve } from 'node:path';
@@ -201,12 +208,15 @@ if (import.meta.main) {
   try {
     const { targets, outDir, hostTriple } = parseSidecarArgs(process.argv.slice(2));
     for (const bunTarget of targets) {
-      // --host: name it for what THIS machine's rustc reports. --target/
-      // --all: name it from the pinned table (hostTriple is undefined).
+      // --host: resolve against THIS machine's rustc — which can swap in
+      // a musl bunTarget the pre-parsed `targets` array above never knew
+      // about, so the log below reads target.bunTarget, not the loop
+      // variable. --target/--all: name it from the pinned table
+      // (hostTriple is undefined, so `target` matches `bunTarget`).
       const target = hostTriple
         ? hostSidecarTarget(process.platform, process.arch, hostTriple)
         : sidecarTargetFor(bunTarget);
-      console.log(`building ${bunTarget} → ${sidecarFileName(target)}`);
+      console.log(`building ${target.bunTarget} → ${sidecarFileName(target)}`);
       buildSidecar(target, outDir);
       verifySidecar(target, outDir);
       console.log(`  ok: ${sidecarPath(target, outDir)}`);

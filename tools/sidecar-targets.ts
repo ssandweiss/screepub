@@ -11,14 +11,20 @@
 // Two tables exist on purpose. tools/build-cli.ts's TARGETS is the RELEASE
 // matrix and holds no darwin row, because a macOS artifact must come signed
 // and notarized from app/release.sh. A sidecar is not a release artifact:
-// it is an input to a build, so darwin belongs here. tests/sidecar-targets
-// .test.ts pins that the release table is a subset of this one.
+// it is an input to a build, so darwin belongs here. The same reasoning
+// covers the two Linux musl rows below: nobody ships a musl release
+// artifact, but a contributor's dev machine can be a musl host, so the
+// sidecar table carries them and the release table does not.
+// tests/sidecar-targets.test.ts pins that the release table is a subset of
+// this one.
 
 import type { BinaryFormat } from './build-cli';
 
 export type BunTarget =
   | 'bun-linux-x64'
+  | 'bun-linux-x64-musl'
   | 'bun-linux-arm64'
+  | 'bun-linux-arm64-musl'
   | 'bun-windows-x64'
   | 'bun-darwin-x64'
   | 'bun-darwin-arm64';
@@ -67,6 +73,23 @@ export const SIDECAR_TARGETS: readonly SidecarTarget[] = [
     exeSuffix: '',
     format: 'macho-arm64',
   },
+  {
+    // Bun genuinely ships musl-linked Linux targets, verified on this
+    // machine by compiling with each and confirming the ELF interpreter
+    // with `file` (/lib/ld-musl-x86_64.so.1, not glibc's loader) — this is
+    // not a glibc binary wearing a different name. Triple spelling checked
+    // against `rustc --print target-list | grep musl`.
+    bunTarget: 'bun-linux-x64-musl',
+    rustTriple: 'x86_64-unknown-linux-musl',
+    exeSuffix: '',
+    format: 'elf-x86-64',
+  },
+  {
+    bunTarget: 'bun-linux-arm64-musl',
+    rustTriple: 'aarch64-unknown-linux-musl',
+    exeSuffix: '',
+    format: 'elf-aarch64',
+  },
 ];
 
 const KNOWN = SIDECAR_TARGETS.map((t) => t.bunTarget).join(', ');
@@ -89,8 +112,12 @@ export function sidecarFileName(target: SidecarTarget): string {
   return `${SIDECAR_BASENAME}-${target.rustTriple}${target.exeSuffix}`;
 }
 
-/** Which target this machine is. Throws rather than guessing: a guess would
- *  produce a sidecar named for a machine it cannot run on. */
+/** Which (glibc-family) target this machine is, from platform/arch alone.
+ *  Throws rather than guessing: a guess would produce a sidecar named for a
+ *  machine it cannot run on. This cannot by itself tell a musl Linux host
+ *  from a glibc one — process.platform/process.arch has no libc axis, both
+ *  report 'linux'/'x64' — so hostSidecarTarget below asks the real
+ *  toolchain and swaps to the musl sibling when that answer says musl. */
 export function hostBunTarget(platform: string, arch: string): BunTarget {
   if (platform === 'linux' && arch === 'x64') return 'bun-linux-x64';
   if (platform === 'linux' && arch === 'arm64') return 'bun-linux-arm64';
@@ -146,29 +173,56 @@ export function rustcHostTriple(): string {
   return parseRustcHost(Buffer.from(proc.stdout).toString());
 }
 
-/** The SidecarTarget for THIS machine, named for what a same-machine
- *  `cargo build` will actually look for.
+/** The musl-linked sibling of a glibc Linux BunTarget, or undefined for
+ *  anything else (Windows and darwin have no libc axis to swap on). Bun
+ *  really does ship these — bun-linux-x64-musl and bun-linux-arm64-musl —
+ *  confirmed by compiling with each --target and checking the resulting
+ *  ELF's interpreter with `file`; they are genuinely musl-linked binaries,
+ *  not glibc ones under a different name. */
+function muslSiblingOf(bunTarget: BunTarget): BunTarget | undefined {
+  if (bunTarget === 'bun-linux-x64') return 'bun-linux-x64-musl';
+  if (bunTarget === 'bun-linux-arm64') return 'bun-linux-arm64-musl';
+  return undefined;
+}
+
+/** The SidecarTarget for THIS machine, named — and, on Linux, COMPILED —
+ *  for what a same-machine `cargo build` will actually look for.
  *
- *  `bunTarget` still comes from platform/arch: Bun's own --compile targets
- *  have no gnu/musl axis to choose between, so there is nothing else to ask
- *  for that part. But the RUST TRIPLE — the part Tauri uses to resolve the
- *  sidecar's filename — is asked of the toolchain, not read from the
- *  pinned SIDECAR_TARGETS table. Node's platform/arch cannot tell a glibc
- *  host from a musl one (both report 'linux'/'x64'), and the pinned table
- *  has only one Linux row per architecture; on a musl host the pinned row
- *  would silently name the sidecar for the wrong libc, and Task 1 already
- *  showed what that failure looks like — cargo build succeeds, the sidecar
- *  bundles under the wrong name, and the app fails at runtime with a bare
- *  "No such file or directory" naming no file at all.
+ *  Two things can be wrong about a Linux host's default guess, and both
+ *  come from the same root cause: process.platform/process.arch has no
+ *  gnu/musl axis, so hostBunTarget alone cannot tell a musl host from a
+ *  glibc one. Fixed here by asking the toolchain instead:
+ *
+ *   1. The RUST TRIPLE — the part Tauri uses to resolve the sidecar's
+ *      filename — is asked of rustc, not read off the pinned
+ *      SIDECAR_TARGETS row for the platform/arch guess.
+ *   2. The BUN TARGET actually compiled — bun-linux-x64 vs.
+ *      -x64-musl — is swapped to the musl sibling when that same rustc
+ *      answer says musl, via muslSiblingOf.
+ *
+ *  Getting only #1 right and not #2 was fix round 1's gap: the sidecar
+ *  would be NAMED correctly for a musl host but built from the pinned
+ *  glibc row, which has no musl row to fall back to — so the build failed
+ *  outright instead of shipping a binary that silently couldn't run.
+ *  Getting neither right is the original failure Task 1 found: cargo
+ *  build succeeds, the sidecar bundles under the wrong name, and the app
+ *  fails at runtime with a bare "No such file or directory" naming no file
+ *  at all.
  *
  *  Cross-compiled targets (--target / --all in build-sidecar.ts) keep the
- *  pinned table exactly: you cannot ask rustc about a triple it is not
- *  installed for. */
+ *  pinned table exactly, musl rows included: you cannot ask rustc about a
+ *  triple it is not installed for, so there --target=bun-linux-x64-musl
+ *  must be named explicitly. */
 export function hostSidecarTarget(
   platform: string = process.platform,
   arch: string = process.arch,
   hostTriple: HostTriple = rustcHostTriple,
 ): SidecarTarget {
-  const base = sidecarTargetFor(hostBunTarget(platform, arch));
-  return { ...base, rustTriple: hostTriple() };
+  // Throws on an unsupported host BEFORE the resolver ever runs.
+  const glibcGuess = hostBunTarget(platform, arch);
+  const rustTriple = hostTriple();
+  const musl = muslSiblingOf(glibcGuess);
+  const bunTarget = musl && rustTriple.includes('musl') ? musl : glibcGuess;
+  const base = sidecarTargetFor(bunTarget);
+  return { ...base, rustTriple };
 }

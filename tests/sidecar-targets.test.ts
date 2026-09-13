@@ -25,6 +25,11 @@ describe('the triple map', () => {
       'bun-windows-x64': 'x86_64-pc-windows-msvc',
       'bun-darwin-x64': 'x86_64-apple-darwin',
       'bun-darwin-arm64': 'aarch64-apple-darwin',
+      // Bun genuinely ships musl-linked Linux targets (verified on this
+      // machine with `file`, not assumed); triples checked against
+      // `rustc --print target-list | grep musl`.
+      'bun-linux-x64-musl': 'x86_64-unknown-linux-musl',
+      'bun-linux-arm64-musl': 'aarch64-unknown-linux-musl',
     });
   });
 
@@ -46,6 +51,10 @@ describe('the triple map', () => {
       'bun-windows-x64': 'pe-x86-64',
       'bun-darwin-x64': 'macho-x86-64',
       'bun-darwin-arm64': 'macho-arm64',
+      // Same ELF machine type as their glibc siblings: libc doesn't change
+      // the CPU architecture the header records.
+      'bun-linux-x64-musl': 'elf-x86-64',
+      'bun-linux-arm64-musl': 'elf-aarch64',
     });
   });
 
@@ -89,6 +98,8 @@ describe('sidecarFileName', () => {
       'screepub-engine-x86_64-pc-windows-msvc.exe',
       'screepub-engine-x86_64-apple-darwin',
       'screepub-engine-aarch64-apple-darwin',
+      'screepub-engine-x86_64-unknown-linux-musl',
+      'screepub-engine-aarch64-unknown-linux-musl',
     ]);
   });
 
@@ -130,22 +141,43 @@ describe('hostBunTarget', () => {
 });
 
 describe('hostSidecarTarget', () => {
-  test('uses the injected resolver for the triple, not the pinned table', () => {
+  test('a musl resolver selects BOTH the musl Bun target and the musl-suffixed filename', () => {
     // The finding from fix round 1: --host must ask the toolchain, because
-    // Node's platform/arch cannot tell a glibc host from a musl one. A
-    // resolver that reports musl must produce a musl-suffixed filename.
+    // Node's platform/arch cannot tell a glibc host from a musl one. Fix
+    // round 2's completion: getting only the filename right and still
+    // building from the glibc row is still broken — just loudly, since
+    // SIDECAR_TARGETS has no musl row to build from otherwise. Both halves
+    // have to come from the same resolved answer.
     const musl = () => 'x86_64-unknown-linux-musl';
     const target = hostSidecarTarget('linux', 'x64', musl);
+    expect(target.bunTarget).toBe('bun-linux-x64-musl');
     expect(target.rustTriple).toBe('x86_64-unknown-linux-musl');
     expect(sidecarFileName(target)).toBe('screepub-engine-x86_64-unknown-linux-musl');
-  });
-
-  test('only the triple changes: bunTarget, exeSuffix and format still come from the pinned row', () => {
-    const musl = () => 'x86_64-unknown-linux-musl';
-    const target = hostSidecarTarget('linux', 'x64', musl);
-    expect(target.bunTarget).toBe('bun-linux-x64');
     expect(target.exeSuffix).toBe('');
     expect(target.format).toBe('elf-x86-64');
+  });
+
+  test('the same swap happens on arm64', () => {
+    const musl = () => 'aarch64-unknown-linux-musl';
+    const target = hostSidecarTarget('linux', 'arm64', musl);
+    expect(target.bunTarget).toBe('bun-linux-arm64-musl');
+    expect(sidecarFileName(target)).toBe('screepub-engine-aarch64-unknown-linux-musl');
+    expect(target.format).toBe('elf-aarch64');
+  });
+
+  test('a gnu (glibc) resolver keeps the plain Bun target — no unconditional swap', () => {
+    const gnu = () => 'x86_64-unknown-linux-gnu';
+    const target = hostSidecarTarget('linux', 'x64', gnu);
+    expect(target.bunTarget).toBe('bun-linux-x64');
+  });
+
+  test('the musl swap is Linux-only: a darwin resolver has no musl sibling to swap to', () => {
+    // musl is a Linux libc distinction; muslSiblingOf is undefined for
+    // darwin/windows targets, so an odd resolver answer there just names
+    // the file — it cannot select a target that doesn't exist.
+    const weird = () => 'aarch64-apple-darwin';
+    const target = hostSidecarTarget('darwin', 'arm64', weird);
+    expect(target.bunTarget).toBe('bun-darwin-arm64');
   });
 
   test('a resolver that fails (rustc missing or broken) propagates, never falls back to a guess', () => {
