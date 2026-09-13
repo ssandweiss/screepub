@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // screepub — screenplay PDF → Fountain → reflowable EPUB3.
 import { parseArgs } from 'node:util';
+import { existsSync } from 'node:fs';
 import { basename, delimiter, dirname, extname, join } from 'node:path';
 import { readFile, writeFile, rename } from 'node:fs/promises';
 // Inlined by `bun build --compile`, so the shipped binary reports the same
@@ -14,8 +15,8 @@ import {
   type ConvertResult,
   type ConvertStage,
 } from './convert';
-import { mapConversionError, CliError, type JsonError } from './cli-errors';
-import { resolveCommand, devicesCommand, sendCommand, type Verb } from './cli-devices';
+import { mapConversionError, CliError, errorMessage, type JsonError } from './cli-errors';
+import { resolveCommand, devicesCommand, sendCommand, VERBS, type Verb } from './cli-devices';
 import type { ListDevicesOptions } from './device/list';
 
 const USAGE = `screepub — screenplay PDF → reflowable EPUB3 (via Fountain)
@@ -53,7 +54,45 @@ Commands:
 
 A verb is only a verb when no file of that name exists: a script saved as
 "devices" still converts, and "./devices" always means the file.
+Each verb has its own --help.
 `;
+
+// A verb's --help must advertise the verb's OWN flags. parseVerbArgs accepts
+// --device, --json and -h and nothing else; printing the conversion usage here
+// offered -o, --mobi, --options and --progress, every one of which the verb
+// parser rejects as an unknown flag.
+const DEVICES_USAGE = `screepub devices — list every connected e-reader
+
+Usage:
+  screepub devices [--json]
+
+Lists USB-mounted Kindle, Kobo and tolino volumes, plus a docked reMarkable if
+its USB web interface answers. Nothing connected is an empty list, not an error.
+
+Options:
+  --json                 machine-readable result on stdout (for the app)
+  -h, --help             show this help
+`;
+
+const SEND_USAGE = `screepub send — send an existing file to a connected reader
+
+Usage:
+  screepub send <file> [--device <id>] [--json]
+
+send never converts: convert first, then send the output. A reMarkable accepts
+only PDF and EPUB.
+
+Options:
+  --device <id>          which reader, as the id \`screepub devices\` prints.
+                         Optional with exactly one connected; required with
+                         several
+  --json                 machine-readable result on stdout (for the app)
+  -h, --help             show this help
+`;
+
+function verbUsage(verb: Verb): string {
+  return verb === 'devices' ? DEVICES_USAGE : SEND_USAGE;
+}
 
 // --json is the app's only channel: EVERY exit in that mode must be one
 // parseable JSON object on stdout. jsonMode is therefore pre-scanned from
@@ -82,11 +121,11 @@ function fail(error: JsonError): never {
   process.exit(1);
 }
 
-function showHelp(): never {
+function showHelp(usage: string = USAGE): never {
   if (jsonMode) {
-    console.log(JSON.stringify({ ok: true, usage: USAGE }));
+    console.log(JSON.stringify({ ok: true, usage }));
   } else {
-    console.log(USAGE);
+    console.log(usage);
   }
   process.exit(0);
 }
@@ -98,6 +137,25 @@ function showVersion(): never {
     console.log(`screepub ${pkg.version}`);
   }
   process.exit(0);
+}
+
+/** The one thing that fixes `screepub --json devices`.
+ *
+ * resolveCommand looks at argv[0] and nothing else, deliberately and
+ * permanently: a verb found after a flag is indistinguishable from that flag's
+ * value (`--title send`). So flag-before-verb — how a shell alias or a spawn
+ * wrapper commonly builds argv — reaches the CONVERSION path and used to die
+ * on `unsupported input type ""`, which names neither the cause nor the cure.
+ * Message-only: dispatch is untouched.
+ *
+ * The hint is withheld when a file of that name exists, because then the user
+ * really did mean the file — that is the shadowing rule, and telling them to
+ * run the verb instead would be wrong. */
+function verbHint(input: string): string {
+  if (extname(input) !== '') return '';
+  if (!(VERBS as readonly string[]).includes(input)) return '';
+  if (existsSync(input)) return '';
+  return ` — did you mean \`screepub ${input}\`? the verb must come first`;
 }
 
 function parseCliArgs() {
@@ -152,17 +210,23 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
   try {
     parsed = parseVerbArgs(args);
   } catch (err) {
-    fail({ code: 'usage', message: (err as Error).message });
+    fail({ code: 'usage', message: errorMessage(err) });
   }
   const { values, positionals } = parsed;
   jsonMode = values.json;
 
   if (values.help) {
-    showHelp();
+    showHelp(verbUsage(verb));
   }
 
   try {
     if (verb === 'devices') {
+      // Rejected rather than ignored, for the same reason `devices extra` is:
+      // silently accepting a flag the command cannot act on teaches the user
+      // it did something. --device belongs to send.
+      if (values.device !== undefined) {
+        fail({ code: 'usage', message: 'devices takes no --device — it lists every reader (--device belongs to send)' });
+      }
       if (positionals.length > 0) {
         fail({ code: 'usage', message: `devices takes no arguments (got "${positionals[0]}")` });
       }
@@ -190,20 +254,22 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
     });
     if (jsonMode) {
       // `destination` is OMITTED for reMarkable, which has no path; `uploaded`
-      // takes its place. Two shapes, one object, per the design spec.
+      // takes its place. Two shapes, one object, per the design spec. Which
+      // shape is READ OFF SendResult.uploaded, never re-derived here: two
+      // places deciding the same thing is two places that can disagree.
       console.log(
         JSON.stringify({
           ok: true,
           device: sent.device,
-          ...(sent.destination !== undefined ? { destination: sent.destination } : { uploaded: true }),
+          ...(sent.uploaded ? { uploaded: true } : { destination: sent.destination }),
         }),
       );
       return;
     }
     console.log(
-      sent.destination !== undefined
-        ? `sent ${basename(positionals[0])} to ${sent.device.name} — ${sent.destination}`
-        : `sent ${basename(positionals[0])} to ${sent.device.name}`,
+      sent.uploaded
+        ? `sent ${basename(positionals[0])} to ${sent.device.name}`
+        : `sent ${basename(positionals[0])} to ${sent.device.name} — ${sent.destination}`,
     );
   } catch (err) {
     if (err instanceof CliError) fail(err.toJson());
@@ -225,7 +291,7 @@ async function main() {
   try {
     parsed = parseCliArgs();
   } catch (err) {
-    fail({ code: 'usage', message: (err as Error).message });
+    fail({ code: 'usage', message: errorMessage(err) });
   }
   const { values, positionals } = parsed;
   jsonMode = values.json;
@@ -294,7 +360,9 @@ async function main() {
     } else {
       fail({
         code: 'unsupported-type',
-        message: `unsupported input type "${ext}" — expected .pdf, .fountain, or .txt`,
+        message:
+          `unsupported input type "${ext}" — expected .pdf, .fountain, or .txt` +
+          verbHint(input),
       });
     }
   } catch (err) {

@@ -2,7 +2,7 @@
 // which piece A detects by on-disk signature, plus a reMarkable, which never
 // mounts and is only there if its USB web interface answers.
 import { mountedDevices } from './volumes';
-import { probeRemarkable, REMARKABLE_ENDPOINT } from './remarkable';
+import { probeRemarkable, REMARKABLE_ENDPOINT, REMARKABLE_PROBE_TIMEOUT_MS } from './remarkable';
 import { DEVICE_DISPLAY_NAMES, type ConnectedDevice } from './types';
 
 export interface ListDevicesOptions {
@@ -27,7 +27,7 @@ export async function listDevices(options: ListDevicesOptions = {}): Promise<Con
   const scan = options.scan ?? mountedDevices;
   const probe = options.probe ?? probeRemarkable;
   const endpoint = options.remarkableEndpoint ?? REMARKABLE_ENDPOINT;
-  const timeoutMs = options.probeTimeoutMs ?? 1500;
+  const timeoutMs = options.probeTimeoutMs ?? REMARKABLE_PROBE_TIMEOUT_MS;
 
   const scanning = Promise.resolve(scan(options.roots));
   const probing = probe(endpoint, timeoutMs).catch(() => false);

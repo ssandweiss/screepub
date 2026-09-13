@@ -3,7 +3,7 @@
 // process. Dispatch lives here rather than in cli.ts because cli.ts runs
 // main() on import and cannot be imported by a test.
 import { existsSync, statSync } from 'node:fs';
-import { CliError } from './cli-errors';
+import { CliError, errorMessage } from './cli-errors';
 import { listDevices, type ListDevicesOptions } from './device/list';
 import { deviceId, type ConnectedDevice, type DeviceKind } from './device/types';
 import { copyToDevice } from './device/transfer';
@@ -142,7 +142,7 @@ export async function sendCommand(options: SendOptions): Promise<SendResult> {
     try {
       await uploadToRemarkable(options.file, options.remarkableEndpoint);
     } catch (err) {
-      throw new CliError('send-failed', (err as Error).message);
+      throw new CliError('send-failed', errorMessage(err));
     }
     return { device: identity, uploaded: true };
   }
@@ -150,6 +150,6 @@ export async function sendCommand(options: SendOptions): Promise<SendResult> {
   try {
     return { device: identity, destination: copyToDevice(options.file, device) };
   } catch (err) {
-    throw new CliError('send-failed', (err as Error).message);
+    throw new CliError('send-failed', errorMessage(err));
   }
 }

@@ -12,6 +12,11 @@ export const REMARKABLE_ENDPOINT = `http://${REMARKABLE_USB_ADDRESS}`;
 /** Paper Pro's web interface caps uploads here. */
 export const REMARKABLE_MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
+/** How long the presence probe waits. One constant, because listDevices always
+ * passes an explicit value: a second copy as this function's default would be
+ * dead for the only production caller, and changing it would do nothing. */
+export const REMARKABLE_PROBE_TIMEOUT_MS = 1500;
+
 export class RemarkableUploadError extends Error {
   constructor(message: string) {
     super(message);
@@ -31,7 +36,7 @@ function documentsUrl(endpoint: string): string {
  * USB with the interface enabled. Cheap enough to poll. */
 export async function probeRemarkable(
   endpoint: string = REMARKABLE_ENDPOINT,
-  timeoutMs = 1500,
+  timeoutMs = REMARKABLE_PROBE_TIMEOUT_MS,
 ): Promise<boolean> {
   try {
     const response = await fetch(documentsUrl(endpoint), {
@@ -63,7 +68,16 @@ export async function uploadToRemarkable(
 ): Promise<void> {
   const ext = extname(file).replace(/^\./, '').toLowerCase();
   if (!remarkableAccepts(file)) {
-    throw new RemarkableUploadError(`reMarkable accepts PDF and EPUB, not .${ext}.`);
+    // Word-for-word what cli-devices.ts's own pre-check says, because
+    // `send-failed` passes this text through verbatim: a user who hits the two
+    // guards from the CLI and from the Tauri shell would otherwise read two
+    // wordings for one fact. House convention for these messages is no
+    // trailing period, which is why the three below lost theirs. (This
+    // diverges from RemarkableDevice.swift's wording; the Swift app is being
+    // retired and its strings are not the source of truth any more.)
+    throw new RemarkableUploadError(
+      `reMarkable accepts PDF and EPUB only — ${file} is neither`,
+    );
   }
 
   // Fail the whole send before any bytes move or any state changes.
@@ -76,7 +90,7 @@ export async function uploadToRemarkable(
   const size = statSync(file).size;
   if (size > REMARKABLE_MAX_UPLOAD_BYTES) {
     throw new RemarkableUploadError(
-      `this file is ${Math.floor(size / (1024 * 1024))} MB; the tablet's USB web interface accepts up to 100 MB.`,
+      `this file is ${Math.floor(size / (1024 * 1024))} MB; the tablet's USB web interface accepts up to 100 MB`,
     );
   }
 
@@ -86,7 +100,7 @@ export async function uploadToRemarkable(
   });
   if (listing.status !== 200) {
     throw new RemarkableUploadError(
-      `couldn't open the tablet's root folder (HTTP ${listing.status}); nothing was uploaded.`,
+      `couldn't open the tablet's root folder (HTTP ${listing.status}); nothing was uploaded`,
     );
   }
 
@@ -100,6 +114,6 @@ export async function uploadToRemarkable(
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
-    throw new RemarkableUploadError(`reMarkable upload failed (HTTP ${response.status}).`);
+    throw new RemarkableUploadError(`reMarkable upload failed (HTTP ${response.status})`);
   }
 }

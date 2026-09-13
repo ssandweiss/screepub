@@ -63,3 +63,15 @@ export class CliError extends Error {
     return { code: this.code, message: this.message };
   }
 }
+
+/** The message to report for an arbitrary throw.
+ *
+ * NOT `(err as Error).message`: a non-Error throw (a string, a rejected
+ * promise carrying an object) yields undefined, and `JSON.stringify` DROPS an
+ * undefined value — so `{"ok":false,"error":{"code":"send-failed"}}` reaches
+ * the caller with no `message` at all, while `JsonError.message` is declared
+ * required and the Tauri decoder rejects the object. One coercion, used at
+ * every site that turns a caught unknown into a contract error. */
+export function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
