@@ -12,8 +12,19 @@
 //   bun tools/build-cli.ts --version 0.6.0 --out dist/
 //   bun tools/build-cli.ts --version 0.6.0 --out dist/ --only windows-x64
 
-import { closeSync, openSync, readSync, readFileSync, mkdirSync } from 'node:fs';
-import { join, isAbsolute, resolve } from 'node:path';
+import {
+  closeSync,
+  openSync,
+  readSync,
+  readFileSync,
+  mkdirSync,
+  chmodSync,
+  rmSync,
+  writeFileSync,
+  existsSync,
+  statSync,
+} from 'node:fs';
+import { join, isAbsolute, resolve, basename } from 'node:path';
 import { parseArgs } from 'node:util';
 
 export type BinaryFormat =
@@ -342,4 +353,114 @@ export function archiveEntries(archivePath: string): Promise<ArchiveEntry[]> {
   return Promise.reject(
     new Error(`build-cli: ${archivePath} is neither a .tar.gz nor a .zip`),
   );
+}
+
+/** tar.gz for Linux, zip for Windows: what each platform's users can open
+ *  with nothing installed. The binary is named plainly inside both, so an
+ *  unpack leaves a runnable file in the current directory — the same
+ *  arrangement the macOS tarballs already have. */
+export async function packageTarget(target: Target, outDir: string): Promise<string> {
+  const bin = binaryPath(target, outDir);
+  // Set, not inherited. On Linux this bit is the difference between a
+  // download that runs and one that does not.
+  chmodSync(bin, 0o755);
+
+  const out = archivePath(target, outDir);
+  rmSync(out, { force: true }); // tar -czf appends into an existing file
+
+  if (target.packaging === 'tar.gz') {
+    const proc = Bun.spawnSync(
+      ['tar', '-czf', out, '-C', buildDir(target, outDir), target.binaryName],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    if ((proc.exitCode ?? 1) !== 0) {
+      throw new Error(`build-cli: tar failed for ${target.id}: ${proc.stderr.toString().trim()}`);
+    }
+  } else {
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+    zip.file(target.binaryName, readFileSync(bin), { unixPermissions: 0o755 });
+    const buf = await zip.generateAsync({
+      type: 'nodebuffer',
+      // UNIX, so the permission bits above are actually written into the
+      // central directory rather than discarded.
+      platform: 'UNIX',
+      compression: 'DEFLATE',
+    });
+    writeFileSync(out, buf);
+  }
+  return out;
+}
+
+export interface Floors {
+  binaryBytes: number;
+  archiveBytes: number;
+}
+
+/** Every real artifact embeds a whole Bun runtime: 64-119 MB compiled,
+ *  39 MB or so compressed. Anything an order of magnitude under that is a
+ *  truncated write, not a lean build. */
+export const RELEASE_FLOORS: Floors = { binaryBytes: 20_000_000, archiveBytes: 1_000_000 };
+
+/** Check what was PRODUCED, not the compiler's exit code. `bun build` can
+ *  exit 0 and leave a truncated file, and a mis-typed --target= exits 0
+ *  while producing a perfectly valid binary for the wrong machine. */
+export async function verifyArtifact(
+  target: Target,
+  outDir: string,
+  floors: Floors = RELEASE_FLOORS,
+): Promise<void> {
+  const bin = binaryPath(target, outDir);
+  if (!existsSync(bin)) throw new Error(`build-cli: ${target.id}: no binary at ${bin}`);
+
+  const binBytes = statSync(bin).size;
+  if (binBytes < floors.binaryBytes) {
+    throw new Error(
+      `build-cli: ${target.id}: binary is ${binBytes} bytes, under the ${floors.binaryBytes}-byte floor`,
+    );
+  }
+
+  const binFormat = readBinaryFormat(bin);
+  if (binFormat !== target.format) {
+    throw new Error(
+      `build-cli: ${target.id}: binary is ${binFormat}, expected ${target.format}`,
+    );
+  }
+
+  const arc = archivePath(target, outDir);
+  if (!existsSync(arc)) throw new Error(`build-cli: ${target.id}: no archive at ${arc}`);
+
+  const arcBytes = statSync(arc).size;
+  if (arcBytes < floors.archiveBytes) {
+    throw new Error(
+      `build-cli: ${target.id}: archive is ${arcBytes} bytes, under the ${floors.archiveBytes}-byte floor`,
+    );
+  }
+
+  const entries = await archiveEntries(arc);
+  const member = entries.find((e) => e.name === target.binaryName);
+  if (!member) {
+    const held = entries.map((e) => e.name).join(', ') || '<nothing>';
+    throw new Error(
+      `build-cli: ${target.id}: ${basename(arc)} does not contain ${target.binaryName} (it holds: ${held})`,
+    );
+  }
+  if (member.size !== binBytes) {
+    throw new Error(
+      `build-cli: ${target.id}: ${target.binaryName} inside the archive is ${member.size} bytes, ` +
+        `the binary on disk is ${binBytes}`,
+    );
+  }
+  const memberFormat = detectBinaryFormat(member.data.subarray(0, HEAD_BYTES));
+  if (memberFormat !== target.format) {
+    throw new Error(
+      `build-cli: ${target.id}: ${target.binaryName} inside the archive is ${memberFormat}, expected ${target.format}`,
+    );
+  }
+  if ((member.mode & 0o111) === 0) {
+    throw new Error(
+      `build-cli: ${target.id}: ${target.binaryName} inside the archive is not executable ` +
+        `(mode ${member.mode.toString(8)})`,
+    );
+  }
 }

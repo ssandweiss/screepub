@@ -19,7 +19,12 @@ import {
   tarGzEntries,
   zipEntries,
   archiveEntries,
+  packageTarget,
+  verifyArtifact,
+  RELEASE_FLOORS,
   type TargetId,
+  type Target,
+  type Floors,
 } from '../tools/build-cli';
 
 /** A header with the exact bytes a real executable of that shape carries,
@@ -450,6 +455,211 @@ describe('reading an archive back', () => {
       expect(entries[0]!.size).toBe(1500);
       expect(Array.from(entries[0]!.data)).toEqual(Array.from(payload));
       expect(entries[0]!.mode & 0o111).not.toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('packageTarget', () => {
+  /** Stage a small stand-in binary exactly where compileTarget would have
+   *  left one, so packaging is tested without a 100 MB compile. */
+  function stage(target: Target, bytes: Uint8Array): string {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-pack-'));
+    mkdirSync(buildDir(target, dir), { recursive: true });
+    writeFileSync(binaryPath(target, dir), bytes);
+    return dir;
+  }
+
+  test('a Linux target becomes a tar.gz holding one executable `screepub`', async () => {
+    const target = TARGETS.find((t) => t.id === 'linux-arm64')!;
+    const payload = new Uint8Array(3000);
+    payload.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0], 0);
+    new DataView(payload.buffer).setUint16(0x12, 0xb7, true);
+    const dir = stage(target, payload);
+    try {
+      // Deliberately NOT executable on disk first: packaging must set the
+      // bit, not inherit whatever the compiler happened to leave.
+      chmodSync(binaryPath(target, dir), 0o644);
+      const archive = await packageTarget(target, dir);
+      expect(archive).toBe(join(dir, 'screepub-cli-linux-arm64.tar.gz'));
+
+      const entries = await archiveEntries(archive);
+      expect(entries.map((e) => e.name)).toEqual(['screepub']); // no path prefix
+      expect(entries[0]!.size).toBe(3000);
+      expect(entries[0]!.mode & 0o111).not.toBe(0);
+      // The member is the binary, byte for byte, and still reads as an
+      // aarch64 ELF after the round trip.
+      expect(detectBinaryFormat(entries[0]!.data)).toBe('elf-aarch64');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('the Windows target becomes a zip holding one `screepub.exe`', async () => {
+    const target = TARGETS.find((t) => t.id === 'windows-x64')!;
+    const payload = new Uint8Array(3000);
+    payload.set([0x4d, 0x5a], 0);
+    const v = new DataView(payload.buffer);
+    v.setUint32(0x3c, 0x78, true);
+    payload.set([0x50, 0x45, 0x00, 0x00], 0x78);
+    v.setUint16(0x7c, 0x8664, true);
+    const dir = stage(target, payload);
+    try {
+      const archive = await packageTarget(target, dir);
+      expect(archive).toBe(join(dir, 'screepub-cli-windows-x64.zip'));
+
+      const entries = await archiveEntries(archive);
+      expect(entries.map((e) => e.name)).toEqual(['screepub.exe']);
+      expect(entries[0]!.size).toBe(3000);
+      expect(detectBinaryFormat(entries[0]!.data)).toBe('pe-x86-64');
+      expect(entries[0]!.mode & 0o111).not.toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('re-packaging replaces the archive instead of appending to it', async () => {
+    const target = TARGETS.find((t) => t.id === 'linux-x64')!;
+    const dir = stage(target, new Uint8Array(3000));
+    try {
+      await packageTarget(target, dir);
+      await packageTarget(target, dir);
+      const entries = await archiveEntries(archivePath(target, dir));
+      expect(entries.length).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('verifyArtifact', () => {
+  const TINY: Floors = { binaryBytes: 512, archiveBytes: 32 };
+  const target = TARGETS.find((t) => t.id === 'linux-x64')!;
+
+  function elfPayload(bytes = 3000, machine = 0x3e): Uint8Array {
+    const b = new Uint8Array(bytes);
+    b.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0], 0);
+    new DataView(b.buffer).setUint16(0x12, machine, true);
+    for (let i = 64; i < bytes; i++) b[i] = i % 251; // not compressible to nothing
+    return b;
+  }
+
+  async function built(payload: Uint8Array): Promise<string> {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-verify-'));
+    mkdirSync(buildDir(target, dir), { recursive: true });
+    writeFileSync(binaryPath(target, dir), payload);
+    await packageTarget(target, dir);
+    return dir;
+  }
+
+  test('a good artifact passes', async () => {
+    const dir = await built(elfPayload());
+    try {
+      await expect(verifyArtifact(target, dir, TINY)).resolves.toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a missing binary fails', async () => {
+    const dir = await built(elfPayload());
+    try {
+      rmSync(binaryPath(target, dir));
+      await expect(verifyArtifact(target, dir, TINY)).rejects.toThrow(/no binary/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a 0-byte binary fails, and so does a merely small one', async () => {
+    // The exact failure a "does the file exist?" check waves through.
+    for (const payload of [new Uint8Array(0), elfPayload(100)]) {
+      const dir = await built(elfPayload());
+      try {
+        writeFileSync(binaryPath(target, dir), payload);
+        await expect(verifyArtifact(target, dir, TINY)).rejects.toThrow(/floor/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('the RIGHT SIZE but the WRONG ARCHITECTURE fails', async () => {
+    // The mis-typed --target= case: a perfectly good binary for a machine
+    // nobody downloading this tarball is running.
+    const dir = await built(elfPayload(3000, 0xb7)); // aarch64 in the x64 slot
+    try {
+      await expect(verifyArtifact(target, dir, TINY)).rejects.toThrow(/elf-aarch64/);
+      await expect(verifyArtifact(target, dir, TINY)).rejects.toThrow(/elf-x86-64/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a shell script where a binary should be fails', async () => {
+    const dir = await built(elfPayload());
+    try {
+      writeFileSync(binaryPath(target, dir), new TextEncoder().encode('#!/bin/sh\n'.repeat(200)));
+      await expect(verifyArtifact(target, dir, TINY)).rejects.toThrow(/unknown/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a missing or tiny archive fails', async () => {
+    const dir = await built(elfPayload());
+    try {
+      rmSync(archivePath(target, dir));
+      await expect(verifyArtifact(target, dir, TINY)).rejects.toThrow(/no archive/);
+      writeFileSync(archivePath(target, dir), new Uint8Array(4));
+      await expect(verifyArtifact(target, dir, TINY)).rejects.toThrow(/floor/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an archive that does not contain the binary fails, and says what it holds', async () => {
+    const dir = await built(elfPayload());
+    try {
+      const decoy = join(buildDir(target, dir), 'READ.ME');
+      writeFileSync(decoy, 'x'.repeat(400));
+      rmSync(archivePath(target, dir));
+      const proc = Bun.spawnSync([
+        'tar', '-czf', archivePath(target, dir), '-C', buildDir(target, dir), 'READ.ME',
+      ]);
+      expect(proc.exitCode).toBe(0);
+      await expect(verifyArtifact(target, dir, TINY)).rejects.toThrow(/READ\.ME/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an archive whose member is not executable fails', async () => {
+    const dir = await built(elfPayload());
+    try {
+      chmodSync(binaryPath(target, dir), 0o644);
+      rmSync(archivePath(target, dir));
+      const proc = Bun.spawnSync([
+        'tar', '-czf', archivePath(target, dir), '-C', buildDir(target, dir), 'screepub',
+      ]);
+      expect(proc.exitCode).toBe(0);
+      chmodSync(binaryPath(target, dir), 0o755); // on-disk bit is fine again
+      await expect(verifyArtifact(target, dir, TINY)).rejects.toThrow(/not executable/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('the production floors are the real numbers and reject a toy binary', async () => {
+    // TINY thresholds above prove the branches work. This proves the
+    // DEFAULTS are set where a real artifact sits: bun embeds its whole
+    // runtime, so every real binary is 64-119 MB.
+    expect(RELEASE_FLOORS.binaryBytes).toBe(20_000_000);
+    expect(RELEASE_FLOORS.archiveBytes).toBe(1_000_000);
+    const dir = await built(elfPayload());
+    try {
+      await expect(verifyArtifact(target, dir)).rejects.toThrow(/20000000|floor/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
