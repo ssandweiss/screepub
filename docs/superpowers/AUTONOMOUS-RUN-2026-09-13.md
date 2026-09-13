@@ -176,3 +176,88 @@ Consequences for E1's design:
   smoke-test each artifact on its own OS even though one job builds them all.
   Windows device behaviour in particular stays unproven — nobody on this
   project has a Windows machine.
+
+## Piece B — merged
+
+`924ca03`, 10 commits, 799 pass / 3 skip / 0 fail on merged main. `screepub
+devices` and `screepub send` are live; `app/` untouched; worktree and branch
+cleaned up. The whole-branch review returned "ready to merge" with 2 Important
+and 9 Minor findings, all fixed in one wave, then re-reviewed clean.
+
+Two things from piece B worth your eye:
+
+- **A pre-existing `--json` leak was found and fixed.** Under `--json`, both
+  `--help` and `--version` printed raw text, breaking the contract that every
+  exit in that mode is exactly one parseable JSON object. The suite already
+  asserted that property for the no-input path — the explicit flags had been
+  missed. Fixed at all four sites. The Mac app never passes those flags, so
+  nothing could break.
+- **I made an error and caught it late.** My fix brief said "settle on one
+  wording" for a reMarkable message without saying which way to unify. The
+  implementer reasonably changed the LIBRARY text to match the CLI's, which
+  broke piece A's byte-for-byte parity with `RemarkableDevice.swift` — an
+  invariant piece A's reviewers had verified explicitly. It survived the suite
+  only by luck: the test asserts `.toThrow('azw3')` and the new message
+  happened to contain the filename. Corrected by unifying downward; all four
+  messages re-verified against the Swift, and the test now asserts the literal
+  `not .azw3.`.
+
+## Decisions (continued)
+
+**D12 — piece E1 is ADDITIVE: macOS CLI artifacts keep being built exactly as
+they are today.** The obvious move, given that Bun cross-compiles everything
+from one machine (F3), was to build every target in one cheap Linux job. I am
+not doing that, for one decisive reason and one supporting one:
+
+1. `app/release.sh` **signs and notarizes** the macOS CLI binaries, and
+   notarization requires Apple's toolchain on macOS. A cross-compiled macOS
+   binary cannot be notarized from Linux, so consolidating would trade a
+   Gatekeeper-clean download for a scary warning — a regression on the only
+   platform with actual users.
+2. `tools/bump-tap.sh` hardcodes `screepub-cli-macos-arm64.tar.gz` and
+   `-x64.tar.gz`; moving or renaming them breaks the Homebrew tap, which has
+   its own freshness alarm.
+
+So E1 adds Linux x64, Linux arm64 and Windows x64 from a cheap Ubuntu job and
+leaves the macOS and DMG paths completely alone. *Cost if wrong: the macOS CLI
+keeps being built on a paid runner that could in principle be cheaper.*
+
+**D13 — Linux arm64 ships even though CI may not be able to smoke-test it.**
+It covers Asahi, Raspberry Pi and ARM servers, and it is the architecture this
+project is developed on daily, so it is the best-exercised Linux target in
+practice even if GitHub has no free arm64 runner. If `ubuntu-24.04-arm` is
+available it gets smoke-tested; if not, it ships and the notes say it is
+untested rather than implying otherwise. *Cost if wrong: an artifact whose
+first execution is on a user's machine — mitigated by it being the maintainer's
+own architecture.*
+
+**D14 — the build matrix is a TypeScript tool, not a shell script.**
+`tools/build-cli.ts`, runnable by hand. A build matrix in bash is exactly the
+platform-locked tooling the ADR is retiring, and a release tool nobody can run
+locally is one nobody can debug. It verifies what it produced — existence,
+non-emptiness, and binary format where the host can tell — rather than trusting
+the compiler's exit code. *Cost if wrong: one more TS file instead of one more
+shell script.*
+
+**D15 — E1's plan was drafted by a subagent (as B's was), and I resolved its
+one placeholder myself.** The plan left `<UPLOAD_SHA>`/`<DOWNLOAD_SHA>` for the
+two new pinned GitHub Actions, which genuinely cannot be known at planning
+time. `gh` is authenticated here, so I resolved them:
+`actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02` and
+`actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093`, both the
+commit the `v4` tag points at, matching how the repo already pins actions.
+
+**Worth revisiting when you can run a release:** those are v4, while the latest
+releases are upload-artifact v7.0.1 and download-artifact v8.0.1. I pinned v4
+deliberately — it is the well-documented, known-compatible pair, the upload and
+download halves are not guaranteed compatible across majors, and a workflow
+cannot be tested without tagging. Jumping two majors unattended, on the one
+part of this piece that rides untested until a tag, was the wrong risk to take.
+*Cost if wrong: the new jobs use an older action generation than they could.*
+
+**Plan quality note.** The drafter caught something I would likely have missed:
+`release.yml`'s `checks` job greps the release notes for `sha-?256` and fails
+the release if it finds one, because the workflow appends the real checksums
+itself and two on a page both look official. So the notes must never name the
+new `SHA256SUMS` asset. The plan adds that term to the in-suite banned list, so
+a mistake fails in nine seconds instead of after notarization.
