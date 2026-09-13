@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // screepub — screenplay PDF → Fountain → reflowable EPUB3.
 import { parseArgs } from 'node:util';
-import { basename, dirname, extname, join } from 'node:path';
+import { basename, delimiter, dirname, extname, join } from 'node:path';
 import { readFile, writeFile, rename } from 'node:fs/promises';
 // Inlined by `bun build --compile`, so the shipped binary reports the same
 // version as the tag that built it. release.sh checks the two agree.
@@ -14,7 +14,9 @@ import {
   type ConvertResult,
   type ConvertStage,
 } from './convert';
-import { mapConversionError, type JsonError } from './cli-errors';
+import { mapConversionError, CliError, type JsonError } from './cli-errors';
+import { resolveCommand, devicesCommand, sendCommand, type Verb } from './cli-devices';
+import type { ListDevicesOptions } from './device/list';
 
 const USAGE = `screepub — screenplay PDF → reflowable EPUB3 (via Fountain)
 
@@ -43,6 +45,14 @@ Options:
                          internal warnings through to stderr
   -h, --help             show this help
       --version          print the version and exit
+
+Commands:
+  screepub devices [--json]                 list connected e-readers
+  screepub send <file> [--device <id>] [--json]
+                                            send an existing file to one
+
+A verb is only a verb when no file of that name exists: a script saved as
+"devices" still converts, and "./devices" always means the file.
 `;
 
 // --json is the app's only channel: EVERY exit in that mode must be one
@@ -95,7 +105,105 @@ function parseCliArgs() {
   });
 }
 
+/** Test seams, and a debugging hook for the Tauri shell: the mount roots to
+ * scan and the reMarkable base URL. Read ONLY by the device commands — the
+ * conversion path does not consult them. Unset means "the real thing". */
+function deviceSeams(): ListDevicesOptions {
+  const roots = process.env.SCREEPUB_VOLUME_ROOTS;
+  const endpoint = process.env.SCREEPUB_REMARKABLE_ENDPOINT;
+  return {
+    roots: roots ? roots.split(delimiter).filter(Boolean) : undefined,
+    remarkableEndpoint: endpoint || undefined,
+  };
+}
+
+function parseVerbArgs(args: string[]) {
+  return parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      device: { type: 'string' },
+      json: { type: 'boolean', default: false },
+      help: { type: 'boolean', short: 'h', default: false },
+    },
+  });
+}
+
+async function runVerb(verb: Verb, args: string[]): Promise<void> {
+  let parsed: ReturnType<typeof parseVerbArgs>;
+  try {
+    parsed = parseVerbArgs(args);
+  } catch (err) {
+    fail({ code: 'usage', message: (err as Error).message });
+  }
+  const { values, positionals } = parsed;
+  jsonMode = values.json;
+
+  if (values.help) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
+  try {
+    if (verb === 'devices') {
+      if (positionals.length > 0) {
+        fail({ code: 'usage', message: `devices takes no arguments (got "${positionals[0]}")` });
+      }
+      const { devices } = await devicesCommand(deviceSeams());
+      if (jsonMode) {
+        console.log(JSON.stringify({ ok: true, devices }));
+        return;
+      }
+      if (devices.length === 0) {
+        console.log('no devices connected');
+        return;
+      }
+      for (const d of devices) console.log(`${d.name} (${d.kind}) — ${d.id}`);
+      return;
+    }
+
+    // verb === 'send'
+    if (positionals.length !== 1) {
+      fail({ code: 'usage', message: 'expected exactly one file to send (see --help)' });
+    }
+    const sent = await sendCommand({
+      file: positionals[0],
+      deviceId: values.device,
+      ...deviceSeams(),
+    });
+    if (jsonMode) {
+      // `destination` is OMITTED for reMarkable, which has no path; `uploaded`
+      // takes its place. Two shapes, one object, per the design spec.
+      console.log(
+        JSON.stringify({
+          ok: true,
+          device: sent.device,
+          ...(sent.destination !== undefined ? { destination: sent.destination } : { uploaded: true }),
+        }),
+      );
+      return;
+    }
+    console.log(
+      sent.destination !== undefined
+        ? `sent ${basename(positionals[0])} to ${sent.device.name} — ${sent.destination}`
+        : `sent ${basename(positionals[0])} to ${sent.device.name}`,
+    );
+  } catch (err) {
+    if (err instanceof CliError) fail(err.toJson());
+    throw err;
+  }
+}
+
 async function main() {
+  // Dispatch BEFORE parseArgs: a verb's flags are not the conversion flags.
+  // jsonMode's raw-argv pre-scan above already holds for this path, so a
+  // throw inside the verb parser still exits as one JSON object.
+  const command = resolveCommand(process.argv.slice(2));
+  if (command.kind === 'verb') {
+    await runVerb(command.verb, command.args);
+    return;
+  }
+
   let parsed: ReturnType<typeof parseCliArgs>;
   try {
     parsed = parseCliArgs();
