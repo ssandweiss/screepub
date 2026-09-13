@@ -12,7 +12,7 @@
 //   bun tools/build-cli.ts --version 0.6.0 --out dist/
 //   bun tools/build-cli.ts --version 0.6.0 --out dist/ --only windows-x64
 
-import { closeSync, openSync, readSync, readFileSync } from 'node:fs';
+import { closeSync, openSync, readSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, isAbsolute, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -238,4 +238,108 @@ export function assertPackageVersion(version: string, repoDir: string = REPO_DIR
         'would misreport itself. Bump package.json, or build the version it already names.',
     );
   }
+}
+
+export interface SpawnResult {
+  exitCode: number;
+  stderr: string;
+}
+export type Spawn = (argv: string[], cwd: string) => SpawnResult;
+
+const realSpawn: Spawn = (argv, cwd) => {
+  const proc = Bun.spawnSync(argv, { cwd, stdout: 'pipe', stderr: 'pipe' });
+  return { exitCode: proc.exitCode ?? 1, stderr: proc.stderr.toString() };
+};
+
+/** The one invocation, as data, so it can be asserted element by element
+ *  instead of reviewed by eye. */
+export function compileArgv(target: Target, outDir: string): string[] {
+  return [
+    'bun',
+    'build',
+    '--compile',
+    `--target=${target.bunTarget}`,
+    'src/cli.ts',
+    `--outfile=${compileOutfile(target, outDir)}`,
+  ];
+}
+
+/** Returns the path bun actually WROTE — which is not the outfile it was
+ *  given for the windows target, where bun appends `.exe`. */
+export function compileTarget(
+  target: Target,
+  outDir: string,
+  spawn: Spawn = realSpawn,
+  repoDir: string = REPO_DIR,
+): string {
+  mkdirSync(buildDir(target, outDir), { recursive: true });
+  const argv = compileArgv(target, outDir);
+  const { exitCode, stderr } = spawn(argv, repoDir);
+  if (exitCode !== 0) {
+    throw new Error(
+      `build-cli: ${target.id} failed to compile (exit ${exitCode})\n${stderr.trim()}`,
+    );
+  }
+  return binaryPath(target, outDir);
+}
+
+export interface ArchiveEntry {
+  name: string;
+  size: number;
+  /** Unix mode as recorded in the archive. 0 when the format carries none. */
+  mode: number;
+  data: Uint8Array;
+}
+
+function tarString(bytes: Uint8Array): string {
+  return new TextDecoder().decode(bytes).replace(/\0[\s\S]*$/, '');
+}
+
+function tarOctal(bytes: Uint8Array): number {
+  const text = tarString(bytes).trim();
+  return text ? parseInt(text, 8) : 0;
+}
+
+/** Walk the tar ourselves. `tar -tzvf` answers in a listing format that
+ *  differs between GNU tar and bsdtar; the header is 512 fixed bytes and
+ *  gunzip is already in the runtime. */
+export function tarGzEntries(archivePath: string): ArchiveEntry[] {
+  const tar = Bun.gunzipSync(readFileSync(archivePath));
+  const entries: ArchiveEntry[] = [];
+  let off = 0;
+  while (off + 512 <= tar.length) {
+    const header = tar.subarray(off, off + 512);
+    if (header.every((b) => b === 0)) break; // end-of-archive marker
+    const name = tarString(header.subarray(0, 100));
+    const mode = tarOctal(header.subarray(100, 108));
+    const size = tarOctal(header.subarray(124, 136));
+    const typeflag = String.fromCharCode(header[156] ?? 0);
+    const start = off + 512;
+    if (typeflag === '0' || typeflag === '\0') {
+      entries.push({ name, size, mode, data: tar.subarray(start, start + size) });
+    }
+    off = start + Math.ceil(size / 512) * 512;
+  }
+  return entries;
+}
+
+export async function zipEntries(archivePath: string): Promise<ArchiveEntry[]> {
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(readFileSync(archivePath));
+  const out: ArchiveEntry[] = [];
+  for (const file of Object.values(zip.files)) {
+    if (file.dir) continue;
+    const data = await file.async('uint8array');
+    const perms = (file as unknown as { unixPermissions: number | null }).unixPermissions;
+    out.push({ name: file.name, size: data.length, mode: perms ?? 0, data });
+  }
+  return out;
+}
+
+export function archiveEntries(archivePath: string): Promise<ArchiveEntry[]> {
+  if (archivePath.endsWith('.tar.gz')) return Promise.resolve(tarGzEntries(archivePath));
+  if (archivePath.endsWith('.zip')) return zipEntries(archivePath);
+  return Promise.reject(
+    new Error(`build-cli: ${archivePath} is neither a .tar.gz nor a .zip`),
+  );
 }

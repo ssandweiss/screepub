@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, chmodSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
 import {
@@ -14,6 +14,11 @@ import {
   hostTarget,
   parseBuildArgs,
   assertPackageVersion,
+  compileArgv,
+  compileTarget,
+  tarGzEntries,
+  zipEntries,
+  archiveEntries,
   type TargetId,
 } from '../tools/build-cli';
 
@@ -269,5 +274,184 @@ describe('assertPackageVersion', () => {
   test('the real repo agrees with itself', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string };
     expect(() => assertPackageVersion(pkg.version)).not.toThrow();
+  });
+});
+
+describe('compileArgv', () => {
+  test('is the exact bun invocation, per target', () => {
+    // Element-by-element. A dropped --target= silently builds the HOST
+    // architecture and every later format check would then be comparing a
+    // native binary against itself.
+    expect(compileArgv(TARGETS[0]!, '/tmp/out')).toEqual([
+      'bun', 'build', '--compile', '--target=bun-linux-x64',
+      'src/cli.ts', '--outfile=/tmp/out/linux-x64/screepub',
+    ]);
+    expect(compileArgv(TARGETS[2]!, '/tmp/out')).toEqual([
+      'bun', 'build', '--compile', '--target=bun-windows-x64',
+      'src/cli.ts', '--outfile=/tmp/out/windows-x64/screepub',
+    ]);
+  });
+
+  test('every target names its own bun target and nothing else', () => {
+    for (const t of TARGETS) {
+      const argv = compileArgv(t, '/tmp/out');
+      expect(argv).toContain(`--target=${t.bunTarget}`);
+      expect(argv.filter((a) => a.startsWith('--target=')).length).toBe(1);
+      expect(argv).toContain('src/cli.ts');
+      expect(argv.some((a) => a.endsWith('.exe'))).toBe(false);
+    }
+  });
+});
+
+describe('compileTarget', () => {
+  test('runs bun from the repo root and returns the path bun WROTE', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-compile-'));
+    try {
+      const seen: { argv: string[]; cwd: string }[] = [];
+      const fake = (argv: string[], cwd: string) => {
+        seen.push({ argv, cwd });
+        return { exitCode: 0, stderr: '' };
+      };
+      const win = TARGETS.find((t) => t.id === 'windows-x64')!;
+      const out = compileTarget(win, dir, fake, '/repo');
+      expect(seen.length).toBe(1);
+      expect(seen[0]!.cwd).toBe('/repo');
+      expect(seen[0]!.argv).toEqual(compileArgv(win, dir));
+      // The returned path is where bun PUTS it, not what we asked for.
+      expect(out).toBe(join(dir, 'windows-x64', 'screepub.exe'));
+      expect(existsSync(join(dir, 'windows-x64'))).toBe(true); // dir made first
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a failed compile throws, naming the target and bun stderr', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-compile-'));
+    try {
+      const fake = () => ({ exitCode: 1, stderr: 'error: unknown target\n' });
+      expect(() => compileTarget(TARGETS[1]!, dir, fake, '/repo')).toThrow(/linux-arm64/);
+      expect(() => compileTarget(TARGETS[1]!, dir, fake, '/repo')).toThrow(/unknown target/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('compileTarget (a real bun build)', () => {
+  // Every other compileTarget test fakes the spawn, which proves the
+  // plumbing (argv, cwd, error handling) but nothing about bun itself.
+  // These two really invoke `bun build --compile` — the only tests in this
+  // file that do — because task 4 exists specifically to settle, for real,
+  // the two things an earlier review flagged as unverified: that bun
+  // appends `.exe` only for the Windows target, and that each compiled
+  // output's actual header format matches what the target table predicts.
+  // A mocked spawn cannot answer either question; only a real compile can.
+  test('a real cross-compiled linux-x64 binary really is ELF x86-64', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-realbuild-'));
+    try {
+      const target = TARGETS.find((t) => t.id === 'linux-x64')!;
+      const out = compileTarget(target, dir);
+      expect(existsSync(out)).toBe(true);
+      expect(readBinaryFormat(out)).toBe(target.format);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  test('bun appends .exe only for the windows target, and the result is a real PE binary', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-realbuild-'));
+    try {
+      const target = TARGETS.find((t) => t.id === 'windows-x64')!;
+      const out = compileTarget(target, dir);
+      // The fact under test: bun wrote screepub.exe, not the bare
+      // 'screepub' we asked for via --outfile.
+      expect(out.endsWith('.exe')).toBe(true);
+      expect(existsSync(compileOutfile(target, dir))).toBe(false);
+      expect(existsSync(out)).toBe(true);
+      expect(readBinaryFormat(out)).toBe(target.format);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
+});
+
+describe('reading an archive back', () => {
+  /** A tar.gz built by the system tar, from files with known contents,
+   *  sizes and modes. Two files, one of them longer than a tar block, so
+   *  the 512-byte walk is genuinely exercised rather than accidentally
+   *  right for a single small entry. */
+  function scratchTarGz(): { dir: string; archive: string; big: Uint8Array } {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-tar-'));
+    const stage = join(dir, 'stage');
+    mkdirSync(stage, { recursive: true });
+    const big = new Uint8Array(1500);
+    for (let i = 0; i < big.length; i++) big[i] = i % 251;
+    writeFileSync(join(stage, 'screepub'), big);
+    chmodSync(join(stage, 'screepub'), 0o755);
+    writeFileSync(join(stage, 'NOTES'), 'plain\n');
+    chmodSync(join(stage, 'NOTES'), 0o644);
+    const archive = join(dir, 'a.tar.gz');
+    const proc = Bun.spawnSync(['tar', '-czf', archive, '-C', stage, 'screepub', 'NOTES']);
+    if (proc.exitCode !== 0) throw new Error(`test setup: tar failed: ${proc.stderr.toString()}`);
+    return { dir, archive, big };
+  }
+
+  test('tarGzEntries reports every member with its size, mode and bytes', () => {
+    const { dir, archive, big } = scratchTarGz();
+    try {
+      const entries = tarGzEntries(archive);
+      expect(entries.map((e) => e.name).sort()).toEqual(['NOTES', 'screepub']);
+
+      const bin = entries.find((e) => e.name === 'screepub')!;
+      expect(bin.size).toBe(1500);
+      // The bytes, not just the length: a walker that mis-added the block
+      // padding would return 1500 bytes starting in the wrong place.
+      expect(Array.from(bin.data)).toEqual(Array.from(big));
+      expect(bin.mode & 0o111).not.toBe(0);
+
+      const notes = entries.find((e) => e.name === 'NOTES')!;
+      expect(new TextDecoder().decode(notes.data)).toBe('plain\n');
+      // The second entry proves the walk advanced past the first one's
+      // padded 2048 bytes rather than stopping.
+      expect(notes.mode & 0o111).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('archiveEntries dispatches on the extension and refuses anything else', async () => {
+    const { dir, archive } = scratchTarGz();
+    try {
+      expect((await archiveEntries(archive)).length).toBe(2);
+      await expect(archiveEntries(join(dir, 'a.rar'))).rejects.toThrow(/tar\.gz|zip/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('zipEntries round-trips a name, bytes and the executable bit', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-zip-'));
+    try {
+      const JSZip = (await import('jszip')).default;
+      const payload = new Uint8Array(1500);
+      for (let i = 0; i < payload.length; i++) payload[i] = (i * 7) % 253;
+      const zip = new JSZip();
+      zip.file('screepub.exe', payload, { unixPermissions: 0o755 });
+      const buf = await zip.generateAsync({
+        type: 'nodebuffer',
+        platform: 'UNIX',
+        compression: 'DEFLATE',
+      });
+      const archive = join(dir, 'a.zip');
+      writeFileSync(archive, buf);
+
+      const entries = await zipEntries(archive);
+      expect(entries.map((e) => e.name)).toEqual(['screepub.exe']);
+      expect(entries[0]!.size).toBe(1500);
+      expect(Array.from(entries[0]!.data)).toEqual(Array.from(payload));
+      expect(entries[0]!.mode & 0o111).not.toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
