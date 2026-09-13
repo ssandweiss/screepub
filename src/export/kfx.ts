@@ -41,6 +41,17 @@ async function pluginInstalled(customize: string): Promise<boolean> {
   return code === 0 && stdout.includes('KFX Output');
 }
 
+/** The conjunction behind `KfxStatus.ready`, pulled out as a pure function
+ * and exported (marked internal, not part of the module's real interface)
+ * only so the AND itself can be unit-tested with synthetic booleans. `ready`
+ * can never actually be `true` on a platform where `previewerPath()` has no
+ * branch (Linux) — Amazon ships no build there — so without this function
+ * the conjunction's correctness would be provable only on macOS/Windows
+ * hardware with Kindle Previewer installed. */
+export function computeReady(s: { calibre: boolean; previewer: boolean; pluginInstalled: boolean }): boolean {
+  return s.calibre && s.previewer && s.pluginInstalled;
+}
+
 /** What's present on this machine. Spawns `calibre-customize` (~1s of Python
  * startup) only when Calibre is actually present. */
 export async function kfxStatus(): Promise<KfxStatus> {
@@ -48,7 +59,12 @@ export async function kfxStatus(): Promise<KfxStatus> {
   const calibre = customize !== null;
   const previewer = previewerPath() !== null;
   const installed = calibre ? await pluginInstalled(customize) : false;
-  return { calibre, previewer, pluginInstalled: installed, ready: calibre && previewer && installed };
+  return {
+    calibre,
+    previewer,
+    pluginInstalled: installed,
+    ready: computeReady({ calibre, previewer, pluginInstalled: installed }),
+  };
 }
 
 /** The sibling `.kfx` for a given EPUB — same directory, same stem. Exported

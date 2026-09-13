@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { platform } from 'node:process';
-import { previewerPath, kfxStatus, toKfx, kfxSibling } from '../src/export/kfx';
+import { previewerPath, kfxStatus, toKfx, kfxSibling, computeReady } from '../src/export/kfx';
 import { calibreTool } from '../src/export/calibre';
 
 test('Kindle Previewer is never found on Linux — Amazon ships no build', () => {
@@ -13,6 +13,28 @@ test('Kindle Previewer is never found on Linux — Amazon ships no build', () =>
 test('status.ready requires all three pieces', async () => {
   const status = await kfxStatus();
   expect(status.ready).toBe(status.calibre && status.previewer && status.pluginInstalled);
+});
+
+// computeReady: the AND behind `ready`, tested directly with synthetic
+// booleans. This is what makes the conjunction provable on Linux, where
+// `previewer` can never actually be true (Amazon ships no build) so the
+// test above can never distinguish a correct three-way AND from a buggy
+// two-way one. Each single-false case pins one term; a mutant dropping any
+// one term from the AND fails at least one of these.
+test('computeReady is true only when calibre, previewer, and pluginInstalled are all true', () => {
+  expect(computeReady({ calibre: true, previewer: true, pluginInstalled: true })).toBe(true);
+});
+
+test('computeReady is false when calibre is false', () => {
+  expect(computeReady({ calibre: false, previewer: true, pluginInstalled: true })).toBe(false);
+});
+
+test('computeReady is false when previewer is false', () => {
+  expect(computeReady({ calibre: true, previewer: false, pluginInstalled: true })).toBe(false);
+});
+
+test('computeReady is false when pluginInstalled is false', () => {
+  expect(computeReady({ calibre: true, previewer: true, pluginInstalled: false })).toBe(false);
 });
 
 test('status.calibre agrees with Calibre discovery', async () => {
