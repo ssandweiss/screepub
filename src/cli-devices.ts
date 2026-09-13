@@ -2,10 +2,12 @@
 // objects and never print: cli.ts owns stdout, so these are testable in
 // process. Dispatch lives here rather than in cli.ts because cli.ts runs
 // main() on import and cannot be imported by a test.
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { CliError } from './cli-errors';
 import { listDevices, type ListDevicesOptions } from './device/list';
 import { deviceId, type ConnectedDevice, type DeviceKind } from './device/types';
+import { copyToDevice } from './device/transfer';
+import { remarkableAccepts, uploadToRemarkable } from './device/remarkable';
 
 export const VERBS = ['devices', 'send'] as const;
 export type Verb = (typeof VERBS)[number];
@@ -91,4 +93,63 @@ export function selectDevice(devices: ConnectedDevice[], requestedId?: string): 
     'ambiguous-device',
     `several readers are connected — pick one with --device: ${ids.join(', ')}`,
   );
+}
+
+export interface SendOptions extends ListDevicesOptions {
+  /** An EXISTING file. `send` never converts — see the design spec. */
+  file: string;
+  /** The id `devices` reports. Omitted: the single connected device. */
+  deviceId?: string;
+}
+
+export interface SendResult {
+  device: { id: string; kind: DeviceKind; name: string };
+  /** Where the file landed. Absent for reMarkable, which has no path. */
+  destination?: string;
+  /** True for reMarkable, which reports no destination. */
+  uploaded?: boolean;
+}
+
+/** Send an existing file to a connected reader.
+ *
+ * The file is checked FIRST, before the device list is built: a typo in the
+ * filename must not be reported as "no devices", and must not pay the
+ * reMarkable probe's timeout to find that out. */
+export async function sendCommand(options: SendOptions): Promise<SendResult> {
+  let isFile = false;
+  try {
+    isFile = statSync(options.file).isFile();
+  } catch {
+    isFile = false;
+  }
+  if (!isFile) {
+    throw new CliError('unreadable', `cannot read the file to send: ${options.file}`);
+  }
+
+  const devices = await listDevices(options);
+  const device = selectDevice(devices, options.deviceId);
+  const identity = { id: deviceId(device), kind: device.kind, name: device.name };
+
+  if (device.kind === 'remarkable') {
+    // Asked before the upload, not inferred from its error: cli-errors.ts's
+    // rule is that detection is typed, never a substring of a message.
+    if (!remarkableAccepts(options.file)) {
+      throw new CliError(
+        'unsupported-file',
+        `reMarkable accepts PDF and EPUB only — ${options.file} is neither`,
+      );
+    }
+    try {
+      await uploadToRemarkable(options.file, options.remarkableEndpoint);
+    } catch (err) {
+      throw new CliError('send-failed', (err as Error).message);
+    }
+    return { device: identity, uploaded: true };
+  }
+
+  try {
+    return { device: identity, destination: copyToDevice(options.file, device) };
+  } catch (err) {
+    throw new CliError('send-failed', (err as Error).message);
+  }
 }

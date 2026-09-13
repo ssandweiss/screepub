@@ -1,4 +1,7 @@
-import { test, expect } from 'bun:test';
+import { test, expect, afterAll } from 'bun:test';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { CliError } from '../src/cli-errors';
 import { resolveCommand, VERBS } from '../src/cli-devices';
 
@@ -79,7 +82,7 @@ test('devicesCommand on an empty list is an empty array, not a throw', async () 
   expect(devices).toEqual([]);
 });
 
-import { selectDevice } from '../src/cli-devices';
+import { selectDevice, sendCommand } from '../src/cli-devices';
 
 const kindle: ConnectedDevice = { kind: 'kindle', name: 'Kindle', volume: '/run/media/sam/Kindle' };
 const remarkable: ConnectedDevice = { kind: 'remarkable', name: 'reMarkable', volume: null };
@@ -140,4 +143,137 @@ test('selection matches on the id, never on a prefix or the name', () => {
   let byName: unknown;
   try { selectDevice([kindle], 'Kindle'); } catch (err) { byName = err; }
   expect((byName as CliError).code).toBe('unknown-device');
+});
+
+function book(name = 'Script.epub'): string {
+  const path = join(mkdtempSync(join(tmpdir(), 'screepub-send-')), name);
+  writeFileSync(path, 'book-bytes');
+  return path;
+}
+
+function kindleVolume(): ConnectedDevice {
+  const volume = join(mkdtempSync(join(tmpdir(), 'screepub-vol-')), 'Kindle');
+  mkdirSync(join(volume, 'documents'), { recursive: true });
+  return { kind: 'kindle', name: 'Kindle', volume };
+}
+
+const uploads: string[] = [];
+const upstub = Bun.serve({
+  port: 0,
+  async fetch(req) {
+    const path = new URL(req.url).pathname;
+    if (req.method === 'POST') {
+      uploads.push(path);
+      await req.arrayBuffer();
+    }
+    return new Response('[]', { status: 200 });
+  },
+});
+const UPLOAD_URL = `http://127.0.0.1:${upstub.port}`;
+afterAll(() => upstub.stop(true));
+
+test('sending to a volume device copies it where that vendor indexes', async () => {
+  const device = kindleVolume();
+  const file = book();
+  const result = await sendCommand({
+    file,
+    scan: () => [device],
+    probe: async () => false,
+  });
+  expect(result.device).toEqual({ id: device.volume!, kind: 'kindle', name: 'Kindle' });
+  expect(result.destination).toBe(join(device.volume!, 'documents', 'Script.epub'));
+  // The bytes actually moved — a handler that computed the path but skipped
+  // the copy passes every other assertion here.
+  expect(readFileSync(result.destination!, 'utf8')).toBe('book-bytes');
+  expect(result.uploaded).toBeUndefined();
+});
+
+test('sending to reMarkable uploads and reports no destination path', async () => {
+  uploads.length = 0;
+  const result = await sendCommand({
+    file: book(),
+    scan: () => [],
+    probe: async () => true,
+    remarkableEndpoint: UPLOAD_URL,
+  });
+  expect(result.device).toEqual({ id: 'remarkable', kind: 'remarkable', name: 'reMarkable' });
+  expect(result.uploaded).toBe(true);
+  expect(result.destination).toBeUndefined();
+  expect(uploads).toEqual(['/upload']);
+});
+
+test('reMarkable rejects an extension it cannot read, before any request', async () => {
+  uploads.length = 0;
+  let thrown: unknown;
+  try {
+    await sendCommand({
+      file: book('Script.azw3'),
+      scan: () => [],
+      probe: async () => true,
+      remarkableEndpoint: UPLOAD_URL,
+    });
+  } catch (err) { thrown = err; }
+  expect(thrown).toBeInstanceOf(CliError);
+  expect((thrown as CliError).code).toBe('unsupported-file');
+  // "Before any request" is the point: nothing was posted. A handler that
+  // called upload and mapped its message would still have hit the tablet.
+  expect(uploads).toEqual([]);
+});
+
+test('a failed copy is send-failed, carrying the underlying message', async () => {
+  // A volume path whose PARENT is a regular file: mkdirSync fails with
+  // ENOTDIR on every platform, so this is deterministic rather than relying
+  // on a read-only directory the test runner might happen to own.
+  const blocker = join(mkdtempSync(join(tmpdir(), 'screepub-block-')), 'not-a-dir');
+  writeFileSync(blocker, 'x');
+  const device: ConnectedDevice = { kind: 'kobo', name: 'KOBOeReader', volume: join(blocker, 'Kobo') };
+  let thrown: unknown;
+  try {
+    await sendCommand({ file: book(), deviceId: device.volume!, scan: () => [device], probe: async () => false });
+  } catch (err) { thrown = err; }
+  expect(thrown).toBeInstanceOf(CliError);
+  expect((thrown as CliError).code).toBe('send-failed');
+  expect((thrown as CliError).message.length).toBeGreaterThan(0);
+});
+
+test('a failed upload is send-failed, not a raw RemarkableUploadError', async () => {
+  const refusing = Bun.serve({ port: 0, fetch: () => new Response('no', { status: 500 }) });
+  let thrown: unknown;
+  try {
+    await sendCommand({
+      file: book(),
+      scan: () => [],
+      probe: async () => true,
+      remarkableEndpoint: `http://127.0.0.1:${refusing.port}`,
+    });
+  } catch (err) { thrown = err; }
+  refusing.stop(true);
+  expect(thrown).toBeInstanceOf(CliError);
+  expect((thrown as CliError).code).toBe('send-failed');
+});
+
+test('a file that is not there is unreadable, and no device is touched', async () => {
+  let scanned = 0;
+  let thrown: unknown;
+  try {
+    await sendCommand({
+      file: join(tmpdir(), 'screepub-no-such-file.epub'),
+      scan: () => { scanned += 1; return []; },
+      probe: async () => false,
+    });
+  } catch (err) { thrown = err; }
+  expect(thrown).toBeInstanceOf(CliError);
+  expect((thrown as CliError).code).toBe('unreadable');
+  // The file check comes FIRST: a missing file must not be reported as
+  // no-devices, and must not cost the probe's timeout.
+  expect(scanned).toBe(0);
+});
+
+test('a directory given as the file is unreadable, not send-failed', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'screepub-dir-'));
+  let thrown: unknown;
+  try {
+    await sendCommand({ file: dir, scan: () => [kindleVolume()], probe: async () => false });
+  } catch (err) { thrown = err; }
+  expect((thrown as CliError).code).toBe('unreadable');
 });
