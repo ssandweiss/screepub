@@ -9,7 +9,7 @@
 // packaging decision that belongs with app packaging. This module reads
 // (discovery, status) and performs one write (conversion).
 import { existsSync, renameSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { platform } from 'node:process';
 import { calibreTool, runCalibre, CALIBRE_FORMAT_GUARDS, CalibreMissingError, CalibreFailedError } from './calibre';
 
@@ -75,16 +75,67 @@ export function kfxSibling(epub: string): string {
   return `${epub.replace(/\.epub$/i, '')}.kfx`;
 }
 
+/** Hidden same-directory scratch the conversion writes into, mirroring
+ * KFXToolchain.scratchURL exactly. Three constraints meet in this one name:
+ * same DIRECTORY means same volume, so promoting the finished file is a
+ * rename and not a copy; the `.kfx` EXTENSION has to survive, because
+ * ebook-convert picks its output format from the extension and dies on
+ * anything it does not recognise ("No plugin to handle output format: tmp");
+ * and the LEADING DOT keeps Finder, library scans and the staleness rung
+ * blind to a file that is not finished yet. */
+export function kfxScratchPath(epub: string): string {
+  const stem = basename(epub).replace(/\.epub$/i, '');
+  return join(dirname(epub), `.${stem}.partial.kfx`);
+}
+
+export class KfxToolchainNotReadyError extends Error {
+  constructor(status: { calibre: boolean; previewer: boolean; pluginInstalled: boolean }) {
+    const missing: string[] = [];
+    if (!status.calibre) missing.push('Calibre');
+    if (!status.previewer) missing.push('Kindle Previewer');
+    if (status.calibre && !status.pluginInstalled) missing.push('the KFX plugin');
+    super(`KFX conversion needs ${missing.join(' and ')}.`);
+    this.name = 'KfxToolchainNotReadyError';
+  }
+}
+
+/** Injectable seams, present only so `toKfx` is testable. Both default to the
+ * real thing. `tool` exists because the PATH-shadowing trick the other
+ * Calibre tests use cannot reach a machine that has a REAL Calibre —
+ * calibreTool checks the fixed install paths before PATH — and the argv this
+ * function hands ebook-convert (specifically the output EXTENSION) has now
+ * been wrong three times in this branch, so it needs a test everywhere, not
+ * just on bare runners. */
+export interface KfxDeps {
+  tool?: () => string | null;
+  status?: () => Promise<KfxStatus>;
+}
+
 /** Convert an EPUB to KFX. Runs the same guard trio as the AZW3 recipe, from
  * the same constant, so a device-validated flag change lands on both rungs or
  * neither. Writes to a scratch path and renames into place, so a partial file
- * never appears where a freshness check would trust it. Most of the wall-clock
- * is Kindle Previewer cold-starting, hence onStage. */
-export async function toKfx(epub: string, onStage?: (stage: string) => void): Promise<string> {
-  const tool = calibreTool('ebook-convert');
+ * never appears where a freshness check would trust it — see kfxScratchPath
+ * for what constrains that name. Most of the wall-clock is Kindle Previewer
+ * cold-starting, hence onStage. */
+export async function toKfx(
+  epub: string,
+  onStage?: (stage: string) => void,
+  deps: KfxDeps = {},
+): Promise<string> {
+  const tool = (deps.tool ?? (() => calibreTool('ebook-convert')))();
   if (!tool) throw new CalibreMissingError();
+  // KFXToolchain.convert's opening guard. Without it a machine that has
+  // Calibre but not Previewer or the plugin gets ebook-convert's raw Python
+  // failure instead of a sentence naming what to install. DIVERGENCE: Swift
+  // checks readiness FIRST and reports a missing Calibre through the same
+  // error; the port keeps CalibreMissingError ahead of it because that error
+  // is the more precise answer and other call sites already discriminate on
+  // it. (Swift's status() is cached, so its guard is ~free; ours re-probes,
+  // which costs ~1s of Python startup against a ~20s conversion.)
+  const status = await (deps.status ?? kfxStatus)();
+  if (!status.ready) throw new KfxToolchainNotReadyError(status);
   const kfx = kfxSibling(epub);
-  const scratch = `${kfx}.${process.pid}.tmp`;
+  const scratch = kfxScratchPath(epub);
   onStage?.('converting to KFX (Kindle Previewer can take ~20s to start)…');
   try {
     await runCalibre(tool, [epub, scratch, ...CALIBRE_FORMAT_GUARDS]);

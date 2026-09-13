@@ -1,10 +1,18 @@
 import { test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { platform } from 'node:process';
-import { previewerPath, kfxStatus, toKfx, kfxSibling, computeReady } from '../src/export/kfx';
-import { calibreTool } from '../src/export/calibre';
+import {
+  previewerPath,
+  kfxStatus,
+  toKfx,
+  kfxSibling,
+  kfxScratchPath,
+  computeReady,
+  KfxToolchainNotReadyError,
+} from '../src/export/kfx';
+import { calibreTool, CALIBRE_FORMAT_GUARDS } from '../src/export/calibre';
 
 test('Kindle Previewer is never found on Linux — Amazon ships no build', () => {
   if (platform === 'linux') expect(previewerPath()).toBeNull();
@@ -75,12 +83,71 @@ test('kfxSibling matches the extension case-insensitively', () => {
   expect(kfxSibling('/tmp/Book.EPUB')).toBe('/tmp/Book.kfx');
 });
 
-test('kfxSibling is what toKfx actually writes to', () => {
-  // Guards against a copy-pasted second derivation inside toKfx that drifts
-  // from kfxSibling — the exact defect the controller ruling calls out.
-  if (calibreTool('ebook-convert')) return;
-  const epub = join(tmpdir(), 'screepub-nonexistent-2.epub');
-  expect(kfxSibling(epub)).toBe(`${epub.replace(/\.epub$/i, '')}.kfx`);
+// --- toKfx driven for real against a fake ebook-convert. The tool and the
+// status probe are injected rather than PATH-shadowed, because this machine
+// (and any machine with Calibre installed) resolves ebook-convert from a
+// fixed install path before PATH, and because `ready` can never be true on
+// Linux. Everything else — argv, the scratch file, the rename — is real.
+
+function fakeEbookConvert(): { tool: string; argvLog: string; workDir: string } {
+  const toolDir = mkdtempSync(join(tmpdir(), 'screepub-kfx-fake-'));
+  const name = platform === 'win32' ? 'ebook-convert.exe' : 'ebook-convert';
+  const tool = join(toolDir, name);
+  const argvLog = join(toolDir, 'argv.log');
+  // Logs argv one entry per line, then touches the output path it was told
+  // to write — mimicking ebook-convert's own file creation.
+  writeFileSync(tool, `#!/bin/sh\nfor a in "$@"; do echo "$a"; done > "${argvLog}"\ntouch "$2"\n`);
+  chmodSync(tool, 0o755);
+  const workDir = mkdtempSync(join(tmpdir(), 'screepub-kfx-work-'));
+  return { tool, argvLog, workDir };
+}
+
+const READY: Awaited<ReturnType<typeof kfxStatus>> = {
+  calibre: true,
+  previewer: true,
+  pluginInstalled: true,
+  ready: true,
+};
+
+test('toKfx writes to a .kfx scratch path and renames it onto kfxSibling', async () => {
+  // Regression pin for the defect that made toKfx unrunnable: the scratch
+  // path ended in `.tmp`, and ebook-convert picks its OUTPUT FORMAT from the
+  // extension ("ValueError: No plugin to handle output format: tmp").
+  // Verified against Calibre 8.7.0. This is the third time in this branch
+  // that Calibre's extension rule has bitten, hence a test and not a comment.
+  if (platform === 'win32') return; // the fake tool is a /bin/sh script
+  const { tool, argvLog, workDir } = fakeEbookConvert();
+  const epub = join(workDir, 'book.epub');
+  writeFileSync(epub, 'fake epub bytes');
+
+  const out = await toKfx(epub, undefined, { tool: () => tool, status: async () => READY });
+
+  expect(out).toBe(kfxSibling(epub));
+  const argv = readFileSync(argvLog, 'utf8').split('\n').filter(Boolean);
+  expect(argv[0]).toBe(epub);
+  expect(argv[1].endsWith('.kfx')).toBe(true);
+  expect(argv[1]).toBe(kfxScratchPath(epub));
+  expect(argv.slice(2)).toEqual([...CALIBRE_FORMAT_GUARDS]);
+  expect(existsSync(kfxScratchPath(epub))).toBe(false); // renamed away
+  expect(existsSync(out)).toBe(true);
+});
+
+test('the scratch path is hidden, same-directory, and keeps the .kfx extension', () => {
+  expect(kfxScratchPath('/tmp/dir/Book.EPUB')).toBe('/tmp/dir/.Book.partial.kfx');
+});
+
+test('toKfx refuses when the toolchain is not ready, naming what is missing', async () => {
+  if (platform === 'win32') return;
+  const { tool, workDir } = fakeEbookConvert();
+  const epub = join(workDir, 'book.epub');
+  writeFileSync(epub, 'fake epub bytes');
+  const notReady = { calibre: true, previewer: false, pluginInstalled: false, ready: false };
+
+  const attempt = toKfx(epub, undefined, { tool: () => tool, status: async () => notReady });
+
+  await expect(attempt).rejects.toThrow(KfxToolchainNotReadyError);
+  await expect(attempt).rejects.toThrow('KFX conversion needs Kindle Previewer and the KFX plugin.');
+  expect(existsSync(kfxSibling(epub))).toBe(false); // and nothing was written
 });
 
 // --- pluginInstalled: exercised directly against a fake calibre-customize

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
 import { mobiSibling, availableFormats, freshKindleArtifact, CannotRegenerateError } from '../src/export/artifact';
-import { kfxSibling } from '../src/export/kfx';
+import { kfxSibling, KfxToolchainNotReadyError } from '../src/export/kfx';
 import { CalibreMissingError, CalibreFailedError } from '../src/export/calibre';
 
 function scratch(): string {
@@ -133,12 +133,14 @@ test('kfxReady with a stale .kfx attempts a KFX rebuild rather than silently reu
   // than silently falling through to the calibreAvailable (AZW3) branch or
   // returning a nonexistent .kfx path.
   //
-  // Precedence, asserted without depending on whether Calibre is installed:
-  // reaching the Calibre/KFX branch throws CalibreMissingError (tool
-  // absent) or CalibreFailedError (tool present, placeholder input
-  // rejected as not a zip). Falling through to the MOBI branch would
-  // instead throw CannotRegenerateError — that is the regression this
-  // pins.
+  // Precedence, asserted without depending on what is installed: reaching
+  // the Calibre/KFX branch throws CalibreMissingError (tool absent),
+  // KfxToolchainNotReadyError (Calibre present but no Kindle Previewer or
+  // plugin — every Linux machine, and the toolchain guard toKfx restored
+  // from KFXToolchain.convert), or CalibreFailedError (whole toolchain
+  // present, placeholder input rejected as not a zip). Falling through to
+  // the MOBI branch would instead throw CannotRegenerateError — that is the
+  // regression this pins.
   const error = await freshKindleArtifact({
     epub,
     fountainPath: null,
@@ -148,7 +150,11 @@ test('kfxReady with a stale .kfx attempts a KFX rebuild rather than silently reu
   }).catch((e) => e);
   expect(error).toBeInstanceOf(Error);
   expect(error).not.toBeInstanceOf(CannotRegenerateError);
-  expect([CalibreMissingError, CalibreFailedError].some((C) => error instanceof C)).toBe(true);
+  expect(
+    [CalibreMissingError, CalibreFailedError, KfxToolchainNotReadyError].some(
+      (C) => error instanceof C,
+    ),
+  ).toBe(true);
 });
 
 test('calibreAvailable is used over an existing fresh .mobi, not reused as a shortcut', async () => {
@@ -176,5 +182,9 @@ test('calibreAvailable is used over an existing fresh .mobi, not reused as a sho
   }).catch((e) => e);
   expect(error).toBeInstanceOf(Error);
   expect(error).not.toBeInstanceOf(CannotRegenerateError);
-  expect([CalibreMissingError, CalibreFailedError].some((C) => error instanceof C)).toBe(true);
+  expect(
+    [CalibreMissingError, CalibreFailedError, KfxToolchainNotReadyError].some(
+      (C) => error instanceof C,
+    ),
+  ).toBe(true);
 });
