@@ -370,6 +370,12 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
+      # DECISION, not an omission: ci.yml's cross-cli caches Bun's
+      # cross-compile runtime bundles and this job deliberately does not. A
+      # release runs a handful of times a year and must build from bytes
+      # fetched fresh from Bun's registry rather than from whatever a push
+      # left in a cache a week ago; ~200 MB and about four seconds is a
+      # cheap price on this path and an expensive one on every push.
       - run: bun install --frozen-lockfile
       - name: Cross-compile and verify the Linux and Windows CLI artifacts
         env:
@@ -456,6 +462,21 @@ jobs:
         with:
           name: cross-cli
           path: cli
+      # The ONE stage where a defect could still pass. build-cli.ts verified
+      # and hashed these files in the cross-cli job's $RUNNER_TEMP, but they
+      # then crossed a job boundary via upload-artifact/download-artifact,
+      # and the smoke jobs only ever open their own downloaded copies --
+      # screepub-cli-linux-arm64.tar.gz is touched by nothing after the
+      # build. This re-opens all three against the SHA256SUMS being
+      # published beside them, so the checksums file is proven to describe
+      # the bytes that reach the release page.
+      #
+      # `cd cli` is load-bearing: SHA256SUMS names bare filenames, which is
+      # what makes it usable by anyone who downloads into their own
+      # directory, so `-c` must run with the files as its cwd. sha256sum
+      # ships on the ubuntu image; this job needs no checkout.
+      - name: The checksums still describe these files after the round trip
+        run: cd cli && sha256sum -c SHA256SUMS
       - name: Upload the Linux and Windows CLI artifacts
         env:
           GH_TOKEN: ${{ github.token }}

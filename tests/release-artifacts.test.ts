@@ -182,6 +182,24 @@ describe('release.yml ships the cross-platform artifacts', () => {
     for (const name of MACOS_ASSETS) expect(text).not.toContain(name);
   });
 
+  test('the checksums are re-verified after the artifact round trip, before the upload', () => {
+    // The files are verified and hashed in cross-cli's $RUNNER_TEMP, then
+    // cross a job boundary through upload-artifact/download-artifact. The
+    // smoke jobs open only their own copies and only two of the three, so
+    // without this step screepub-cli-linux-arm64.tar.gz is never touched
+    // again and SHA256SUMS is never checked against what it names.
+    const steps = rel.jobs['cross-upload']!.steps ?? [];
+    const verify = steps.findIndex((s) => /sha256sum -c SHA256SUMS/.test(s.run ?? ''));
+    const upload = steps.findIndex((s) => /gh release upload/.test(s.run ?? ''));
+    expect(verify).toBeGreaterThanOrEqual(0);
+    expect(upload).toBeGreaterThanOrEqual(0);
+    // Order is the whole point: verifying after the upload is decoration.
+    expect(verify).toBeLessThan(upload);
+    // SHA256SUMS names BARE filenames, so -c only resolves them with the
+    // download directory as cwd.
+    expect(steps[verify]!.run).toMatch(/cd cli/);
+  });
+
   test('linux-arm64 is built and shipped but never smoke-tested', () => {
     // Stated, not hidden: no arm64 runner is assumed available, so this
     // artifact ships untested and the release notes say so. If an arm64
@@ -204,6 +222,20 @@ describe('the two limits are stated where a reader meets them', () => {
 
   test('the README names each Linux and Windows artifact it tells people to download', () => {
     for (const t of TARGETS) expect(readme).toContain(t.archiveName);
+  });
+
+  test('the README says which release these downloads start appearing in', () => {
+    // package.json deliberately stays at 0.5.4 through this branch, and
+    // GitHub renders README.md from main the moment it merges. Without a
+    // version qualifier, "latest release" points at v0.5.4, which carries
+    // the DMG and two macOS tarballs and none of the three files the table
+    // above names -- an empty-handed download with no error to explain it.
+    const section = readme.slice(readme.indexOf('### Linux and Windows'));
+    expect(section).toContain('releases/latest');
+    // The qualifier has to sit in the same breath as the link, not in some
+    // other part of the page a downloader never reaches.
+    const around = section.slice(0, section.indexOf('| Machine |'));
+    expect(around).toContain('0.6.0');
   });
 
   test('the README says device support off macOS is unproven, and names the tolino case', () => {

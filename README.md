@@ -105,9 +105,10 @@ Kindle-sideload format.
 ### Linux and Windows (command line)
 
 There is no window to open yet on Linux or Windows: what ships is the
-converter itself, run from a terminal. Download the file for your machine
-from the [latest release](https://github.com/ssandweiss/screepub/releases/latest),
-unpack it, and run it.
+converter itself, run from a terminal. From version 0.6.0 onward, download the
+file for your machine from the
+[latest release](https://github.com/ssandweiss/screepub/releases/latest),
+unpack it, and run it. Earlier releases carry the macOS downloads only.
 
 | Machine | File |
 | --- | --- |
