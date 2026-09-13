@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // screepub — screenplay PDF → Fountain → reflowable EPUB3.
 import { parseArgs } from 'node:util';
-import { basename, dirname, extname, join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { basename, delimiter, dirname, extname, join } from 'node:path';
 import { readFile, writeFile, rename } from 'node:fs/promises';
 // Inlined by `bun build --compile`, so the shipped binary reports the same
 // version as the tag that built it. release.sh checks the two agree.
@@ -14,7 +15,9 @@ import {
   type ConvertResult,
   type ConvertStage,
 } from './convert';
-import { mapConversionError, type JsonError } from './cli-errors';
+import { mapConversionError, CliError, errorMessage, type JsonError } from './cli-errors';
+import { resolveCommand, devicesCommand, sendCommand, VERBS, type Verb } from './cli-devices';
+import type { ListDevicesOptions } from './device/list';
 
 const USAGE = `screepub — screenplay PDF → reflowable EPUB3 (via Fountain)
 
@@ -43,7 +46,53 @@ Options:
                          internal warnings through to stderr
   -h, --help             show this help
       --version          print the version and exit
+
+Commands:
+  screepub devices [--json]                 list connected e-readers
+  screepub send <file> [--device <id>] [--json]
+                                            send an existing file to one
+
+A verb is only a verb when no file of that name exists: a script saved as
+"devices" still converts, and "./devices" always means the file.
+Each verb has its own --help.
 `;
+
+// A verb's --help must advertise the verb's OWN flags. parseVerbArgs accepts
+// --device, --json and -h and nothing else; printing the conversion usage here
+// offered -o, --mobi, --options and --progress, every one of which the verb
+// parser rejects as an unknown flag.
+const DEVICES_USAGE = `screepub devices — list every connected e-reader
+
+Usage:
+  screepub devices [--json]
+
+Lists USB-mounted Kindle, Kobo and tolino volumes, plus a docked reMarkable if
+its USB web interface answers. Nothing connected is an empty list, not an error.
+
+Options:
+  --json                 machine-readable result on stdout (for the app)
+  -h, --help             show this help
+`;
+
+const SEND_USAGE = `screepub send — send an existing file to a connected reader
+
+Usage:
+  screepub send <file> [--device <id>] [--json]
+
+send never converts: convert first, then send the output. A reMarkable accepts
+only PDF and EPUB.
+
+Options:
+  --device <id>          which reader, as the id \`screepub devices\` prints.
+                         Optional with exactly one connected; required with
+                         several
+  --json                 machine-readable result on stdout (for the app)
+  -h, --help             show this help
+`;
+
+function verbUsage(verb: Verb): string {
+  return verb === 'devices' ? DEVICES_USAGE : SEND_USAGE;
+}
 
 // --json is the app's only channel: EVERY exit in that mode must be one
 // parseable JSON object on stdout. jsonMode is therefore pre-scanned from
@@ -72,6 +121,43 @@ function fail(error: JsonError): never {
   process.exit(1);
 }
 
+function showHelp(usage: string = USAGE): never {
+  if (jsonMode) {
+    console.log(JSON.stringify({ ok: true, usage }));
+  } else {
+    console.log(usage);
+  }
+  process.exit(0);
+}
+
+function showVersion(): never {
+  if (jsonMode) {
+    console.log(JSON.stringify({ ok: true, version: pkg.version }));
+  } else {
+    console.log(`screepub ${pkg.version}`);
+  }
+  process.exit(0);
+}
+
+/** The one thing that fixes `screepub --json devices`.
+ *
+ * resolveCommand looks at argv[0] and nothing else, deliberately and
+ * permanently: a verb found after a flag is indistinguishable from that flag's
+ * value (`--title send`). So flag-before-verb — how a shell alias or a spawn
+ * wrapper commonly builds argv — reaches the CONVERSION path and used to die
+ * on `unsupported input type ""`, which names neither the cause nor the cure.
+ * Message-only: dispatch is untouched.
+ *
+ * The hint is withheld when a file of that name exists, because then the user
+ * really did mean the file — that is the shadowing rule, and telling them to
+ * run the verb instead would be wrong. */
+function verbHint(input: string): string {
+  if (extname(input) !== '') return '';
+  if (!(VERBS as readonly string[]).includes(input)) return '';
+  if (existsSync(input)) return '';
+  return ` — did you mean \`screepub ${input}\`? the verb must come first`;
+}
+
 function parseCliArgs() {
   return parseArgs({
     args: process.argv.slice(2),
@@ -95,23 +181,126 @@ function parseCliArgs() {
   });
 }
 
+/** Test seams, and a debugging hook for the Tauri shell: the mount roots to
+ * scan and the reMarkable base URL. Read ONLY by the device commands — the
+ * conversion path does not consult them. Unset means "the real thing". */
+function deviceSeams(): ListDevicesOptions {
+  const roots = process.env.SCREEPUB_VOLUME_ROOTS;
+  const endpoint = process.env.SCREEPUB_REMARKABLE_ENDPOINT;
+  return {
+    roots: roots ? roots.split(delimiter).filter(Boolean) : undefined,
+    remarkableEndpoint: endpoint || undefined,
+  };
+}
+
+function parseVerbArgs(args: string[]) {
+  return parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      device: { type: 'string' },
+      json: { type: 'boolean', default: false },
+      help: { type: 'boolean', short: 'h', default: false },
+    },
+  });
+}
+
+async function runVerb(verb: Verb, args: string[]): Promise<void> {
+  let parsed: ReturnType<typeof parseVerbArgs>;
+  try {
+    parsed = parseVerbArgs(args);
+  } catch (err) {
+    fail({ code: 'usage', message: errorMessage(err) });
+  }
+  const { values, positionals } = parsed;
+  jsonMode = values.json;
+
+  if (values.help) {
+    showHelp(verbUsage(verb));
+  }
+
+  try {
+    if (verb === 'devices') {
+      // Rejected rather than ignored, for the same reason `devices extra` is:
+      // silently accepting a flag the command cannot act on teaches the user
+      // it did something. --device belongs to send.
+      if (values.device !== undefined) {
+        fail({ code: 'usage', message: 'devices takes no --device — it lists every reader (--device belongs to send)' });
+      }
+      if (positionals.length > 0) {
+        fail({ code: 'usage', message: `devices takes no arguments (got "${positionals[0]}")` });
+      }
+      const { devices } = await devicesCommand(deviceSeams());
+      if (jsonMode) {
+        console.log(JSON.stringify({ ok: true, devices }));
+        return;
+      }
+      if (devices.length === 0) {
+        console.log('no devices connected');
+        return;
+      }
+      for (const d of devices) console.log(`${d.name} (${d.kind}) — ${d.id}`);
+      return;
+    }
+
+    // verb === 'send'
+    if (positionals.length !== 1) {
+      fail({ code: 'usage', message: 'expected exactly one file to send (see --help)' });
+    }
+    const sent = await sendCommand({
+      file: positionals[0],
+      deviceId: values.device,
+      ...deviceSeams(),
+    });
+    if (jsonMode) {
+      // `destination` is OMITTED for reMarkable, which has no path; `uploaded`
+      // takes its place. Two shapes, one object, per the design spec. Which
+      // shape is READ OFF SendResult.uploaded, never re-derived here: two
+      // places deciding the same thing is two places that can disagree.
+      console.log(
+        JSON.stringify({
+          ok: true,
+          device: sent.device,
+          ...(sent.uploaded ? { uploaded: true } : { destination: sent.destination }),
+        }),
+      );
+      return;
+    }
+    console.log(
+      sent.uploaded
+        ? `sent ${basename(positionals[0])} to ${sent.device.name}`
+        : `sent ${basename(positionals[0])} to ${sent.device.name} — ${sent.destination}`,
+    );
+  } catch (err) {
+    if (err instanceof CliError) fail(err.toJson());
+    throw err;
+  }
+}
+
 async function main() {
+  // Dispatch BEFORE parseArgs: a verb's flags are not the conversion flags.
+  // jsonMode's raw-argv pre-scan above already holds for this path, so a
+  // throw inside the verb parser still exits as one JSON object.
+  const command = resolveCommand(process.argv.slice(2));
+  if (command.kind === 'verb') {
+    await runVerb(command.verb, command.args);
+    return;
+  }
+
   let parsed: ReturnType<typeof parseCliArgs>;
   try {
     parsed = parseCliArgs();
   } catch (err) {
-    fail({ code: 'usage', message: (err as Error).message });
+    fail({ code: 'usage', message: errorMessage(err) });
   }
   const { values, positionals } = parsed;
   jsonMode = values.json;
 
   if (values.version) {
-    console.log(`screepub ${pkg.version}`);
-    process.exit(0);
+    showVersion();
   }
   if (values.help) {
-    console.log(USAGE);
-    process.exit(0);
+    showHelp();
   }
   if (positionals.length === 0) {
     if (jsonMode) {
@@ -171,7 +360,9 @@ async function main() {
     } else {
       fail({
         code: 'unsupported-type',
-        message: `unsupported input type "${ext}" — expected .pdf, .fountain, or .txt`,
+        message:
+          `unsupported input type "${ext}" — expected .pdf, .fountain, or .txt` +
+          verbHint(input),
       });
     }
   } catch (err) {

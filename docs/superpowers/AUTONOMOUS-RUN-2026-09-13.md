@@ -147,3 +147,32 @@ mounts and hit a real network. These inject fakes instead. The cost is two
 hidden inputs to production code; mitigated by a Final Verification step that
 greps the conversion path to prove nothing there reads them. *Cost if wrong:
 two env vars nobody sets in production.*
+
+**F3 — piece E1 is far cheaper than the ADR assumed: Bun cross-compiles every
+target from this one machine.** The ADR treated cross-platform CLI releases as
+"mostly a release-workflow change", implying a per-OS build matrix. It does
+not need one. Verified by building all four targets here on aarch64 Linux and
+checking what actually came out with `file`:
+
+| Target | Time | `file` says |
+|---|---|---|
+| `bun-linux-x64` | 2.1s | ELF 64-bit LSB executable, x86-64 |
+| `bun-windows-x64` | 2.4s | PE32+ executable for MS Windows, x86-64 |
+| `bun-darwin-arm64` | 1.8s | Mach-O 64-bit arm64 executable |
+| `bun-linux-arm64` (native) | 0.1s | runs: `screepub 0.5.4` |
+
+Bun downloads each target's runtime on demand and emits a genuine native
+executable for it. The whole matrix builds in about six seconds.
+
+Consequences for E1's design:
+
+- No per-OS CI runners are needed to BUILD the CLI. One job can produce every
+  artifact, which also drops this half of the release off paid macOS runners.
+- Binaries are large (65-119 MB) because each embeds a Bun runtime. That is
+  the known cost of the sidecar approach, recorded in the 2026-07-22 ADR.
+- **Cross-compiling is not cross-TESTING.** A Windows binary built here has
+  never executed. The existing CI smoke test (compile, convert a fixture,
+  assert `"ok":true`) can only run on a matching runner, so E1 will still
+  smoke-test each artifact on its own OS even though one job builds them all.
+  Windows device behaviour in particular stays unproven — nobody on this
+  project has a Windows machine.

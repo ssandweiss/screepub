@@ -7,6 +7,7 @@ import {
   REMARKABLE_MAX_UPLOAD_BYTES,
   probeRemarkable,
   uploadToRemarkable,
+  remarkableAccepts,
 } from '../src/device/remarkable';
 
 /** Records the request sequence, mirroring kit-check's StubRemarkable. The
@@ -80,10 +81,26 @@ test('only PDF and EPUB are accepted', async () => {
   s.reset();
   const azw3 = join(mkdtempSync(join(tmpdir(), 'screepub-test-')), 'Script.azw3');
   writeFileSync(azw3, 'x');
-  await expect(uploadToRemarkable(azw3, s.url)).rejects.toThrow('azw3');
+  // The literal `not .azw3.`, not the bare extension: the filename itself ends
+  // in .azw3, so a message that merely echoed the path would satisfy a looser
+  // assertion without ever naming the rule. This text is held byte-identical
+  // to RemarkableDevice.swift's — see the note beside the throw.
+  await expect(uploadToRemarkable(azw3, s.url)).rejects.toThrow('not .azw3.');
   expect(s.requests).toEqual([]);
 });
 
 test('probe reports false when nothing is serving', async () => {
   expect(await probeRemarkable('http://127.0.0.1:1', 500)).toBe(false);
+});
+
+test('remarkableAccepts is the one copy of the PDF/EPUB rule', () => {
+  expect(remarkableAccepts('/tmp/Script.pdf')).toBe(true);
+  expect(remarkableAccepts('/tmp/Script.epub')).toBe(true);
+  // Case and a dotted stem must not fool it: the extension is the LAST dot.
+  expect(remarkableAccepts('/tmp/Script.EPUB')).toBe(true);
+  expect(remarkableAccepts('/tmp/Draft.epub.azw3')).toBe(false);
+  expect(remarkableAccepts('/tmp/Script.azw3')).toBe(false);
+  expect(remarkableAccepts('/tmp/Script.mobi')).toBe(false);
+  // No extension at all is not an accepted extension.
+  expect(remarkableAccepts('/tmp/Script')).toBe(false);
 });

@@ -12,6 +12,11 @@ export const REMARKABLE_ENDPOINT = `http://${REMARKABLE_USB_ADDRESS}`;
 /** Paper Pro's web interface caps uploads here. */
 export const REMARKABLE_MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
+/** How long the presence probe waits. One constant, because listDevices always
+ * passes an explicit value: a second copy as this function's default would be
+ * dead for the only production caller, and changing it would do nothing. */
+export const REMARKABLE_PROBE_TIMEOUT_MS = 1500;
+
 export class RemarkableUploadError extends Error {
   constructor(message: string) {
     super(message);
@@ -31,7 +36,7 @@ function documentsUrl(endpoint: string): string {
  * USB with the interface enabled. Cheap enough to poll. */
 export async function probeRemarkable(
   endpoint: string = REMARKABLE_ENDPOINT,
-  timeoutMs = 1500,
+  timeoutMs = REMARKABLE_PROBE_TIMEOUT_MS,
 ): Promise<boolean> {
   try {
     const response = await fetch(documentsUrl(endpoint), {
@@ -44,6 +49,15 @@ export async function probeRemarkable(
   }
 }
 
+/** The tablet's USB web interface accepts these two formats and no others.
+ * Exported because `send` has to report `unsupported-file` BEFORE it calls
+ * upload — deciding that by matching the upload error's message would be the
+ * substring detection cli-errors.ts bans. One copy, two callers. */
+export function remarkableAccepts(file: string): boolean {
+  const ext = extname(file).replace(/^\./, '').toLowerCase();
+  return ext === 'pdf' || ext === 'epub';
+}
+
 /** Upload a PDF or EPUB to the tablet's root folder. "Root" is made true, not
  * assumed: /upload writes into the last-listed folder (server-side state), so
  * root is listed first and a failed listing aborts the send rather than fire
@@ -53,7 +67,15 @@ export async function uploadToRemarkable(
   endpoint: string = REMARKABLE_ENDPOINT,
 ): Promise<void> {
   const ext = extname(file).replace(/^\./, '').toLowerCase();
-  if (ext !== 'pdf' && ext !== 'epub') {
+  if (!remarkableAccepts(file)) {
+    // BYTE-IDENTICAL to RemarkableDevice.swift's wording, trailing period and
+    // all, as are the other three RemarkableUploadError messages below. Piece
+    // A ported this module from the Swift deliberately and its review verified
+    // the error text matched; the Swift stays the source of truth until the
+    // Mac app retires (piece F), KitCheck still runs against it, and a reader
+    // diffing the two modules must find them saying the same thing. Do not
+    // reword these while app/ exists — cli-devices.ts's own pre-check was
+    // brought into line with THIS text, not the other way round.
     throw new RemarkableUploadError(`reMarkable accepts PDF and EPUB, not .${ext}.`);
   }
 
