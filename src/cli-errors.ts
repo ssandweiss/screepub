@@ -10,7 +10,13 @@ export interface JsonError {
     | 'unsupported-type'
     | 'usage'
     | 'bad-options'
-    | 'internal';
+    | 'internal'
+    // Device commands (piece B). Same contract, same stdout rule.
+    | 'no-devices'
+    | 'ambiguous-device'
+    | 'unknown-device'
+    | 'send-failed'
+    | 'unsupported-file';
   message: string;
 }
 
@@ -38,4 +44,22 @@ export function mapConversionError(err: unknown): JsonError | null {
     return { code: 'unreadable', message: `cannot read the input file (${fsCode})` };
   }
   return null;
+}
+
+/** A failure that already knows its contract code. Thrown by the device
+ * command handlers, which must not import the printer: they return values or
+ * throw this, and cli.ts is the only place that decides how it reaches the
+ * user. */
+export class CliError extends Error {
+  constructor(
+    readonly code: JsonError['code'],
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CliError';
+  }
+
+  toJson(): JsonError {
+    return { code: this.code, message: this.message };
+  }
 }
