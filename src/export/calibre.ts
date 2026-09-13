@@ -105,21 +105,31 @@ export async function toAzw3(epub: string): Promise<string> {
  * KEPUB. Convert to `<stem>.kepub` first, then rename to the double
  * extension the Kobo renderer selects on.
  *
- * Deliberately NOT passed CALIBRE_FORMAT_GUARDS, matching the Swift: it
- * passes no guards to this call while applying them to toAzw3. The
- * omission looks like it may be an oversight — Calibre's remove-fake-
- * margins would wreck a dialogue column on Kobo just as it does on
- * Kindle — but no Kobo has ever been connected to this project, so this
- * port carries the behavior across faithfully rather than silently
- * "fixing" a difference on hardware nobody here can verify. Do not add
- * the guards here without a Kobo hardware pass to confirm the outcome. */
+ * DELIBERATE DIVERGENCE from EbookConvert.swift (2026-09-12): the Swift
+ * passes the guards to toAzw3 but not here, and this port passes them to
+ * both. That difference was carried across faithfully at first, on the
+ * rule that device behavior nobody can re-verify gets preserved rather
+ * than "fixed" — but the rule does not apply, because the guards are not
+ * device behavior. `--disable-remove-fake-margins` governs how Calibre
+ * READS the EPUB: the heuristic strips per-block side margins during
+ * input processing, before the output format is chosen, and the Swift's
+ * own note records it deleting them "regardless of unit". A screenplay's
+ * dialogue column is exactly what it mistakes for publisher page margins,
+ * so KEPUB is affected for the same reason AZW3 was — device-verified
+ * 2026-07-29 on the AZW3 path. The Swift omission reads as a plain bug.
+ *
+ * Consequence: TypeScript and Swift now disagree here until the Swift app
+ * retires (cross-platform piece F). Nothing consumes this function yet,
+ * so no user sees either behavior. Still unconfirmed on real hardware —
+ * no Kobo has ever been connected to this project — so this stays on the
+ * device-checklist for the first Kobo pass. */
 export async function toKepub(epub: string): Promise<string> {
   const tool = calibreTool('ebook-convert');
   if (!tool) throw new CalibreMissingError();
   const stem = epub.replace(/\.epub$/i, '');
   const raw = `${stem}.kepub`;
   const kepub = `${stem}.kepub.epub`;
-  await runCalibre(tool, [epub, raw]);
+  await runCalibre(tool, [epub, raw, ...CALIBRE_FORMAT_GUARDS]);
   if (!existsSync(raw)) {
     throw new CalibreFailedError('ebook-convert exited cleanly but produced no .kepub');
   }

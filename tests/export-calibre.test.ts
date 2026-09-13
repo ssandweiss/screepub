@@ -134,16 +134,15 @@ test('toKepub converts to .kepub then renames to .kepub.epub (fake ebook-convert
     expect(existsSync(rawKepub)).toBe(false); // renamed away, not left behind
     expect(readFileSync(out, 'utf8')).not.toBe('stale leftover'); // overwritten
 
-    // Ruling B: toKepub must call ebook-convert with exactly [epub, raw] --
-    // no CALIBRE_FORMAT_GUARDS, matching EbookConvert.swift's toKepub
-    // (which passes guards to toAzw3 but not here). This is a deliberately
-    // preserved discrepancy pending a Kobo hardware pass, not an oversight
-    // to "fix" by making the two recipes consistent.
+    // toKepub converts to the RAW .kepub path (the extension is what makes
+    // ebook-convert emit KEPUB at all) and passes the same guard trio as
+    // toAzw3. EbookConvert.swift omits the guards here; this port applies
+    // them deliberately, because remove-fake-margins is an input-side
+    // heuristic that strips the dialogue column's side margins before the
+    // output format is even chosen -- see the note on toKepub. A regression
+    // back to the Swift's guard-free call fails this.
     const argv = readFileSync(argvLog, 'utf8').split('\n').filter(Boolean);
-    expect(argv).toEqual([epub, rawKepub]);
-    for (const guard of CALIBRE_FORMAT_GUARDS) {
-      expect(argv).not.toContain(guard);
-    }
+    expect(argv).toEqual([epub, rawKepub, ...CALIBRE_FORMAT_GUARDS]);
   } finally {
     process.env.PATH = originalPath;
   }

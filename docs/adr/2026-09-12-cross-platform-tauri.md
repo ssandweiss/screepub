@@ -140,6 +140,25 @@ halfway point rather than at the end.
   across two languages' PDF writers is not a realistic target. All tests must
   pass against regenerated fixtures, and stability is rebaselined exactly
   once, in one reviewable commit.
+- **One deliberate behavioural divergence from the Swift, recorded here
+  because it outlives piece A.** `EbookConvert.swift` passes the three
+  device-verified Calibre format guards to its AZW3 recipe but not to its
+  KEPUB one; the TypeScript port passes them to both. The omission was
+  carried across faithfully at first, on the rule that behaviour nobody can
+  re-verify gets preserved rather than "fixed" — but the rule does not apply,
+  because the guards are not device behaviour.
+  `--disable-remove-fake-margins` governs how Calibre READS an EPUB: it
+  strips per-block side margins during input processing, before the output
+  format is chosen, and the Swift's own note records it doing so "regardless
+  of unit". A screenplay's dialogue column is precisely what it mistakes for
+  publisher page margins. KEPUB is therefore affected for the same reason
+  AZW3 was, and the Swift omission reads as a plain bug rather than a
+  decision. Verified on real Calibre 8.7.0 that applying the guards does not
+  disturb KEPUB's koboSpan markup. TypeScript and Swift disagree here until
+  the Swift app retires at piece F; nothing consumes the function before
+  then, so no user sees either behaviour. **Still unconfirmed on hardware —
+  no Kobo has ever been connected to this project — so it belongs on the
+  checklist for the first Kobo pass.**
 - **Calibre and epubcheck stay.** Both are cross-platform, neither is shipped
   to users, and Calibre remains optional — the engine's own MOBI writer is
   still the dependency-free USB path. Writing our own AZW3 was considered and
