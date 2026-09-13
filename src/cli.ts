@@ -82,6 +82,24 @@ function fail(error: JsonError): never {
   process.exit(1);
 }
 
+function showHelp(): never {
+  if (jsonMode) {
+    console.log(JSON.stringify({ ok: true, usage: USAGE }));
+  } else {
+    console.log(USAGE);
+  }
+  process.exit(0);
+}
+
+function showVersion(): never {
+  if (jsonMode) {
+    console.log(JSON.stringify({ ok: true, version: pkg.version }));
+  } else {
+    console.log(`screepub ${pkg.version}`);
+  }
+  process.exit(0);
+}
+
 function parseCliArgs() {
   return parseArgs({
     args: process.argv.slice(2),
@@ -140,8 +158,7 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
   jsonMode = values.json;
 
   if (values.help) {
-    console.log(USAGE);
-    process.exit(0);
+    showHelp();
   }
 
   try {
@@ -214,12 +231,10 @@ async function main() {
   jsonMode = values.json;
 
   if (values.version) {
-    console.log(`screepub ${pkg.version}`);
-    process.exit(0);
+    showVersion();
   }
   if (values.help) {
-    console.log(USAGE);
-    process.exit(0);
+    showHelp();
   }
   if (positionals.length === 0) {
     if (jsonMode) {

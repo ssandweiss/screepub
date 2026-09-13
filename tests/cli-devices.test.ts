@@ -1,9 +1,24 @@
-import { test, expect, afterAll } from 'bun:test';
+import { test, expect, afterAll, describe } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CliError } from '../src/cli-errors';
 import { resolveCommand, VERBS } from '../src/cli-devices';
+
+const ROOT = new URL('..', import.meta.url).pathname;
+
+async function runCli(args: string[]) {
+  const proc = Bun.spawn(['bun', `${ROOT}src/cli.ts`, ...args], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { stdout, stderr, exitCode };
+}
 
 test('CliError carries a contract code and renders the exact JSON error shape', () => {
   const err = new CliError('ambiguous-device', 'several devices are connected: a, b');
@@ -276,4 +291,51 @@ test('a directory given as the file is unreadable, not send-failed', async () =>
     await sendCommand({ file: dir, scan: () => [kindleVolume()], probe: async () => false });
   } catch (err) { thrown = err; }
   expect((thrown as CliError).code).toBe('unreadable');
+});
+
+describe('cli --json --help and --version', () => {
+  test('--json --help emits JSON with ok: true and non-empty usage', async () => {
+    const { stdout, exitCode } = await runCli(['--json', '--help']);
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.ok).toBe(true);
+    expect(typeof result.usage).toBe('string');
+    expect(result.usage.length).toBeGreaterThan(0);
+  });
+
+  test('--json --version emits JSON with ok: true and matching version', async () => {
+    const pkg = await Bun.file(`${ROOT}package.json`).json();
+    const { stdout, exitCode } = await runCli(['--json', '--version']);
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.ok).toBe(true);
+    expect(result.version).toBe(pkg.version);
+  });
+
+  test('plain --help without --json still prints human text and does not parse as JSON', async () => {
+    const { stdout, exitCode } = await runCli(['--help']);
+    expect(exitCode).toBe(0);
+    // Human text should not start with { (the start of a JSON object)
+    expect(stdout.trim().startsWith('{')).toBe(false);
+    // Should contain something like "Usage:" from USAGE text
+    expect(stdout).toContain('Usage:');
+  });
+
+  test('devices --json --help emits JSON with ok: true and non-empty usage', async () => {
+    const { stdout, exitCode } = await runCli(['devices', '--json', '--help']);
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.ok).toBe(true);
+    expect(typeof result.usage).toBe('string');
+    expect(result.usage.length).toBeGreaterThan(0);
+  });
+
+  test('send --json --help emits JSON with ok: true and non-empty usage', async () => {
+    const { stdout, exitCode } = await runCli(['send', '--json', '--help']);
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.ok).toBe(true);
+    expect(typeof result.usage).toBe('string');
+    expect(result.usage.length).toBeGreaterThan(0);
+  });
 });
