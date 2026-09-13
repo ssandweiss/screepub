@@ -140,9 +140,9 @@ describe('Rust is a window, not a brain', () => {
       // legitimately appears in code — it's an OS file filter, not a
       // decision about what a screenplay is. Carved out the same way the
       // "pdf" test below carves it out, rather than let it fail the ban.
-      const lines = stripped
-        .split('\n')
-        .filter((line) => !line.includes('add_filter'));
+      // The exemption removes the CALL, not the line: dropping a whole
+      // line would let anything co-located on it escape the ban too.
+      const lines = stripped.replace(/add_filter\([^)]*\)/g, '').split('\n');
       // Plain substring, not word-boundary: a `\b` match treats `_` as a
       // word character, so it is blind to snake_case and inflections
       // (`is_kindle_volume`, `n_scenes`, `sluglines`, `.epub3`) — exactly
