@@ -21,6 +21,23 @@ test('unnamed volume with documents/ + system/ is detected', () => {
   expect(isKindleVolume(volume('NO NAME', ['documents', 'system']))).toBe(true);
 });
 
+test('a system FILE, not a directory, still detects a Kindle', () => {
+  // KindleDevice.isKindleVolume checks `system` with fileExists and NO
+  // directory flag — it asks "did the firmware leave its marker here?", not
+  // "is it a folder". Without this test, narrowing the check to isDirectory
+  // (the way `documents` is checked, two lines up) passes silently.
+  const dir = volume('NO NAME', ['documents']);
+  writeFileSync(join(dir, 'system'), 'a marker file, not a folder');
+  expect(isKindleVolume(dir)).toBe(true);
+});
+
+test('the Kindle name match is case-insensitive', () => {
+  // Swift used localizedCaseInsensitiveContains; the port lowercases first.
+  expect(isKindleVolume(volume('KINDLE', ['documents']))).toBe(true);
+  expect(isKindleVolume(volume('kindle', ['documents']))).toBe(true);
+  expect(isKindleVolume(volume('Sams Kindle', ['documents']))).toBe(true);
+});
+
 test('volume without documents/ is rejected', () => {
   expect(isKindleVolume(volume('Kindle-empty'))).toBe(false);
 });

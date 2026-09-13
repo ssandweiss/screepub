@@ -6,6 +6,13 @@ test('the Kindle e-ink preset is exactly the defaults', () => {
   expect(DEVICE_PRESETS.kindleEink.settings).toEqual(DEFAULT_FORMAT_OPTIONS);
 });
 
+test('a preset does not alias the module-level defaults', () => {
+  // Swift's FormatOptions was a value type, so this could not happen there.
+  // Handing out DEFAULT_FORMAT_OPTIONS by reference would let one mutation
+  // through a preset corrupt every conversion in the process.
+  expect(DEVICE_PRESETS.kindleEink.settings).not.toBe(DEFAULT_FORMAT_OPTIONS);
+});
+
 test('the phone preset widens the column and drops side-by-side dual dialogue', () => {
   expect(DEVICE_PRESETS.phone.settings).toEqual({
     ...DEFAULT_FORMAT_OPTIONS,

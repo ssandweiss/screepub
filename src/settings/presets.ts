@@ -7,10 +7,15 @@ import { DEFAULT_FORMAT_OPTIONS, type FormatOptions } from '../options';
 export type DevicePresetId = 'kindleEink' | 'phone';
 
 export const DEVICE_PRESETS: Record<DevicePresetId, { displayName: string; settings: FormatOptions }> = {
-  /** The recommended baseline: 6" e-ink Kindle. Identical to defaults. */
+  /** The recommended baseline: 6" e-ink Kindle. Identical to defaults — but
+   * a COPY of them. Swift's FormatOptions was a value type, so aliasing the
+   * defaults was impossible there; here a preset handed out by reference IS
+   * DEFAULT_FORMAT_OPTIONS, and one stray mutation through it would corrupt
+   * every conversion in the process — and desync the defaults that
+   * options.test.ts and kit-check both pin to format-defaults.json. */
   kindleEink: {
     displayName: 'Kindle e-ink (6")',
-    settings: DEFAULT_FORMAT_OPTIONS,
+    settings: { ...DEFAULT_FORMAT_OPTIONS },
   },
   /** Narrow phone/tablet reading app: side-by-side dual dialogue is an
    * unreadable sliver, so speeches go sequential, and the dialogue column
