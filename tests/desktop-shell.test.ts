@@ -10,7 +10,13 @@ const CONFIG = JSON.parse(
   readFileSync(join(REPO, 'desktop', 'src-tauri', 'tauri.conf.json'), 'utf8'),
 );
 
-const rustFiles = readdirSync(RUST_DIR).filter((f) => f.endsWith('.rs'));
+// Recursive: a submodule (e.g. a `mod brain;` under a subdirectory) is the
+// most natural shape "one more small thing in Rust" takes, and a
+// non-recursive read would leave it entirely ungoverned by every guard
+// below.
+const rustFiles = (readdirSync(RUST_DIR, { recursive: true }) as string[]).filter((f) =>
+  f.endsWith('.rs'),
+);
 const rustSources = rustFiles.map((f) => ({
   name: f,
   text: readFileSync(join(RUST_DIR, f), 'utf8'),
@@ -30,18 +36,64 @@ function code(text: string): string[] {
  * itself. A doc comment explaining "we deliberately don't depend on
  * serde_json" or spelling out what a scene is for the reader's benefit is
  * exactly the kind of sentence these guards would otherwise trip on —
- * words that describe the rule, not code that breaks it. None of these
- * files puts "//" or "/*" inside a string literal, so a plain scan is safe.
+ * words that describe the rule, not code that breaks it.
+ *
+ * This tracks string-literal state (not just a line-oriented scan), because
+ * an ordinary future edit — a URL or path inside a format! string — can put
+ * "//" or "/*" inside a string literal. A scan blind to quoting would treat
+ * the rest of that string, or an arbitrary span after a stray "/*" inside a
+ * string, as a comment and hide real code from every guard that reads
+ * stripped text. Escaped quotes (`\"`) are honoured so a string is not
+ * closed early.
  */
 function stripComments(text: string): string {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n')
-    .map((line) => {
-      const idx = line.indexOf('//');
-      return idx === -1 ? line : line.slice(0, idx);
-    })
-    .join('\n');
+  let out = '';
+  let i = 0;
+  let inString = false;
+  let inBlockComment = false;
+  while (i < text.length) {
+    const ch = text[i];
+    if (inBlockComment) {
+      if (ch === '*' && text[i + 1] === '/') {
+        inBlockComment = false;
+        i += 2;
+        continue;
+      }
+      out += ch === '\n' ? '\n' : ''; // keep line breaks; content is gone
+      i += 1;
+      continue;
+    }
+    if (inString) {
+      out += ch;
+      if (ch === '\\' && i + 1 < text.length) {
+        out += text[i + 1];
+        i += 2;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      i += 1;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '/') {
+      const nl = text.indexOf('\n', i);
+      i = nl === -1 ? text.length : nl; // resume at the newline itself
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      inBlockComment = true;
+      i += 2;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
 }
 
 describe('Rust is a window, not a brain', () => {
@@ -91,14 +143,17 @@ describe('Rust is a window, not a brain', () => {
       const lines = stripped
         .split('\n')
         .filter((line) => !line.includes('add_filter'));
-      const lower = lines.join('\n').toLowerCase();
+      // Plain substring, not word-boundary: a `\b` match treats `_` as a
+      // word character, so it is blind to snake_case and inflections
+      // (`is_kindle_volume`, `n_scenes`, `sluglines`, `.epub3`) — exactly
+      // the shape device/format/screenplay knowledge takes in real Rust.
+      // The one real collision this creates — "epub" is the tail of the
+      // product name "Screepub" and of the `screepub-engine` SIDECAR
+      // constant — is carved out explicitly, by name, rather than by
+      // loosening the match for every word.
+      const lower = lines.join('\n').toLowerCase().replaceAll('screepub', '');
       for (const word of banned) {
-        // Word-boundary, not substring: "epub" is a real banned word, but
-        // it is also the tail of "Screepub"/"screepub-engine" — the
-        // product name and the SIDECAR constant the cross-pin test below
-        // requires verbatim. A whole-word match lets the product name
-        // through without a special-case exemption.
-        const found = new RegExp(`\\b${word}\\b`).test(lower);
+        const found = lower.includes(word);
         expect(`${name} mentions ${word}: ${found}`).toBe(`${name} mentions ${word}: false`);
       }
     }
@@ -227,14 +282,30 @@ describe('the desktop CSS copy of the brand tokens does not drift', () => {
   const TOKENS = JSON.parse(readFileSync(join(REPO, 'brand', 'tokens.json'), 'utf8')).colors;
 
   // style.css declares its base palette in a top-level `:root { … }` block
-  // and overrides a subset inside `@media (prefers-color-scheme: dark)`.
-  // Splitting the file at the @media marker is enough to tell the two
-  // apart: nothing above it is a dark-mode override, and everything below
-  // it is.
-  const mediaIdx = CSS.indexOf('@media');
+  // and overrides a subset inside a `:root { … }` nested in
+  // `@media (prefers-color-scheme: dark)`. The split below is keyed off
+  // those actual `:root` blocks — not off "everything before/after the
+  // @media marker" — so a hex custom property declared elsewhere in the
+  // file (outside either block) is simply not swept into the wrong side.
+  //
+  // Known limits, same shape as tests/brand-tokens.test.ts's own note on
+  // its block-scanning: this assumes exactly one top-level `:root {…}`
+  // block and one `@media (prefers-color-scheme: dark) { :root {…} }`
+  // block, both flat (no nested braces) and each on its own — a `}` inside
+  // a comment or quoted value ahead of the real close would truncate the
+  // slice early and silently.
+  function rootBlock(text: string, searchFrom: number): string {
+    const rootIdx = text.indexOf(':root', searchFrom);
+    expect(rootIdx, `no :root block found at/after index ${searchFrom}`).toBeGreaterThan(-1);
+    const braceStart = text.indexOf('{', rootIdx);
+    const braceEnd = text.indexOf('}', braceStart);
+    return text.slice(braceStart, braceEnd + 1);
+  }
+
+  const lightSection = rootBlock(CSS, 0);
+  const mediaIdx = CSS.indexOf('@media (prefers-color-scheme: dark)');
   expect(mediaIdx, 'style.css is missing its dark-mode @media block').toBeGreaterThan(-1);
-  const lightSection = CSS.slice(0, mediaIdx);
-  const darkSection = CSS.slice(mediaIdx);
+  const darkSection = rootBlock(CSS, mediaIdx);
 
   function hexDeclarations(section: string): Record<string, string> {
     const out: Record<string, string> = {};
@@ -252,6 +323,15 @@ describe('the desktop CSS copy of the brand tokens does not drift', () => {
     // dropped during an edit) rather than only checking the ones present.
     expect(Object.keys(light).sort()).toEqual(
       ['alarm', 'brass', 'ground', 'ink', 'ink-muted', 'ink-on-brass', 'paper'].sort(),
+    );
+  });
+
+  test('the dark override still declares its five tokens', () => {
+    // Presence, not just value: deleting a dark override (e.g.
+    // --ink-muted) would leave light-mode ink drawn on dark paper, and the
+    // value-comparison test below can't catch an entry that's simply gone.
+    expect(Object.keys(dark).sort()).toEqual(
+      ['alarm', 'ground', 'ink', 'ink-muted', 'paper'].sort(),
     );
   });
 
