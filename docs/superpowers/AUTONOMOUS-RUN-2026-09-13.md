@@ -329,3 +329,35 @@ built-but-untested.
 `runs-on: ubuntu-24.04-arm`, and delete the test in
 `tests/release-artifacts.test.ts` asserting that job's absence — it names
 itself for exactly this purpose.
+
+**F5 — piece D starts with most of its design already built.** Inventoried
+before speccing it, so D's spec is grounded in what exists rather than in
+imagination:
+
+The SwiftUI app is 2,508 lines across ten files, dominated by a 1,020-line
+`ContentView.swift`, with `ReaderRail` (240), `ReaderView` (152) and
+`Theme.swift` (170) behind it.
+
+Against that, `brand/components/` already holds twelve self-contained HTML/CSS
+components that map almost one-to-one onto that surface:
+
+| Component | What it is in the app |
+|---|---|
+| `drop-well` | the PDF drop target |
+| `progress` | conversion progress |
+| `result-card` | the conversion result |
+| `failure-notice` | errors |
+| `device-table` | connected readers |
+| `buttons` | actions |
+| `page-frame`, `slugline`, `title-block`, `transition-rule`, `shot-frame` | the screenplay reader itself |
+| `brad` | the fastener motif |
+
+And seven colour tokens are already pinned to `Theme.swift` by
+`tests/brand-tokens.test.ts`, so the palette cannot drift from the Swift app
+while both exist.
+
+**Consequence for D:** it is assembly and wiring against an existing design
+system, not visual invention. The `frontend-design` skill (which you asked for
+explicitly) should be spent on how those pieces compose into screens and on
+what the reader view becomes in a webview — not on inventing a look the
+project already has.
