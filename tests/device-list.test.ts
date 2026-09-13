@@ -54,19 +54,31 @@ test('nothing connected is an empty list, not an error', async () => {
 });
 
 test('the mount scan and the probe run concurrently, not one after the other', async () => {
+  // The property is that both are STARTED before either is awaited, so each
+  // stub records its own entry time and the two are compared directly. The
+  // earlier version timed the whole call and asserted <350ms against ~200ms
+  // nominal — same property, but a stopwatch, and the one plausible CI flake
+  // on this branch: a scheduling hiccup would have read as a concurrency
+  // regression. Sequential (`await scan(); await probe()`) puts the probe's
+  // start 200ms after the scan's and fails here just as loudly.
   const slow = <T>(value: T, ms: number) =>
     new Promise<T>((resolve) => setTimeout(() => resolve(value), ms));
-  const started = Date.now();
+  let scanStarted = 0;
+  let probeStarted = 0;
   const devices = await listDevices({
-    scan: () => slow<ConnectedDevice[]>([{ kind: 'kindle', name: 'Kindle', volume: '/v/Kindle' }], 200),
-    probe: () => slow(true, 200),
+    scan: () => {
+      scanStarted = Date.now();
+      return slow<ConnectedDevice[]>([{ kind: 'kindle', name: 'Kindle', volume: '/v/Kindle' }], 200);
+    },
+    probe: () => {
+      probeStarted = Date.now();
+      return slow(true, 200);
+    },
   });
-  const elapsed = Date.now() - started;
   expect(devices.map((d) => d.kind)).toEqual(['kindle', 'remarkable']);
-  // Sequential (`await scan(); await probe()`) takes ~400ms and fails here;
-  // Promise.all takes ~200ms. This is the spec's "wall-clock is the probe's
-  // timeout rather than the sum" made into an assertion.
-  expect(elapsed).toBeLessThan(350);
+  expect(scanStarted).toBeGreaterThan(0);
+  expect(probeStarted).toBeGreaterThan(0);
+  expect(Math.abs(probeStarted - scanStarted)).toBeLessThan(20);
 });
 
 test('a probe that throws is a tablet that is not there, not a crash', async () => {

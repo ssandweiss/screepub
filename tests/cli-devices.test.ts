@@ -1,24 +1,17 @@
-import { test, expect, afterAll, describe } from 'bun:test';
+import { test, expect, afterAll } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CliError } from '../src/cli-errors';
+import { CliError, errorMessage } from '../src/cli-errors';
 import { resolveCommand, VERBS } from '../src/cli-devices';
 
-const ROOT = new URL('..', import.meta.url).pathname;
-
-async function runCli(args: string[]) {
-  const proc = Bun.spawn(['bun', `${ROOT}src/cli.ts`, ...args], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  return { stdout, stderr, exitCode };
-}
+// No spawning helper lives here on purpose. Every test in this file drives the
+// handlers IN PROCESS with injected seams; the spawned-CLI tests live in
+// cli-device-commands.test.ts, whose runCli pins SCREEPUB_VOLUME_ROOTS and
+// SCREEPUB_REMARKABLE_ENDPOINT. A second, unsandboxed spawner here was safe
+// only as long as every test using it exited before any device work — the next
+// one appended would have enumerated this machine's real mounts and fired a
+// real request at the reMarkable USB address.
 
 test('CliError carries a contract code and renders the exact JSON error shape', () => {
   const err = new CliError('ambiguous-device', 'several devices are connected: a, b');
@@ -248,7 +241,11 @@ test('a failed copy is send-failed, carrying the underlying message', async () =
   } catch (err) { thrown = err; }
   expect(thrown).toBeInstanceOf(CliError);
   expect((thrown as CliError).code).toBe('send-failed');
-  expect((thrown as CliError).message.length).toBeGreaterThan(0);
+  // The UNDERLYING message, not a substitute: an implementation that caught
+  // the copy's error and threw its own prose ("could not send the file") is
+  // exactly the mutation this test exists to catch, and any non-empty string
+  // passes a length check. mkdirSync's failure is ENOTDIR here.
+  expect((thrown as CliError).message).toContain('ENOTDIR');
 });
 
 test('a failed upload is send-failed, not a raw RemarkableUploadError', async () => {
@@ -293,49 +290,20 @@ test('a directory given as the file is unreadable, not send-failed', async () =>
   expect((thrown as CliError).code).toBe('unreadable');
 });
 
-describe('cli --json --help and --version', () => {
-  test('--json --help emits JSON with ok: true and non-empty usage', async () => {
-    const { stdout, exitCode } = await runCli(['--json', '--help']);
-    expect(exitCode).toBe(0);
-    const result = JSON.parse(stdout);
-    expect(result.ok).toBe(true);
-    expect(typeof result.usage).toBe('string');
-    expect(result.usage.length).toBeGreaterThan(0);
-  });
+test('a non-Error throw still produces a message key the decoder can read', () => {
+  // `(err as Error).message` on a non-Error is undefined, and JSON.stringify
+  // DROPS an undefined value: the wire object became {"code":"send-failed"}
+  // with no message at all, while JsonError.message is required and the Tauri
+  // decoder rejects it. Asserted through the real chain — CliError, toJson,
+  // stringify, parse — because the drop only happens at stringify.
+  const naive = { code: 'send-failed', message: (('boom' as unknown) as Error).message };
+  expect('message' in JSON.parse(JSON.stringify(naive))).toBe(false);
 
-  test('--json --version emits JSON with ok: true and matching version', async () => {
-    const pkg = await Bun.file(`${ROOT}package.json`).json();
-    const { stdout, exitCode } = await runCli(['--json', '--version']);
-    expect(exitCode).toBe(0);
-    const result = JSON.parse(stdout);
-    expect(result.ok).toBe(true);
-    expect(result.version).toBe(pkg.version);
-  });
-
-  test('plain --help without --json still prints human text and does not parse as JSON', async () => {
-    const { stdout, exitCode } = await runCli(['--help']);
-    expect(exitCode).toBe(0);
-    // Human text should not start with { (the start of a JSON object)
-    expect(stdout.trim().startsWith('{')).toBe(false);
-    // Should contain something like "Usage:" from USAGE text
-    expect(stdout).toContain('Usage:');
-  });
-
-  test('devices --json --help emits JSON with ok: true and non-empty usage', async () => {
-    const { stdout, exitCode } = await runCli(['devices', '--json', '--help']);
-    expect(exitCode).toBe(0);
-    const result = JSON.parse(stdout);
-    expect(result.ok).toBe(true);
-    expect(typeof result.usage).toBe('string');
-    expect(result.usage.length).toBeGreaterThan(0);
-  });
-
-  test('send --json --help emits JSON with ok: true and non-empty usage', async () => {
-    const { stdout, exitCode } = await runCli(['send', '--json', '--help']);
-    expect(exitCode).toBe(0);
-    const result = JSON.parse(stdout);
-    expect(result.ok).toBe(true);
-    expect(typeof result.usage).toBe('string');
-    expect(result.usage.length).toBeGreaterThan(0);
-  });
+  for (const thrown of ['boom', 42, { code: 'ENOTDIR' }, null]) {
+    const wire = JSON.parse(JSON.stringify(new CliError('send-failed', errorMessage(thrown)).toJson()));
+    expect(typeof wire.message).toBe('string');
+    expect(wire.message.length).toBeGreaterThan(0);
+  }
+  // A real Error still reports its own message, not "Error: ...".
+  expect(errorMessage(new Error('ENOTDIR: not a directory'))).toBe('ENOTDIR: not a directory');
 });

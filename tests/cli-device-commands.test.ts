@@ -19,12 +19,24 @@ const silent = Bun.serve({ port: 0, fetch: () => new Response('no', { status: 40
 const SILENT_URL = `http://127.0.0.1:${silent.port}`;
 afterAll(() => silent.stop(true));
 
+/** An empty mount parent, so a spawned CLI that reaches the device code with
+ * no explicit roots scans THIS and finds nothing. Both seams are pinned by
+ * default — mounts here, the tablet at SILENT_URL — so no test in this file
+ * can read a real mount or reach the real reMarkable USB address, whatever it
+ * asks the CLI to do. A caller that cares passes its own roots. */
+const NO_MOUNTS = mkdtempSync(join(tmpdir(), 'screepub-empty-'));
+
 async function runCli(args: string[], env: Record<string, string> = {}, cwd = ROOT) {
   const proc = Bun.spawn(['bun', `${ROOT}src/cli.ts`, ...args], {
     stdout: 'pipe',
     stderr: 'pipe',
     cwd,
-    env: { ...process.env, SCREEPUB_REMARKABLE_ENDPOINT: SILENT_URL, ...env },
+    env: {
+      ...process.env,
+      SCREEPUB_VOLUME_ROOTS: NO_MOUNTS,
+      SCREEPUB_REMARKABLE_ENDPOINT: SILENT_URL,
+      ...env,
+    },
   });
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -309,5 +321,124 @@ describe('verb dispatch does not capture files', () => {
     // Without the shadowing rule this is a usage error from `send` with no
     // file argument; with it, the file is the input and its type is wrong.
     expect(soleJson(stdout).error.code).toBe('unsupported-type');
+  });
+});
+
+describe('cli --json --help and --version', () => {
+  // Moved here from cli-devices.test.ts, which had a second runCli with the
+  // INHERITED environment: safe only while every test using it exited before
+  // any device work. This file's runCli pins both device seams, so a test
+  // appended below cannot reach a real mount or the real tablet address.
+  test('--json --help emits JSON with ok: true and non-empty usage', async () => {
+    const { stdout, exitCode } = await runCli(['--json', '--help']);
+    expect(exitCode).toBe(0);
+    const result = soleJson(stdout);
+    expect(result.ok).toBe(true);
+    expect(typeof result.usage).toBe('string');
+    expect(result.usage.length).toBeGreaterThan(0);
+  });
+
+  test('--json --version emits JSON with ok: true and matching version', async () => {
+    const pkg = await Bun.file(`${ROOT}package.json`).json();
+    const { stdout, exitCode } = await runCli(['--json', '--version']);
+    expect(exitCode).toBe(0);
+    const result = soleJson(stdout);
+    expect(result.ok).toBe(true);
+    expect(result.version).toBe(pkg.version);
+  });
+
+  test('plain --help without --json prints the human text, not JSON', async () => {
+    const { stdout, exitCode } = await runCli(['--help']);
+    expect(exitCode).toBe(0);
+    expect(stdout.trim().startsWith('{')).toBe(false);
+    expect(stdout).toContain('Usage:');
+  });
+
+  test('devices --json --help is the devices usage, not the conversion usage', async () => {
+    const { stdout, exitCode } = await runCli(['devices', '--json', '--help']);
+    expect(exitCode).toBe(0);
+    const result = soleJson(stdout);
+    expect(result.ok).toBe(true);
+    // The point of the fix: a verb's help lists the verb's OWN flags. Any
+    // string satisfies `usage.length > 0`, including the conversion usage that
+    // advertised -o, --mobi and --options — none of which parseVerbArgs
+    // accepts. --device is send's, so devices must not offer that either.
+    expect(result.usage).toContain('screepub devices');
+    expect(result.usage).not.toContain('--mobi');
+    expect(result.usage).not.toContain('--device');
+  });
+
+  test('send --json --help is the send usage, naming --device and not --mobi', async () => {
+    const { stdout, exitCode } = await runCli(['send', '--json', '--help']);
+    expect(exitCode).toBe(0);
+    const result = soleJson(stdout);
+    expect(result.ok).toBe(true);
+    expect(result.usage).toContain('--device');
+    expect(result.usage).not.toContain('--mobi');
+    expect(result.usage).not.toContain('--options');
+  });
+
+  test('plain send --help prints the send usage as human text', async () => {
+    const { stdout, exitCode } = await runCli(['send', '--help']);
+    expect(exitCode).toBe(0);
+    expect(stdout.trim().startsWith('{')).toBe(false);
+    expect(stdout).toContain('--device');
+    expect(stdout).not.toContain('--mobi');
+  });
+});
+
+describe('flag before verb', () => {
+  test('--json devices says the verb must come first', async () => {
+    // resolveCommand reads argv[0] only, deliberately, so this reaches the
+    // CONVERSION path and fails as unsupported-type — correct, but the bare
+    // 'unsupported input type ""' named neither the cause nor the cure.
+    const { stdout, exitCode } = await runCli(['--json', 'devices']);
+    expect(exitCode).toBe(1);
+    const result = soleJson(stdout);
+    expect(result.error.code).toBe('unsupported-type');
+    expect(result.error.message).toContain('screepub devices');
+    expect(result.error.message).toContain('verb must come first');
+  });
+
+  test('--json send gets the hint naming send, not devices', async () => {
+    const { stdout } = await runCli(['--json', 'send']);
+    expect(soleJson(stdout).error.message).toContain('screepub send');
+  });
+
+  test('an extension-less file that is not a verb gets no hint', async () => {
+    // The hint is for verbs only: a real script saved as `Makefile` must not
+    // be told to run a command that does not exist.
+    const { stdout, exitCode } = await runCli(['--json', 'Makefile']);
+    expect(exitCode).toBe(1);
+    const result = soleJson(stdout);
+    expect(result.error.code).toBe('unsupported-type');
+    expect(result.error.message).not.toContain('did you mean');
+  });
+
+  test('a real file named devices gets no hint either', async () => {
+    // Then the user meant the file — that is the shadowing rule — and telling
+    // them to run the verb instead would be wrong.
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-shadow-'));
+    writeFileSync(join(dir, 'devices'), 'not a pdf');
+    const { stdout } = await runCli(['--json', 'devices'], {}, dir);
+    expect(soleJson(stdout).error.message).not.toContain('did you mean');
+  });
+});
+
+describe('devices rejects flags it cannot act on', () => {
+  test('--device on devices is a usage error, not a silent no-op', async () => {
+    // Same class as `devices extra`, which is already rejected: accepting a
+    // flag the command ignores teaches the user it did something.
+    const { stdout, exitCode } = await runCli(['devices', '--device', 'foo', '--json']);
+    expect(exitCode).toBe(1);
+    const result = soleJson(stdout);
+    expect(result.error.code).toBe('usage');
+    expect(result.error.message).toContain('--device');
+  });
+
+  test('devices without --device still lists, so the guard is not blanket', async () => {
+    const { stdout, exitCode } = await runCli(['devices', '--json']);
+    expect(exitCode).toBe(0);
+    expect(soleJson(stdout)).toEqual({ ok: true, devices: [] });
   });
 });
