@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
@@ -86,6 +86,34 @@ test('the MOBI branch rebuilds from the .fountain and writes a .mobi', async () 
   expect(existsSync(out)).toBe(true);
   // Documented side effect: this branch rewrites the EPUB in place.
   expect(readFileSync(epub, 'utf8')).not.toBe('stale');
+});
+
+test('the rebuild writes through temp files and leaves none behind', async () => {
+  // Both outputs go to a hidden temp sibling and are renamed into place, so
+  // an interrupted rebuild cannot leave a truncated .mobi at the final path
+  // — which, being NEWER than the EPUB, the staleness rung would trust as
+  // fresh forever. The crash itself isn't reproducible in a test; what is
+  // testable is that the mechanism ran and cleaned up after itself.
+  const dir = scratch();
+  const fountain = join(dir, 'Script.fountain');
+  writeFileSync(fountain, 'Title: Test\n\nINT. ROOM - DAY\n\nA line of action.\n');
+  const epub = join(dir, 'Script.epub');
+  writeFileSync(epub, 'stale');
+
+  const out = await freshKindleArtifact({
+    epub,
+    fountainPath: fountain,
+    format: DEFAULT_FORMAT_OPTIONS,
+    calibreAvailable: false,
+    kfxReady: false,
+  });
+
+  expect(readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+  // Both outputs arrived complete at their final paths. (Their mtimes can
+  // still tie on a coarse-resolution filesystem, which freshness.ts counts
+  // as stale — a rebuild, never a truncated file trusted as fresh.)
+  expect(readFileSync(epub, 'utf8')).not.toBe('stale');
+  expect(readFileSync(out).length).toBeGreaterThan(0);
 });
 
 // --- Strengthening tests beyond the brief's five: these exercise ladder

@@ -1,10 +1,18 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { convertFountain } from '../convert';
 import type { FormatOptions } from '../options';
 import { toAzw3 } from './calibre';
 import { needsRegeneration } from './freshness';
 import type { ExportFormat } from './formats';
 import { kfxSibling, toKfx } from './kfx';
+
+export class RegenerationFailedError extends Error {
+  constructor(why: string) {
+    super(`Couldn't rebuild the Kindle file: ${why}`);
+    this.name = 'RegenerationFailedError';
+  }
+}
 
 export class CannotRegenerateError extends Error {
   constructor() {
@@ -74,10 +82,32 @@ export async function freshKindleArtifact(opts: FreshKindleArtifactOptions): Pro
   onStage?.('rebuilding the Kindle file…');
   const fountainText = await Bun.file(fountainPath).text();
   const result = await convertFountain(fountainText, { format, mobi: true });
-  writeFileSync(epub, result.epub);
   if (!result.mobi) {
-    throw new Error('the engine reported success but produced no .mobi');
+    throw new RegenerationFailedError('the engine reported success but produced no .mobi');
   }
-  writeFileSync(mobi, result.mobi);
+  // Swift's branch shelled out to cli.ts, and Export.swift leans on what that
+  // does: each output goes to a temp file that is renamed into place, so a
+  // partial `.mobi` never appears at the final path in the FIRST PLACE. That
+  // is load-bearing for the rung right above — a kill or disk-full mid-write
+  // would otherwise leave a truncated `.mobi` whose mtime is NEWER than the
+  // EPUB's, which needsRegeneration would then trust as fresh forever. Same
+  // discipline as cli.ts's writeFileAtomic, settings/sidecar.ts and
+  // export/kfx.ts.
+  writeFileAtomic(epub, result.epub);
+  writeFileAtomic(mobi, result.mobi);
   return mobi;
+}
+
+/** Write-then-rename, so the final path only ever holds a complete file.
+ * The temp sibling is hidden and lives in the same directory as its target,
+ * so it shares a volume and the promote is a rename, not a copy. */
+function writeFileAtomic(path: string, data: Uint8Array): void {
+  const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
+  try {
+    writeFileSync(tmp, data);
+    renameSync(tmp, path);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  }
 }
