@@ -102,6 +102,42 @@ brew install --cask ssandweiss/tap/screepub
 [Calibre](https://calibre-ebook.com) is optional and only needed for the AZW3
 Kindle-sideload format.
 
+### Linux and Windows (command line)
+
+There is no window to open yet on Linux or Windows: what ships is the
+converter itself, run from a terminal. From version 0.6.0 onward, download the
+file for your machine from the
+[latest release](https://github.com/ssandweiss/screepub/releases/latest),
+unpack it, and run it. Earlier releases carry the macOS downloads only.
+
+| Machine | File |
+| --- | --- |
+| Linux, Intel or AMD | `screepub-cli-linux-x64.tar.gz` |
+| Linux, ARM (Asahi, Raspberry Pi, ARM servers) | `screepub-cli-linux-arm64.tar.gz` |
+| Windows, 64-bit | `screepub-cli-windows-x64.zip` |
+
+```bash
+tar -xzf screepub-cli-linux-x64.tar.gz
+./screepub script.pdf
+```
+
+`SHA256SUMS` on the release page covers these three files, for anyone who
+wants to check what they downloaded.
+
+**Windows will warn you.** The Windows build is unsigned: it carries no
+code-signing certificate, so SmartScreen shows a "publisher unknown" screen the
+first time you run it. Choose **More info**, then **Run anyway**. Certificates
+cost money this project does not spend yet; this note exists so the warning is
+expected rather than alarming.
+
+**Device support off macOS is unproven.** `screepub devices` and
+`screepub send` are built for all three platforms and code-tested on all
+three, but the only device transfer anyone has ever run on real hardware was a
+Kindle, on a Mac. Windows drive enumeration has never run against a real
+reader, and a tolino cannot be detected on Windows at all: it is identified by
+the name of its volume, and a Windows drive root carries none. Converting is
+the part that is well tested everywhere; sending is not.
+
 ## Your script stays on your machine
 
 Scripts are confidential. Screepub is built accordingly.
@@ -185,6 +221,10 @@ The same hardware caveat as everywhere else applies here: only the Kindle
 route has been run on a real device. Kobo, tolino and reMarkable are built and
 code-tested against injected mounts and a stub tablet — see the table in
 [Which readers?](#which-readers) above.
+
+On Linux and Windows this caveat is stronger still: no device of any kind has
+been connected to Screepub on either operating system. See
+[Linux and Windows](#linux-and-windows-command-line) above.
 
 A verb is only a verb when no file of that name exists, so a script saved as
 `devices` still converts and `./devices` always means the file.

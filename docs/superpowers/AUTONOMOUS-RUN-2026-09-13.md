@@ -261,3 +261,25 @@ the release if it finds one, because the workflow appends the real checksums
 itself and two on a page both look official. So the notes must never name the
 new `SHA256SUMS` asset. The plan adds that term to the in-suite banned list, so
 a mistake fails in nine seconds instead of after notarization.
+
+**F4 — piece C is fully buildable here: a real Tauri v2 dependency tree
+compiles and links against this machine's WebKitGTK.** F1 established the
+libraries were installed; that is not the same as a successful link, so I
+scaffolded a throwaway crate depending on `tauri` v2 + `tauri-build` v2 and
+built it.
+
+Result: `cargo build` succeeded in **31.5 s**, and the crates that matter
+compiled — `webkit2gtk v2.0.2`, `javascriptcore-rs v1.1.2`, `soup3 v0.5.0`,
+plus `tao` (windowing) and `muda` (menus). Those crates' build scripts resolve
+the system libraries through pkg-config and fail at build time when they are
+missing, so their success is direct evidence the linkage works, not an
+inference from `pacman -Q`.
+
+(The throwaway binary itself does not show WebKit in `ldd`, because its
+`main.rs` never opens a window and the linker drops what nothing references.
+The compiled webview crates are the real signal.)
+
+So pieces C and D can be built AND RUN on this machine — the UI can be checked
+in a real window rather than written blind. The only remaining external need in
+the whole program is `patchelf`, and only for AppImage bundling in E2; a `.deb`
+needs nothing extra.
