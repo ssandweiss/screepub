@@ -46,3 +46,13 @@ test('Kindle wins over a bare name collision', () => {
 test('volumeName is the directory name', () => {
   expect(volumeName(volume('KOBOeReader'))).toBe('KOBOeReader');
 });
+
+test('classification order decides an ambiguous volume: Kindle wins over Kobo', () => {
+  // documents/ AND a .kobo dir. Swift checks Kindle first, so this is a Kindle.
+  expect(classify(volume('Kindle', ['documents', '.kobo']))).toBe('kindle');
+});
+
+test('classification order decides an ambiguous volume: Kobo wins over tolino', () => {
+  // Named tolino AND carrying .kobo. Swift checks Kobo before the name match.
+  expect(classify(volume('tolino', ['.kobo']))).toBe('kobo');
+});
