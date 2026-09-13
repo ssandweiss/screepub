@@ -101,3 +101,74 @@ export function hostBunTarget(platform: string, arch: string): BunTarget {
     `build-sidecar: no sidecar target for ${platform}/${arch}; known targets are ${KNOWN}`,
   );
 }
+
+/** A resolver for "what Rust triple is this machine", injected the same way
+ *  build-cli.ts and build-sidecar.ts already inject `Spawn`: a real
+ *  implementation by default, a fake one in tests. */
+export type HostTriple = () => string;
+
+/** Pull the triple out of `rustc -vV`'s `host:` line. Exported so a
+ *  malformed capture can be tested without spawning a real process. */
+export function parseRustcHost(output: string): string {
+  const match = /^host:\s*(\S+)/m.exec(output);
+  if (!match) {
+    throw new Error(
+      `build-sidecar: \`rustc -vV\` printed no "host:" line to read a triple from:\n${output.trim()}`,
+    );
+  }
+  return match[1]!;
+}
+
+/** The real resolver: ask the toolchain that will actually run `cargo
+ *  build` what ITS host is, instead of mapping process.platform/
+ *  process.arch (see hostSidecarTarget for why). Anyone invoking --host is
+ *  about to `cargo build`, so rustc is definitionally present — there is no
+ *  silent fallback here for a missing or broken one, because a --host build
+ *  that cannot ask rustc has no way left to get the one fact this file
+ *  exists to get right. */
+export function rustcHostTriple(): string {
+  let proc: { exitCode: number | null; stdout: Uint8Array; stderr: Uint8Array };
+  try {
+    proc = Bun.spawnSync(['rustc', '-vV'], { stdout: 'pipe', stderr: 'pipe' });
+  } catch (err) {
+    throw new Error(
+      `build-sidecar: could not run \`rustc -vV\` to resolve the host triple (${
+        err instanceof Error ? err.message : String(err)
+      })`,
+    );
+  }
+  if ((proc.exitCode ?? 1) !== 0) {
+    throw new Error(
+      `build-sidecar: \`rustc -vV\` exited ${proc.exitCode} while resolving the host triple: ` +
+        Buffer.from(proc.stderr).toString().trim(),
+    );
+  }
+  return parseRustcHost(Buffer.from(proc.stdout).toString());
+}
+
+/** The SidecarTarget for THIS machine, named for what a same-machine
+ *  `cargo build` will actually look for.
+ *
+ *  `bunTarget` still comes from platform/arch: Bun's own --compile targets
+ *  have no gnu/musl axis to choose between, so there is nothing else to ask
+ *  for that part. But the RUST TRIPLE — the part Tauri uses to resolve the
+ *  sidecar's filename — is asked of the toolchain, not read from the
+ *  pinned SIDECAR_TARGETS table. Node's platform/arch cannot tell a glibc
+ *  host from a musl one (both report 'linux'/'x64'), and the pinned table
+ *  has only one Linux row per architecture; on a musl host the pinned row
+ *  would silently name the sidecar for the wrong libc, and Task 1 already
+ *  showed what that failure looks like — cargo build succeeds, the sidecar
+ *  bundles under the wrong name, and the app fails at runtime with a bare
+ *  "No such file or directory" naming no file at all.
+ *
+ *  Cross-compiled targets (--target / --all in build-sidecar.ts) keep the
+ *  pinned table exactly: you cannot ask rustc about a triple it is not
+ *  installed for. */
+export function hostSidecarTarget(
+  platform: string = process.platform,
+  arch: string = process.arch,
+  hostTriple: HostTriple = rustcHostTriple,
+): SidecarTarget {
+  const base = sidecarTargetFor(hostBunTarget(platform, arch));
+  return { ...base, rustTriple: hostTriple() };
+}

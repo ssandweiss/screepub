@@ -64,6 +64,23 @@ describe('parseSidecarArgs', () => {
   test('--out overrides it, so a test never writes into the repo', () => {
     expect(parseSidecarArgs(['--host', '--out', '/tmp/x'], 'linux', 'x64').outDir).toBe('/tmp/x');
   });
+
+  test('--host carries the injected triple resolver, for the caller to use instead of the pinned table', () => {
+    const musl = () => 'x86_64-unknown-linux-musl';
+    const args = parseSidecarArgs(['--host'], 'linux', 'x64', musl);
+    expect(args.targets).toEqual(['bun-linux-x64']);
+    expect(args.hostTriple).toBe(musl);
+  });
+
+  test('--target and --all never carry a resolver: the pinned table stays authoritative there', () => {
+    // This is the fix's boundary: fix round 1 only touches --host. A
+    // resolver leaking onto --target/--all would let a cross-compiled
+    // target's filename be renamed by whatever rustc happens to be
+    // installed on the machine doing the cross-compile, which is exactly
+    // the drift the pinned, cross-pinned table exists to prevent.
+    expect(parseSidecarArgs(['--target', 'bun-linux-x64']).hostTriple).toBeUndefined();
+    expect(parseSidecarArgs(['--all']).hostTriple).toBeUndefined();
+  });
 });
 
 describe('sidecarPath', () => {

@@ -14,15 +14,21 @@
 // desktop/README.md. Get it wrong and nothing fails until the window is
 // open.
 //
-// The triple for each target in tools/sidecar-targets.ts is a PINNED
-// constant, not something computed here from process.platform/process.arch:
-// Node's platform/arch enum has no gnu/musl axis (glibc and musl Linux both
-// report 'linux'/'x64'), so a mapping computed from it can silently name
-// the wrong libc even when the OS and CPU guesses are right. The only
-// value that cannot drift from what `cargo build` will actually demand is
-// the toolchain's own report — `rustc -vV`'s `host:` line — which is what
-// this tool's build step is checked against by hand (see desktop/README.md
-// and the task report), not re-derived in code on every run.
+// Two different sources answer "what is the Rust triple?", for two
+// different questions. For --target/--all, it is the PINNED constant in
+// tools/sidecar-targets.ts's SIDECAR_TARGETS: cross-compiling for a machine
+// you are not on, there is no toolchain to ask, and that table is
+// cross-pinned against build-cli.ts's release matrix so it cannot drift
+// silently. For --host, it is asked of THIS machine's own rustc
+// (hostSidecarTarget, in tools/sidecar-targets.ts) rather than mapped from
+// process.platform/process.arch: Node's platform/arch enum has no gnu/musl
+// axis (glibc and musl Linux both report 'linux'/'x64'), so a value derived
+// from it can silently name the wrong libc even when the OS and CPU guesses
+// are right — and Task 1 already showed what that failure looks like: cargo
+// build succeeds, the sidecar bundles under the wrong name, and the app
+// fails at runtime with a bare "No such file or directory" naming no file.
+// Anyone running --host is about to `cargo build` on this same machine, so
+// asking its own rustc is both correct and always available.
 
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { join, isAbsolute, resolve } from 'node:path';
@@ -33,8 +39,11 @@ import {
   sidecarTargetFor,
   sidecarFileName,
   hostBunTarget,
+  hostSidecarTarget,
+  rustcHostTriple,
   type BunTarget,
   type SidecarTarget,
+  type HostTriple,
 } from './sidecar-targets';
 
 /** Exactly the directory tauri.conf.json's `externalBin` points at. */
@@ -54,12 +63,20 @@ const realSpawn: Spawn = (argv, cwd) => {
 export interface SidecarArgs {
   targets: BunTarget[];
   outDir: string;
+  /** Set only when targets came from --host. The caller should then build
+   *  with hostSidecarTarget(..., hostTriple) instead of
+   *  sidecarTargetFor(bunTarget), so the sidecar is named for what THIS
+   *  machine's rustc actually reports rather than the pinned table's
+   *  assumption. --target and --all leave this undefined and keep the
+   *  pinned table exactly. */
+  hostTriple?: HostTriple;
 }
 
 export function parseSidecarArgs(
   argv: string[],
   platform: string = process.platform,
   arch: string = process.arch,
+  hostTriple: HostTriple = rustcHostTriple,
 ): SidecarArgs {
   const { values } = parseArgs({
     args: argv,
@@ -79,6 +96,7 @@ export function parseSidecarArgs(
     .filter(Boolean);
 
   let targets: BunTarget[];
+  let viaHost = false;
   if (values.all) {
     targets = SIDECAR_TARGETS.map((t) => t.bunTarget);
   } else if (named.length) {
@@ -86,6 +104,7 @@ export function parseSidecarArgs(
     targets = named.map((n) => sidecarTargetFor(n).bunTarget);
   } else if (values.host) {
     targets = [hostBunTarget(platform, arch)];
+    viaHost = true;
   } else {
     throw new Error(
       'build-sidecar: say which targets — --host, --target <bun-target> or --all. ' +
@@ -100,7 +119,7 @@ export function parseSidecarArgs(
       : resolve(values.out)
     : BINARIES_DIR;
 
-  return { targets, outDir };
+  return viaHost ? { targets, outDir, hostTriple } : { targets, outDir };
 }
 
 /** Where this target's sidecar must sit, under the name Tauri asks for. */
@@ -180,9 +199,13 @@ export function verifySidecar(
 
 if (import.meta.main) {
   try {
-    const { targets, outDir } = parseSidecarArgs(process.argv.slice(2));
+    const { targets, outDir, hostTriple } = parseSidecarArgs(process.argv.slice(2));
     for (const bunTarget of targets) {
-      const target = sidecarTargetFor(bunTarget);
+      // --host: name it for what THIS machine's rustc reports. --target/
+      // --all: name it from the pinned table (hostTriple is undefined).
+      const target = hostTriple
+        ? hostSidecarTarget(process.platform, process.arch, hostTriple)
+        : sidecarTargetFor(bunTarget);
       console.log(`building ${bunTarget} → ${sidecarFileName(target)}`);
       buildSidecar(target, outDir);
       verifySidecar(target, outDir);

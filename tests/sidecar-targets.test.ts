@@ -6,6 +6,8 @@ import {
   sidecarFileName,
   sidecarTargetFor,
   hostBunTarget,
+  hostSidecarTarget,
+  parseRustcHost,
 } from '../tools/sidecar-targets';
 import { TARGETS } from '../tools/build-cli';
 
@@ -124,6 +126,66 @@ describe('hostBunTarget', () => {
   test('this machine is a supported host', () => {
     const t = hostBunTarget(process.platform, process.arch);
     expect(SIDECAR_TARGETS.map((x) => x.bunTarget)).toContain(t);
+  });
+});
+
+describe('hostSidecarTarget', () => {
+  test('uses the injected resolver for the triple, not the pinned table', () => {
+    // The finding from fix round 1: --host must ask the toolchain, because
+    // Node's platform/arch cannot tell a glibc host from a musl one. A
+    // resolver that reports musl must produce a musl-suffixed filename.
+    const musl = () => 'x86_64-unknown-linux-musl';
+    const target = hostSidecarTarget('linux', 'x64', musl);
+    expect(target.rustTriple).toBe('x86_64-unknown-linux-musl');
+    expect(sidecarFileName(target)).toBe('screepub-engine-x86_64-unknown-linux-musl');
+  });
+
+  test('only the triple changes: bunTarget, exeSuffix and format still come from the pinned row', () => {
+    const musl = () => 'x86_64-unknown-linux-musl';
+    const target = hostSidecarTarget('linux', 'x64', musl);
+    expect(target.bunTarget).toBe('bun-linux-x64');
+    expect(target.exeSuffix).toBe('');
+    expect(target.format).toBe('elf-x86-64');
+  });
+
+  test('a resolver that fails (rustc missing or broken) propagates, never falls back to a guess', () => {
+    const broken = (): string => {
+      throw new Error('rustc: command not found');
+    };
+    expect(() => hostSidecarTarget('linux', 'x64', broken)).toThrow(/rustc: command not found/);
+  });
+
+  test('an unsupported host throws before the resolver is even asked', () => {
+    const neverCalled = (): string => {
+      throw new Error('should not have been called');
+    };
+    expect(() => hostSidecarTarget('freebsd', 'x64', neverCalled)).toThrow(/no sidecar target/i);
+  });
+
+  test('on this machine, the real resolver agrees with an independent call to rustc', () => {
+    // Proof, not a mock: ask rustc separately from the implementation and
+    // require agreement, rather than re-running the same regex on itself.
+    const proc = Bun.spawnSync(['rustc', '-vV'], { stdout: 'pipe', stderr: 'pipe' });
+    if ((proc.exitCode ?? 1) !== 0) return; // no rustc on this runner; nothing to compare
+    const expected = /^host:\s*(\S+)/m.exec(proc.stdout.toString())?.[1];
+    expect(expected).toBeDefined();
+    expect(hostSidecarTarget().rustTriple).toBe(expected as string);
+  });
+});
+
+describe('parseRustcHost', () => {
+  test('reads the triple that follows "host:"', () => {
+    expect(
+      parseRustcHost('rustc 1.98.1 (48a229cea)\nhost: aarch64-unknown-linux-gnu\nrelease: 1.98.1\n'),
+    ).toBe('aarch64-unknown-linux-gnu');
+  });
+
+  test('rejects output with no host line, rather than guessing', () => {
+    expect(() => parseRustcHost('rustc 1.98.1\nrelease: 1.98.1\n')).toThrow(/host/i);
+  });
+
+  test('rejects empty output', () => {
+    expect(() => parseRustcHost('')).toThrow(/host/i);
   });
 });
 
