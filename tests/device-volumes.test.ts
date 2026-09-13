@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { platform } from 'node:process';
-import { volumeRoots, enumerateVolumes, mountedDevices } from '../src/device/volumes';
+import { volumeRoots, enumerateVolumes, mountedDevices, rootIsItselfAVolume } from '../src/device/volumes';
 
 /** A fake mount root holding several "volumes", so enumeration is tested by
  * injection and never against whatever is really plugged into this machine. */
@@ -49,4 +49,22 @@ test('the default roots are the right ones for this platform', () => {
     expect(roots).toContain('/media');
   }
   if (platform === 'win32') expect(roots.some((r) => /^[A-Z]:\\$/.test(r))).toBe(true);
+});
+
+// rootIsItselfAVolume drives the "a root IS a volume on Windows" branch in
+// enumerateVolumes. It is gated on the real platform, so without an
+// OS-injectable predicate that branch is unreachable — and untested — on any
+// machine other than actual Windows. Injecting `os` lets it be exercised for
+// every platform right here.
+test('a drive root is itself a volume only on win32', () => {
+  expect(rootIsItselfAVolume('D:\\', 'win32')).toBe(true);
+});
+
+test('a drive-root-shaped string is not itself a volume off Windows', () => {
+  expect(rootIsItselfAVolume('D:\\', 'linux')).toBe(false);
+});
+
+test('a non-drive-root path is never itself a volume, even on win32', () => {
+  expect(rootIsItselfAVolume('/Volumes', 'darwin')).toBe(false);
+  expect(rootIsItselfAVolume('/Volumes', 'win32')).toBe(false);
 });

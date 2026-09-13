@@ -31,13 +31,22 @@ function isDirectory(path: string): boolean {
   }
 }
 
+/** True when `root` is itself a mountable volume rather than a directory
+ * that CONTAINS volumes — the Windows drive-letter case. Pure and
+ * OS-injectable (default: the real host) so the branch it drives in
+ * enumerateVolumes is directly testable on every platform, not just
+ * exercised as dead code gated on `platform === 'win32'`. */
+export function rootIsItselfAVolume(root: string, os: NodeJS.Platform = platform): boolean {
+  return os === 'win32' && /^[A-Z]:\\$/.test(root);
+}
+
 /** Every mounted volume path under the given roots (default: this platform's).
  * On Windows a root IS a volume; elsewhere a root CONTAINS volumes. */
 export function enumerateVolumes(roots: string[] = volumeRoots()): string[] {
   const found: string[] = [];
   for (const root of roots) {
     if (!isDirectory(root)) continue;
-    if (platform === 'win32' && /^[A-Z]:\\$/.test(root)) {
+    if (rootIsItselfAVolume(root)) {
       found.push(root);
       continue;
     }

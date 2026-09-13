@@ -7,7 +7,15 @@ import { basename, join } from 'node:path';
 import { isKindleVolume } from './kindle';
 import type { DeviceKind } from './types';
 
+/** A bare Windows drive root, e.g. "D:\". It has no basename component
+ * (path.basename returns '' for it on win32), so it is special-cased to the
+ * drive designator instead — "D:\" -> "D:" — rather than surfacing an empty
+ * device name. This is a pure string check, independent of the host
+ * platform, so it is exercised the same way in tests everywhere. */
+const WINDOWS_DRIVE_ROOT = /^[A-Za-z]:\\$/;
+
 export function volumeName(volume: string): string {
+  if (WINDOWS_DRIVE_ROOT.test(volume)) return volume.slice(0, -1);
   return basename(volume);
 }
 
@@ -21,7 +29,14 @@ function isDirectory(path: string): boolean {
 
 /** Vendor signature of a mounted volume, or null for a plain drive. Kobo
  * firmware maintains a `.kobo` folder at the root; tolino mounts under its
- * brand name; Kindle keeps the documents/ check. */
+ * brand name; Kindle keeps the documents/ check.
+ *
+ * Name-based detection (tolino) cannot work on a Windows drive root: a drive
+ * letter like "D:" carries no vendor information, so tolino is simply not
+ * detectable there without a separate volume-label lookup, which this layer
+ * deliberately does not perform (enumeration must stay a pure directory
+ * listing — see volumes.ts). Kindle and Kobo are unaffected because both are
+ * detected by on-disk signature (`documents/`, `.kobo`) rather than by name. */
 export function classify(volume: string): DeviceKind | null {
   if (isKindleVolume(volume)) return 'kindle';
   if (isDirectory(join(volume, '.kobo'))) return 'kobo';

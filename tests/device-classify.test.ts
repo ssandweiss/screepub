@@ -56,3 +56,21 @@ test('classification order decides an ambiguous volume: Kobo wins over tolino', 
   // Named tolino AND carrying .kobo. Swift checks Kobo before the name match.
   expect(classify(volume('tolino', ['.kobo']))).toBe('kobo');
 });
+
+test('a Windows drive root names itself by its drive designator, not an empty string', () => {
+  // "D:\" has no basename component (path.basename yields '' for it on
+  // win32) and is not a vendor's volume label, so it must not surface as ''.
+  expect(volumeName('D:\\')).toBe('D:');
+});
+
+test('a Windows-shaped drive root with a .kobo signature still classifies as Kobo', () => {
+  // Name-based detection (tolino) cannot work on a bare drive letter, but
+  // signature-based detection (Kindle's documents/, Kobo's .kobo) does not
+  // depend on the name at all, so it survives even here. (Backslash is just
+  // a literal filename character on this POSIX test host, standing in for
+  // the shape of a real Windows drive root.)
+  const parent = mkdtempSync(join(tmpdir(), 'screepub-test-'));
+  const driveRoot = join(parent, 'D:\\');
+  mkdirSync(join(driveRoot, '.kobo'), { recursive: true });
+  expect(classify(driveRoot)).toBe('kobo');
+});
