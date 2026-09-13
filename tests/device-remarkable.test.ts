@@ -7,6 +7,7 @@ import {
   REMARKABLE_MAX_UPLOAD_BYTES,
   probeRemarkable,
   uploadToRemarkable,
+  remarkableAccepts,
 } from '../src/device/remarkable';
 
 /** Records the request sequence, mirroring kit-check's StubRemarkable. The
@@ -86,4 +87,16 @@ test('only PDF and EPUB are accepted', async () => {
 
 test('probe reports false when nothing is serving', async () => {
   expect(await probeRemarkable('http://127.0.0.1:1', 500)).toBe(false);
+});
+
+test('remarkableAccepts is the one copy of the PDF/EPUB rule', () => {
+  expect(remarkableAccepts('/tmp/Script.pdf')).toBe(true);
+  expect(remarkableAccepts('/tmp/Script.epub')).toBe(true);
+  // Case and a dotted stem must not fool it: the extension is the LAST dot.
+  expect(remarkableAccepts('/tmp/Script.EPUB')).toBe(true);
+  expect(remarkableAccepts('/tmp/Draft.epub.azw3')).toBe(false);
+  expect(remarkableAccepts('/tmp/Script.azw3')).toBe(false);
+  expect(remarkableAccepts('/tmp/Script.mobi')).toBe(false);
+  // No extension at all is not an accepted extension.
+  expect(remarkableAccepts('/tmp/Script')).toBe(false);
 });

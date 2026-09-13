@@ -44,6 +44,15 @@ export async function probeRemarkable(
   }
 }
 
+/** The tablet's USB web interface accepts these two formats and no others.
+ * Exported because `send` has to report `unsupported-file` BEFORE it calls
+ * upload — deciding that by matching the upload error's message would be the
+ * substring detection cli-errors.ts bans. One copy, two callers. */
+export function remarkableAccepts(file: string): boolean {
+  const ext = extname(file).replace(/^\./, '').toLowerCase();
+  return ext === 'pdf' || ext === 'epub';
+}
+
 /** Upload a PDF or EPUB to the tablet's root folder. "Root" is made true, not
  * assumed: /upload writes into the last-listed folder (server-side state), so
  * root is listed first and a failed listing aborts the send rather than fire
@@ -53,7 +62,7 @@ export async function uploadToRemarkable(
   endpoint: string = REMARKABLE_ENDPOINT,
 ): Promise<void> {
   const ext = extname(file).replace(/^\./, '').toLowerCase();
-  if (ext !== 'pdf' && ext !== 'epub') {
+  if (!remarkableAccepts(file)) {
     throw new RemarkableUploadError(`reMarkable accepts PDF and EPUB, not .${ext}.`);
   }
 
