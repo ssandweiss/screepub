@@ -60,3 +60,84 @@ test('unknown words and an empty argv are the default path', () => {
 test('VERBS is the single list of known verbs', () => {
   expect([...VERBS]).toEqual(['devices', 'send']);
 });
+
+import { devicesCommand } from '../src/cli-devices';
+import type { ConnectedDevice } from '../src/device/types';
+
+const kobo: ConnectedDevice = { kind: 'kobo', name: 'KOBOeReader', volume: '/run/media/sam/KOBOeReader' };
+
+test('devicesCommand reports each device with the id send accepts', async () => {
+  const { devices } = await devicesCommand({ scan: () => [kobo], probe: async () => true });
+  expect(devices).toEqual([
+    { id: '/run/media/sam/KOBOeReader', kind: 'kobo', name: 'KOBOeReader', volume: '/run/media/sam/KOBOeReader' },
+    { id: 'remarkable', kind: 'remarkable', name: 'reMarkable', volume: null },
+  ]);
+});
+
+test('devicesCommand on an empty list is an empty array, not a throw', async () => {
+  const { devices } = await devicesCommand({ scan: () => [], probe: async () => false });
+  expect(devices).toEqual([]);
+});
+
+import { selectDevice } from '../src/cli-devices';
+
+const kindle: ConnectedDevice = { kind: 'kindle', name: 'Kindle', volume: '/run/media/sam/Kindle' };
+const remarkable: ConnectedDevice = { kind: 'remarkable', name: 'reMarkable', volume: null };
+
+test('one device connected and no --device picks it', () => {
+  expect(selectDevice([kobo])).toBe(kobo);
+});
+
+test('an explicit id picks that device even when several are connected', () => {
+  // Ordering test: "ambiguous when >1" and "honour --device first" disagree
+  // on exactly this input. An implementation that checks the count before the
+  // id throws ambiguous-device here.
+  expect(selectDevice([kobo, kindle], '/run/media/sam/Kindle')).toBe(kindle);
+  expect(selectDevice([kobo, kindle, remarkable], 'remarkable')).toBe(remarkable);
+});
+
+test('several connected and no --device is ambiguous-device, listing the ids', () => {
+  let thrown: unknown;
+  try { selectDevice([kobo, kindle]); } catch (err) { thrown = err; }
+  expect(thrown).toBeInstanceOf(CliError);
+  expect((thrown as CliError).code).toBe('ambiguous-device');
+  // The message must name both, or the user has no way to pick one.
+  expect((thrown as CliError).message).toContain('/run/media/sam/KOBOeReader');
+  expect((thrown as CliError).message).toContain('/run/media/sam/Kindle');
+});
+
+test('nothing connected is no-devices even when --device was given', () => {
+  // Ordering test: both no-devices and unknown-device describe this input.
+  // The plan's rule is that the empty list wins, because "nothing is plugged
+  // in" is the actionable fact. An implementation that checks the requested
+  // id first reports unknown-device and fails here.
+  let thrown: unknown;
+  try { selectDevice([], '/run/media/sam/Kindle'); } catch (err) { thrown = err; }
+  expect(thrown).toBeInstanceOf(CliError);
+  expect((thrown as CliError).code).toBe('no-devices');
+});
+
+test('nothing connected and no --device is also no-devices', () => {
+  let thrown: unknown;
+  try { selectDevice([]); } catch (err) { thrown = err; }
+  expect((thrown as CliError).code).toBe('no-devices');
+});
+
+test('an id that matches nothing connected is unknown-device, listing what is', () => {
+  let thrown: unknown;
+  try { selectDevice([kobo, kindle], '/run/media/sam/Nope'); } catch (err) { thrown = err; }
+  expect(thrown).toBeInstanceOf(CliError);
+  expect((thrown as CliError).code).toBe('unknown-device');
+  expect((thrown as CliError).message).toContain('/run/media/sam/Nope');
+  expect((thrown as CliError).message).toContain('/run/media/sam/KOBOeReader');
+});
+
+test('selection matches on the id, never on a prefix or the name', () => {
+  // Catches `deviceId(d).includes(requested)` and `d.name === requested`.
+  let thrown: unknown;
+  try { selectDevice([kindle], '/run/media/sam'); } catch (err) { thrown = err; }
+  expect((thrown as CliError).code).toBe('unknown-device');
+  let byName: unknown;
+  try { selectDevice([kindle], 'Kindle'); } catch (err) { byName = err; }
+  expect((byName as CliError).code).toBe('unknown-device');
+});
