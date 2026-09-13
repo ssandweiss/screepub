@@ -223,9 +223,12 @@ describe('parseBuildArgs', () => {
   });
 
   test('refuses to invent an output directory', () => {
-    // The artifacts are 39-119 MB each. A default would put a quarter of a
-    // gigabyte somewhere nobody asked for.
+    // A full build leaves a 64-119 MB binary AND a 39 MB or so archive per
+    // target -- buildDir is not cleaned up -- so about 450 MB in all. A
+    // default would put that somewhere nobody asked for, and the message
+    // has to name the real number or it understates what it is warning about.
     expect(() => parseBuildArgs(['--version', '0.6.0'])).toThrow(/--out/);
+    expect(() => parseBuildArgs(['--version', '0.6.0'])).toThrow(/450 MB/);
   });
 
   test('resolves the output directory to an absolute path', () => {
@@ -722,6 +725,47 @@ describe('SHA256SUMS', () => {
       const after = parseChecksums(writeChecksums(dir, names));
       expect(after.get(names[0]!)).not.toBe(before.get(names[0]!));
       expect(after.get(names[1]!)).toBe(before.get(names[1]!));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a partial rebuild keeps the entries it did not rebuild', () => {
+    // The footgun this closes: `--only windows-x64` into a directory that
+    // already holds a full build used to overwrite SHA256SUMS with one
+    // line, leaving two published archives silently unchecked by a
+    // `sha256sum -c` that passes.
+    const { dir, names } = withFiles();
+    try {
+      writeChecksums(dir, names);
+      writeFileSync(join(dir, names[0]!), 'rebuilt windows bytes');
+      const text = writeChecksums(dir, [names[0]!]);
+      const map = parseChecksums(text);
+      expect([...map.keys()].sort()).toEqual([...names].sort());
+      // The rebuilt one is re-hashed...
+      expect(map.get(names[0]!)).toBe(
+        createHash('sha256').update(readFileSync(join(dir, names[0]!))).digest('hex'),
+      );
+      // ...and so is the carried-over one: the digest comes from the file
+      // on disk, never copied out of the old text, so an archive changed
+      // behind our back cannot ride through on a stale line.
+      expect(map.get(names[1]!)).toBe(
+        createHash('sha256').update(readFileSync(join(dir, names[1]!))).digest('hex'),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an entry whose file is gone is dropped rather than carried', () => {
+    // A line naming a file nobody can download fails `-c` for everyone who
+    // did download the rest.
+    const { dir, names } = withFiles();
+    try {
+      writeChecksums(dir, names);
+      rmSync(join(dir, names[1]!));
+      const map = parseChecksums(writeChecksums(dir, [names[0]!]));
+      expect([...map.keys()]).toEqual([names[0]!]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

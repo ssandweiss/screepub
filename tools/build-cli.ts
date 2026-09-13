@@ -211,8 +211,9 @@ export function parseBuildArgs(argv: string[]): BuildArgs {
   }
   if (!values.out) {
     throw new Error(
-      'build-cli: --out <dir> is required. There is no default: each artifact is 39-119 MB, ' +
-        'and a default would write a quarter of a gigabyte somewhere you did not ask for.',
+      'build-cli: --out <dir> is required. There is no default: a full build leaves a ' +
+        '64-119 MB binary AND a 39 MB or so archive per target, about 450 MB in all, ' +
+        'and a default would write that somewhere you did not ask for.',
     );
   }
 
@@ -473,13 +474,39 @@ export function sha256File(path: string): string {
 /** The format `sha256sum -c` and `shasum -a 256 -c` both parse: lowercase
  *  hex, exactly two spaces, a bare filename, a trailing newline. Sorted, so
  *  two runs of the same build produce the same file. Returns the text as
- *  well as writing it, so callers can assert on it without re-reading. */
+ *  well as writing it, so callers can assert on it without re-reading.
+ *
+ *  MERGES with an existing SHA256SUMS rather than overwriting it. Chosen
+ *  over refusing-to-write because the partial file is the surprise, not the
+ *  build: `--only windows-x64` into a directory that already holds a full
+ *  build used to leave a ONE-LINE checksums file beside three archives —
+ *  which `sha256sum -c` then passes, with two downloads silently unchecked.
+ *  Refusing would have made the hand-run path need a flag to do the obvious
+ *  thing. CI never passes --only (both callers are asserted free of it), so
+ *  this only ever bites the hand-run path, which is the one with nobody
+ *  reviewing the output.
+ *
+ *  Carried-over names are RE-HASHED from the files on disk, never copied
+ *  out of the old text: a digest that no longer matches its file is the one
+ *  failure this file exists to catch. A named file that is gone is dropped,
+ *  loudly, rather than left behind to fail `-c` for a download nobody
+ *  published. */
 export function writeChecksums(outDir: string, archiveNames: string[]): string {
-  const text = [...archiveNames]
+  const path = join(outDir, 'SHA256SUMS');
+  const carried: string[] = [];
+  if (existsSync(path)) {
+    for (const name of parseChecksums(readFileSync(path, 'utf8')).keys()) {
+      if (archiveNames.includes(name)) continue;
+      if (existsSync(join(outDir, name))) carried.push(name);
+      else console.warn(`build-cli: ${name} is named in SHA256SUMS but no longer in ${outDir}; dropping it`);
+    }
+  }
+
+  const text = [...archiveNames, ...carried]
     .sort()
     .map((name) => `${sha256File(join(outDir, name))}  ${name}\n`)
     .join('');
-  writeFileSync(join(outDir, 'SHA256SUMS'), text);
+  writeFileSync(path, text);
   return text;
 }
 
