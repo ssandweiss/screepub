@@ -173,10 +173,18 @@ bun src/cli.ts send <file> [--device <id>] [--json]      # send an existing file
 
 `devices` lists every reader it can reach: USB-mounted Kindle, Kobo and
 tolino volumes, plus a reMarkable if its USB web interface is answering.
-`send` copies an existing file where that vendor actually indexes it — it
-does **not** convert, so run a conversion first. With one reader connected
-`--device` is optional; with several it is required, and `devices` prints the
-ids it accepts.
+`send` delivers an existing file — it does **not** convert, so run a
+conversion first. For a mounted volume that means copying the file where that
+vendor actually indexes it; for a reMarkable it means uploading over HTTP to
+the docked tablet, which accepts **only PDF and EPUB** (anything else is
+refused before a byte moves). With one reader connected `--device` is
+optional; with several it is required, and `devices` prints the ids it
+accepts.
+
+The same hardware caveat as everywhere else applies here: only the Kindle
+route has been run on a real device. Kobo, tolino and reMarkable are built and
+code-tested against injected mounts and a stub tablet — see the table in
+[Which readers?](#which-readers) above.
 
 A verb is only a verb when no file of that name exists, so a script saved as
 `devices` still converts and `./devices` always means the file.
