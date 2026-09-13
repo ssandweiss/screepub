@@ -30,3 +30,6 @@ app/build/
 app/dist/
 app/.build/
 __pycache__/
+
+# Superpowers worktrees (scratch, never committed)
+.worktrees/
