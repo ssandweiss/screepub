@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
 import { mobiSibling, availableFormats, freshKindleArtifact, CannotRegenerateError } from '../src/export/artifact';
 import { kfxSibling } from '../src/export/kfx';
-import { CalibreMissingError } from '../src/export/calibre';
+import { CalibreMissingError, CalibreFailedError } from '../src/export/calibre';
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), 'screepub-test-'));
@@ -129,18 +129,26 @@ test('kfxReady with a stale .kfx attempts a KFX rebuild rather than silently reu
   const epub = join(dir, 'Script.epub');
   writeFileSync(epub, 'epub');
   // No .kfx at all yet, so needsRegeneration must report stale/missing and
-  // the implementation must attempt toKfx — which needs Calibre, absent
-  // here — rather than silently falling through to the calibreAvailable
-  // (AZW3) branch or returning a nonexistent .kfx path.
-  await expect(
-    freshKindleArtifact({
-      epub,
-      fountainPath: null,
-      format: DEFAULT_FORMAT_OPTIONS,
-      calibreAvailable: true,
-      kfxReady: true,
-    }),
-  ).rejects.toThrow(CalibreMissingError);
+  // the implementation must attempt toKfx — which needs Calibre — rather
+  // than silently falling through to the calibreAvailable (AZW3) branch or
+  // returning a nonexistent .kfx path.
+  //
+  // Precedence, asserted without depending on whether Calibre is installed:
+  // reaching the Calibre/KFX branch throws CalibreMissingError (tool
+  // absent) or CalibreFailedError (tool present, placeholder input
+  // rejected as not a zip). Falling through to the MOBI branch would
+  // instead throw CannotRegenerateError — that is the regression this
+  // pins.
+  const error = await freshKindleArtifact({
+    epub,
+    fountainPath: null,
+    format: DEFAULT_FORMAT_OPTIONS,
+    calibreAvailable: true,
+    kfxReady: true,
+  }).catch((e) => e);
+  expect(error).toBeInstanceOf(Error);
+  expect(error).not.toBeInstanceOf(CannotRegenerateError);
+  expect([CalibreMissingError, CalibreFailedError].some((C) => error instanceof C)).toBe(true);
 });
 
 test('calibreAvailable is used over an existing fresh .mobi, not reused as a shortcut', async () => {
@@ -155,16 +163,18 @@ test('calibreAvailable is used over an existing fresh .mobi, not reused as a sho
   // calibreAvailable=true means the AZW3 branch is always taken (it's fresh
   // by construction) — a wrong implementation might instead notice a fresh
   // .mobi already satisfies "kindle" and reuse it, skipping Calibre
-  // entirely. Calibre is absent on this machine, so the correct branch
-  // surfaces as CalibreMissingError rather than a silent, wrong reuse of
-  // the .mobi.
-  await expect(
-    freshKindleArtifact({
-      epub,
-      fountainPath: null,
-      format: DEFAULT_FORMAT_OPTIONS,
-      calibreAvailable: true,
-      kfxReady: false,
-    }),
-  ).rejects.toThrow(CalibreMissingError);
+  // entirely. Same environment-independent precedence assertion as above:
+  // the correct branch surfaces as CalibreMissingError or
+  // CalibreFailedError, never CannotRegenerateError (which would mean
+  // execution fell through to the MOBI branch instead).
+  const error = await freshKindleArtifact({
+    epub,
+    fountainPath: null,
+    format: DEFAULT_FORMAT_OPTIONS,
+    calibreAvailable: true,
+    kfxReady: false,
+  }).catch((e) => e);
+  expect(error).toBeInstanceOf(Error);
+  expect(error).not.toBeInstanceOf(CannotRegenerateError);
+  expect([CalibreMissingError, CalibreFailedError].some((C) => error instanceof C)).toBe(true);
 });
