@@ -264,3 +264,50 @@ describe('screepub send', () => {
     expect(stdout).toContain(join(volume, 'documents', 'Script.epub'));
   });
 });
+
+describe('verb dispatch does not capture files', () => {
+  test('a file literally named `devices` converts instead of listing', async () => {
+    // Direction one of the shadowing rule, end to end, with a real file in a
+    // real cwd. `devices` has no extension, so the conversion path rejects it
+    // as unsupported-type — which is exactly the proof that the FILE won: the
+    // verb would have printed {"ok":true,"devices":[...]} and exited 0.
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-shadow-'));
+    writeFileSync(join(dir, 'devices'), 'not a pdf');
+    const { stdout, exitCode } = await runCli(['devices', '--json'], {
+      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(tmpdir(), 'screepub-empty-')),
+    }, dir);
+    expect(exitCode).toBe(1);
+    const result = soleJson(stdout);
+    expect(result.ok).toBe(false);
+    expect(result.error.code).toBe('unsupported-type');
+  });
+
+  test('the bare word lists devices in the same cwd with no such file', async () => {
+    // Direction two. Same command, same cwd shape, only the file removed —
+    // so the two tests differ in exactly the thing the rule is about.
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-shadow-'));
+    const { stdout, exitCode } = await runCli(['devices', '--json'], {
+      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(tmpdir(), 'screepub-empty-')),
+    }, dir);
+    expect(exitCode).toBe(0);
+    expect(soleJson(stdout)).toEqual({ ok: true, devices: [] });
+  });
+
+  test('./devices always means the file', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-shadow-'));
+    writeFileSync(join(dir, 'devices'), 'not a pdf');
+    const { stdout, exitCode } = await runCli(['./devices', '--json'], {}, dir);
+    expect(exitCode).toBe(1);
+    expect(soleJson(stdout).error.code).toBe('unsupported-type');
+  });
+
+  test('a file named `send` converts rather than being a command', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-shadow-'));
+    writeFileSync(join(dir, 'send'), 'not a pdf');
+    const { stdout, exitCode } = await runCli(['send', '--json'], {}, dir);
+    expect(exitCode).toBe(1);
+    // Without the shadowing rule this is a usage error from `send` with no
+    // file argument; with it, the file is the input and its type is wrong.
+    expect(soleJson(stdout).error.code).toBe('unsupported-type');
+  });
+});

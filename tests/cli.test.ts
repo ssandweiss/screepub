@@ -240,3 +240,22 @@ describe('cli --progress', () => {
     expect(stderr).toBe('');
   }, 60000);
 });
+
+describe('the default conversion path is unchanged by verb dispatch', () => {
+  test('a PDF whose stem is a verb converts exactly as any other would', async () => {
+    // Names that brush against dispatch: "send.pdf" starts with a verb, and
+    // "devices.pdf" is the shadowing rule's near miss. Both must take the
+    // ordinary path and produce the ordinary success payload.
+    for (const name of ['send.pdf', 'devices.pdf']) {
+      const input = `${SCRATCH}/${name}`;
+      writeFileSync(input, new Uint8Array(await Bun.file(`${FIXTURES}screenplay.pdf`).arrayBuffer()));
+      const out = `${SCRATCH}/${name}.epub`;
+      const { stdout, exitCode } = await runCli([input, '-o', out, '--no-fountain', '--json']);
+      expect(exitCode).toBe(0);
+      const result = JSON.parse(stdout);
+      expect(result.ok).toBe(true);
+      expect(result.epubPath).toBe(out);
+      expect(result.pages).toBeGreaterThan(0);
+    }
+  }, 120000);
+});

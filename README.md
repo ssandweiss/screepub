@@ -164,6 +164,23 @@ bun src/cli.ts <input.pdf | input.fountain> [options]
 | `--progress` | NDJSON progress on **stderr** while converting |
 | `--debug` | dump classified elements JSON |
 
+#### Device commands
+
+```bash
+bun src/cli.ts devices [--json]                          # list connected e-readers
+bun src/cli.ts send <file> [--device <id>] [--json]      # send an existing file to one
+```
+
+`devices` lists every reader it can reach: USB-mounted Kindle, Kobo and
+tolino volumes, plus a reMarkable if its USB web interface is answering.
+`send` copies an existing file where that vendor actually indexes it — it
+does **not** convert, so run a conversion first. With one reader connected
+`--device` is optional; with several it is required, and `devices` prints the
+ids it accepts.
+
+A verb is only a verb when no file of that name exists, so a script saved as
+`devices` still converts and `./devices` always means the file.
+
 `.fountain` input is partially supported: 16 of the 18 formatting options
 apply, and one piece of syntax renders differently than another tool would
 render it. See [Fountain input](docs/fountain-input.md).
