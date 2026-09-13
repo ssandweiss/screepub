@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, chmodSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   detectBinaryFormat,
   readBinaryFormat,
@@ -22,6 +23,9 @@ import {
   packageTarget,
   verifyArtifact,
   RELEASE_FLOORS,
+  writeChecksums,
+  parseChecksums,
+  buildAll,
   type TargetId,
   type Target,
   type Floors,
@@ -663,5 +667,144 @@ describe('verifyArtifact', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('SHA256SUMS', () => {
+  function withFiles(): { dir: string; names: string[] } {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-sums-'));
+    const names = ['screepub-cli-windows-x64.zip', 'screepub-cli-linux-x64.tar.gz'];
+    writeFileSync(join(dir, names[0]!), 'windows bytes');
+    writeFileSync(join(dir, names[1]!), 'linux bytes');
+    return { dir, names };
+  }
+
+  test('the digests are the real ones', () => {
+    const { dir, names } = withFiles();
+    try {
+      writeChecksums(dir, names);
+      const map = parseChecksums(readFileSync(join(dir, 'SHA256SUMS'), 'utf8'));
+      for (const name of names) {
+        const expected = createHash('sha256').update(readFileSync(join(dir, name))).digest('hex');
+        expect(map.get(name)).toBe(expected);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('the format is the one sha256sum -c actually parses', () => {
+    const { dir, names } = withFiles();
+    try {
+      const text = writeChecksums(dir, names);
+      const lines = text.split('\n');
+      expect(lines.at(-1)).toBe(''); // trailing newline
+      const body = lines.slice(0, -1);
+      expect(body.length).toBe(2);
+      for (const line of body) {
+        // Two spaces, lowercase hex, bare filename. One space is the BSD
+        // "text mode" spelling and a path component breaks -c for anyone
+        // who downloads the file into their own directory.
+        expect(line).toMatch(/^[0-9a-f]{64} {2}[^ /\\][^/\\]*$/);
+      }
+      // Sorted, so two runs of the same build produce the same file.
+      expect(body.map((l) => l.slice(66))).toEqual([...names].sort());
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a changed byte changes the digest', () => {
+    const { dir, names } = withFiles();
+    try {
+      const before = parseChecksums(writeChecksums(dir, names));
+      writeFileSync(join(dir, names[0]!), 'windows bytez');
+      const after = parseChecksums(writeChecksums(dir, names));
+      expect(after.get(names[0]!)).not.toBe(before.get(names[0]!));
+      expect(after.get(names[1]!)).toBe(before.get(names[1]!));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('the system checker accepts it, and rejects a tampered file', () => {
+    const checker = Bun.which('sha256sum') ?? Bun.which('shasum');
+    if (!checker) {
+      // Self-skip, matching how the suite handles Calibre and fixtures.
+      console.log('skipping: no sha256sum/shasum on PATH');
+      return;
+    }
+    const argv = checker.endsWith('shasum')
+      ? [checker, '-a', '256', '-c', 'SHA256SUMS']
+      : [checker, '-c', 'SHA256SUMS'];
+    const { dir, names } = withFiles();
+    try {
+      writeChecksums(dir, names);
+      const ok = Bun.spawnSync(argv, { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
+      expect(ok.exitCode).toBe(0);
+      writeFileSync(join(dir, names[0]!), 'tampered');
+      const bad = Bun.spawnSync(argv, { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
+      expect(bad.exitCode).not.toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('buildAll', () => {
+  test('refuses to build a version package.json does not name', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-all-'));
+    try {
+      await expect(
+        buildAll({ version: '99.0.0', outDir: dir, only: ['linux-x64'] }),
+      ).rejects.toThrow(/package\.json/);
+      // Nothing was compiled: the guard runs before any 100 MB write.
+      expect(existsSync(buildDir(TARGETS[0]!, dir))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('the repo will not accidentally commit an artifact', () => {
+  test('.gitignore covers the obvious hand-run output directories', () => {
+    // `bun tools/build-cli.ts --out dist/` is the documented example, and
+    // each artifact is 39-119 MB.
+    for (const path of [
+      'dist/screepub-cli-linux-x64.tar.gz',
+      'dist/SHA256SUMS',
+      'build/screepub-cli-windows-x64.zip',
+    ]) {
+      const proc = Bun.spawnSync(['git', 'check-ignore', '-q', path]);
+      expect({ path, ignored: proc.exitCode === 0 }).toEqual({ path, ignored: true });
+    }
+  });
+});
+
+describe('the tool runs from a command line', () => {
+  // A path that provably does not exist yet, so "it was never created" is a
+  // real assertion rather than an accident of what /tmp happens to hold.
+  const NEVER = join(tmpdir(), `screepub-never-${process.pid}-${Date.now()}`);
+
+  test('a missing --version fails with a message and a non-zero exit', () => {
+    const proc = Bun.spawnSync(['bun', 'tools/build-cli.ts', '--out', NEVER], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    expect(proc.exitCode).not.toBe(0);
+    expect(proc.stderr.toString()).toMatch(/--version/);
+    expect(existsSync(NEVER)).toBe(false);
+  });
+
+  test('an unknown target is refused before anything is compiled', () => {
+    const proc = Bun.spawnSync(
+      ['bun', 'tools/build-cli.ts', '--version', '0.0.1', '--out', NEVER, '--only', 'darwin-arm64'],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    expect(proc.exitCode).not.toBe(0);
+    expect(proc.stderr.toString()).toMatch(/darwin-arm64/);
+    // Nothing was created: the refusal happens during argument parsing, so
+    // a mistyped target never costs a 100 MB write.
+    expect(existsSync(NEVER)).toBe(false);
   });
 });

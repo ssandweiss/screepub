@@ -26,6 +26,7 @@ import {
 } from 'node:fs';
 import { join, isAbsolute, resolve, basename } from 'node:path';
 import { parseArgs } from 'node:util';
+import { createHash } from 'node:crypto';
 
 export type BinaryFormat =
   | 'elf-x86-64'
@@ -462,5 +463,65 @@ export async function verifyArtifact(
       `build-cli: ${target.id}: ${target.binaryName} inside the archive is not executable ` +
         `(mode ${member.mode.toString(8)})`,
     );
+  }
+}
+
+export function sha256File(path: string): string {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+/** The format `sha256sum -c` and `shasum -a 256 -c` both parse: lowercase
+ *  hex, exactly two spaces, a bare filename, a trailing newline. Sorted, so
+ *  two runs of the same build produce the same file. Returns the text as
+ *  well as writing it, so callers can assert on it without re-reading. */
+export function writeChecksums(outDir: string, archiveNames: string[]): string {
+  const text = [...archiveNames]
+    .sort()
+    .map((name) => `${sha256File(join(outDir, name))}  ${name}\n`)
+    .join('');
+  writeFileSync(join(outDir, 'SHA256SUMS'), text);
+  return text;
+}
+
+export function parseChecksums(text: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const line of text.split('\n')) {
+    const m = /^([0-9a-f]{64}) {2}(.+)$/.exec(line);
+    if (m) map.set(m[2]!, m[1]!);
+  }
+  return map;
+}
+
+/** Compile, package and verify one target at a time, verifying BEFORE
+ *  moving on: a broken target then fails at the target that broke, not at
+ *  a checksum three minutes later. */
+export async function buildAll(args: BuildArgs, floors: Floors = RELEASE_FLOORS): Promise<string[]> {
+  assertPackageVersion(args.version);
+  mkdirSync(args.outDir, { recursive: true });
+
+  const targets = TARGETS.filter((t) => args.only.includes(t.id));
+  const names: string[] = [];
+  for (const target of targets) {
+    console.log(`── ${target.id} (${target.bunTarget})`);
+    compileTarget(target, args.outDir);
+    await packageTarget(target, args.outDir);
+    await verifyArtifact(target, args.outDir, floors);
+    const bytes = statSync(archivePath(target, args.outDir)).size;
+    console.log(`   ${target.archiveName}  ${bytes} bytes  ok`);
+    names.push(target.archiveName);
+  }
+
+  writeChecksums(args.outDir, names);
+  return names.map((n) => join(args.outDir, n));
+}
+
+if (import.meta.main) {
+  try {
+    const args = parseBuildArgs(Bun.argv.slice(2));
+    const made = await buildAll(args);
+    console.log(`\n${made.length} artifact(s) + SHA256SUMS in ${args.outDir}`);
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(1);
   }
 }
