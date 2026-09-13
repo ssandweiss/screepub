@@ -104,3 +104,121 @@ describe('ci.yml cross-compiles on every push', () => {
     expect(runText(artifact!)).toContain('epubcheck');
   });
 });
+
+describe('release.yml ships the cross-platform artifacts', () => {
+  const rel = workflow('release.yml');
+  const needs = (name: string): string[] => {
+    const n = rel.jobs[name]?.needs;
+    return Array.isArray(n) ? n : n ? [n] : [];
+  };
+
+  test('the four existing jobs are still there, in their existing shape', () => {
+    expect(Object.keys(rel.jobs)).toEqual(
+      expect.arrayContaining(['checks', 'release', 'tap', 'tap-check']),
+    );
+    expect(rel.jobs['release']!['runs-on']).toBe('macos-15');
+    expect(needs('release')).toEqual(['checks']);
+    expect(needs('tap')).toEqual(['release']);
+    expect(needs('tap-check')).toEqual(['tap']);
+  });
+
+  test('the macOS release job still builds, signs and uploads exactly its three assets', () => {
+    const text = runText(rel.jobs['release']!);
+    expect(text).toContain('app/release.sh');
+    for (const name of MACOS_ASSETS) expect(text).toContain(`app/dist/${name}`);
+    // And it has NOT quietly become responsible for the new ones.
+    for (const t of TARGETS) expect(text).not.toContain(t.archiveName);
+  });
+
+  test('cross-cli builds every artifact once, after the checks pass', () => {
+    const job = rel.jobs['cross-cli'];
+    expect(job).toBeDefined();
+    expect(job!['runs-on']).toBe('ubuntu-latest');
+    expect(needs('cross-cli')).toEqual(['checks']);
+    const text = runText(job!);
+    expect(text).toContain('tools/build-cli.ts');
+    expect(text).not.toContain('--only');
+    // The version comes from the TAG, so a mis-set package.json fails the
+    // build instead of shipping a binary that misreports itself.
+    expect(text).toContain('${TAG#v}');
+    const upload = (job!.steps ?? []).find((s) => (s.uses ?? '').includes('upload-artifact'));
+    expect(upload).toBeDefined();
+    expect(String(upload!.with?.['if-no-files-found'])).toBe('error');
+  });
+
+  test('each smoke job downloads its own artifact and runs it on its own OS', () => {
+    expect(rel.jobs['smoke-linux-x64']!['runs-on']).toBe('ubuntu-latest');
+    expect(rel.jobs['smoke-windows-x64']!['runs-on']).toBe('windows-latest');
+    for (const name of ['smoke-linux-x64', 'smoke-windows-x64']) {
+      expect(needs(name)).toEqual(['cross-cli']);
+      const job = rel.jobs[name]!;
+      expect((job.steps ?? []).some((s) => (s.uses ?? '').includes('download-artifact'))).toBe(true);
+      expect(runText(job)).toContain('tools/smoke-cli.ts');
+    }
+    expect(runText(rel.jobs['smoke-linux-x64']!)).toContain('screepub-cli-linux-x64.tar.gz');
+    const win = rel.jobs['smoke-windows-x64']!;
+    expect(runText(win)).toContain('screepub-cli-windows-x64.zip');
+    expect((win.steps ?? []).some((s) => s.shell === 'pwsh')).toBe(true);
+  });
+
+  test('nothing is uploaded until both smoke jobs have passed', () => {
+    // The Windows binary has never executed anywhere before that job. If
+    // the upload did not wait for it, the smoke test would be decoration.
+    expect(needs('cross-upload').sort()).toEqual(
+      ['release', 'smoke-linux-x64', 'smoke-windows-x64'],
+    );
+    expect(rel.jobs['cross-upload']!.permissions?.contents).toBe('write');
+  });
+
+  test('cross-upload attaches all three archives and the checksums', () => {
+    const text = runText(rel.jobs['cross-upload']!);
+    for (const t of TARGETS) expect(text).toContain(t.archiveName);
+    expect(text).toContain('SHA256SUMS');
+    expect(text).toContain('--clobber');
+    // No checkout in that job, so gh must be told the repository.
+    const env = JSON.stringify(rel.jobs['cross-upload']!.steps ?? []);
+    expect(env).toContain('GH_REPO');
+    // It must not touch the macOS assets the release job already uploaded.
+    for (const name of MACOS_ASSETS) expect(text).not.toContain(name);
+  });
+
+  test('linux-arm64 is built and shipped but never smoke-tested', () => {
+    // Stated, not hidden: no arm64 runner is assumed available, so this
+    // artifact ships untested and the release notes say so. If an arm64
+    // runner is ever added, this assertion is the one to delete.
+    const jobs = Object.keys(rel.jobs);
+    expect(jobs).not.toContain('smoke-linux-arm64');
+    expect(runText(rel.jobs['cross-upload']!)).toContain('screepub-cli-linux-arm64.tar.gz');
+  });
+});
+
+describe('the two limits are stated where a reader meets them', () => {
+  const readme = read('README.md');
+
+  test('the README says the Windows download is unsigned', () => {
+    const lower = readme.toLowerCase();
+    expect(lower).toContain('windows');
+    expect(lower).toContain('smartscreen');
+    expect(/not signed|unsigned/.test(lower)).toBe(true);
+  });
+
+  test('the README names each Linux and Windows artifact it tells people to download', () => {
+    for (const t of TARGETS) expect(readme).toContain(t.archiveName);
+  });
+
+  test('the README says device support off macOS is unproven, and names the tolino case', () => {
+    const lower = readme.toLowerCase();
+    expect(lower).toContain('tolino');
+    // The specific, checkable claim: on Windows a tolino cannot be detected
+    // at all, because it is identified by volume name and a Windows drive
+    // root carries none.
+    expect(/tolino[^.]*windows|windows[^.]*tolino/s.test(lower)).toBe(true);
+  });
+
+  test('the 0.6.0 notes carry both limits', () => {
+    const notes = read('docs/releases/0.6.0.md').toLowerCase();
+    expect(notes).toContain('windows');
+    expect(/not signed|unsigned/.test(notes)).toBe(true);
+    expect(notes).toContain('tolino');
+  });
+});

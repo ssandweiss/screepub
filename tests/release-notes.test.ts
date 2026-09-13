@@ -20,6 +20,12 @@ const BANNED = [
   'rendering engine',
   'stylesheet',
   '—', // em dash: house rule for user-facing copy
+  // release.yml's `checks` job fails a tag whose notes name a checksum,
+  // because the workflow appends the real ones and two lists on one page
+  // both look official. That check runs AFTER the tag is pushed; this one
+  // runs in nine seconds.
+  'sha256',
+  'sha-256',
 ];
 
 const RELEASES_DIR = join(import.meta.dir, '..', 'docs', 'releases');
