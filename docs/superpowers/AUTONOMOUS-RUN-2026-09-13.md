@@ -283,3 +283,49 @@ So pieces C and D can be built AND RUN on this machine — the UI can be checked
 in a real window rather than written blind. The only remaining external need in
 the whole program is `patchelf`, and only for AppImage bundling in E2; a `.deb`
 needs nothing extra.
+
+## Piece E1 — merged
+
+`382e3e8`, 10 commits + a 2-commit fix wave, 894 pass / 3 skip / 0 fail on
+merged main. Fifteen tasks, **no fix rounds during execution** — the first
+piece in this program where every task passed its own review first time. The
+whole-branch review returned "ready to merge" with no Critical findings.
+
+**Proven, not asserted.** Before merging I ran the tool for real: three
+artifacts plus `SHA256SUMS` in 13.1s; `sha256sum -c` verified them
+independently; the Linux tarball held `screepub` at `-rwxr-xr-x` and the zip
+held `screepub.exe`; and the extracted linux-arm64 binary ran on this machine,
+answered `devices --json`, and converted a fixture PDF to EPUB. That is E1's
+whole value demonstrated from a release artifact rather than from source.
+
+**The best catch of the piece** came from the whole-branch review, which traced
+a bad build stage by stage — truncated binary, wrong architecture, missing
+executable bit — and found exactly one unguarded row: artifacts crossed the
+CI job boundary via upload/download-artifact and were shipped **without being
+re-opened**, so `SHA256SUMS` was never checked against the files it names. One
+line (`cd cli && sha256sum -c SHA256SUMS`, ordered before the upload and
+pinned by a test) closed the only hole in the chain.
+
+**Two limits are now stated rather than discovered:** Windows binaries are
+unsigned and SmartScreen will warn; and device support on Windows and Linux
+has never run on hardware, with tolino undetectable on Windows at all because
+it is identified by volume name and a drive root carries none.
+
+### The one thing I decided against the reviewer
+
+It recommended adding a `smoke-linux-arm64` job, since GitHub offers free
+`ubuntu-24.04-arm` runners to public repos and the spec said to use one "if
+available" — which the workflow had resolved as "assume not available", an
+assumption rather than a check. The reviewer is probably right.
+
+I shipped without it anyway. I cannot verify a runner label from here, and the
+failure mode is lopsided: if it does not resolve on a real tag, the smoke job
+fails, `cross-upload` is gated on it, and the release publishes **without the
+Linux and Windows assets while its own notes promise them**. A bad first tag
+for a gain I could not confirm. The notes are honest that linux-arm64 ships
+built-but-untested.
+
+**Flip it when you can check:** copy `smoke-linux-x64` with
+`runs-on: ubuntu-24.04-arm`, and delete the test in
+`tests/release-artifacts.test.ts` asserting that job's absence — it names
+itself for exactly this purpose.
