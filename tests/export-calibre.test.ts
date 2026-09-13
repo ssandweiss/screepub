@@ -1,5 +1,5 @@
 import { test, expect, test as bunTest } from 'bun:test';
-import { accessSync, constants, mkdtempSync, writeFileSync, readFileSync, chmodSync } from 'node:fs';
+import { accessSync, constants, mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { platform } from 'node:process';
@@ -91,6 +91,61 @@ withoutCalibre('toAzw3 throws CalibreMissingError, specifically, when Calibre is
 
 withoutCalibre('toKepub throws CalibreMissingError, specifically, when Calibre is absent', async () => {
   await expect(toKepub('/tmp/screepub-does-not-exist.epub')).rejects.toThrow(CalibreMissingError);
+});
+
+// ebook-convert selects its OUTPUT FORMAT from the output file's extension,
+// so toKepub must convert to `<stem>.kepub` first and only THEN rename to
+// `<stem>.kepub.epub` -- writing straight to the double extension would make
+// real Calibre see ".epub" and emit a plain EPUB with no koboSpan markup at
+// all. A fake ebook-convert that just touches whatever path it's told to
+// write lets us prove the two-step shape without Calibre installed: it
+// fails closed (CalibreFailedError, "no .kepub") if toKepub ever regresses
+// to the single-step form, because the fake would then create `.kepub.epub`
+// directly and the intermediate `.kepub` existsSync check would find nothing.
+test('toKepub converts to .kepub then renames to .kepub.epub (fake ebook-convert)', async () => {
+  if (!describesPathScan) return;
+  if (calibreTool('ebook-convert')) return; // never shadow a real install
+
+  const toolDir = mkdtempSync(join(tmpdir(), 'screepub-calibre-fake-'));
+  const name = platform === 'win32' ? 'ebook-convert.exe' : 'ebook-convert';
+  const fakeTool = join(toolDir, name);
+  const argvLog = join(toolDir, 'argv.log');
+  // Logs the exact argv it received (one per line, so a guard flag
+  // containing "=" or "/" round-trips safely), then touches the output path
+  // it's told to write, mimicking ebook-convert's own file creation.
+  writeFileSync(fakeTool, `#!/bin/sh\nfor a in "$@"; do echo "$a"; done > "${argvLog}"\ntouch "$2"\n`);
+  chmodSync(fakeTool, 0o755);
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${toolDir}${delimiter}${originalPath ?? ''}`;
+  try {
+    const workDir = mkdtempSync(join(tmpdir(), 'screepub-calibre-work-'));
+    const epub = join(workDir, 'book.epub');
+    writeFileSync(epub, 'fake epub bytes');
+    const rawKepub = join(workDir, 'book.kepub');
+    const finalKepub = join(workDir, 'book.kepub.epub');
+    writeFileSync(finalKepub, 'stale leftover'); // proves the rmSync-before-rename step
+
+    const out = await toKepub(epub);
+
+    expect(out).toBe(finalKepub);
+    expect(out.endsWith('.kepub.epub')).toBe(true);
+    expect(existsSync(rawKepub)).toBe(false); // renamed away, not left behind
+    expect(readFileSync(out, 'utf8')).not.toBe('stale leftover'); // overwritten
+
+    // Ruling B: toKepub must call ebook-convert with exactly [epub, raw] --
+    // no CALIBRE_FORMAT_GUARDS, matching EbookConvert.swift's toKepub
+    // (which passes guards to toAzw3 but not here). This is a deliberately
+    // preserved discrepancy pending a Kobo hardware pass, not an oversight
+    // to "fix" by making the two recipes consistent.
+    const argv = readFileSync(argvLog, 'utf8').split('\n').filter(Boolean);
+    expect(argv).toEqual([epub, rawKepub]);
+    for (const guard of CALIBRE_FORMAT_GUARDS) {
+      expect(argv).not.toContain(guard);
+    }
+  } finally {
+    process.env.PATH = originalPath;
+  }
 });
 
 async function minimalEpub(): Promise<string> {
