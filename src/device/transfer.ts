@@ -4,10 +4,10 @@ import type { ConnectedDevice } from './types';
 import { copyToKindleVolume } from './kindle';
 import { replaceFile } from '../replace-file';
 
-export class TransferError extends Error {
+export class NoVolumeError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'TransferError';
+    this.name = 'NoVolumeError';
   }
 }
 
@@ -15,11 +15,11 @@ export class TransferError extends Error {
  * Kobo → volume root, tolino → Books/ at the root (subfolders of it
  * aren't reliably indexed; the folder is created if missing).
  * Replaces any previous copy. Returns the destination path.
- * Throws if the device has no mounted volume, or if it's a reMarkable
+ * Throws NoVolumeError if the device has no mounted volume, or if it's a reMarkable
  * (which never mounts and is reached over its USB web interface instead). */
-export function copyToVolume(file: string, device: ConnectedDevice): string {
+export function copyToDevice(file: string, device: ConnectedDevice): string {
   if (!device.volume) {
-    throw new TransferError('Device has no mounted volume.');
+    throw new NoVolumeError('Device has no mounted volume.');
   }
 
   const volume = device.volume;
@@ -45,7 +45,7 @@ export function copyToVolume(file: string, device: ConnectedDevice): string {
     }
 
     case 'remarkable':
-      throw new TransferError('Device has no mounted volume.');
+      throw new NoVolumeError('Device has no mounted volume.');
 
     default:
       const _exhaustive: never = device.kind;

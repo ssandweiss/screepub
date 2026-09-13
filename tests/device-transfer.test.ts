@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { copyToVolume } from '../src/device/transfer';
+import { copyToDevice, NoVolumeError } from '../src/device/transfer';
 import type { ConnectedDevice } from '../src/device/types';
 
 /** Mirrors kit-check's tempDir(): a uniquely-rooted directory whose own name
@@ -25,7 +25,7 @@ test('copy to Kindle lands in documents/', () => {
     volume: vol,
   };
 
-  const dest = copyToVolume(src, device);
+  const dest = copyToDevice(src, device);
   expect(dest.endsWith(join('documents', 'Test.epub'))).toBe(true);
   expect(readFileSync(dest, 'utf8')).toBe('v1');
 });
@@ -41,7 +41,7 @@ test('copy to Kobo lands in volume root', () => {
     volume: vol,
   };
 
-  const dest = copyToVolume(src, device);
+  const dest = copyToDevice(src, device);
   expect(dest).toBe(join(vol, 'Book.epub'));
   expect(readFileSync(dest, 'utf8')).toBe('content');
 });
@@ -57,7 +57,7 @@ test('copy to tolino lands in Books/ subfolder', () => {
     volume: vol,
   };
 
-  const dest = copyToVolume(src, device);
+  const dest = copyToDevice(src, device);
   expect(dest).toBe(join(vol, 'Books', 'Story.epub'));
   expect(readFileSync(dest, 'utf8')).toBe('text');
 });
@@ -73,7 +73,7 @@ test('tolino Books/ folder is created if missing', () => {
     volume: vol,
   };
 
-  copyToVolume(src, device);
+  copyToDevice(src, device);
   const booksDir = join(vol, 'Books');
   expect(Bun.file(booksDir).exists()).toBeTruthy();
 });
@@ -89,11 +89,11 @@ test('copy overwrites existing file', () => {
     volume: vol,
   };
 
-  let dest = copyToVolume(src, device);
+  let dest = copyToDevice(src, device);
   expect(readFileSync(dest, 'utf8')).toBe('v1');
 
   writeFileSync(src, 'v2');
-  copyToVolume(src, device);
+  copyToDevice(src, device);
   expect(readFileSync(dest, 'utf8')).toBe('v2');
 });
 
@@ -108,7 +108,7 @@ test('reMarkable throws even with volume present', () => {
     volume: vol,
   };
 
-  expect(() => copyToVolume(src, device)).toThrow();
+  expect(() => copyToDevice(src, device)).toThrow(NoVolumeError);
 });
 
 test('throws if device has no volume', () => {
@@ -121,7 +121,7 @@ test('throws if device has no volume', () => {
     volume: null,
   };
 
-  expect(() => copyToVolume(src, device)).toThrow();
+  expect(() => copyToDevice(src, device)).toThrow(NoVolumeError);
 });
 
 test('Kobo copy overwrites existing file at volume root', () => {
@@ -135,11 +135,11 @@ test('Kobo copy overwrites existing file at volume root', () => {
     volume: vol,
   };
 
-  let dest = copyToVolume(src, device);
+  let dest = copyToDevice(src, device);
   expect(readFileSync(dest, 'utf8')).toBe('v1');
 
   writeFileSync(src, 'v2');
-  copyToVolume(src, device);
+  copyToDevice(src, device);
   expect(readFileSync(dest, 'utf8')).toBe('v2');
 });
 
@@ -154,10 +154,10 @@ test('tolino copy overwrites existing file in Books/', () => {
     volume: vol,
   };
 
-  let dest = copyToVolume(src, device);
+  let dest = copyToDevice(src, device);
   expect(readFileSync(dest, 'utf8')).toBe('v1');
 
   writeFileSync(src, 'v2');
-  copyToVolume(src, device);
+  copyToDevice(src, device);
   expect(readFileSync(dest, 'utf8')).toBe('v2');
 });
