@@ -23,6 +23,13 @@ test('matchingPreset returns null once a knob is tuned away from every preset', 
   expect(matchingPreset({ ...DEFAULT_FORMAT_OPTIONS, cueIndentPct: 41 })).toBeNull();
 });
 
+test('matchingPreset compares by value, not by object identity', () => {
+  // A fresh object with identical fields must still resolve — this is what
+  // stops a regression to reference equality passing the suite.
+  expect(matchingPreset({ ...DEFAULT_FORMAT_OPTIONS })).toBe('kindleEink');
+  expect(matchingPreset({ ...DEVICE_PRESETS.phone.settings })).toBe('phone');
+});
+
 test('every preset has a display name', () => {
   for (const preset of Object.values(DEVICE_PRESETS)) {
     expect(preset.displayName.length).toBeGreaterThan(0);
