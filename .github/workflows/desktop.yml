@@ -1,8 +1,15 @@
-# The desktop shell compiles on all three platforms. It does NOT bundle,
-# sign, install or run here -- that is piece E2. Nobody on this project has
-# a Windows machine and the Mac is elsewhere, so these two jobs are the only
-# evidence that exists that the shell builds there at all. Compiling is not
-# running, and this workflow does not claim otherwise.
+# The desktop shell compiles on all three platforms, bundles an installer on
+# each, and runs the engine out of that installer. It does NOT install the
+# bundle, launch the window, or click anything: no runner has a display, so
+# the GUI half of the app is exercised nowhere. What breaks silently during
+# bundling is the sidecar -- AppImage's patchelf pass corrupted it outright
+# -- and that is exactly what the smoke step catches.
+#
+# Nobody on this project has a Windows machine and the Mac is elsewhere, so
+# these three jobs are the only evidence that exists that the shell builds
+# or bundles there at all. As of the commit that added the bundle steps,
+# this workflow had never run: the branch was unpushed. A green Windows leg
+# here is the FIRST time a Screepub Windows installer will have existed.
 #
 # Separate from ci.yml on purpose: that workflow is the engine's fast loop,
 # and a cargo build is minutes. A parser change should never wait on Rust.
@@ -21,9 +28,9 @@
 name: desktop
 on:
   push:
-    paths: ['desktop/**', 'tools/build-sidecar.ts', 'tools/build-cli.ts', 'tools/sidecar-targets.ts', 'brand/tokens.json', '.github/workflows/desktop.yml']
+    paths: ['desktop/**', 'tools/build-sidecar.ts', 'tools/build-cli.ts', 'tools/sidecar-targets.ts', 'tools/bundle-archive.ts', 'tools/build-app-bundle.ts', 'tools/smoke-bundle.ts', 'package.json', 'brand/tokens.json', '.github/workflows/desktop.yml']
   pull_request:
-    paths: ['desktop/**', 'tools/build-sidecar.ts', 'tools/build-cli.ts', 'tools/sidecar-targets.ts', 'brand/tokens.json', '.github/workflows/desktop.yml']
+    paths: ['desktop/**', 'tools/build-sidecar.ts', 'tools/build-cli.ts', 'tools/sidecar-targets.ts', 'tools/bundle-archive.ts', 'tools/build-app-bundle.ts', 'tools/smoke-bundle.ts', 'package.json', 'brand/tokens.json', '.github/workflows/desktop.yml']
 permissions:
   contents: read
 jobs:
@@ -59,6 +66,11 @@ jobs:
       # what turns "committed" back into "current". Before the sidecar build
       # so it fails in seconds rather than after a cargo compile, and on every
       # platform because the generators are the same everywhere.
+      #
+      # It must also stay BEFORE the bundle step, on purpose and not by
+      # accident: `cargo tauri build` rewrites desktop/src-tauri/Cargo.toml,
+      # so a generated-files diff running after it could go red for the
+      # bundler's doing and read like a stale generated file.
       - name: Generated window files are current
         run: |
           bun tools/build-desktop-tokens.ts
@@ -71,3 +83,79 @@ jobs:
       - name: Compile the shell
         working-directory: desktop/src-tauri
         run: cargo build --locked
+      # cargo-tauri is a new release-toolchain dependency. Pinned exactly --
+      # an unpinned `cargo install tauri-cli` is a four-minute build against
+      # whatever crates.io served that morning -- and cached, or every push
+      # pays that four minutes three times over.
+      - name: Cache the Tauri CLI
+        id: tauri-cli-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-tauri
+            ~/.cargo/bin/cargo-tauri.exe
+          key: tauri-cli-2.11.4-${{ matrix.os }}
+      - name: Install the Tauri CLI
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version 2.11.4 --locked
+      # Bundling on every push turns a compile check into an ARTIFACT check,
+      # which is where a broken bundle should be caught -- not at a tag. It
+      # is not fast: the deb+rpm pair measured 3m30s locally, of which cargo
+      # itself is 15s and the rest is gzipping the 102 MB engine twice.
+      #
+      # `cargo tauri build` REWRITES desktop/src-tauri/Cargo.toml with the
+      # feature lists it derives from tauri.conf.json. The committed spelling
+      # is the one the CLI writes, so today that rewrite is a no-op -- but a
+      # future tauri.conf.json option would make it rewrite again, which is
+      # why the `git diff --exit-code` step above runs BEFORE this one and
+      # must stay there. After it, a red diff would be this step's doing and
+      # would read like a stale generated file.
+      #
+      # The bundle list is pinned per OS because the Linux default is deb,
+      # rpm AND appimage, and the AppImage step runs linuxdeploy's patchelf
+      # over the Bun-compiled engine, moves its dynamic section past the
+      # 102 MB appended payload, and leaves a binary that segfaults. Measured
+      # 2026-09-14; see the design doc.
+      #
+      # No certificate is imported here and the macOS bundle is UNSIGNED.
+      # Importing a Developer ID on every push is slow and exposes the
+      # secret far more widely than a release does; signing happens in
+      # release.yml, once, at a tag.
+      - name: Bundle this runner's installers
+        working-directory: desktop/src-tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ runner.os }}" in
+            Linux)   BUNDLES=deb,rpm ;;
+            macOS)   BUNDLES=app,dmg ;;
+            Windows) BUNDLES=nsis ;;
+            *)       echo "no bundle list for runner.os=${{ runner.os }}" >&2; exit 1 ;;
+          esac
+          cargo tauri build --bundles "$BUNDLES"
+      # The check that would have caught a 0.6.0 installer whose engine
+      # answers 0.5.4: open each bundle without installing it and run the
+      # engine from inside. package.json's version is the right expectation
+      # HERE -- the engine is built from it, and it is deliberately allowed
+      # to lag tauri.conf.json on a working branch. release.yml asserts all
+      # three against the tag instead.
+      #
+      # This calls smoke-bundle.ts and NOT build-app-bundle.ts, because that
+      # tool refuses to run while the three version files disagree -- which
+      # they do, by design, on every working branch. The renaming and
+      # SHA256SUMS-app half of build-app-bundle.ts is covered by its unit
+      # tests and by the release run, and by nothing here. Stated rather
+      # than papered over.
+      - name: Run the engine out of each bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          V="$(node -p "require('./package.json').version")"
+          # node prints "undefined" and exits 0 for a missing key, so
+          # without this the smoke step would run against an expectation
+          # that came from nowhere.
+          if [ -z "$V" ] || [ "$V" = "undefined" ]; then
+            echo "desktop.yml: package.json has no version to check the bundled engine against" >&2
+            exit 1
+          fi
+          bun tools/smoke-bundle.ts --built --expect-version "$V"

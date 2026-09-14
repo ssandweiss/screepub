@@ -235,6 +235,113 @@ describe('release.yml ships the cross-platform artifacts', () => {
   });
 });
 
+describe('desktop.yml bundles and smokes on every push', () => {
+  // These are the STRUCTURAL pins -- which steps exist, in which order, on
+  // which runners. What the two bash blocks actually DO is executed, with
+  // stub executables, in tests/desktop-bundle-step.test.ts.
+  const desktop = workflow('desktop.yml');
+  const job = desktop.jobs['build']!;
+  const steps = job.steps ?? [];
+  const stepIndex = (re: RegExp): number => steps.findIndex((s) => re.test(s.run ?? ''));
+
+  test('it still compiles on all three platforms', () => {
+    // The matrix predates this piece and is not replaced by it.
+    expect(JSON.stringify(job)).toContain('cargo build --locked');
+    const yml = read(join(WORKFLOWS, 'desktop.yml'));
+    for (const os of ['ubuntu-latest', 'macos-15', 'windows-latest']) {
+      expect(yml).toContain(os);
+    }
+  });
+
+  test('the generated-files diff runs BEFORE anything that rewrites Cargo.toml', () => {
+    // `cargo tauri build` rewrites desktop/src-tauri/Cargo.toml with the
+    // feature lists it derives from tauri.conf.json. The committed spelling
+    // makes that a no-op today, but a future tauri.conf.json option would
+    // make it rewrite again -- and a `git diff --exit-code` running after
+    // the bundle step would then go red for a reason nobody could read.
+    const diff = stepIndex(/git diff --exit-code/);
+    const bundle = stepIndex(/cargo tauri build/);
+    expect(diff).toBeGreaterThanOrEqual(0);
+    expect(bundle).toBeGreaterThanOrEqual(0);
+    expect(diff).toBeLessThan(bundle);
+  });
+
+  test('the bundle list is pinned and never the per-OS default', () => {
+    // The Linux default is deb, rpm AND appimage, and the AppImage step
+    // corrupts the Bun-compiled engine and fails the whole run.
+    const text = runText(job);
+    expect(text).toContain('--bundles');
+    expect(text).not.toContain('appimage');
+  });
+
+  test('it runs smoke-bundle after building, not instead of it', () => {
+    const bundle = stepIndex(/cargo tauri build/);
+    const smoke = stepIndex(/tools\/smoke-bundle\.ts/);
+    expect(smoke).toBeGreaterThan(bundle);
+    expect(steps[smoke]!.run).toContain('--built');
+  });
+
+  test('both bash steps run under bash on every runner, Windows included', () => {
+    // Without `shell: bash` a `run:` block on windows-latest is executed by
+    // PowerShell, where `case ... esac` and `set -euo pipefail` are syntax
+    // errors -- and the Windows leg is the one nobody here can try first.
+    for (const re of [/cargo tauri build/, /tools\/smoke-bundle\.ts/]) {
+      expect(steps[stepIndex(re)]!.shell).toBe('bash');
+    }
+  });
+
+  test('cargo-tauri is installed at a pinned version and cached', () => {
+    const yml = read(join(WORKFLOWS, 'desktop.yml'));
+    // An unpinned `cargo install tauri-cli` is a four-minute build against
+    // whatever crates.io served that morning.
+    expect(yml).toMatch(/cargo install tauri-cli --version [0-9]/);
+    expect(yml).toContain('--locked');
+    expect(yml).toContain('~/.cargo/bin/cargo-tauri');
+    // The cache key must name the SAME version that gets installed, or a
+    // version bump is served the old binary out of the cache forever.
+    const installed = /cargo install tauri-cli --version ([0-9][^ ]*) /.exec(yml)?.[1];
+    expect(installed).toBeDefined();
+    expect(yml).toContain(`key: tauri-cli-${installed}-`);
+  });
+
+  test('the push path imports no Developer ID certificate', () => {
+    // Signing on every push is slow and exposes the secret far more widely
+    // than a release does. The push bundle is unsigned on purpose.
+    const yml = read(join(WORKFLOWS, 'desktop.yml'));
+    for (const secret of ['APPLE_CERTIFICATE', 'DEVELOPER_ID_CERT_P12_BASE64', 'APPLE_API_KEY']) {
+      expect(yml).not.toContain(secret);
+    }
+  });
+
+  test('an edit to any tool this workflow runs triggers it', () => {
+    // The bundle and smoke steps run code that lives outside desktop/. A
+    // path filter that did not list it would let smoke-bundle.ts change
+    // without the only workflow that executes it ever running.
+    const yml = read(join(WORKFLOWS, 'desktop.yml'));
+    const filters = yml.split('\n').filter((l) => l.trim().startsWith('paths:'));
+    expect(filters.length).toBe(2);
+    for (const line of filters) {
+      for (const path of [
+        'tools/smoke-bundle.ts',
+        'tools/build-app-bundle.ts',
+        'tools/bundle-archive.ts',
+        'package.json',
+      ]) {
+        expect(line).toContain(`'${path}'`);
+      }
+    }
+  });
+
+  test('the workflow says, where a reader meets it, what it does not prove', () => {
+    // The two admissions that must not quietly disappear: nothing here
+    // launches the GUI, and build-app-bundle.ts's renaming half is not
+    // exercised on the push path at all.
+    const yml = read(join(WORKFLOWS, 'desktop.yml'));
+    expect(yml).toContain('no runner has a display');
+    expect(yml).toMatch(/build-app-bundle\.ts/);
+  });
+});
+
 describe('the two limits are stated where a reader meets them', () => {
   const readme = read('README.md');
 

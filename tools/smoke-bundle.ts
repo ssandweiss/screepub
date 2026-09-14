@@ -42,6 +42,14 @@ import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { bundleEntries, findEntry } from './bundle-archive';
 import {
+  bundleDirFor,
+  discoverArtifact,
+  kindsForOs,
+  osForPlatform,
+  verifyBundleFile,
+  type BundleOs,
+} from './build-app-bundle';
+import {
   checkConvertResult,
   checkEpubBytes,
   soleJson,
@@ -260,30 +268,92 @@ export function smokeBundle(
   }
 }
 
+/** Verify and smoke every bundle this runner just built.
+ *
+ *  The affordance CI needs, in TypeScript rather than in YAML: a workflow
+ *  step that loops over bundle kinds in shell is a step that can only be
+ *  tested by pushing. It deliberately does NOT call build-app-bundle.ts --
+ *  that tool refuses to run while package.json, Cargo.toml and
+ *  tauri.conf.json disagree, which they do on every working branch by
+ *  design. The renaming and checksum half of build-app-bundle.ts is
+ *  therefore exercised by its unit tests and by the release run, and not
+ *  here. */
+export function smokeBuiltBundles(
+  os: BundleOs,
+  expectedVersion: string,
+  fixture: string,
+  workRoot: string,
+  run: Runner = realRun,
+  // A parameter and not only the constant, for the same reason
+  // build-app-bundle.ts's BundleDirs is one: without it this loop could
+  // only ever be exercised against the repo's own target/ tree, which on a
+  // clean checkout and in CI is empty -- so the multi-kind path would be
+  // covered by nothing.
+  desktopDir?: string,
+): string[] {
+  const kinds = kindsForOs(os);
+  // An OS with no kinds would smoke nothing and exit 0, which is the exact
+  // silent-green outcome this whole tool exists to refuse.
+  if (kinds.length === 0) {
+    throw new Error(`smoke-bundle: no bundle kinds are defined for ${os}. NOTHING WAS CHECKED.`);
+  }
+  const smoked: string[] = [];
+  for (const kind of kinds) {
+    // Throws, naming the directory, when the bundler produced nothing --
+    // rather than returning an empty list, which would make a step that
+    // checked nothing look green.
+    const path = discoverArtifact(bundleDirFor(kind, undefined, desktopDir), kind);
+    verifyBundleFile(path, kind);
+    // The container readers are pure TypeScript and run anywhere, but the
+    // binary inside one is for a single OS. Asked for another OS's bundles,
+    // say which machine this had to run on rather than executing a foreign
+    // binary and reporting whatever came back.
+    const refusal = platformRefusal(path, process.platform);
+    if (refusal) throw new Error(refusal);
+    const work = join(workRoot, kind.id);
+    mkdirSync(work, { recursive: true });
+    smokeBundle(path, fixture, work, expectedVersion, run);
+    console.log(`smoke-bundle: ${kind.id} ok -- ${path}`);
+    smoked.push(path);
+  }
+  return smoked;
+}
+
 if (import.meta.main) {
   try {
     const { values } = parseArgs({
       args: Bun.argv.slice(2),
       options: {
         bundle: { type: 'string' },
+        built: { type: 'boolean', default: false },
         'expect-version': { type: 'string' },
         fixture: { type: 'string' },
       },
       strict: true,
       allowPositionals: false,
     });
-    if (!values.bundle) throw new Error('smoke-bundle: --bundle <path> is required');
     const expected = (values['expect-version'] ?? '').replace(/^v/, '');
     if (!expected) throw new Error('smoke-bundle: --expect-version <version> is required');
-    const refusal = platformRefusal(values.bundle, process.platform);
-    if (refusal) throw new Error(refusal);
     const repo = join(import.meta.dir, '..');
     const fixture = values.fixture ?? join(repo, 'tests', 'fixtures', 'screenplay.pdf');
     const work = mkdtempSync(join(tmpdir(), 'screepub-bundle-smoke-'));
-    smokeBundle(values.bundle, fixture, work, expected);
-    console.log(
-      `smoke-bundle: the engine inside ${values.bundle} reports ${expected} and converts the fixture`,
-    );
+
+    if (values.built) {
+      // --built is what CI runs: whatever this runner's own `cargo tauri
+      // build` just produced, every kind of it, found rather than named.
+      const smoked = smokeBuiltBundles(osForPlatform(process.platform), expected, fixture, work);
+      console.log(
+        `smoke-bundle: ${smoked.length} bundle(s) report ${expected} and convert the fixture`,
+      );
+    } else {
+      if (!values.bundle) throw new Error('smoke-bundle: pass --bundle <path> or --built');
+      const refusal = platformRefusal(values.bundle, process.platform);
+      if (refusal) throw new Error(refusal);
+      smokeBundle(values.bundle, fixture, work, expected);
+      console.log(
+        `smoke-bundle: the engine inside ${values.bundle} reports ${expected} and converts the fixture`,
+      );
+    }
   } catch (err) {
     console.error((err as Error).message);
     process.exit(1);

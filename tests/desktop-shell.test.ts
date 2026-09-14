@@ -537,12 +537,16 @@ describe('the desktop workflow', () => {
     expect(regen).toBeLessThan(cargo);
   });
 
-  test('it does not bundle, sign or run anything', () => {
-    // Scope guard. Bundling is piece E2; a `tauri build` appearing here
-    // would mean C had grown an installer nobody reviewed.
+  test('it bundles, but signs nothing and never builds an AppImage', () => {
+    // Was a scope guard against bundling at all, until piece E2 made
+    // bundling on every push the point of the workflow. The two halves that
+    // are still guards: no certificate touches the push path (signing
+    // happens once, at a tag, in release.yml), and the AppImage bundler
+    // corrupts the Bun-compiled sidecar, so its name must never appear.
     const all = JSON.stringify(WF);
-    expect(all).not.toContain('tauri build');
+    expect(all).toContain('cargo tauri build');
     expect(all).not.toContain('codesign');
+    expect(all).not.toContain('APPLE_');
     expect(all).not.toContain('appimage');
   });
 

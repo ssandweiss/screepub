@@ -18,7 +18,9 @@ import {
   extractExeEngine,
   platformRefusal,
   smokeBundle,
+  smokeBuiltBundles,
 } from '../tools/smoke-bundle';
+import { kindsForOs } from '../tools/build-app-bundle';
 import type { RunResult } from '../tools/smoke-cli';
 
 const REPO = join(import.meta.dir, '..');
@@ -404,6 +406,179 @@ describe('a whole smoke run over a .deb', () => {
       }),
     ).toThrow(/nope\.deb/);
     expect(calls.length).toBe(0);
+  });
+});
+
+describe('finding and smoking whatever this runner just built', () => {
+  const fixture = join(REPO, 'tests', 'fixtures', 'screenplay.pdf');
+  const ZIP = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
+
+  /** Every bundle kind has a 10 MB floor, because every real one carries the
+   *  ~102 MB engine. A fixture under it fails on its size before its content
+   *  is ever read, so these fakes are padded to clear it: the .deb with an
+   *  extra ar member, the .rpm with an extra cpio file of RANDOM bytes --
+   *  zeros would gzip away to nothing and leave the file small. */
+  const PAD = 11_000_000;
+  function randomBytes(n: number): Uint8Array<ArrayBuffer> {
+    const out = new Uint8Array(n);
+    for (let off = 0; off < n; off += 65536) {
+      crypto.getRandomValues(out.subarray(off, Math.min(off + 65536, n)));
+    }
+    return out;
+  }
+
+  function bigDeb(path: string, contents: string): void {
+    const tar = concat([tarFile('usr/bin/screepub-engine', contents), new Uint8Array(1024)]);
+    writeFileSync(
+      path,
+      concat([
+        enc('!<arch>\n'),
+        arMember('debian-binary/  ', enc('2.0\n')),
+        arMember('control.tar.gz/ ', Bun.gzipSync(new Uint8Array(1024))),
+        arMember('data.tar.gz/    ', Bun.gzipSync(tar)),
+        // Ignored by the reader, which looks members up by name; here only
+        // to put the file over the container floor.
+        arMember('_padding/       ', new Uint8Array(PAD)),
+      ]),
+    );
+  }
+
+  /** newc cpio + the 96-byte lead and two headers an .rpm puts in front of
+   *  it. Copied in the same spirit as tests/bundle-archive.test.ts's
+   *  builders: this file needs a whole .rpm, not a payload. */
+  function cpioMember(name: string, data: Uint8Array, mode = 0o100755): Uint8Array<ArrayBuffer> {
+    const nameBytes = concat([enc(name), new Uint8Array([0])]);
+    const hex = (n: number) => n.toString(16).padStart(8, '0');
+    const header = enc(
+      '070701' +
+        hex(1) + hex(mode) + hex(0) + hex(0) + hex(1) + hex(0) +
+        hex(data.length) + hex(0) + hex(0) + hex(0) + hex(0) +
+        hex(nameBytes.length) + hex(0),
+    );
+    const namePad = new Uint8Array((4 - ((header.length + nameBytes.length) % 4)) % 4);
+    const dataPad = new Uint8Array((4 - (data.length % 4)) % 4);
+    return concat([header, nameBytes, namePad, data, dataPad]);
+  }
+
+  function rpmHeader(nindex: number, hsize: number): Uint8Array<ArrayBuffer> {
+    const h = new Uint8Array(16 + nindex * 16 + hsize);
+    h.set([0x8e, 0xad, 0xe8, 0x01, 0, 0, 0, 0], 0);
+    const view = new DataView(h.buffer);
+    view.setUint32(8, nindex, false);
+    view.setUint32(12, hsize, false);
+    return h;
+  }
+
+  function bigRpm(path: string, contents: string): void {
+    const cpio = concat([
+      cpioMember('./usr/bin/screepub-engine', enc(contents)),
+      cpioMember('./usr/lib/Screepub/_padding', randomBytes(PAD), 0o100644),
+      cpioMember('TRAILER!!!', new Uint8Array(0), 0),
+    ]);
+    const lead = new Uint8Array(96);
+    lead.set([0xed, 0xab, 0xee, 0xdb, 0x03, 0x00, 0x00, 0x00], 0);
+    const sig = rpmHeader(2, 5);
+    const pad = new Uint8Array((8 - (sig.length % 8)) % 8);
+    const hdr = rpmHeader(1, 3);
+    writeFileSync(path, concat([lead, sig, pad, hdr, Bun.gzipSync(cpio)]));
+  }
+
+  /** A stand-in for `desktop/src-tauri`, so this can drive the loop without
+   *  writing fakes into the repo's own target/ -- where the NEXT run, and
+   *  the gated real-bundle test at the bottom of this file, would find
+   *  them. Returns the directory each named kind's bundle goes in. */
+  function desktopTree(kinds: ('deb' | 'rpm')[], tag: string): string {
+    const root = fresh(tag);
+    for (const kind of kinds) {
+      const dir = join(root, 'target', 'release', 'bundle', kind);
+      mkdirSync(dir, { recursive: true });
+      const path = join(dir, kind === 'deb' ? 'Screepub_0.6.0_arm64.deb' : 'Screepub-0.6.0-1.aarch64.rpm');
+      if (kind === 'deb') bigDeb(path, 'ENGINE');
+      else bigRpm(path, 'ENGINE');
+    }
+    return root;
+  }
+
+  const engineRun = (calls: string[][]) => (argv: string[]): RunResult => {
+    calls.push(argv);
+    if (argv.includes('--version')) return ok('{"ok":true,"version":"0.6.0"}\n');
+    const epub = argv[argv.indexOf('-o') + 1]!;
+    writeFileSync(epub, ZIP);
+    return ok(`{"ok":true,"epubPath":${JSON.stringify(epub)},"pages":12}\n`);
+  };
+
+  test('it refuses an OS whose bundles are not on disk, naming the directory', () => {
+    // On a machine that has not run `cargo tauri build`, the failure must
+    // say where it looked -- not return an empty list, which would make a
+    // CI step that checked nothing look green.
+    expect(() =>
+      smokeBuiltBundles('windows', '0.6.0', fixture, OUT, () => ok(''), desktopTree([], 'nonsis')),
+    ).toThrow(/bundle[/\\]nsis|nsis/);
+  });
+
+  test('it smokes EVERY kind the OS defines, each with its own engine run', () => {
+    // Linux defines two kinds. A run that found only the .deb and reported
+    // success would ship an unchecked .rpm; the spec's whole argument for
+    // per-push bundling is that an unchecked artifact is the failure mode.
+    expect(kindsForOs('linux').length).toBe(2);
+    const root = desktopTree(['deb', 'rpm'], 'both');
+    const calls: string[][] = [];
+    const smoked = smokeBuiltBundles('linux', '0.6.0', fixture, fresh('bothwork'), engineRun(calls), root);
+    expect(smoked.length).toBe(2);
+    expect(smoked.some((s) => s.endsWith('.deb'))).toBe(true);
+    expect(smoked.some((s) => s.endsWith('.rpm'))).toBe(true);
+    // Two runs per bundle: --version, then a real conversion. Four in all,
+    // so neither kind was discovered and then quietly skipped.
+    expect(calls.length).toBe(4);
+    expect(calls.filter((c) => c.includes('--version')).length).toBe(2);
+  });
+
+  test('one kind missing fails the run, even though the other one smoked clean', () => {
+    // The silent-green failure this exists to prevent: the .deb is there
+    // and perfect, the .rpm was never produced, and a loop that reported
+    // what it found would exit 0 having shipped an unopened package.
+    const root = desktopTree(['deb'], 'debonly');
+    const calls: string[][] = [];
+    expect(() =>
+      smokeBuiltBundles('linux', '0.6.0', fixture, fresh('debonlywork'), engineRun(calls), root),
+    ).toThrow(/rpm/);
+    // The .deb WAS smoked first -- proof the throw is about the missing
+    // second kind and not about failing to start.
+    expect(calls.length).toBe(2);
+  });
+
+  test('the container is verified before any engine inside it is run', () => {
+    const root = desktopTree([], 'wrongmagic');
+    const dir = join(root, 'target', 'release', 'bundle', 'deb');
+    mkdirSync(dir, { recursive: true });
+    // Right name, right size, wrong container -- a copy step that put the
+    // wrong file behind the right name.
+    writeFileSync(join(dir, 'Screepub_0.6.0_arm64.deb'), randomBytes(11_000_000));
+    const calls: string[][] = [];
+    expect(() =>
+      smokeBuiltBundles('linux', '0.6.0', fixture, fresh('wmwork'), engineRun(calls), root),
+    ).toThrow(/magic/);
+    expect(calls.length).toBe(0);
+  });
+
+  test('a bundle under the size floor is refused rather than smoked', () => {
+    const root = desktopTree([], 'tiny');
+    const dir = join(root, 'target', 'release', 'bundle', 'deb');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'Screepub_0.6.0_arm64.deb'), enc('!<arch>\n'));
+    expect(() =>
+      smokeBuiltBundles('linux', '0.6.0', fixture, fresh('tinywork'), () => ok(''), root),
+    ).toThrow(/floor/);
+  });
+
+  test('a wrong-version engine inside a built bundle fails the whole run', () => {
+    // The check the workflow step exists for, end to end through the
+    // discover-verify-smoke path rather than through smokeBundle alone.
+    const root = desktopTree(['deb', 'rpm'], 'badver');
+    expect(() =>
+      smokeBuiltBundles('linux', '0.6.0', fixture, fresh('badverwork'), () =>
+        ok('{"ok":true,"version":"0.5.4"}\n'), root),
+    ).toThrow(/0\.5\.4/);
   });
 });
 

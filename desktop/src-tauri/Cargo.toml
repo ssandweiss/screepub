@@ -8,12 +8,20 @@ publish = false
 description = "Screepub desktop shell. A window around the engine; no logic lives here."
 
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # No serde_json, on purpose and permanently. The engine's answer is an
 # opaque string on its way to the frontend; a JSON parser in this crate is
 # the first step to a decision being made in it.
-tauri = "2"
+#
+# `features = []` is not decoration and must not be tidied away: the Tauri
+# CLI derives these lists from tauri.conf.json and writes them back on every
+# `cargo tauri build`. Committed in the spelling the CLI produces, the
+# rewrite is a no-op and a developer who bundles locally gets no unexplained
+# diff. If tauri.conf.json ever gains a feature-bearing option the CLI will
+# rewrite these again -- which is why desktop.yml still runs its
+# `git diff --exit-code` BEFORE the bundle step and not after.
+tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
