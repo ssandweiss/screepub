@@ -9,19 +9,45 @@ export function sidecarPath(fountainPath: string): string {
   return join(dirname(fountainPath), `${stem}.screepub.json`);
 }
 
-/** Read a sidecar and overlay it on `fallback`. Unknown keys and invalid
- * values are ignored and missing keys leave `fallback` standing, so neither
- * an older nor a newer schema can wipe a user's per-script tuning — that
- * merge is resolveFormatOptions', not a second copy of it. */
-export function loadScriptSettings(fountainPath: string, fallback: FormatOptions): FormatOptions {
+/** What a script's sidecar has to say, if it has anything.
+ *
+ * `null` when there is no sidecar to read at all. `settings: null` when a
+ * file IS there but is not a settings object — hand-edited with a trailing
+ * comma, or half a write from something else. That case must never break a
+ * conversion that would otherwise succeed, so the caller falls back; it is
+ * told apart from "absent" only so the caller can SAY so.
+ *
+ * Unknown keys and invalid values are ignored and missing keys leave
+ * `fallback` standing, so neither an older nor a newer schema can wipe a
+ * user's per-script tuning — that merge is resolveFormatOptions', not a
+ * second copy of it. */
+export function readScriptSettings(
+  fountainPath: string,
+  fallback: FormatOptions,
+): { path: string; settings: FormatOptions | null } | null {
+  const path = sidecarPath(fountainPath);
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(sidecarPath(fountainPath), 'utf8'));
+    parsed = JSON.parse(text);
   } catch {
-    return fallback;
+    return { path, settings: null };
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return fallback;
-  return resolveFormatOptions(parsed as Record<string, unknown>, fallback);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { path, settings: null };
+  }
+  return { path, settings: resolveFormatOptions(parsed as Record<string, unknown>, fallback) };
+}
+
+/** Read a sidecar and overlay it on `fallback` — or hand `fallback` straight
+ * back when there is nothing usable to overlay. */
+export function loadScriptSettings(fountainPath: string, fallback: FormatOptions): FormatOptions {
+  return readScriptSettings(fountainPath, fallback)?.settings ?? fallback;
 }
 
 /** Write the sidecar with sorted keys, via temp-then-rename so a reader

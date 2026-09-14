@@ -11,6 +11,19 @@ written as a **toggle or slider in the Mac app** (the reader window's rail;
 app. Entries below marked "not built" remain future work; everything else
 is live.
 
+**Where a conversion's options come from (2026-09-14):** explicit flag
+(`--options` / `--options-json`) over the script's sidecar
+(`<Stem>.screepub.json`, written by `screepub settings`) over these
+defaults, knob by knob, through the one merge `resolveFormatOptions` already
+is. The conversion itself reads the sidecar — beside the input, or in the
+script's library folder under `--library`, which wins — so a tuned script's
+FIRST book carries its tuning. It used to be read only by `screepub
+settings`, so the library adopted a sidecar and then rendered at the
+defaults; every export rung but MOBI converts that EPUB as it stands, so
+those defaults reached the reader. An unusable sidecar is ignored (the
+conversion still succeeds) and, either way, the engine says on stderr which
+file it used and names it as `settingsPath` in the `--json` answer.
+
 **Coverage of these entries by the committed torture fixture is tracked in
 `tools/torture-manifest.json`**, one row per entry, and
 `tests/torture-coverage.test.ts` fails when an entry has no decision

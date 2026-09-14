@@ -16,7 +16,9 @@ import {
   type ConvertStage,
 } from './convert';
 import { mapConversionError, CliError, errorMessage, type JsonError } from './cli-errors';
-import { adoptSidecar, libraryOutput } from './library';
+import { adoptSidecar, existingLibraryOutput, libraryOutput } from './library';
+import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from './options';
+import { readScriptSettings } from './settings/sidecar';
 import { resolveCommand, devicesCommand, sendCommand, VERBS, type Verb } from './cli-devices';
 import { settingsCommand } from './cli-settings';
 import { exportCommand } from './cli-export';
@@ -32,6 +34,12 @@ and rejoinSplitDialogue are applied when a PDF is read, so they do not take
 effect here (asking to strip (CONT'D) warns rather than failing silently),
 and the scanned-PDF and not-a-screenplay guards are PDF-only. See the
 README's "Fountain input" section.
+
+A script's saved settings are used by the conversion that finds them: if
+<script>.screepub.json sits beside the input — or in the script's library
+folder, under --library — this run renders with it and says so on stderr.
+--options/--options-json override it knob by knob. Write one with the
+settings command.
 
 Options:
   -o, --output <file>    EPUB output path (default: <input>.epub)
@@ -509,6 +517,69 @@ async function main() {
     format = parsed as Record<string, unknown>;
   }
 
+  // The script's own saved settings apply to THIS conversion — the one the
+  // user just asked for — and not only to whatever happens to re-render the
+  // book afterwards. They used to be read by `screepub settings` alone, so a
+  // library conversion ADOPTED a sidecar and then rendered without it: the
+  // first book off a tuned script came out at the defaults, and every rung
+  // that converts the EPUB as it stands (export's KFX and AZW3, and every
+  // non-Kindle device, which get the EPUB verbatim) shipped those defaults to
+  // the reader.
+  //
+  // Scope: any conversion that finds this script's sidecar, not only
+  // --library. A .screepub.json never appears by accident — `screepub
+  // settings --set` is the only thing that writes one — so honouring it is
+  // honouring something the user deliberately said about this script, and
+  // the same file being obeyed or ignored depending on an unrelated output
+  // flag would be the stranger rule. What keeps that from being a surprise
+  // is that it is SAID, on stderr, every time it happens.
+  //
+  // Precedence: explicit flag > sidecar > defaults, knob by knob, through
+  // the one merge resolveFormatOptions already is — no second rule. A
+  // partial --options therefore moves the knobs it names and leaves the rest
+  // of the script's tuning standing, which is what cli-settings' --set does
+  // with the same call.
+  let settings: FormatOptions | undefined;
+  let settingsPath: string | undefined;
+  const sidecarCandidates: string[] = [];
+  if (values.library) {
+    // A sidecar already IN the library outranks the older copy beside the
+    // PDF — the same precedence adoptSidecar applies when it refuses to
+    // overwrite it. Read-only: resolving it must not create a folder for an
+    // input that is about to be refused.
+    try {
+      const prefix = existingLibraryOutput(input);
+      if (prefix !== null) sidecarCandidates.push(`${prefix}.fountain`);
+    } catch {
+      // An unusable library is the conversion's problem, and it is reported
+      // below with its own code. It is not a reason to fail here.
+    }
+  }
+  sidecarCandidates.push(input);
+  for (const candidate of sidecarCandidates) {
+    const read = readScriptSettings(candidate, DEFAULT_FORMAT_OPTIONS);
+    if (read === null) continue;
+    if (read.settings === null) {
+      // Malformed must never break a conversion that would otherwise
+      // succeed — loadScriptSettings has always shrugged at one — but
+      // shrugging SILENTLY is how "why does this look different from last
+      // time" goes unanswered.
+      process.stderr.write(
+        `screepub: ignoring ${read.path} — it is not a settings object\n`,
+      );
+      continue;
+    }
+    settings = read.settings;
+    settingsPath = read.path;
+    process.stderr.write(
+      `screepub: using this script's saved settings — ${read.path}` +
+        `${format ? ' (the options you passed override them)' : ''}\n`,
+    );
+    break;
+  }
+  // One object, one merge: the flags over the sidecar over the defaults.
+  const formatForConvert = settings === undefined ? format : resolveFormatOptions(format, settings);
+
   // Progress goes to STDERR, never stdout. --json's contract is that stdout
   // is exactly one parseable object, and the app decodes it as such; a
   // progress line on stdout would corrupt every conversion the app runs.
@@ -524,7 +595,7 @@ async function main() {
       }
     : undefined;
 
-  const opts = { title: values.title, author: values.author, force: values.force, mobi: values.mobi, format, onProgress };
+  const opts = { title: values.title, author: values.author, force: values.force, mobi: values.mobi, format: formatForConvert, onProgress };
 
   let result: ConvertResult;
   const isPdf = ext === '.pdf';
@@ -627,6 +698,10 @@ async function main() {
         epubPath,
         mobiPath,
         fountainPath,
+        // The sidecar this conversion actually rendered with, so the window
+        // (and anyone reading the answer later) can tell a book built from a
+        // script's saved settings from one built at the defaults.
+        settingsPath,
         previewHtmlPath: previewPath,
         debugPath,
         // Spread, not a plain key: the app asks for this and nothing else

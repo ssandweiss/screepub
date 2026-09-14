@@ -136,7 +136,7 @@ function recordedSource(folder: string): string | null {
  * Which folder an input owns is therefore decided by what is ON DISK, not by
  * the name alone — and it is stable, because the same input path always
  * re-recognises its own source.json and gets the same folder back. */
-function scriptFolder(source: string, root: string): string {
+function folderFor(source: string, root: string): string {
   const stem = stemOf(source);
   const hash = createHash('sha256').update(source).digest('hex');
   // Free, or already ours. A folder with no source.json (one the user made,
@@ -160,6 +160,12 @@ function scriptFolder(source: string, root: string): string {
     folder = join(root, `${stem}-${mark}`);
   }
 
+  return folder;
+}
+
+/** The same folder, created and marked as this script's. */
+function scriptFolder(source: string, root: string): string {
+  const folder = folderFor(source, root);
   mkdirSync(folder, { recursive: true });
   if (recordedSource(folder) !== source) {
     writeFileSync(join(folder, SOURCE_FILE), `${JSON.stringify({ source }, null, 2)}\n`);
@@ -181,6 +187,20 @@ export function libraryOutput(input: string, root: string = libraryRoot()): stri
   // name, one file stem, one source of truth.
   const source = resolve(input);
   return join(scriptFolder(source, root), stemOf(source));
+}
+
+/** This input's output prefix in `root` IF the library already holds the
+ * script's folder — and null otherwise. Creates nothing and writes nothing.
+ *
+ * libraryOutput's read-only twin, for the one question that has to be asked
+ * BEFORE a conversion runs: what has this script already been tuned to?
+ * Asking it with libraryOutput would make a folder for every typo'd path and
+ * every file that turns out not to be a screenplay, which is exactly the
+ * defect that moved the library resolution below the conversion. */
+export function existingLibraryOutput(input: string, root: string = libraryRoot()): string | null {
+  const source = resolve(input);
+  const folder = folderFor(source, root);
+  return existsSync(folder) ? join(folder, stemOf(source)) : null;
 }
 
 /** A script converted beside its PDF before the library existed has its
