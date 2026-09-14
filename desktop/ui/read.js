@@ -57,6 +57,28 @@ export const FONT_CSS = `
  *  property declared on this document does not cascade into another one. */
 export const PAPER_TOKENS = ['ink', 'paper'];
 
+/** The theme, read off whatever declares it. The window hands this the
+ *  computed style of its own root; a test hands it a reader that records
+ *  what was asked for. Splitting it out is what makes the whole path —
+ *  which properties are read, what comes back, what reaches the frame's
+ *  sheet — checkable, instead of only checkable that the reading happened. */
+export function paperFrom(read) {
+  const tokens = {};
+  for (const name of PAPER_TOKENS) tokens[name] = read(`--${name}`);
+  return tokens;
+}
+
+/** The page margin the frame reads at. It is NOT a --space token, and that
+ *  is the point: those are rem values for the window's own furniture, and
+ *  they do not cross into the frame anyway (a custom property declared on
+ *  this document does not cascade into another one). What this margin owes
+ *  is the rule the EPUB's own stylesheet is held to — horizontal in %,
+ *  vertical in em — so it scales with the reader's type size the way a
+ *  device's margin does, and stays proportional to the column at any window
+ *  width. tests/desktop-ui.test.ts pins both units so it cannot drift into
+ *  px or rem. */
+export const PAGE_MARGIN = { block: '1.6em', inline: '7%' };
+
 /** What a reading device supplies on top of a book: the page margins and
  *  the theme it is read in. The engine's stylesheet sets NEITHER on purpose
  *  — `html, body { margin: 0; padding: 0 }` leaves margins to the device,
@@ -74,7 +96,8 @@ export function deviceCss(tokens) {
     ink === '' ? null : `color: ${ink};`,
     paper === '' ? null : `background: ${paper};`,
   ].filter((part) => part !== null).join(' ');
-  return `html { ${colours} }\nbody { padding: 1.6em 7%; }\n`;
+  return `html { ${colours} }\n`
+    + `body { padding: ${PAGE_MARGIN.block} ${PAGE_MARGIN.inline}; }\n`;
 }
 
 /** The whole sheet the frame adopts, in the order a device applies it: the
@@ -109,15 +132,17 @@ export function readerState(script) {
   return html === '' ? 'blank' : 'ready';
 }
 
-/** An empty reader is an invitation, not a blank panel. */
+/** The one state that is not the script and can still be reached.
+ *
+ *  There is deliberately no notice for `closed`. main.js disables the Read
+ *  tab whenever no script is open and there is no way to close one, so a
+ *  reader can never be standing on this surface with nothing converted —
+ *  the invitation belongs to Convert, which is the only surface reachable
+ *  then, and says it better with the drop well. An empty reader IS an
+ *  invitation rather than a blank panel; it is just that the invitation is
+ *  on the other tab. Copy nobody can see reads as a considered empty state
+ *  to the next person who maintains it, which is worse than none. */
 export const NOTICES = {
-  closed: {
-    slug: 'Int. the reader - before page one',
-    line: 'Nothing is open yet. Convert a script and it arrives here whole — '
-      + 'scenes still scenes, cues still fixed to their lines — set exactly as '
-      + 'the e-book will set it.',
-    way: 'Convert a script',
-  },
   blank: {
     slug: 'Int. the reader - no pages came back',
     line: 'The engine converted this script but sent no pages to read. The book '
@@ -214,12 +239,30 @@ let place = null;
 let sheetCss = '';
 let markedId = null;
 let ticking = false;
+let resizing = false;
 let watching = null;
 let darkQuery = null;
 
 export function mount(node, context) {
   pane = node;
   ctx = context;
+
+  // The WINDOW's resize, not the frame's: a frame cannot be resized on its
+  // own, and — as with scroll — the frame's own events do not reach this
+  // document. A reflow moves every section, so marks taken before it are
+  // answers about a layout that no longer exists and the rail starts naming
+  // the wrong scene. Whether it names the wrong one depends on how
+  // proportional the reflow was, which is to say: on luck.
+  addEventListener('resize', () => {
+    if (resizing) return;
+    resizing = true;
+    requestAnimationFrame(() => {
+      resizing = false;
+      measure();
+      markCurrent();
+    });
+  });
+
   draw();
 }
 
@@ -276,7 +319,10 @@ function draw() {
 
   const state = readerState(ctx.state.script);
   if (state !== 'ready') {
-    drawNotice(NOTICES[state]);
+    // `closed` draws nothing on purpose: the tab is disabled in that state,
+    // so this pane is not somewhere a reader can be. See NOTICES.
+    const notice = NOTICES[state];
+    if (notice !== undefined) drawNotice(notice);
     return;
   }
 
@@ -385,8 +431,7 @@ function adopt() {
   const win = frame.contentWindow;
   if (!doc || !win) return;
   const root = getComputedStyle(document.documentElement);
-  const tokens = {};
-  for (const name of PAPER_TOKENS) tokens[name] = root.getPropertyValue(`--${name}`);
+  const tokens = paperFrom((name) => root.getPropertyValue(name));
   const sheet = new win.CSSStyleSheet();
   sheet.replaceSync(sheetText(sheetCss, tokens));
   doc.adoptedStyleSheets = [sheet];

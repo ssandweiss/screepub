@@ -253,6 +253,10 @@
 }
 
 .scene-rail {
+  /* Positioned so it is the offsetParent of its own buttons: read.js keeps
+   * the marked scene inside this strip by its offsetTop, and an unpositioned
+   * rail would hand it an offset measured from the page instead. */
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;

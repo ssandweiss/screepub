@@ -848,6 +848,19 @@ describe('the Read surface', () => {
     expect(reader).toMatch(/export function hide\(\)[\s\S]{0,120}keep\(\)/);
   });
 
+  test('the rail can scroll its own mark into view', () => {
+    // read.js keeps the marked scene inside the rail with
+    // `rail.scrollTop = button.offsetTop`, which is only the offset WITHIN
+    // the rail if the rail is the button's offsetParent. Unpositioned, the
+    // offset is measured from the page and the rail scrolls to a number that
+    // means nothing — visible at narrow widths, where the rail is a short
+    // strip and the mark simply never comes into view.
+    expect(reader).toContain('rail.scrollTop = button.offsetTop');
+    const css = read('surfaces.css');
+    const rule = css.slice(css.indexOf('.scene-rail {'));
+    expect(rule.slice(0, rule.indexOf('}'))).toContain('position: relative');
+  });
+
   test('the parser the window uses is the real one', () => {
     // splitPreview() takes its parser as an argument so it can be exercised
     // below without a browser. That is only honest if the window itself
@@ -860,8 +873,23 @@ describe('the Read surface', () => {
     // The window's colour tokens are declared on THIS document; a custom
     // property does not cascade into another one, so a frame that only
     // named them would render black ink on a dark ground in dark mode.
+    // What the VALUES do once read is checked below, against the CSS.
     expect(reader).toContain('getPropertyValue');
     expect(reader).toContain('prefers-color-scheme');
+    // adopt() must hand the sheet the tokens it read and nothing else: this
+    // is the seam the value test below cannot see across.
+    expect(reader).toMatch(/paperFrom\(\(name\) => root\.getPropertyValue\(name\)\)/);
+    expect(reader).toMatch(/sheetText\(sheetCss, tokens\)/);
+  });
+
+  test('a resized window re-measures, because a reflow moves every scene', () => {
+    // measure() ran only when the frame loaded and when the surface was
+    // shown. After a resize the frame reflows and the marks describe a
+    // layout that no longer exists, so readerPlace() can name the wrong
+    // scene until the next surface round trip. Whether it does depends on
+    // how proportional the reflow happened to be.
+    expect(reader).toMatch(/addEventListener\('resize'[\s\S]{0,300}measure\(\)/);
+    expect(reader).toMatch(/addEventListener\('resize'[\s\S]{0,300}markCurrent\(\)/);
   });
 });
 
@@ -877,6 +905,8 @@ describe('what the Read surface decides', () => {
     NO_SCENES: string;
     NOTICES: Record<string, { slug: string; line: string; way: string }>;
     deviceCss: (tokens: unknown) => string;
+    paperFrom: (read: (name: string) => string) => Record<string, string>;
+    PAGE_MARGIN: { block: string; inline: string };
     sheetText: (engineCss: unknown, tokens: unknown) => string;
     splitPreview: (html: string, parser: unknown) => { css: string; html: string };
     readerState: (script: unknown) => string;
@@ -1037,6 +1067,57 @@ describe('what the Read surface decides', () => {
     expect([...urls].sort()).toEqual([...new Set(windowFaces)].sort());
   });
 
+  test('the values read off the window are the values the frame is painted in', () => {
+    // The weak form of this test asserted only that getPropertyValue appears
+    // in the file, which an implementation that read the tokens and then
+    // wrote a colour of its OWN would pass. So: drive the whole path — which
+    // properties are asked for, what comes back, what reaches the sheet —
+    // with values nothing could plausibly invent.
+    const asked: string[] = [];
+    const answers: Record<string, string> = {
+      '--ink': 'oklch(0.113 0.019 83.4)',
+      '--paper': 'oklch(0.971 0.013 84.1)',
+    };
+    const tokens = reader.paperFrom((name) => {
+      asked.push(name);
+      return answers[name] ?? '';
+    });
+    // The two the frame cannot get any other way, asked for by their real
+    // names — a reader that asked for something else would paint a theme
+    // nobody chose.
+    expect(asked).toEqual(['--ink', '--paper']);
+    expect(tokens).toEqual({ ink: answers['--ink'], paper: answers['--paper'] });
+
+    const sheet = reader.sheetText('section.scene { margin: 0; }', tokens);
+    // Exact, and the whole rule: an invented colour cannot hide beside the
+    // real one, and an extra declaration cannot hide inside it.
+    expect(sheet).toContain(
+      `html { color: ${answers['--ink']}; background: ${answers['--paper']}; }`,
+    );
+    // Nothing in the emitted sheet paints with anything but what was read.
+    const painted = [...sheet.matchAll(/(?:^|[;{\s])(?:color|background)\s*:\s*([^;}]+)/g)]
+      .map(([, value]) => value.trim());
+    expect(painted).toEqual([answers['--ink'], answers['--paper']]);
+  });
+
+  test('the page margin is the device’s, in the units the EPUB rule demands', () => {
+    // The one size in this surface that is not a brand token, because the
+    // brand's are rem values for the window's furniture and do not cross
+    // into the frame at all. What it owes instead is the rule the engine's
+    // own stylesheet is held to: horizontal in %, vertical in em, so it
+    // scales with the reader's type size and stays proportional to the
+    // column. Pinned so it cannot drift into px or rem unnoticed.
+    expect(reader.PAGE_MARGIN.block).toMatch(/^[\d.]+em$/);
+    expect(reader.PAGE_MARGIN.inline).toMatch(/^[\d.]+%$/);
+    const sheet = reader.deviceCss({ ink: 'black', paper: 'white' });
+    expect(sheet).toContain(
+      `body { padding: ${reader.PAGE_MARGIN.block} ${reader.PAGE_MARGIN.inline}; }`,
+    );
+    // And the emitted padding is that constant, not a second copy of it.
+    const paddings = [...sheet.matchAll(/padding:\s*([^;}]+)/g)].map(([, v]) => v.trim());
+    expect(paddings).toEqual([`${reader.PAGE_MARGIN.block} ${reader.PAGE_MARGIN.inline}`]);
+  });
+
   test('a token that did not resolve is left out, not written as blank', () => {
     // getPropertyValue() returns '' for a property that is not declared.
     // `color: ;` is a dropped declaration at best and a dropped RULE in a
@@ -1167,18 +1248,23 @@ describe('what the Read surface decides', () => {
     expect(reader.readerState({ previewHtml: undefined })).toBe('blank');
     expect(reader.readerState({ previewHtml: preview })).toBe('ready');
 
-    // An empty reader is an invitation, not a blank panel: every state that
-    // is not the script says what happened AND offers the way on.
-    for (const state of ['closed', 'blank']) {
-      const notice = reader.NOTICES[state];
-      expect(`${state} has a slug: ${(notice?.slug ?? '').length > 0}`)
-        .toBe(`${state} has a slug: true`);
-      expect(notice.line.length).toBeGreaterThan(40);
-      expect(notice.way.length).toBeGreaterThan(0);
-    }
-    // The two are not the same notice with a different name: a blank preview
-    // is not the same situation as no script at all.
-    expect(reader.NOTICES.closed.line).not.toBe(reader.NOTICES.blank.line);
+    // `blank` is reachable — the tab is live, the script converted, and the
+    // pages did not come back — so it says what happened AND offers the way
+    // on. `closed` is NOT reachable: main.js disables the Read tab whenever
+    // no script is open and nothing closes one, so there is deliberately no
+    // copy for it. Copy nobody can see reads as a considered empty state to
+    // the next person who maintains it.
+    const notice = reader.NOTICES.blank;
+    expect(notice.slug.length).toBeGreaterThan(0);
+    expect(notice.line.length).toBeGreaterThan(40);
+    expect(notice.way.length).toBeGreaterThan(0);
+    expect(Object.keys(reader.NOTICES)).toEqual(['blank']);
+    // The tab really is out of reach in that state, which is the whole
+    // argument for not writing the words. If this ever stops being true,
+    // this test fails and the invitation has to come back.
+    const main = read('main.js');
+    expect(main).toMatch(/NEEDS_SCRIPT[\s\S]{0,80}'read'/);
+    expect(main).toMatch(/frame\.enable\(id, open\)/);
     expect(reader.NO_SCENES.length).toBeGreaterThan(0);
   });
 });
