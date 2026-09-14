@@ -584,3 +584,81 @@ wholesale and so takes over `Exec=`, `Icon=`, `StartupWMClass=` and
 `MimeType=` as well — four more things to keep correct by hand, on a
 surface nobody here can test, to add one category string. Not worth it.
 `Office;` is what ships and this paragraph is why.
+
+## Bundling: what was built, and what was checked (observed 2026-09-14)
+
+`cargo tauri build --bundles deb,rpm` from an empty
+`target/release/bundle/`, on aarch64-unknown-linux-gnu with
+`tauri-cli 2.11.4`, `rustc`/`cargo` 1.98.1 and bun 1.3.11:
+
+| artifact | size | wall time |
+| --- | --- | --- |
+| `Screepub_0.6.0_arm64.deb` | 44,363,298 B | **3 m 29.8 s for the pair** |
+| `Screepub-0.6.0-1.aarch64.rpm` | 44,358,905 B | (`cargo` itself: 15.06 s) |
+
+**Three and a half minutes, not fifty seconds.** The Rust half is 15
+seconds; the other three and a quarter minutes are the bundler compressing a
+102 MB engine twice — once into `data.tar.gz`, once into the rpm payload.
+Budget for that, and note that `--bundles deb` alone is roughly half of it.
+
+Opened with `tools/bundle-archive.ts` — no `dpkg-deb`, no `rpm2cpio`, no
+`rpm`, none of which is installed here — both hold `usr/bin/screepub-engine`
+(102,153,058 B), `usr/lib/Screepub/LICENSE` (34,523 B),
+`usr/lib/Screepub/THIRD-PARTY-NOTICES.md` (6,079 B) and a `.desktop` entry
+carrying `Categories=Office;`, a human `Comment=` and
+`MimeType=application/pdf`. `findEntry` absorbs the rpm's `./` name prefix;
+no lookup needed a special case. `tools/smoke-bundle.ts` ran the engine
+straight out of both and converted `tests/fixtures/screenplay.pdf`, and
+rejected `--expect-version 9.9.9` on both, which is what makes the passing
+run evidence.
+
+**The application itself was run out of the `.deb`, not just the engine.**
+The payload was unpacked to a scratch directory with
+`tools/bundle-archive.ts` and `usr/bin/screepub-desktop` launched directly
+under the live Hyprland/Wayland session. It mapped a window
+(`class=screepub-desktop`, `title=Screepub`), rendered the CONVERT page, and
+printed `ENGINE 0.5.4` in the corner — which means the shell found and
+spawned `usr/bin/screepub-engine` from beside itself inside the unpacked
+tree. `Ctrl+O` opened the portal file chooser. Nothing was installed and no
+`sudo` was used.
+
+**What this does NOT show.** No `.deb` or `.rpm` has been *installed* on any
+machine; they have been opened and their contents executed in place. The
+launcher entry has never been exercised by a desktop environment — the app
+was started from a shell. No `.dmg` and no NSIS installer has ever been
+produced by this project at all.
+
+### What contradicted the plan
+
+1. **Wall time was 4× the plan's figure** — 3 m 29.8 s for the pair against
+   "about 50 seconds each". Corrected in the table above.
+2. **The deb and the rpm carry exactly the same nine files.** The plan, and
+   the doc comment on `verifyBundleFile`, both recorded that they do not:
+   that the deb ships four icon sizes and the rpm only 512×512, and that
+   their `screepub-desktop` binaries differ in size (14,434,192 vs
+   15,482,648). In this build the rpm ships **all four** icon sizes and both
+   `screepub-desktop` binaries are **14,434,192 B**, byte-for-byte the same
+   size, as is every other entry. The earlier observation was of a stale
+   pair built before the Task 2 config change; it is not a property of the
+   bundlers. Only the entry *order* and the `./` prefix differ. The
+   cross-kind file-list assertion the plan warned against is in fact safe
+   today — but it is still not asserted, because nothing guarantees two
+   different bundlers stay in step.
+3. **`MimeType=application/pdf` is inert as shipped.** The entry declares
+   the type, but `Exec=screepub-desktop` carries no `%f`/`%U`, so a desktop
+   environment passes no path; and `desktop/src-tauri/src/main.rs` never
+   reads `argv` anyway. "Open with Screepub" from a file manager will open
+   an empty window. The declaration is not wrong — it makes Screepub appear
+   in the PDF handler list — but the plan's phrase "offers to open a PDF"
+   overstates it, and the test in `tests/app-bundle-e2e.test.ts` asserts
+   only that the line is present, which is all it should assert. Making it
+   real needs `%f` in a custom `desktopTemplate` *and* argv handling in the
+   shell, neither of which exists.
+4. `cargo tauri build` rewrote `desktop/src-tauri/Cargo.toml` again, to
+   exactly the Task 2 spelling: `tauri-build = { version = "2", features =
+   [] }` and `tauri = { version = "2", features = [] }`. The two plugin
+   dependencies (`tauri-plugin-shell`, `tauri-plugin-dialog`) are **not**
+   touched. Restored with `git checkout`.
+5. The gated suite has **seven** tests, not six-plus-one: with bundles on
+   disk it is 7 pass, and with none it is 1 pass / 6 skip with the reason
+   printed. The plan's "passes six tests" undercounts by one.

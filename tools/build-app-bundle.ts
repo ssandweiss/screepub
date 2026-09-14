@@ -193,10 +193,15 @@ function bytesAt(path: string, n: number, position: number): Uint8Array {
  *  truncated image, and a copy step can put the wrong container behind the
  *  right name.
  *
- *  There is deliberately no shared file-list assertion across kinds: the
- *  real .deb and .rpm of the same build do NOT carry the same payload (the
- *  deb ships four icon sizes, the rpm one; their binaries differ in size),
- *  so the only thing true of every kind is its container and its scale. */
+ *  There is deliberately no shared file-list assertion across kinds. An
+ *  earlier note here said the real .deb and .rpm of one build do not carry
+ *  the same payload -- deb four icon sizes, rpm one, binaries of different
+ *  sizes. That was measured on a STALE pair and did not reproduce: the
+ *  2026-09-14 build ships the same nine files at the same sizes in both,
+ *  differing only in entry order and the rpm's `./` prefix. The assertion
+ *  still does not exist, for the weaker and more durable reason: nothing
+ *  makes two different bundlers stay in step, so the only thing true of
+ *  every kind is its container and its scale. */
 export function verifyBundleFile(path: string, kind: BundleKind): void {
   if (!existsSync(path)) {
     throw new Error(`build-app-bundle: ${kind.id}: nothing at ${path}`);
