@@ -1,0 +1,285 @@
+{
+  "$comment": "The blast radius of deleting app/ — every tracked file OUTSIDE app/ that names the SwiftUI app, its directory, its build commands or the release artifacts only it produces. Enforced by tests/app-references.test.ts, which defines what counts as a reference and why. `refs` is a CEILING: it may fall (that is progress toward piece F3), never rise without a row being updated deliberately. `category` is what would break: build = a workflow or script that executes or packages app/; test = a bun test that reads app/ or asserts about its artifacts; artifact = names a release artifact or bundle only the Swift app produces; doc = user-facing prose that becomes false; note = a comment citing app/ as provenance, stale rather than broken; freeze = the F1 freeze machinery itself. See docs/superpowers/specs/2026-09-14-retire-swiftui-design.md (F3 acceptance criterion 11: this file is empty when the retirement is done).",
+  "files": {
+    ".github/dependabot.yml": {
+      "refs": 2,
+      "category": "note",
+      "breaks": "A comment explaining why there is no SwiftPM ecosystem entry: it names app/Package.swift. Goes with the directory."
+    },
+    ".github/workflows/ci.yml": {
+      "refs": 6,
+      "category": "build",
+      "breaks": "The `app` job: swift build + `swift run kit-check` on macos-15, working-directory: app. This job is COVERAGE (171 of kit-check's 264 checks exist nowhere else) and must survive until F3, then be deleted whole."
+    },
+    ".github/workflows/release.yml": {
+      "refs": 26,
+      "category": "build",
+      "breaks": "The macOS Swift job (working-directory: app), app/release.sh, the three app/dist assets it uploads, and the tap crib sheet that hashes them. NOTE for whoever greps: this file ALSO says `path: app` and `cd app` in the app-bundles/app-upload jobs, and those are the TAURI bundle staging directory, not this repository directory. Do not delete them."
+    },
+    ".github/workflows/weekly-toolchain.yml": {
+      "refs": 5,
+      "category": "build",
+      "breaks": "The ENTIRE workflow is `swift run -c release kit-check` with working-directory: app, on macos-15 with Calibre. It has no non-Swift job, so F3 deletes the file outright. It is reachable only through `working-directory: app`, which a grep for \"app/\" does not see."
+    },
+    ".gitignore": {
+      "refs": 3,
+      "category": "build",
+      "breaks": "Ignores app/build/, app/dist/, app/.build/ — the SwiftPM and release output paths."
+    },
+    "CLAUDE.md": {
+      "refs": 16,
+      "category": "doc",
+      "breaks": "The architecture section, both Swift build commands, and the format-defaults.json invariant that says BOTH options.test.ts and kit-check pin it (F3 acceptance criterion 14 rewrites that sentence)."
+    },
+    "CONTRIBUTING.md": {
+      "refs": 8,
+      "category": "doc",
+      "breaks": "The contributor build commands: app/build-app.sh and `swift run kit-check`, plus the description of CI's app job."
+    },
+    "README.md": {
+      "refs": 12,
+      "category": "doc",
+      "breaks": "The DMG download button, \"the macOS app in app/ remains the supported Mac app\", the build commands, and the source-tree map. User-facing: it must not point at a directory that is gone."
+    },
+    "SECURITY.md": {
+      "refs": 1,
+      "category": "doc",
+      "breaks": "Names app/screepub-engine.entitlements in the threat-model section."
+    },
+    "THIRD-PARTY-NOTICES.md": {
+      "refs": 11,
+      "category": "doc",
+      "breaks": "Two live paths inside app/Packages/KFXKit (PROVENANCE.md and LICENSE) plus the Screepub.app resource path. This is a LICENSE document: a dangling path in it is a compliance defect, not a typo. F3 acceptance criterion 13."
+    },
+    "brand/README.md": {
+      "refs": 3,
+      "category": "doc",
+      "breaks": "Declares app/Sources/ScreepubApp/Theme.swift the source of the shared brand tokens. Reversed by F3 criterion 12."
+    },
+    "brand/tokens.css": {
+      "refs": 2,
+      "category": "note",
+      "breaks": "Comments saying which values mirror Theme.swift."
+    },
+    "brand/tokens.json": {
+      "refs": 11,
+      "category": "test",
+      "breaks": "`\"from\": \"Theme.swift\"` on eight tokens, plus a $comment naming the Swift path. This is the machine-readable half of the pin that tests/brand-tokens.test.ts enforces; promoting this file to source of truth is F3 criterion 12."
+    },
+    "desktop/README.md": {
+      "refs": 1,
+      "category": "artifact",
+      "breaks": "Names Screepub.app — the bundle name the Tauri app takes over at F2."
+    },
+    "desktop/ui/style.css": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment naming Theme.swift as what the token values are re-checked against."
+    },
+    "desktop/ui/tune.js": {
+      "refs": 3,
+      "category": "note",
+      "breaks": "A comment crediting the Mac app's rail (app/Sources/ScreepubApp/) as the origin of the tune panel."
+    },
+    "docs/device-map.md": {
+      "refs": 2,
+      "category": "doc",
+      "breaks": "\"Current support (app code, verified against ScreepubKit)\" is the provenance line for the support table; it stops being a checkable claim at F3."
+    },
+    "docs/formatting-options-log.md": {
+      "refs": 13,
+      "category": "doc",
+      "breaks": "The options registry names Swift files as the implementing code for three behaviours and kit-check as their guard. CLAUDE.md calls this file the app's options registry, so a stale entry here misleads by design."
+    },
+    "docs/release-notes-template.md": {
+      "refs": 5,
+      "category": "doc",
+      "breaks": "A live instruction to the notes author: edit app/Sources/ScreepubApp/ReaderRail.swift when a bullet announces a UI change. Not a record — a procedure that would tell someone to edit a deleted file."
+    },
+    "docs/release-secrets.md": {
+      "refs": 2,
+      "category": "doc",
+      "breaks": "Says app/release.sh computes the three SHAs the tap bump needs, and names Screepub-macOS.dmg among the re-uploaded assets."
+    },
+    "site/index.html": {
+      "refs": 4,
+      "category": "artifact",
+      "breaks": "Three DOWNLOAD FOR MACOS buttons pointing at Screepub-macOS.dmg plus the supported-download paragraph. The count of three is itself pinned by tests/release-artifacts.test.ts."
+    },
+    "src/cli-devices.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment pointing at RemarkableDevice.swift for the byte-identical behaviour."
+    },
+    "src/device/remarkable.ts": {
+      "refs": 4,
+      "category": "note",
+      "breaks": "A comment that explicitly asks NOT to be reworded \"while app/ exists\", because KitCheck still runs against it. It becomes free to edit at F3 — and should be, or it will keep pointing readers at nothing."
+    },
+    "src/device/volumes.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "Records a deliberate divergence from Device.swift."
+    },
+    "src/export/artifact.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment citing Export.swift's behaviour as the precedent."
+    },
+    "src/export/calibre.ts": {
+      "refs": 2,
+      "category": "note",
+      "breaks": "Two comments: one saying the two-step matches EbookConvert.swift exactly, one recording a deliberate divergence from it."
+    },
+    "src/export/kfx.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment citing Export.swift's mobiSibling(for:)."
+    },
+    "src/settings/presets.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "Repeats the claim that options.test.ts AND kit-check both pin format-defaults.json. That sentence becomes false at F3 (criterion 14), in source rather than in a doc."
+    },
+    "tests/brand-components.test.ts": {
+      "refs": 2,
+      "category": "note",
+      "breaks": "A comment crediting Theme.swift/ContentView.swift as where the components existed first."
+    },
+    "tests/brand-tokens.test.ts": {
+      "refs": 9,
+      "category": "test",
+      "breaks": "FAILS OUTRIGHT once Theme.swift is gone: it filters brand/tokens.json for from:\"Theme.swift\" and compares each value against the parsed Swift. F3 criterion 12 reverses its direction."
+    },
+    "tests/build-app-bundle.test.ts": {
+      "refs": 3,
+      "category": "test",
+      "breaks": "Asserts the Tauri DMG is NOT named Screepub-macOS.dmg. The assertion loses its subject when the Swift DMG stops being published (F2), and the F2 rename of the Desktop infix rewrites it."
+    },
+    "tests/build-cli.test.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment siting the unsigned CLI \"alongside the signed one app/release.sh builds\"."
+    },
+    "tests/cli.test.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment saying the --json sample is the same file kit-check decodes."
+    },
+    "tests/desktop-shell.test.ts": {
+      "refs": 13,
+      "category": "test",
+      "breaks": "Pins the bundle-identifier split against app/Sources/KitCheck/main.swift, and holds a whole \"nothing under app/ or src/ was drawn into this\" boundary describe block. Its subject moves at F2 and several assertions go at F3."
+    },
+    "tests/device-kindle.test.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment saying tempDir() mirrors kit-check's."
+    },
+    "tests/device-remarkable.test.ts": {
+      "refs": 2,
+      "category": "note",
+      "breaks": "A comment saying the request recorder mirrors kit-check's StubRemarkable."
+    },
+    "tests/device-transfer.test.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment saying tempDir() mirrors kit-check's."
+    },
+    "tests/export-calibre.test.ts": {
+      "refs": 6,
+      "category": "note",
+      "breaks": "Cites KitCheck/main.swift:349-350 BY LINE NUMBER. Line citations into a directory scheduled for deletion rot in both directions; this is the one to rewrite first."
+    },
+    "tests/export-kfx.test.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment citing Export.swift's mobiSibling(for:) precedent."
+    },
+    "tests/frozen-app.test.ts": {
+      "refs": 31,
+      "category": "freeze",
+      "breaks": "The freeze guard itself. It reads app/ and app/README-FROZEN.md, so F3 deletes it in the same commit as the directory."
+    },
+    "tests/mobi.test.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment citing Export.swift's kfxReady."
+    },
+    "tests/options.test.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment saying kit-check decodes the same format-defaults.json."
+    },
+    "tests/release-artifacts.test.ts": {
+      "refs": 14,
+      "category": "test",
+      "breaks": "READS app/release.sh and asserts it still produces the two tarballs and the DMG, that release.yml uploads app/dist/*, and that site/index.html carries exactly three DMG links. Roughly eight tests fail at F3; several must change at F2 instead."
+    },
+    "tests/sidecar-targets.test.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment naming app/release.sh as the other producer of the macOS targets."
+    },
+    "tests/sidecar.test.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment saying the assertion was ported verbatim from kit-check."
+    },
+    "tests/smoke-bundle.test.ts": {
+      "refs": 3,
+      "category": "artifact",
+      "breaks": "Builds a fake DMG whose bundle is named Screepub.app. Harmless today; it collides in meaning once the Tauri bundle takes that name at F2."
+    },
+    "tests/theme-colors.ts": {
+      "refs": 5,
+      "category": "test",
+      "breaks": "READS app/Sources/ScreepubApp/Theme.swift and parses it. The single hardest F3 dependency: it is the only file outside app/ that opens a file inside app/ for its CONTENT rather than its existence."
+    },
+    "tools/build-app-bundle.ts": {
+      "refs": 3,
+      "category": "artifact",
+      "breaks": "The DMG naming rule, written specifically so the Tauri artifact cannot collide with Screepub-macOS.dmg. F2 removes the Desktop infix and this comment with it."
+    },
+    "tools/build-cli.ts": {
+      "refs": 3,
+      "category": "note",
+      "breaks": "Comments explaining that the signed macOS CLI comes from app/release.sh instead."
+    },
+    "tools/build-sidecar.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment drawing the line between this tool's job and app/release.sh's."
+    },
+    "tools/bump-tap.sh": {
+      "refs": 2,
+      "category": "artifact",
+      "breaks": "Hardcodes Screepub-macOS.dmg for the cask digest. TAP MACHINERY — belongs to gate 3 and must not be edited before F2 answers the per-arch question. Listed here so the blast radius is known, not so it is touched."
+    },
+    "tools/check-tap.sh": {
+      "refs": 1,
+      "category": "artifact",
+      "breaks": "Verifies the published cask still serves Screepub-macOS.dmg. TAP MACHINERY, gate 3. It is run weekly by .github/workflows/tap-freshness.yml, which carries no textual reference of its own and is therefore INVISIBLE to this sweep — the second-order reference this row exists to record."
+    },
+    "tools/frozen-app-manifest.json": {
+      "refs": 67,
+      "category": "freeze",
+      "breaks": "The frozen inventory of app/'s Swift files. F3 deletes it with the directory."
+    },
+    "tools/release-notes.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment naming src/ and app/ as the two trees a denylist would otherwise have had to enumerate."
+    },
+    "tools/sidecar-targets.ts": {
+      "refs": 1,
+      "category": "note",
+      "breaks": "A comment saying the signed macOS CLI is notarized from app/release.sh."
+    },
+    "tools/smoke-bundle.ts": {
+      "refs": 1,
+      "category": "artifact",
+      "breaks": "A comment saying piece F renames \"Screepub Desktop.app\" to \"Screepub.app\"."
+    }
+  }
+}
