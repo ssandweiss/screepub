@@ -156,7 +156,8 @@ tune its formatting, send it to a reader, and the release notes.
 
 ```bash
 sudo apt install ./Screepub_0.6.0_amd64.deb     # Debian, Ubuntu
-sudo dnf install ./Screepub-0.6.0-1.x86_64.rpm  # Fedora, openSUSE
+sudo dnf install ./Screepub-0.6.0-1.x86_64.rpm     # Fedora
+sudo zypper install ./Screepub-0.6.0-1.x86_64.rpm  # openSUSE
 ```
 
 `SHA256SUMS-app` on the release page covers these five files. (`SHA256SUMS`,

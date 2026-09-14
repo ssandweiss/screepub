@@ -92,6 +92,17 @@ export function arMembers(bytes: Uint8Array): Map<string, Uint8Array> {
     }
     off = start + size + (size % 2); // the \n pad to an even offset
   }
+  // A member header is 60 bytes; fewer than that left over means the archive
+  // was cut inside one. Without this the loop just exits and returns a
+  // PLAUSIBLE SHORT LIST, and the caller blames the wrong thing ("holds no
+  // data.tar.gz") instead of saying the file is truncated. This is the guard
+  // cpio already has for its missing TRAILER!!!; ar never got the equivalent.
+  if (off !== bytes.length) {
+    throw new Error(
+      `bundle-archive: ar archive is truncated -- ${bytes.length - off} bytes left over ` +
+        'after the last complete member, too few for a 60-byte header',
+    );
+  }
   return members;
 }
 
@@ -122,7 +133,15 @@ export function cpioEntries(bytes: Uint8Array): ArchiveEntry[] {
     const mode = field(1);
     const fileSize = field(6);
     const nameSize = field(11);
-    if (!Number.isFinite(fileSize) || !Number.isFinite(nameSize) || nameSize < 1) {
+    // `mode` is guarded too: parseInt('ZZZZZZZZ', 16) is NaN, NaN & 0o170000
+    // is 0, and the entry would then be silently classified as not-a-regular
+    // file -- a corrupt payload returning an EMPTY list instead of an error.
+    if (
+      !Number.isFinite(fileSize) ||
+      !Number.isFinite(nameSize) ||
+      !Number.isFinite(mode) ||
+      nameSize < 1
+    ) {
       throw new Error(`bundle-archive: cpio entry at offset ${off} has unreadable size fields`);
     }
     const nameStart = off + 110;

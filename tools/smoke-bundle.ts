@@ -125,11 +125,13 @@ export function platformRefusal(bundlePath: string, platform: string): string | 
 /** A .deb or an .rpm, opened in TypeScript -- no dpkg-deb, no rpm2cpio, no
  *  7z, nothing to apt-get on a runner.
  *
- *  Only the engine is pulled out, and deliberately so: the real .deb and
- *  the real .rpm do NOT hold the same files (the deb ships four icon sizes
- *  to the rpm's one, and their desktop binaries differ in size), so a
- *  shared file manifest would be a fiction. What must be true of both is
- *  that the sidecar is in it and works. */
+ *  Only the engine is pulled out, and deliberately so. An earlier note here
+ *  said the deb and the rpm hold different files; that was measured on a
+ *  STALE pair and did not reproduce -- see verifyBundleFile's comment in
+ *  tools/build-app-bundle.ts. The durable reason stands without it: nothing
+ *  makes two different bundlers stay in step, so a shared file manifest
+ *  would be pinning a coincidence. What must be true of both is that the
+ *  sidecar is in it and works. */
 export function extractArchiveEngine(bundlePath: string, workDir: string): string {
   const entry = findEntry(bundleEntries(bundlePath), ENGINE_IN_ARCHIVE);
   const dest = join(workDir, ENGINE_IN_ARCHIVE);

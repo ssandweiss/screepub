@@ -90,10 +90,18 @@ jobs:
           # Read from the tagged commit, like everything else in this step.
           # The FIRST version key AFTER [package] -- a dependency's
           # `version = "2"` must not be mistaken for the crate's, and
-          # [dependencies] can appear first in the file. node, not awk: this
-          # is the same regex tools/build-app-bundle.ts's assertBundleVersions
-          # uses, so the two cannot drift into disagreeing about which
-          # version they are reading.
+          # [dependencies] can appear first in the file.
+          #
+          # This is NOT the same expression tools/build-app-bundle.ts's
+          # cargoPackageVersion uses: that one cuts the [package] table at the
+          # next header first, and this one is a single lazy scan. They agree
+          # on every real file, and they diverge in the safe direction -- a
+          # [package] with no version of its own makes this scan run on and
+          # report a dependency's, which is a LOUDER gate with a misleading
+          # number, not a silent one. The exception worth knowing: if that
+          # dependency's version ever equalled the tag, this passes and the
+          # bundler's own check fails the build instead. Keep the two spellings
+          # in step by hand, or make this call the exported function.
           CARGO="$(git cat-file blob "$GITHUB_SHA:desktop/src-tauri/Cargo.toml" \
             | node -p "(/^\s*\[package\][\s\S]*?^\s*version\s*=\s*\"([^\"]+)\"/m.exec(require('fs').readFileSync(0,'utf8'))||[])[1]||''")"
           [ "$CARGO" = "$VERSION" ] || {

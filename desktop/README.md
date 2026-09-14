@@ -594,8 +594,8 @@ surface nobody here can test, to add one category string. Not worth it.
 
 | artifact | size | wall time |
 | --- | --- | --- |
-| `Screepub_0.6.0_arm64.deb` | 44,363,298 B | **3 m 29.8 s for the pair** |
-| `Screepub-0.6.0-1.aarch64.rpm` | 44,358,905 B | (`cargo` itself: 15.06 s) |
+| `Screepub_0.6.0_arm64.deb` | 44,363,262 B | **3 m 29.8 s for the pair** |
+| `Screepub-0.6.0-1.aarch64.rpm` | 44,358,894 B | (`cargo` itself: 15.06 s) |
 
 **Three and a half minutes, not fifty seconds.** The Rust half is 15
 seconds; the other three and a quarter minutes are the bundler compressing a
@@ -606,8 +606,9 @@ Opened with `tools/bundle-archive.ts` — no `dpkg-deb`, no `rpm2cpio`, no
 `rpm`, none of which is installed here — both hold `usr/bin/screepub-engine`
 (102,153,058 B), `usr/lib/Screepub/LICENSE` (34,523 B),
 `usr/lib/Screepub/THIRD-PARTY-NOTICES.md` (6,079 B) and a `.desktop` entry
-carrying `Categories=Office;`, a human `Comment=` and
-`MimeType=application/pdf`. `findEntry` absorbs the rpm's `./` name prefix;
+carrying `Categories=Office;` and a human `Comment=` — and, since the
+association was withdrawn later the same day, **no `MimeType=`**; the sizes
+above are from the rebuilt pair. `findEntry` absorbs the rpm's `./` prefix;
 no lookup needed a special case. `tools/smoke-bundle.ts` ran the engine
 straight out of both and converted `tests/fixtures/screenplay.pdf`, and
 rejected `--expect-version 9.9.9` on both, which is what makes the passing
