@@ -69,7 +69,7 @@ test('unknown words and an empty argv are the default path', () => {
 });
 
 test('VERBS is the single list of known verbs', () => {
-  expect([...VERBS]).toEqual(['devices', 'send', 'settings']);
+  expect([...VERBS]).toEqual(['devices', 'send', 'settings', 'export']);
 });
 
 import { devicesCommand } from '../src/cli-devices';

@@ -18,6 +18,7 @@ import {
 import { mapConversionError, CliError, errorMessage, type JsonError } from './cli-errors';
 import { resolveCommand, devicesCommand, sendCommand, VERBS, type Verb } from './cli-devices';
 import { settingsCommand } from './cli-settings';
+import { exportCommand } from './cli-export';
 import type { ListDevicesOptions } from './device/list';
 
 const USAGE = `screepub — screenplay PDF → reflowable EPUB3 (via Fountain)
@@ -56,6 +57,8 @@ Commands:
                                             send an existing file to one
   screepub settings <file.fountain> [--set <json>] [--json]
                                             read/write a script's own settings
+  screepub export <file.epub> [--for kindle|epub] [--json]
+                                            the file you would put on a reader
 
 A verb is only a verb when no file of that name exists: a script saved as
 "devices" still converts, and "./devices" always means the file.
@@ -110,9 +113,27 @@ Options:
   -h, --help             show this help
 `;
 
+const EXPORT_USAGE = `screepub export — the file you would put on a reader
+
+Usage:
+  screepub export <file.epub> [--for kindle|epub] [--fountain <f>] [--json]
+
+export never sends: it produces (or reuses) the right file, and
+\`screepub send\` moves it. Kindle climbs KFX → AZW3 → MOBI, taking the best
+rung this machine can reach.
+
+Options:
+  --for <kindle|epub>    which file you want (default epub)
+  --fountain <file>      the script's .fountain, needed to rebuild a MOBI
+  --options-json <json>  this script's settings, so a rebuild keeps them
+  --json                 machine-readable result on stdout (for the app)
+  -h, --help             show this help
+`;
+
 function verbUsage(verb: Verb): string {
   if (verb === 'devices') return DEVICES_USAGE;
   if (verb === 'settings') return SETTINGS_USAGE;
+  if (verb === 'export') return EXPORT_USAGE;
   return SEND_USAGE;
 }
 
@@ -224,6 +245,9 @@ function parseVerbArgs(args: string[]) {
     options: {
       device: { type: 'string' },
       set: { type: 'string' },
+      for: { type: 'string' },
+      fountain: { type: 'string' },
+      'options-json': { type: 'string' },
       json: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -254,6 +278,15 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       }
       if (values.set !== undefined) {
         fail({ code: 'usage', message: 'devices takes no --set (--set belongs to settings)' });
+      }
+      if (values.for !== undefined) {
+        fail({ code: 'usage', message: 'devices takes no --for (--for belongs to export)' });
+      }
+      if (values.fountain !== undefined) {
+        fail({ code: 'usage', message: 'devices takes no --fountain (--fountain belongs to export)' });
+      }
+      if (values['options-json'] !== undefined) {
+        fail({ code: 'usage', message: 'devices takes no --options-json (--options-json belongs to export)' });
       }
       if (positionals.length > 0) {
         fail({ code: 'usage', message: `devices takes no arguments (got "${positionals[0]}")` });
@@ -287,7 +320,38 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       return;
     }
 
+    if (verb === 'export') {
+      if (positionals.length !== 1) {
+        fail({ code: 'usage', message: 'expected exactly one .epub to export (see --help)' });
+      }
+      const result = await exportCommand({
+        epub: positionals[0],
+        for: values.for,
+        fountain: values.fountain,
+        optionsJson: values['options-json'],
+      });
+      if (jsonMode) {
+        console.log(JSON.stringify({ ok: true, ...result }));
+        return;
+      }
+      for (const stage of result.stages) console.log(`  ${stage}`);
+      console.log(`${result.label}\n  ${result.path}`);
+      return;
+    }
+
     // verb === 'send'
+    if (values.set !== undefined) {
+      fail({ code: 'usage', message: 'send takes no --set (--set belongs to settings)' });
+    }
+    if (values.for !== undefined) {
+      fail({ code: 'usage', message: 'send takes no --for (--for belongs to export)' });
+    }
+    if (values.fountain !== undefined) {
+      fail({ code: 'usage', message: 'send takes no --fountain (--fountain belongs to export)' });
+    }
+    if (values['options-json'] !== undefined) {
+      fail({ code: 'usage', message: 'send takes no --options-json (--options-json belongs to export)' });
+    }
     if (positionals.length !== 1) {
       fail({ code: 'usage', message: 'expected exactly one file to send (see --help)' });
     }
