@@ -79,6 +79,21 @@ export function onEngineLine(handler) {
   return tauri().event.listen('engine-line', (event) => handler(String(event.payload)));
 }
 
+/** OS drag-and-drop. Tauri intercepts it before the webview sees it, so the
+ *  HTML5 drop event never fires and the PATHS — which is all the engine can
+ *  use — arrive here instead. The payload is Tauri's DragDropPayload:
+ *  `{ paths: [...], position: { x, y } }` on enter and drop, and nothing at
+ *  all on leave. Which of the paths to convert is not decided here; this file
+ *  is the boundary, not the surface. */
+export function onFileDrag({ over, drop }) {
+  tauri().event.listen('tauri://drag-enter', () => over(true));
+  tauri().event.listen('tauri://drag-leave', () => over(false));
+  tauri().event.listen('tauri://drag-drop', (event) => {
+    over(false);
+    drop(event.payload?.paths ?? []);
+  });
+}
+
 /** The progress lines, decoded. The payload is whatever the OS handed the
  *  Rust, so one event may carry several lines or a partial one; anything
  *  that is not a progress object is ignored rather than thrown, because a

@@ -1,6 +1,6 @@
 // Boots the window: the frame, the five surfaces, the keyboard, and the one
 // line that proves the engine is there.
-import { runEngine, argv } from './app.js';
+import { runEngine, argv, onFileDrag } from './app.js';
 import { mountFrame } from './frame.js';
 import { el, text } from './dom.js';
 import * as convert from './convert.js';
@@ -65,6 +65,14 @@ frame.onSurface((id) => {
     if (on) surfaces[name].show?.();
     else surfaces[name].hide?.();
   }
+});
+
+// A file dragged onto the window lands on Convert, whatever was on screen.
+// Tauri takes the drop before the webview sees it, so this is the only way
+// the paths reach the page at all.
+onFileDrag({
+  over: (on) => convert.dragOver(on),
+  drop: (paths) => { frame.setSurface('convert'); convert.dropPaths(paths); },
 });
 
 // Ctrl/Cmd-O opens a script from anywhere. Rust registers no menu, so the

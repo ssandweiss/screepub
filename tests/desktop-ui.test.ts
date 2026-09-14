@@ -1,6 +1,7 @@
-import { describe, test, expect } from 'bun:test';
+import { beforeAll, describe, test, expect } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const UI = join(new URL('..', import.meta.url).pathname, 'desktop', 'ui');
 const read = (name: string) => readFileSync(join(UI, name), 'utf8');
@@ -304,4 +305,350 @@ describe('the five surfaces are wired to the frame', () => {
     expect(main).toContain('scriptChanged');
     expect(main).toContain("frame.setSurface('convert')");
   });
+});
+
+describe('the Convert surface', () => {
+  const convert = read('convert.js');
+
+  test('it tells you what the engine cannot take, before you drop', () => {
+    // brand/components/drop-well.html's own argument: two of the four guards
+    // are properties a reader can check at a glance, so saying them here
+    // moves both from after the wait to before the drop.
+    expect(convert).toContain('Needs selectable text, not a scan. No password.');
+  });
+
+  test('it offers "Convert anyway" only for the one guard a reader can overrule', () => {
+    // not-screenplay is overridable by --force; scanned, password and
+    // unreadable describe a file the engine genuinely cannot read, and
+    // offering an override there would be a lie.
+    expect(convert).toContain("'not-screenplay'");
+    const forced = convert.slice(convert.indexOf("'not-screenplay'"));
+    expect(forced).toContain('force');
+    for (const code of ['scanned', 'password']) {
+      expect(
+        new RegExp(`'${code}'[^\\n]*force`).test(convert),
+        `convert.js offers a force override for ${code}`,
+      ).toBe(false);
+    }
+  });
+
+  test('it renders the engine’s own message rather than a sentence of its own', () => {
+    expect(convert).toContain('error.message');
+    expect(convert).toContain('error.code');
+    for (const invented of ['Something went wrong', 'An error occurred', 'Oops', 'Sorry']) {
+      expect(`convert.js says "${invented}": ${convert.includes(invented)}`).toBe(
+        `convert.js says "${invented}": false`,
+      );
+    }
+  });
+
+  test('the failure heading names the cause, for every code the engine can return', () => {
+    // Every JsonError code the conversion path can produce must have a
+    // heading, or a real failure renders with a blank title.
+    for (const code of ['scanned', 'not-screenplay', 'password', 'unreadable',
+      'unsupported-type', 'bad-options', 'internal']) {
+      expect(convert.includes(`'${code}'`), `convert.js has no heading for ${code}`).toBe(true);
+    }
+  });
+
+  test('the progress bar is determinate and never walks backwards', () => {
+    // The engine emits a percent per stage; a bar that took each stage's
+    // percent literally would jump 85 -> 0 at the parse/render boundary.
+    expect(convert).toContain('Math.max');
+    expect(convert).toContain('percent');
+  });
+
+  test('the shortcut label is the platform’s, not the Mac’s everywhere', () => {
+    // brand/components/drop-well.html draws the Mac spelling. This window
+    // runs on three platforms.
+    expect(convert).toContain('navigator');
+    expect(convert).toContain('Ctrl');
+  });
+
+  test('the surface takes focus back after the native dialog closes', () => {
+    // desktop/README.md's disclosed observation: the webview did not regain
+    // keyboard focus after the file dialog closed.
+    expect(convert).toContain('.focus()');
+  });
+
+  test('it sets no inline style, which this window’s CSP refuses', () => {
+    // Measured in piece C: with `default-src 'self'` an appended <style>, a
+    // style= attribute and a <style> inside srcdoc all fail silently. The
+    // bar's width is the one computed value on this surface, so this is the
+    // rule most easily broken here.
+    expect(`convert.js sets .style: ${/\.style\b/.test(convert)}`).toBe(
+      'convert.js sets .style: false',
+    );
+    expect(`convert.js sets a style attribute: ${/['"]style['"]\s*:/.test(convert)}`).toBe(
+      'convert.js sets a style attribute: false',
+    );
+    // ...and the route it uses instead, which piece C measured as working.
+    expect(convert).toContain('adoptedStyleSheets');
+  });
+
+  test('only app.js listens for the drop, and it hands over every path', () => {
+    // The drop is an IPC event like any other: tests above already forbid a
+    // surface from touching Tauri, and this is the rule's other half — the
+    // boundary must not decide WHICH file gets converted, or that decision
+    // ends up somewhere no test can reach it.
+    const app = read('app.js');
+    expect(app).toContain("'tauri://drag-drop'");
+    expect(app).toContain("'tauri://drag-enter'");
+    expect(app).toContain("'tauri://drag-leave'");
+    expect(app).toContain('paths');
+    // The path is not picked here: app.js forwards the array.
+    expect(`app.js picks a path: ${/paths\s*\[\s*0\s*\]/.test(app)}`).toBe(
+      'app.js picks a path: false',
+    );
+    const main = read('main.js');
+    expect(main).toContain('onFileDrag');
+    expect(main).toContain('convert.dragOver');
+    expect(main).toContain('convert.dropPaths');
+  });
+});
+
+describe('what the Convert surface decides', () => {
+  // The decisions, exercised directly. The drawing over them is thin by
+  // design; these are the rules a wrong implementation would get wrong.
+  // desktop/ui is plain .js with no declarations, so the module is imported
+  // the same dynamic way the argv tests import app.js, and its decision
+  // surface is spelled out here — which doubles as the list a later surface
+  // may rely on.
+  type Progress = { percent: number; stage: string | null; label: string };
+  type ConvertModule = {
+    HEADINGS: Record<string, string>;
+    OVERRIDABLE: string;
+    NO_MESSAGE: string;
+    PROGRESS_START: Progress;
+    shortcutLabel: (platform: unknown) => string;
+    failureFor: (error: unknown) => {
+      code: string; heading: string; message: string; canForce: boolean;
+    };
+    nextProgress: (previous: Progress, line: unknown) => Progress;
+    fileName: (path: unknown) => string;
+    countLine: (answer: unknown) => string;
+    scriptFrom: (path: string, answer: unknown) => Record<string, unknown>;
+    droppedPath: (paths: unknown) => string | null;
+  };
+  let convert: ConvertModule;
+
+  beforeAll(async () => {
+    convert = (await import(join(UI, 'convert.js'))) as ConvertModule;
+  });
+
+  test('the shortcut is spelled the platform’s way', () => {
+    expect(convert.shortcutLabel('MacIntel')).toBe('⌘O');
+    expect(convert.shortcutLabel('macOS')).toBe('⌘O');
+    expect(convert.shortcutLabel('Linux aarch64')).toBe('Ctrl+O');
+    expect(convert.shortcutLabel('Win32')).toBe('Ctrl+O');
+    // navigator.userAgentData is absent on WebKitGTK, and navigator.platform
+    // is deprecated: both can be undefined in the same window.
+    expect(convert.shortcutLabel(undefined)).toBe('Ctrl+O');
+  });
+
+  test('every code the engine can refuse with gets a heading that names a cause', () => {
+    const codes = ['scanned', 'not-screenplay', 'password', 'unreadable',
+      'unsupported-type', 'bad-options', 'usage', 'internal'];
+    const headings = new Set<string>();
+    for (const code of codes) {
+      const { heading } = convert.failureFor({ code, message: 'x' });
+      expect(`${code}: ${heading}`).not.toBe(`${code}: `);
+      // A heading that is the same for every code names nothing.
+      headings.add(heading);
+    }
+    expect(headings.size).toBeGreaterThanOrEqual(codes.length - 1);
+    // The blank-heading failure this is here to prevent: a code no one
+    // anticipated still renders a sentence, and is never overridable.
+    const unknown = convert.failureFor({ code: 'moon-phase', message: 'x' });
+    expect(unknown.heading).toBe(convert.HEADINGS.internal);
+    expect(unknown.canForce).toBe(false);
+    expect(unknown.code).toBe('moon-phase');
+  });
+
+  test('the engine’s sentence survives verbatim, whatever is in it', () => {
+    const said = 'No scene headings and no dialogue found — this does not look like a '
+      + 'screenplay. Pass --force to convert it anyway.';
+    expect(convert.failureFor({ code: 'not-screenplay', message: said }).message).toBe(said);
+    // Not trimmed into a summary, not re-cased, not suffixed.
+    const odd = 'cannot read the input file (EACCES)';
+    expect(convert.failureFor({ code: 'unreadable', message: odd }).message).toBe(odd);
+  });
+
+  test('a failure with no sentence still says something, and says it once', () => {
+    for (const broken of [{ code: 'scanned' }, { code: 'scanned', message: '   ' }, {}, undefined]) {
+      const shown = convert.failureFor(broken as never);
+      expect(shown.message).toBe(convert.NO_MESSAGE);
+      expect(shown.heading.length).toBeGreaterThan(0);
+    }
+    // A missing code is the engine breaking its contract, not a file the
+    // reader can overrule.
+    expect(convert.failureFor({} as never).code).toBe('internal');
+    expect(convert.failureFor({} as never).canForce).toBe(false);
+  });
+
+  test('only not-screenplay may be overruled', () => {
+    expect(convert.failureFor({ code: 'not-screenplay', message: 'x' }).canForce).toBe(true);
+    for (const code of ['scanned', 'password', 'unreadable', 'unsupported-type',
+      'bad-options', 'usage', 'internal']) {
+      expect(`${code} canForce: ${convert.failureFor({ code, message: 'x' }).canForce}`)
+        .toBe(`${code} canForce: false`);
+    }
+  });
+
+  test('the bar follows the engine\u2019s own percent, which is already the whole job', () => {
+    // Measured against the engine, not assumed: a 3,601-page script emits
+    // parse 6..85 and then render 85, render 100, because src/convert.ts
+    // has already applied PARSE_SHARE. A window that re-weighted those
+    // numbers would stall at 72% for the entire tail of the parse and then
+    // leap to the end — which is exactly what the first draft of this
+    // surface did, and what a live run caught.
+    let at = convert.PROGRESS_START;
+    const seen: number[] = [];
+    for (const line of [
+      { stage: 'parse', percent: 6 }, { stage: 'parse', percent: 44 },
+      { stage: 'parse', percent: 85 }, { stage: 'render', percent: 85 },
+      { stage: 'render', percent: 100 },
+    ]) {
+      at = convert.nextProgress(at, line);
+      seen.push(at.percent);
+    }
+    expect(seen).toEqual([6, 44, 85, 85, 100]);
+    // Every step forward or level, never back.
+    for (let i = 1; i < seen.length; i += 1) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
+  });
+
+  test('the read-out names the stage the reader is waiting on', () => {
+    expect(convert.PROGRESS_START.label).toBe('starting up');
+    expect(convert.nextProgress(convert.PROGRESS_START, { stage: 'parse', percent: 40 }).label)
+      .toBe('reading the pages (40%)');
+    // Crossing into rendering is news even though the bar does not move: the
+    // engine hands over at 85 on both sides of the boundary.
+    const parsed = convert.nextProgress(convert.PROGRESS_START, { stage: 'parse', percent: 85 });
+    expect(parsed.label).toBe('reading the pages (85%)');
+    const rendering = convert.nextProgress(parsed, { stage: 'render', percent: 85 });
+    expect(rendering.label).toBe('building the book (85%)');
+    expect(rendering.percent).toBe(85);
+  });
+
+  test('a line that is late, unknown or malformed leaves the bar alone', () => {
+    const half = convert.nextProgress(convert.PROGRESS_START, { stage: 'render', percent: 50 });
+    for (const junk of [
+      { stage: 'parse', percent: 20 },      // a parse line arriving after render began
+      { stage: 'render', percent: 50 },     // the percent it is already showing
+      { stage: 'polish', percent: 99 },     // a stage this window does not know
+      { stage: 'render', percent: 'lots' }, // not a number
+      { stage: 'render' }, {}, undefined, null,
+    ]) {
+      expect(convert.nextProgress(half, junk as never)).toBe(half);
+    }
+    // ...and a percent outside the contract is clamped, not drawn past the end.
+    expect(convert.nextProgress(half, { stage: 'render', percent: 900 }).percent).toBe(100);
+  });
+
+  test('the percents the engine really emits drive the bar from end to end', async () => {
+    // The other half of the pin above: the sequence is read off the engine
+    // itself rather than typed out here, so a change to PARSE_SHARE or to
+    // the throttle shows up as a failing test rather than as a stuck bar.
+    const root = new URL('..', import.meta.url).pathname;
+    const proc = Bun.spawn(
+      ['bun', join(root, 'src', 'cli.ts'), join(root, 'tests', 'fixtures', 'screenplay.pdf'),
+        '--json', '--progress', '-o', join(tmpdir(), 'screepub-convert-progress.epub')],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    const [stderr] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+    const lines = stderr.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('{'))
+      .map((l) => JSON.parse(l).progress).filter((p) => p);
+    expect(lines.length).toBeGreaterThan(2);
+
+    let at = convert.PROGRESS_START;
+    const seen = lines.map((line: { stage: string; percent: number }) => {
+      at = convert.nextProgress(at, line);
+      return at.percent;
+    });
+    for (let i = 1; i < seen.length; i += 1) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
+    // It starts somewhere near the beginning and finishes AT the end: a bar
+    // that stopped at 72% would satisfy monotonicity and still be wrong.
+    expect(seen[0]).toBeLessThan(50);
+    expect(at.percent).toBe(100);
+    expect(at.label).toBe('building the book (100%)');
+  }, 60000);
+
+  test('the counts read as a sentence, singular included', () => {
+    expect(convert.countLine({ pages: 5, scenes: 5, characters: 3 }))
+      .toBe('5 pages. 5 scenes.\n3 speaking characters.');
+    expect(convert.countLine({ pages: 1, scenes: 1, characters: 1 }))
+      .toBe('1 page. 1 scene.\n1 speaking character.');
+    expect(convert.countLine({ pages: 2, scenes: 0, characters: 0 }))
+      .toBe('2 pages. 0 scenes.\n0 speaking characters.');
+    // The engine omits the counts entirely for a .fountain input; "undefined
+    // pages" is worse than no line at all.
+    expect(convert.countLine({ title: 'x' })).toBe('');
+    expect(convert.countLine({ pages: 4 })).toBe('4 pages.');
+  });
+
+  test('the script object tasks 9–11 read is complete whatever the engine sent', () => {
+    const full = convert.scriptFrom('/s/The Script.pdf', {
+      ok: true, title: 'The Last Video Store', author: 'A. N. Placeholder',
+      pages: 5, scenes: 5, characters: 3, warnings: ['a dual-dialogue block was flattened'],
+      epubPath: '/s/The Script.epub', fountainPath: '/s/The Script.fountain',
+      previewHtml: '<p>x</p>', mobiPath: '/s/The Script.mobi',
+    });
+    expect(full).toEqual({
+      path: '/s/The Script.pdf',
+      title: 'The Last Video Store',
+      author: 'A. N. Placeholder',
+      pages: 5, scenes: 5, characters: 3,
+      warnings: ['a dual-dialogue block was flattened'],
+      epubPath: '/s/The Script.epub',
+      fountainPath: '/s/The Script.fountain',
+      previewHtml: '<p>x</p>',
+      settings: null,
+    });
+
+    // A title-less script falls back to its filename rather than to nothing:
+    // every later surface prints this.
+    const bare = convert.scriptFrom('/s/untitled.pdf', { ok: true, epubPath: '/s/untitled.epub' });
+    expect(bare.title).toBe('untitled.pdf');
+    expect(bare.author).toBeNull();
+    expect(bare.warnings).toEqual([]);
+    expect(bare.previewHtml).toBe('');
+    expect(bare.settings).toBeNull();
+    // The same keys either way, so no surface has to test for a field.
+    expect(Object.keys(bare).sort()).toEqual(Object.keys(full).sort());
+  });
+
+  test('one window converts one dropped script', () => {
+    expect(convert.droppedPath(['/a/one.pdf', '/a/two.pdf'])).toBe('/a/one.pdf');
+    expect(convert.droppedPath(['', '  ', '/a/real.pdf'])).toBe('/a/real.pdf');
+    // Tauri sends drag-leave with no payload at all; the well must not try to
+    // convert nothing.
+    expect(convert.droppedPath([])).toBeNull();
+    expect(convert.droppedPath(undefined as never)).toBeNull();
+    expect(convert.droppedPath('/a/one.pdf' as never)).toBeNull();
+  });
+
+  test('the working line names the file, not its path', () => {
+    expect(convert.fileName('/home/a/scripts/The Script.pdf')).toBe('The Script.pdf');
+    expect(convert.fileName('C:\\Users\\a\\The Script.pdf')).toBe('The Script.pdf');
+    expect(convert.fileName('The Script.pdf')).toBe('The Script.pdf');
+  });
+
+  test('the code it branches on is a code the engine really returns', async () => {
+    // The one assertion here that a change to the engine could break: if
+    // prose.pdf ever stopped reporting not-screenplay, this surface would go
+    // on offering "Convert anyway" for a code nobody sends.
+    const root = new URL('..', import.meta.url).pathname;
+    const proc = Bun.spawn(
+      ['bun', join(root, 'src', 'cli.ts'), join(root, 'tests', 'fixtures', 'prose.pdf'),
+        '--json', '-o', join(tmpdir(), 'screepub-convert-surface.epub')],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    const answer = JSON.parse(stdout);
+    expect(answer.ok).toBe(false);
+    const shown = convert.failureFor(answer.error);
+    expect(shown.canForce).toBe(true);
+    expect(shown.message).toBe(answer.error.message);
+    expect(shown.heading).toBe(convert.HEADINGS['not-screenplay']);
+  }, 60000);
 });

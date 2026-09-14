@@ -221,3 +221,67 @@ built. Any Rust that spawns the sidecar must therefore add its own context
 (the name it asked for, and "run `bun tools/build-sidecar.ts --host`") before
 this string reaches the window, or the only clue a maintainer gets is
 `os error 2`.
+
+## How a dropped file arrives (task 8, 2026-09-13)
+
+**Paths arrive on `tauri://drag-drop`, and nowhere else.** With
+`dragDropEnabled` at its default, Tauri takes the OS drop before the webview
+sees it: the HTML5 `drop` event never fires, and the payload is Tauri's own
+`DragDropPayload` —
+
+    tauri://drag-enter   { paths: [<absolute path>, …], position: { x, y } }
+    tauri://drag-drop    { paths: [<absolute path>, …], position: { x, y } }
+    tauri://drag-leave   (no payload at all)
+
+which is why `desktop/ui/app.js`'s `onFileDrag` reads `event.payload.paths`
+and hands the whole ARRAY to the surface: deciding which of several dropped
+files to convert is the surface's job, not the boundary's.
+
+**How this was verified, and what was not.** This machine has no pointer
+injection available to an automated session (`/dev/uinput` is root-only,
+there is no ydotool, and `wtype` is keyboard-only), so **no human hand
+dragged a file onto this window.** What was checked instead:
+
+  * the three listeners register under `core:default` and fire — Tauri
+    2.11.5 puts no reserved-prefix guard on `emit`, so a temporary probe in
+    the page emitted the exact payload the Rust emits, and the window
+    highlighted the well, converted the file, and rendered the result;
+  * the payload SHAPE is read off the Rust rather than guessed:
+    `tauri-2.11.5/src/manager/window.rs` builds `DragDropPayload { paths,
+    position }` for enter and drop and sends `()` for leave;
+  * on Linux the events come from `wry-0.55.1/src/webkitgtk/drag_drop.rs`,
+    which raises `Enter` from GTK's `drag_data_received` (so the paths are
+    already known when the well lights up) and emits `Leave` through an idle
+    callback that a real drop cancels.
+
+The one thing still unconfirmed is GTK's own delivery of a drag from a file
+manager. If a real drop ever turns out not to arrive, the fallback is the
+one the task brief names: `"dragDropEnabled": false` and the button alone.
+
+## The progress percent is ALREADY the whole job (task 8, 2026-09-13)
+
+`src/convert.ts` applies `PARSE_SHARE = 0.85` itself, so the engine's line is
+the overall fraction, not the stage's own: a 3,601-page script emits `parse`
+6…85 and then `render` 85, `render` 100. A window that weighted those numbers
+a second time sat at **72%** for the whole tail of the parse and then jumped
+to the end — seen on screen before it was fixed. `desktop/ui/convert.js`
+takes the number as given and only picks the wording from the stage.
+
+The bar's width is written through a constructed stylesheet
+(`new CSSStyleSheet()` + `replaceSync` + `adoptedStyleSheets`), because
+`default-src 'self'` refuses an inline style; observed painting correctly at
+83% and 85% in a live run.
+
+### A very large `--preview-inline` answer does not survive the pipe
+
+Converting a synthetic **3,601-page** script (stdout 6.0 MB, most of it
+`previewHtml`) failed in the window with `the engine did not answer in JSON:`
+followed by a valid-looking prefix of that object — i.e. what reached
+`JSON.parse` was not the whole 6 MB. The same argv run straight from a shell
+prints a complete, parseable object. Nothing in `sidecar.rs` truncates
+(it concatenates every `CommandEvent::Stdout` chunk), so the loss is further
+down — the shell plugin's line reader or the IPC response itself. Real
+scripts are nowhere near this size (a 120-page script's preview is a few
+hundred KB) and every fixture converts fine, so this is recorded rather than
+fixed. The failure was at least legible: the window showed the engine's raw
+output under `INT. THE ENGINE DID NOT ANSWER - DAY`.
