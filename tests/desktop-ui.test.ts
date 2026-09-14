@@ -130,6 +130,20 @@ describe('the window respects the quality floor', () => {
   });
 });
 
+describe('the window uses the brand, not its own colours (scripts too)', () => {
+  test('no script builds a colour of its own', () => {
+    // The CSS is checked above; a script can smuggle one in just as easily by
+    // assigning a literal. The two brand-verbatim gradient stops in frame.js
+    // (#fff / #000, copied from brand/components/brad.html) are three-digit
+    // and deliberately not matched by the six-digit form.
+    for (const name of jsFiles()) {
+      const hexes = [...read(name).matchAll(/#[0-9a-fA-F]{6}\b/g)].map((m) => m[0]);
+      const rgba = [...read(name).matchAll(/\brgba?\(/g)].map((m) => m[0]);
+      expect(`${name}: ${[...hexes, ...rgba].join(', ')}`).toBe(`${name}: `);
+    }
+  });
+});
+
 describe('the engine contract lives in exactly one file', () => {
   test('only app.js talks to Rust', () => {
     for (const name of jsFiles()) {
@@ -139,6 +153,18 @@ describe('the engine contract lives in exactly one file', () => {
       );
       expect(`${name} reaches __TAURI__: ${/__TAURI__/.test(read(name))}`).toBe(
         `${name} reaches __TAURI__: false`,
+      );
+    }
+  });
+
+  test('only app.js reads the engine answer', () => {
+    // The argv goes out through app.js and the JSON comes back through it.
+    // Without this, a surface could parse the engine's stdout itself and the
+    // one-place contract would be true of flags but not of answers.
+    for (const name of jsFiles()) {
+      if (name === 'app.js') continue;
+      expect(`${name} parses JSON: ${/JSON\s*\.\s*parse/.test(read(name))}`).toBe(
+        `${name} parses JSON: false`,
       );
     }
   });
