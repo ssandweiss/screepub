@@ -110,21 +110,29 @@ export async function exportCommand(
   const kfx = await (deps.kfxStatus ?? realKfxStatus)();
   const state = { calibreAvailable, kfxReady: kfx.ready };
   const stages: string[] = [];
+  // Parsed BEFORE the try below: readFormat throws its own CliError
+  // ('bad-options'), and that code has to reach the caller as-is. Evaluating
+  // it inside the try would let the catch's unconditional rewrap turn a bad
+  // --options-json into 'export-failed' — the right message, wrong code,
+  // which matters because the code is what a UI switches on.
+  const formatOptions = readFormat(options.optionsJson);
   let path: string;
   try {
     path = await (deps.freshKindleArtifact ?? realFreshKindleArtifact)({
       epub: options.epub,
       fountainPath: options.fountain ?? null,
-      format: readFormat(options.optionsJson),
+      format: formatOptions,
       calibreAvailable,
       kfxReady: kfx.ready,
       onStage: (stage) => stages.push(stage),
     });
   } catch (err) {
-    // The ladder's own sentences are already written for a person
-    // (CannotRegenerateError, RegenerationFailedError, CalibreMissingError);
-    // passing them through verbatim is the rule this project already keeps
-    // for send-failed.
+    // Only the LADDER's own errors belong here (CannotRegenerateError,
+    // RegenerationFailedError, CalibreMissingError, ...) — none of them are
+    // CliError, so this rewrap can't accidentally swallow a typed code. Any
+    // CliError this command itself needs to throw (bad-options above,
+    // unreadable earlier, usage at the top) is raised OUTSIDE this try, on
+    // purpose, so its code survives verbatim.
     throw new CliError('export-failed', errorMessage(err));
   }
 

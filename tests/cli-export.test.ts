@@ -248,6 +248,65 @@ describe('exportCommand', () => {
     expect(message).toContain('epub');
     expect(message).toContain('kindle');
   });
+
+  // Fix round 1: readFormat's own CliError('bad-options', …) was being
+  // evaluated INSIDE the try that wraps the ladder call, so the catch's
+  // unconditional `throw new CliError('export-failed', errorMessage(err))`
+  // rewrapped it — right message, wrong code, and code is what a UI
+  // branches on. Asserts the CODE, not just the message (a message-only
+  // check passed against the bug), and proves the ladder is never even
+  // reached: an injected fake that recorded a call would fail this if
+  // readFormat's throw were still happening too late.
+  test('malformed --options-json is bad-options, not export-failed', async () => {
+    let ladderCalled = false;
+    let error: unknown;
+    try {
+      await exportCommand(
+        { epub, for: 'kindle', fountain, optionsJson: 'not json' },
+        {
+          calibreAvailable: () => true,
+          kfxStatus: async () => calibreOnlyStatus,
+          freshKindleArtifact: async () => {
+            ladderCalled = true;
+            return join(dir, 'Script.azw3');
+          },
+        },
+      );
+    } catch (err) {
+      error = err;
+    }
+    expect((error as { code?: string } | undefined)?.code).toBe('bad-options');
+    expect((error as Error | undefined)?.message).toContain('--options-json');
+    expect(ladderCalled).toBe(false);
+  });
+
+  test('--options-json that parses but is not a JSON object is also bad-options', async () => {
+    let code = '';
+    try {
+      await exportCommand({ epub, for: 'kindle', fountain, optionsJson: '[1,2,3]' });
+    } catch (err) {
+      code = (err as { code: string }).code;
+    }
+    expect(code).toBe('bad-options');
+  });
+
+  // The same rewrap could in principle swallow ANY CliError raised while a
+  // kindle export is being resolved. 'unreadable' is thrown before the
+  // toolchain is even probed, so it must win regardless of what else about
+  // the request is also wrong — a malformed --options-json here must not
+  // turn into 'bad-options' OR 'export-failed' ahead of the more
+  // fundamental problem: there is no file to export at all.
+  test('a missing EPUB is unreadable even when --options-json is also malformed', async () => {
+    let code = '';
+    try {
+      await exportCommand({
+        epub: join(dir, 'nope.epub'), for: 'kindle', optionsJson: 'not json',
+      });
+    } catch (err) {
+      code = (err as { code: string }).code;
+    }
+    expect(code).toBe('unreadable');
+  });
 });
 
 describe('screepub export (through the CLI)', () => {
