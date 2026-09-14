@@ -80,12 +80,17 @@ describe('a real Linux bundle, when one has been built', () => {
   );
 
   test.skipIf(AVAILABLE.length === 0)(
-    'the launcher entry offers to open a PDF and carries a human comment',
+    'the launcher entry carries a human comment and claims no file type',
     () => {
       for (const { path } of AVAILABLE) {
         const entry = findEntry(bundleEntries(path), 'usr/share/applications/Screepub.desktop');
         const text = new TextDecoder().decode(entry.data);
-        expect(text).toContain('MimeType=application/pdf');
+        // No MimeType=: task 6 opened a real bundle and found the association
+        // inert (no %f in Exec=, no argv handling in main.rs), so it is
+        // withdrawn rather than left promising an empty window.
+        expect(`the entry claims a MIME type: ${text.includes('MimeType=')}`).toBe(
+          'the entry claims a MIME type: false',
+        );
         expect(text).toContain('Categories=Office;');
         expect(text).toMatch(/^Comment=.{20,}$/m);
         // The contributor-facing crate description must not have leaked in.

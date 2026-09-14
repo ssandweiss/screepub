@@ -644,16 +644,23 @@ produced by this project at all.
    cross-kind file-list assertion the plan warned against is in fact safe
    today — but it is still not asserted, because nothing guarantees two
    different bundlers stay in step.
-3. **`MimeType=application/pdf` is inert as shipped.** The entry declares
-   the type, but `Exec=screepub-desktop` carries no `%f`/`%U`, so a desktop
-   environment passes no path; and `desktop/src-tauri/src/main.rs` never
-   reads `argv` anyway. "Open with Screepub" from a file manager will open
-   an empty window. The declaration is not wrong — it makes Screepub appear
-   in the PDF handler list — but the plan's phrase "offers to open a PDF"
-   overstates it, and the test in `tests/app-bundle-e2e.test.ts` asserts
-   only that the line is present, which is all it should assert. Making it
-   real needs `%f` in a custom `desktopTemplate` *and* argv handling in the
-   shell, neither of which exists.
+3. **The PDF file association was inert, and has been withdrawn.** The
+   entry declared `MimeType=application/pdf`, but `Exec=screepub-desktop`
+   carries no `%f`/`%U`, so a desktop environment passes no path — and
+   `desktop/src-tauri/src/main.rs` never reads `argv` anyway. "Open with
+   Screepub" from a file manager put the app in the handler list and then
+   opened an **empty window**.
+
+   `bundle.fileAssociations` is therefore gone from `tauri.conf.json`, and
+   both `tests/desktop-shell.test.ts` and `tests/app-bundle-e2e.test.ts`
+   now assert its **absence**. Appearing in a menu and then doing nothing is
+   worse than not appearing: the user has already chosen Screepub by the
+   time they learn it cannot help.
+
+   Making it real needs two things that do not exist yet — `%f` in a custom
+   `desktopTemplate` (a whole template file to maintain, declined earlier
+   for the menu category) *and* argv handling in the shell. Restoring the
+   key without both re-creates the empty window.
 4. `cargo tauri build` rewrote `desktop/src-tauri/Cargo.toml` again, to
    exactly the Task 2 spelling: `tauri-build = { version = "2", features =
    [] }` and `tauri = { version = "2", features = [] }`. The two plugin

@@ -21,7 +21,9 @@
     }
   },
   "bundle": {
-    "externalBin": ["binaries/screepub-engine"],
+    "externalBin": [
+      "binaries/screepub-engine"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -37,9 +39,6 @@
     "resources": {
       "../../LICENSE": "LICENSE",
       "../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md"
-    },
-    "fileAssociations": [
-      { "ext": ["pdf"], "mimeType": "application/pdf", "name": "PDF", "role": "Viewer" }
-    ]
+    }
   }
 }

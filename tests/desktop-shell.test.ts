@@ -662,15 +662,17 @@ describe('what the Linux package tells a user about itself', () => {
     expect(existsSync(join(REPO, 'THIRD-PARTY-NOTICES.md'))).toBe(true);
   });
 
-  test('the launcher entry offers to open a PDF and files itself under Office', () => {
-    // MimeType= comes from fileAssociations[].mimeType and Categories= from
-    // the category enum. The Swift app declares com.adobe.pdf in
-    // CFBundleDocumentTypes so "Open With" offers it; this is the same
-    // promise on Linux, and on macOS the same key produces the same plist.
+  test('the launcher files itself under Office and claims no file it cannot open', () => {
+    // Category is real: it puts the app in the right menu.
     expect(CONFIG.bundle.category).toBe('Productivity');
-    expect(CONFIG.bundle.fileAssociations).toEqual([
-      { ext: ['pdf'], mimeType: 'application/pdf', name: 'PDF', role: 'Viewer' },
-    ]);
+    // fileAssociations is DELIBERATELY ABSENT. It was set, and task 6 found
+    // it inert: the generated Exec= line carries no %f, and main.rs never
+    // reads argv, so "Open with Screepub" put the app in the user's menu and
+    // then opened an EMPTY WINDOW. Advertising a capability the app does not
+    // have is worse than not appearing in the list, so the claim is withdrawn
+    // until the shell can accept a path. Restoring this key without also
+    // handling argv re-creates the empty window.
+    expect(CONFIG.bundle.fileAssociations).toBeUndefined();
   });
 
   test('the window title is NOT changed by any of this', () => {
