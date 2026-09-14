@@ -687,3 +687,102 @@ describe('what the Linux package tells a user about itself', () => {
     expect(CONFIG.app.windows[0].title).toBe('Screepub');
   });
 });
+
+describe('the macOS transition overlay', () => {
+  const overlayPath = join(REPO, 'desktop', 'src-tauri', 'tauri.transition.conf.json');
+
+  test('it exists, and it is passed to cargo tauri build by the macOS job only', () => {
+    expect(existsSync(overlayPath)).toBe(true);
+  });
+
+  test('it overrides the product NAME and nothing else', () => {
+    // A config overlay is merged into tauri.conf.json wholesale. Every
+    // extra key here is a setting that silently differs between the macOS
+    // build and the other two, on a platform nobody here can inspect. One
+    // key is auditable; three are not.
+    //
+    // An earlier draft carried a leading-underscore "_why" key, on the
+    // theory that Tauri ignores unrecognized top-level keys the way a `_`
+    // prefix is ignored elsewhere in this codebase's own conventions. It
+    // does not: tauri-cli 2.11.4's own config.schema.json (the version
+    // desktop.yml pins, in $CARGO_HOME/registry/.../tauri-cli-2.11.4/
+    // config.schema.json) sets `"additionalProperties": false` at the top
+    // level, with no exception for `_`-prefixed names, and RFC 7396 merge
+    // patch carries a brand-new key straight into the merged object.
+    // Confirmed by running the actual command Task 10 will run:
+    // `cargo tauri build --config tauri.transition.conf.json --bundles deb`
+    // failed outright with `Additional properties are not allowed ('_why'
+    // was unexpected)` while the "_why" key was present, and succeeded
+    // (`Bundling Screepub Desktop_0.6.0_arm64.deb`) once it was removed —
+    // see desktop/README.md. So there is no second key here at all, ever:
+    // an overlay this schema accepts can only ever be exactly the one key
+    // it exists to set.
+    const overlay = JSON.parse(readFileSync(overlayPath, 'utf8')) as Record<string, unknown>;
+    expect(Object.keys(overlay)).toEqual(['productName']);
+    expect(overlay.productName).toBe('Screepub Desktop');
+  });
+
+  test('it does not collide with the SwiftUI app’s bundle name', () => {
+    const overlay = JSON.parse(readFileSync(overlayPath, 'utf8')) as { productName: string };
+    // app/build-app.sh produces Screepub.app and app/release.sh ships it
+    // inside Screepub-macOS.dmg, which tools/bump-tap.sh hardcodes. Both
+    // apps must be installable at once until piece F.
+    expect(overlay.productName).not.toBe('Screepub');
+    expect(overlay.productName).not.toBe(CONFIG.productName);
+  });
+
+  test('it does not touch the identifier, which already differs', () => {
+    // If the overlay ever set an identifier, the two apps could collide in
+    // LaunchServices in a way the filename difference would hide.
+    const overlay = JSON.parse(readFileSync(overlayPath, 'utf8')) as Record<string, unknown>;
+    expect(overlay.identifier).toBeUndefined();
+    expect(CONFIG.identifier).toBe('com.darkwell.screepub.desktop');
+  });
+
+  test('it does not touch the window title', () => {
+    // productName names the .app; app.windows[0].title names the window. A
+    // user who opens the app should see "Screepub", not the transition
+    // spelling, on every platform.
+    const overlay = JSON.parse(readFileSync(overlayPath, 'utf8')) as Record<string, unknown>;
+    expect(overlay.app).toBeUndefined();
+    expect(CONFIG.app.windows[0].title).toBe('Screepub');
+  });
+
+  test('desktop/README.md records that piece F deletes this file', () => {
+    // JSON has no comments, and (per the test above) Tauri's own schema
+    // forbids the overlay from carrying a second key to hold one — so the
+    // file cannot say this about itself without also breaking the real
+    // build. The note that would have gone in a "_why" key lives in the
+    // README instead, next to the section Task 6 already put the bundling
+    // notes in. Without a marker SOMEWHERE, this file is indistinguishable
+    // from permanent configuration and outlives the transition it exists for.
+    const readme = readFileSync(join(REPO, 'desktop', 'README.md'), 'utf8');
+    expect(readme).toContain('tauri.transition.conf.json');
+    expect(readme).toContain('piece F');
+  });
+
+  test('merging it into tauri.conf.json actually changes productName and nothing else', () => {
+    // The tests above only inspect the overlay file in isolation — a file
+    // that says the right thing but is never truly merged (a typo'd key,
+    // a value of the wrong type) would still pass every one of them. This
+    // applies the exact merge Tauri's own docs describe for `--config` (a
+    // shallow JSON Merge Patch: RFC 7396) against the real tauri.conf.json,
+    // so the effect — not just the file's existence — is what is pinned.
+    // https://v2.tauri.app/reference/config/
+    //
+    // This mirrors, at the JS level, what was independently confirmed by
+    // actually invoking `cargo tauri build --config tauri.transition.conf.json`
+    // on this machine (see desktop/README.md and the test above) — this
+    // suite cannot spawn cargo itself, so this is the closest an automated
+    // check gets, and the manual run is what proves the two agree.
+    const overlay = JSON.parse(readFileSync(overlayPath, 'utf8')) as Record<string, unknown>;
+    const merged: Record<string, unknown> = { ...CONFIG, ...overlay };
+    expect(merged.productName).toBe('Screepub Desktop');
+    // Every other top-level key is byte-for-byte what tauri.conf.json alone
+    // says — the overlay altered exactly one thing.
+    for (const key of Object.keys(CONFIG)) {
+      if (key === 'productName') continue;
+      expect(merged[key]).toEqual(CONFIG[key]);
+    }
+  });
+});

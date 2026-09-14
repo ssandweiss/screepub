@@ -669,3 +669,49 @@ produced by this project at all.
 5. The gated suite has **seven** tests, not six-plus-one: with bundles on
    disk it is 7 pass, and with none it is 1 pass / 6 skip with the reason
    printed. The plan's "passes six tests" undercounts by one.
+
+### The macOS name, and what has not been seen
+
+`desktop/src-tauri/tauri.transition.conf.json` renames the macOS product to
+`Screepub Desktop` so the Tauri app and the SwiftUI app can both be
+installed. The overlay is passed only by release.yml's macOS job, once a
+later piece wires that job up; **piece F deletes the file** and the name
+becomes `Screepub.app`.
+
+The overlay is exactly one key — `{"productName": "Screepub Desktop"}`,
+nothing else. An earlier draft added a leading-underscore `"_why"` key to
+carry this same note as JSON, on the assumption that Tauri ignores unknown
+top-level keys in a `--config` overlay the way a `_` prefix is ignored
+elsewhere in this codebase. **That assumption is wrong**, and it was wrong
+in a way that would have broken the real build. Confirmed on this machine:
+
+    $ cargo tauri build --config tauri.transition.conf.json --bundles deb
+    Error `"tauri.conf.json"` error: Additional properties are not allowed ('_why' was unexpected)
+
+`tauri-cli 2.11.4` — the exact version `desktop.yml` pins — ships a
+`config.schema.json` with `"additionalProperties": false` at the top level,
+and `--config` merges via RFC 7396 merge patch, which carries a brand-new
+key straight into the object that gets schema-validated. There is no
+exception for `_`-prefixed names, and no flag to relax it. Removing the key
+and re-running the identical command bundled cleanly:
+
+    $ cargo tauri build --config tauri.transition.conf.json --bundles deb
+        Bundling Screepub Desktop_0.6.0_arm64.deb (…/target/release/bundle/deb/Screepub Desktop_0.6.0_arm64.deb)
+
+So the self-documentation this note would have carried lives here instead —
+this file is the one `tests/desktop-shell.test.ts` checks for the marker —
+and the overlay itself stays the minimal, provably-working single key.
+
+**Nobody has opened the result on macOS.** No `.app`, no `.dmg` and no NSIS
+installer has been produced by this project on any machine at the time of
+writing; the macOS and Windows halves are read off tauri-bundler's source
+and ride on CI. What *was* checked on this Linux machine, against the real
+`cargo tauri` binary CI uses: that the overlay parses, that `cargo tauri
+build --config` accepts it and reaches `productName` (the throwaway `.deb`
+above), and that a bare underscore-prefixed key — the design this file
+almost shipped with — does not merely get ignored but hard-fails the build.
+The identifier (`com.darkwell.screepub.desktop`, already distinct from the
+Swift app's `com.darkwell.screepub`) and the window title (`app.windows[0].
+title`, left untouched at `"Screepub"`) were not re-verified here beyond
+what `tests/desktop-shell.test.ts` already pins, since neither one is
+touched by this piece.
