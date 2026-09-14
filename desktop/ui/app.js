@@ -48,12 +48,42 @@ export const argv = {
       optionsJson ? '--options-json' : null, optionsJson].filter((a) => a !== null),
 };
 
+/** How much of an unparseable answer goes in the message a person reads.
+ *  A truncated 400 KB answer is still 400 KB of JSON, and the fault body is
+ *  a 52-character column: the first few lines say what went wrong, and the
+ *  rest only buries the two buttons under it. */
+const RAW_SHOWN = 300;
+
+/** The engine's stdout, as text.
+ *
+ *  Rust hands it over as BYTES, not as a string, and that is load-bearing
+ *  rather than a style choice. Tauri routes an IPC answer one of two ways
+ *  (`tauri-2.11.5/src/ipc/protocol.rs:373-407`): a raw body goes down the
+ *  channel, a JSON body only when it starts with `{` or `[`. A Rust String
+ *  arrives as `"…"`, so it took the other route — injected into WebKitGTK as
+ *  a JS string literal — and above roughly 400 KB that arrives TRUNCATED,
+ *  nondeterministically. A 120-page script with --preview-inline is already
+ *  220-320 KB, so this was not a theoretical ceiling.
+ *
+ *  Both shapes are accepted because Tauri's own routing is per platform:
+ *  Linux and Windows deliver the raw body as an ArrayBuffer down the
+ *  channel, while macOS and iOS still eval it, where a Vec<u8> serialises as
+ *  an array of numbers. The string branch is what a test double hands over,
+ *  and what the old transport produced. */
+function decodeAnswer(answer) {
+  if (typeof answer === 'string') return answer;
+  if (answer instanceof ArrayBuffer) return new TextDecoder().decode(answer);
+  if (ArrayBuffer.isView(answer)) return new TextDecoder().decode(answer);
+  if (Array.isArray(answer)) return new TextDecoder().decode(Uint8Array.from(answer));
+  return String(answer ?? '');
+}
+
 /** Run the engine and parse its one line of stdout.
  *  Throws an Error whose message is fit to show a person. */
 export async function runEngine(args) {
   let stdout;
   try {
-    stdout = await tauri().core.invoke('run_engine', { args });
+    stdout = decodeAnswer(await tauri().core.invoke('run_engine', { args }));
   } catch (message) {
     // Rust rejected: it could not find or start the binary at all.
     throw new Error(String(message));
@@ -62,8 +92,10 @@ export async function runEngine(args) {
     return JSON.parse(stdout);
   } catch {
     // The engine printed something that is not its contract. Show it raw
-    // rather than swallowing it — this is how a dropped --json presents.
-    throw new Error(`the engine did not answer in JSON:\n${stdout}`);
+    // rather than swallowing it — this is how a dropped --json presents —
+    // but only as much of it as a person can actually read.
+    const shown = stdout.length > RAW_SHOWN ? `${stdout.slice(0, RAW_SHOWN)}…` : stdout;
+    throw new Error(`the engine did not answer in JSON:\n${shown}`);
   }
 }
 

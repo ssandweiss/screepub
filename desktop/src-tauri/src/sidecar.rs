@@ -17,6 +17,18 @@
 //! under one name. This file never looks inside a line. If a change here
 //! needs to know what a line MEANS, the change belongs in `desktop/ui/`.
 //!
+//! It hands back BYTES rather than a `String`, and that is a transport fix,
+//! not a change of contract — the bytes are the same stdout, undecoded.
+//! Tauri routes an IPC answer one of two ways (`tauri-2.11.5/src/ipc/
+//! protocol.rs:373-407`): a raw body goes down the channel, while a JSON
+//! body does only when it starts with `{` or `[`. A Rust `String` serialises
+//! as `"…"`, so it fell to `responder_eval` — the whole answer injected into
+//! WebKitGTK as a JS string literal — which above roughly 400 KB arrives
+//! TRUNCATED, nondeterministically: measured here, a 384 KB answer came back
+//! whole twice and short twice in one session. A raw body takes the channel
+//! and arrives intact. `desktop/ui/app.js` decodes it; nothing in this file
+//! looks at what it decoded to.
+//!
 //! This is deliberately NOT a third command: the two registered commands are
 //! unchanged, and the window is granted no new permission.
 //!
@@ -35,7 +47,7 @@ pub const SIDECAR: &str = "screepub-engine";
 /// this name, uninspected. The window decides what a line is.
 pub const LINE_EVENT: &str = "engine-line";
 
-pub async fn run(app: &AppHandle, args: Vec<String>) -> Result<String, String> {
+pub async fn run(app: &AppHandle, args: Vec<String>) -> Result<Vec<u8>, String> {
     let (mut rx, _child) = app
         .shell()
         .sidecar(SIDECAR)
@@ -76,7 +88,9 @@ pub async fn run(app: &AppHandle, args: Vec<String>) -> Result<String, String> {
         }
     }
 
-    let stdout = stdout.trim().to_string();
+    // Trimmed first, then handed over as bytes: `into_bytes` is the String's
+    // own buffer, so this costs no copy and reads nothing.
+    let stdout = stdout.trim().to_string().into_bytes();
     if stdout.is_empty() {
         // Nothing on stdout means the engine died before it could honour
         // its own contract. What it said on the way down is all that is left.

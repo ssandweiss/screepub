@@ -411,3 +411,84 @@ describe('--preview-inline', () => {
     expect(answer.previewHtmlPath).toBeUndefined();
   }, 60000);
 });
+
+describe('a large answer survives a pipe', () => {
+  // The desktop window reads the engine's stdout through a pipe, and a pipe
+  // buffer is 64 KiB. `console.log` to a pipe is buffered and exiting does
+  // not wait for the tail: measured on this machine before the fix, the
+  // answer for the script generated below came back to a piped caller cut
+  // to exactly 262,144 or 655,360 bytes — 64 KiB multiples — roughly one run
+  // in four, while the same command redirected to a FILE was always whole.
+  // Nothing in the app was involved; `bun src/cli.ts … | cat` reproduced it.
+  //
+  // The engine's own suite never saw it because every other answer here fits
+  // in one buffer. --preview-inline is 1.85-2.6 KB per page, so a 120-page
+  // script is already several buffers deep.
+  //
+  // Repeating the plain spawn was NOT enough: with the defect restored, six
+  // attempts caught it in four runs out of five and ten in three out of
+  // five — the race can fall either way whatever the count. So the reader is
+  // made slow as well: nothing drains the pipe for the first moments, so the
+  // answer cannot fit in the 64 KiB buffer while an engine that does not
+  // wait for its own tail is exiting. Measured with the defect restored,
+  // that combination caught it in six runs out of six; the slow reader alone
+  // did not (one run in three still passed).
+  const READER_WAIT_MS = 400;
+  const ATTEMPTS = 6;
+
+  /** Run the CLI, leave its stdout unread for a moment, then drain it. */
+  async function runCliSlowReader(args: string[]) {
+    const proc = Bun.spawn(['bun', `${ROOT}src/cli.ts`, ...args], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    await Bun.sleep(READER_WAIT_MS);
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return stdout;
+  }
+
+  /** An invented screenplay, big enough to need several pipe buffers. */
+  function generated(scenes: number) {
+    const parts = ['Title: Generated Load Sample\nAuthor: Test Harness\n\n'];
+    for (let i = 0; i < scenes; i += 1) {
+      parts.push(`INT. TEST ROOM ${i} - DAY\n\n`);
+      parts.push(`A plain room with a numbered door. Nothing in it matters except its
+length, which is the whole point of sample number ${i}.\n\n`);
+      parts.push(`ALPHA\nThis is line ${i} of a script that exists only to be big.\n\n`);
+      parts.push(`BETA\n(flatly)\nUnderstood. That was line ${i}. There will be more.\n\n`);
+    }
+    return parts.join('');
+  }
+
+  test('every byte of it, every time', async () => {
+    const script = `${SCRATCH}/pipe-load.fountain`;
+    writeFileSync(script, generated(1000), 'utf8');
+
+    const lengths: number[] = [];
+    for (let i = 0; i < ATTEMPTS; i += 1) {
+      const stdout = (await runCliSlowReader([script, '--json', '--preview-inline',
+        '--no-fountain', '-o', `${SCRATCH}/pipe-load.epub`])).trim();
+      lengths.push(stdout.length);
+      // Named by attempt, so a failure says which run lost the tail.
+      expect(`attempt ${i} parses: ${(() => {
+        try {
+          return JSON.parse(stdout).ok === true;
+        } catch {
+          return false;
+        }
+      })()}`).toBe(`attempt ${i} parses: true`);
+    }
+
+    // The answer is the same every time, so any difference is loss. (A
+    // truncation that happened to cut identically on every attempt would
+    // still be caught by the parse above.)
+    expect(lengths.map((l) => l === lengths[0])).toEqual(lengths.map(() => true));
+    // And the test is actually testing the thing: an answer that fits in one
+    // 64 KiB pipe buffer could never have shown the defect.
+    expect(lengths[0]).toBeGreaterThan(4 * 65536);
+  }, 120000);
+});

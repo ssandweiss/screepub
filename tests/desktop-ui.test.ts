@@ -652,3 +652,131 @@ describe('what the Convert surface decides', () => {
     expect(shown.heading).toBe(convert.HEADINGS['not-screenplay']);
   }, 60000);
 });
+
+describe('the engine’s answer survives the trip out of Rust', () => {
+  // Measured, not supposed: driving `run_engine` from the live window with a
+  // String on the Rust side, a 384 KB answer came back whole twice and
+  // TRUNCATED twice in the same session (327,675 and 360,443 of 384,283
+  // characters), and a 3.4 MB answer was short on all four attempts. Tauri
+  // only sends a JSON body down the IPC channel when it starts with `{` or
+  // `[` (tauri-2.11.5/src/ipc/protocol.rs:373-407); a Rust String arrives as
+  // `"…"`, so it was injected into WebKitGTK as a JS string literal instead,
+  // which is what loses bytes. Rust now returns the stdout as raw BYTES,
+  // which always takes the channel, and app.js decodes them.
+  //
+  // These tests are about the decode, because that is the part that lives in
+  // this repo: the wrong implementations they exist to catch are a decode
+  // that ignores a view's offset, one that corrupts multi-byte UTF-8, and
+  // one that cannot cope with the shape a different platform sends.
+  const UTF8 = new TextEncoder();
+
+  async function answering(answer: unknown) {
+    const { runEngine } = await import(join(UI, 'app.js'));
+    (globalThis as unknown as { window: unknown }).window = {
+      __TAURI__: { core: { invoke: async () => answer } },
+    };
+    try {
+      return await runEngine(['--version', '--json']);
+    } finally {
+      delete (globalThis as unknown as { window?: unknown }).window;
+    }
+  }
+
+  /** A JSON answer of roughly `bytes` bytes, shaped like the engine's. */
+  function bigAnswer(bytes: number) {
+    const answer = { ok: true, title: 'Generated Load Sample', previewHtml: '' };
+    answer.previewHtml = 'x'.repeat(Math.max(0, bytes - JSON.stringify(answer).length));
+    return JSON.stringify(answer);
+  }
+
+  test('an ArrayBuffer of half a megabyte arrives whole', async () => {
+    const json = bigAnswer(500_000);
+    expect(json.length).toBeGreaterThan(400_000); // the old floor, exceeded
+    const parsed = await answering(UTF8.encode(json).buffer);
+    // Length first: a decode that dropped the tail would still produce an
+    // object if it happened to cut on a brace, so assert the bytes.
+    expect(JSON.stringify(parsed).length).toBe(json.length);
+    expect(parsed).toEqual(JSON.parse(json));
+  });
+
+  test('a view into a larger buffer decodes only its own bytes', async () => {
+    // `decode(view.buffer)` is the plausible wrong implementation: it reads
+    // the whole allocation, padding included, and the JSON.parse then fails
+    // for a reason nobody can see.
+    const json = bigAnswer(1_000);
+    const padded = new Uint8Array(json.length + 64);
+    padded.fill(0x20);
+    padded.set(UTF8.encode(json), 32);
+    const view = padded.subarray(32, 32 + json.length);
+    expect(await answering(view)).toEqual(JSON.parse(json));
+  });
+
+  test('multi-byte characters are decoded, not truncated to bytes', async () => {
+    // `String.fromCharCode(...bytes)` passes every ASCII test above and
+    // mangles the first em dash — and an em dash is in the engine's own
+    // refusal text.
+    const json = JSON.stringify({ ok: false, error: { code: 'x', message: 'é — 日本語' } });
+    const parsed = await answering(UTF8.encode(json));
+    expect((parsed as { error: { message: string } }).error.message).toBe('é — 日本語');
+  });
+
+  test('a plain array of byte values decodes too', async () => {
+    // The shape macOS and iOS produce: Tauri evals a raw body there rather
+    // than sending it down the channel, and a Vec<u8> serialises as numbers.
+    const json = bigAnswer(2_000);
+    expect(await answering([...UTF8.encode(json)])).toEqual(JSON.parse(json));
+  });
+
+  test('a string still works, so a test double need not encode', async () => {
+    expect(await answering('{"ok":true}')).toEqual({ ok: true });
+  });
+
+  test('an answer that is not JSON is reported in a readable length', async () => {
+    // Before the cap, a truncated 400 KB answer put 400 KB of raw JSON in a
+    // 52-character column, burying the two buttons under it.
+    const noise = `<!DOCTYPE html>${'a'.repeat(500_000)}`;
+    const err = await answering(UTF8.encode(noise)).then(
+      () => null,
+      (e: Error) => e,
+    );
+    expect(err).not.toBeNull();
+    expect(err!.message).toContain('the engine did not answer in JSON');
+    // The sentence, a newline, 300 characters and an ellipsis — and the
+    // whole thing well under a screenful, whatever the answer's size.
+    expect(err!.message.length).toBeLessThan(400);
+    expect(err!.message).toContain('<!DOCTYPE html>');
+    expect(err!.message.endsWith('…')).toBe(true);
+  });
+
+  test('a short answer is quoted in full, not always truncated', async () => {
+    // Guards the other half: a cap that fired unconditionally would hide the
+    // whole of the short answers that are the common case.
+    const err = await answering('engine: command not found').then(
+      () => null,
+      (e: Error) => e,
+    );
+    expect(err!.message).toBe('the engine did not answer in JSON:\nengine: command not found');
+  });
+
+  test('a rejection from Rust is passed through as its own message', async () => {
+    const { runEngine } = await import(join(UI, 'app.js'));
+    (globalThis as unknown as { window: unknown }).window = {
+      __TAURI__: {
+        core: {
+          invoke: async () => {
+            throw 'could not start the Screepub engine (sidecar "screepub-engine")';
+          },
+        },
+      },
+    };
+    try {
+      const err = await runEngine(['--version']).then(
+        () => null,
+        (e: Error) => e,
+      );
+      expect(err!.message).toBe('could not start the Screepub engine (sidecar "screepub-engine")');
+    } finally {
+      delete (globalThis as unknown as { window?: unknown }).window;
+    }
+  });
+});

@@ -134,6 +134,48 @@ a thing to slip in.
   * `listen()` itself needed **no new permission**: the capability is still
     `['core:default']`, which already carries the event API.
 
+## Why a big answer used to arrive cut in half (piece D, measured 2026-09-13)
+
+Driving `run_engine` from the live window against generated scripts, an
+answer above roughly 400 KB came back TRUNCATED, nondeterministically: the
+same 384 KB input succeeded twice and failed twice in one session. With
+`--preview-inline` costing 1.85-2.6 KB per page, a 120-page script is
+220-320 KB, so this was not a theoretical ceiling.
+
+**It was not the IPC, and it was not this shell.** The received lengths were
+all exact multiples of 64 KiB — a pipe buffer — and `bun src/cli.ts … |
+cat`, with no Tauri anywhere, reproduced it at the same boundaries, while the
+identical run redirected to a FILE was always whole. The engine's
+`console.log` to a pipe is buffered, and the process was exiting without
+waiting for the tail. `src/cli.ts` now writes that one answer through
+`sayLine`, which waits for `drain`; `tests/cli.test.ts` has the regression
+test (a deliberately slow reader plus six attempts — the defect restored,
+that pair caught it six runs out of six).
+
+Measured after the fix, through the live window, four attempts each:
+212 KB, 384 KB, 487 KB, 694 KB and **3.47 MB** all arrived whole and parsed,
+20 of 20.
+
+Two things changed here as well, both secondary:
+
+  * `run_engine` returns the stdout as **bytes** (`tauri::ipc::Response`)
+    rather than a `String`, and `desktop/ui/app.js` decodes them. A String
+    return is serialised by Tauri into a quoted JSON string and parsed back
+    out again, so a multi-megabyte answer was escaped and parsed twice for
+    no reason. This was *not* what fixed the truncation.
+  * A dead end worth recording: Tauri only sends a JSON IPC body down the
+    channel when it starts with `{` or `[`
+    (`tauri-2.11.5/src/ipc/protocol.rs:373-407`), and otherwise injects it
+    into the webview with `eval`. That looked like the cause. It was not:
+    with the engine truncating, the webview's IPC `fetch` failed once and
+    Tauri then fell back to `postMessage` + `eval` **permanently** for that
+    page (`customProtocolIpcFailed` in `scripts/ipc-protocol.js`), which is
+    what made the second symptom appear. With the engine fixed, the custom
+    protocol holds and every answer arrives as an ArrayBuffer. The CSP was
+    briefly widened to `connect-src 'self' ipc: http://ipc.localhost` while
+    chasing this; it made no difference and was reverted — `default-src
+    'self'` is what ships.
+
 ## How Tauri finds the engine (observed 2026-09-13, on aarch64-unknown-linux-gnu)
 
 This section is a transcript, not a summary. Tauri 2.11.5 /

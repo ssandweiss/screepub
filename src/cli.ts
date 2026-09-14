@@ -155,6 +155,26 @@ async function writeFileAtomic(
   await rename(tmp, path);
 }
 
+/** Print one line on stdout and WAIT for it to leave this process.
+ *
+ * `console.log` to a PIPE is buffered, and exiting does not wait for the
+ * tail. Measured on this machine: the engine's own answer for a generated
+ * 1,000-scene script reached a piped caller cut to exactly 262,144 or
+ * 655,360 bytes — 64 KiB multiples, the pipe buffer — one run in four, with
+ * no app and no Tauri anywhere, while the same run redirected to a FILE was
+ * always whole. An answer under one pipe buffer never noticed; a
+ * --preview-inline answer is 1.85-2.6 KB per page, so a 120-page script is
+ * already several buffers deep, and the desktop window reads exactly this
+ * way. Anything that can exceed 64 KiB goes through here.
+ */
+async function sayLine(text: string): Promise<void> {
+  if (!process.stdout.write(`${text}\n`)) {
+    await new Promise<void>((resolve) => {
+      process.stdout.once('drain', () => resolve());
+    });
+  }
+}
+
 function fail(error: JsonError): never {
   if (jsonMode) {
     console.log(JSON.stringify({ ok: false, error }));
@@ -543,7 +563,10 @@ async function main() {
 
   const sp = result.screenplay;
   if (jsonMode) {
-    console.log(
+    // sayLine, not console.log: this is the one answer that can outgrow a
+    // pipe buffer, and the window on the other end of that pipe needs all
+    // of it. See sayLine's note.
+    await sayLine(
       JSON.stringify({
         ok: true,
         title: result.meta.title,
