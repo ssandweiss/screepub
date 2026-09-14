@@ -122,32 +122,24 @@ function renderBlocks(
     if (speech) speech.push({ kind, html: s });
     else blocks.push(s);
   };
-  // The cue (+ parentheticals) and the FIRST dialogue line share an
-  // unbreakable wrapper so a cue never strands at a page bottom with its
-  // speech on the next page — the wrapper form, which scene headings no
-  // longer need.
-  // The keep closes BEFORE the first dialogue token, not after it. A
-  // dialogue token is a whole paragraph, so closing after it put an entire
-  // speech inside one break-inside: avoid block: an eleven-line speech that
-  // would not fit moved wholesale, ending the page two thirds of the way
-  // down, and keepSpeechesWhole was effectively on however it was set.
+  // A speech is a flat run of paragraphs: cue, any parentheticals, then the
+  // dialogue. NO wrapper. What holds a cue to its speech is the CSS chain on
+  // the paragraphs themselves — break-after: avoid on p.character and
+  // p.parenthetical — plus orphans on p.dialogue for the page edge (#17).
   //
-  // What holds the speech together instead is the chain, every link of it
-  // device-settled: break-after: avoid binds a cue to what follows and
-  // binds ALONE (registry #5a), the same now carries a parenthetical into
-  // its dialogue, and orphans on p.dialogue keeps the print minimum of
-  // lines at the page edge (registry #17). The keep is left doing the one
-  // job a chain cannot: stopping a break INSIDE the cue-and-parenthetical
-  // group.
-  const speechBlock = (cells: Cell[]): string => {
-    const firstLine = cells.findIndex((c) => c.kind === 'dialogue');
-    const cut = firstLine === -1 ? cells.length : firstLine;
-    const head = cells.slice(0, cut).map((c) => c.html).join('');
-    const tail = cells.slice(cut).map((c) => c.html).join('');
-    // Stray dialogue with no cue ahead of it has nothing to keep.
-    const kept = head ? `<div class="keep-together">\n${head}</div>\n` : '';
-    return `<div class="dialogue-block">\n${kept}${tail}</div>\n`;
-  };
+  // The wrapper is gone because it was the thing breaking this. A
+  // `<div class="keep-together">` carried the forward bind, and the KFX
+  // converter behind Send-to-Kindle honors break-after on elements that
+  // carry text (settled on h2.scene-heading, #5a) but not on a structural
+  // div, and does not propagate a last child's break-after to its parent.
+  // So p.character's own rule governed a break inside the wrapper that can
+  // never be taken, the wrapper→dialogue boundary went ungoverned, and cues
+  // stranded on device (photo-confirmed 2026-09-14, #8b).
+  //
+  // This is the shape #5a already proved on this renderer when the heading
+  // wrapper was deleted for the same reason. Keep it flat.
+  const speechBlock = (cells: Cell[]): string =>
+    `<div class="dialogue-block">\n${cells.map((c) => c.html).join('')}</div>\n`;
   const closeSpeech = () => {
     if (!speech) return;
     blocks.push(speechBlock(speech));

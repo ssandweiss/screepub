@@ -3,7 +3,7 @@ import { Fountain } from 'fountain-js';
 import JSZip from 'jszip';
 import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from '../src/options';
 import { screenplayCss } from '../src/epub/css';
-import { ruleFor } from './css-rules';
+import { ruleFor, eachRule } from './css-rules';
 import { tokensToBody } from '../src/epub/html';
 import { buildEpub } from '../src/epub/build';
 import { toFountain } from '../src/fountain/serialize';
@@ -174,14 +174,14 @@ describe('screenplayCss with options', () => {
 
   test('wrapper keeps carry the column spelling in a separate rule', () => {
     const css = screenplayCss(DEFAULT_FORMAT_OPTIONS);
-    // Grouped rule on purpose: this test targets the comma-joined shadow
-    // selector itself (the old column-break spelling), not the bare
-    // .keep-together or table.dual-dialogue rules.
-    const rule = ruleFor(css, '.keep-together, table.dual-dialogue');
-    expect(rule).toContain('-webkit-column-break-inside: avoid');
+    // The shadow shares its selector with the rule it shadows and is
+    // emitted second, so address it by position rather than by name.
+    const both = eachRule(css).filter((r) => r.selector === 'table.dual-dialogue');
+    expect(both).toHaveLength(2);
+    expect(both[1]!.body).toContain('-webkit-column-break-inside: avoid');
     // iBooks bug: the column spelling must not share a declaration block
     // with page-break-inside, or Books ignores BOTH.
-    expect(rule).not.toContain('page-break-inside');
+    expect(both[1]!.body).not.toContain('page-break-inside');
   });
 
   test('the column spelling tracks the keep set: keepSpeechesWhole joins it', () => {
@@ -189,12 +189,11 @@ describe('screenplayCss with options', () => {
     // from this rule is inert there. The selector list is derived from the
     // same gating that emits the keeps, not hand-maintained beside it.
     const off = screenplayCss(resolveFormatOptions({}));
-    expect(ruleFor(off, '.keep-together, table.dual-dialogue'))
-      .toContain('-webkit-column-break-inside: avoid');
+    expect(off).toContain('table.dual-dialogue { -webkit-column-break-inside: avoid; }');
     expect(off).not.toContain('.dialogue-block { -webkit-column-break-inside');
 
     const on = screenplayCss(resolveFormatOptions({ keepSpeechesWhole: true }));
-    const rule = ruleFor(on, '.keep-together, table.dual-dialogue, .dialogue-block');
+    const rule = ruleFor(on, 'table.dual-dialogue, .dialogue-block');
     expect(rule).toContain('-webkit-column-break-inside: avoid');
     // Still its own declaration block, per the iBooks bug above.
     expect(rule).not.toContain('page-break-inside');

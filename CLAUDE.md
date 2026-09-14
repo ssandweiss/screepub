@@ -51,10 +51,13 @@ epubcheck <out.epub>        # validate output (brew-installed)
   line-height.** Kindle strips max-width and owns line-height. Two more
   hard NOs: **never `background-color` on html or body** — it makes the KFX
   converter synthesize its own wrapper block and every keep in the book
-  then dies silently (MobileRead t=330798). Our own nesting is fine:
-  `section.scene` > `.dialogue-block` > `.keep-together` is device-
-  confirmed to hold (registry #8b), so this is a ban on the root
-  background, NOT a reason to flatten the DOM. And **CSS value SYNTAX
+  then dies silently (MobileRead t=330798). This is a ban on the ROOT
+  background, not a general fear of nesting: `section.scene` >
+  `.dialogue-block` is device-confirmed to hold. But **a keep must sit on
+  an element that carries TEXT, never on a structural wrapper** — that
+  converter honors `break-after: avoid` on a `<p>` or `<h2>` and ignores it
+  on a `<div>`, which stranded every cue in the book once (registry #8b,
+  2026-09-14). Keeps are chains on paragraphs here, not wrappers. And **CSS value SYNTAX
   stays CSS-2.1-vintage** — no `min()`/`clamp()`/`var()`, because Adobe
   RMSDK (Kobo's EPUB path, tolino) violates CSS error handling and can
   blank a whole book on a value function it cannot parse; CSS3 PROPERTIES

@@ -66,7 +66,7 @@ describe('tokensToBody', () => {
     expect(file.xhtml).toMatch(
       /<section class="scene" id="sc-001">\s*<h2 class="scene-heading">INT\. KITCHEN - DAY<\/h2>\s*<p class="action">Jack enters, exhausted\.<\/p>/,
     );
-    expect(file.xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
+    expect(file.xhtml).not.toContain('keep-together');
   });
 
   test('a dialogue block follows its heading directly — no outer wrapper', () => {
@@ -75,7 +75,7 @@ describe('tokensToBody', () => {
     expect(file.xhtml).toMatch(
       /<h2 class="scene-heading">INT\. CAR - DAY<\/h2>\s*<div class="dialogue-block">/,
     );
-    expect(file.xhtml).not.toMatch(/<div class="keep-together">\s*<h2/);
+    expect(file.xhtml).not.toContain('keep-together');
   });
 
   test('heading-only scene renders bare without error', () => {
@@ -143,10 +143,10 @@ describe('dual dialogue height fallback', () => {
     expect(file.xhtml).not.toContain('<table class="dual-dialogue">');
     expect(file.xhtml).toContain('<p class="character">JACK</p>');
     expect(file.xhtml).toContain('<p class="character">JILL</p>');
-    // each speech is a full dialogue block whose cue opens the keep, and
-    // JACK's speech still precedes JILL's
+    // each speech is a full dialogue block led by its cue, and JACK's
+    // speech still precedes JILL's
     expect(file.xhtml).toMatch(
-      /<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JACK<\/p>[\s\S]*?<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JILL<\/p>/,
+      /<div class="dialogue-block">\s*<p class="character">JACK<\/p>[\s\S]*?<div class="dialogue-block">\s*<p class="character">JILL<\/p>/,
     );
     const blocks = file.xhtml.match(/<div class="dialogue-block">/g) ?? [];
     expect(blocks.length).toBe(2);
@@ -197,9 +197,12 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
     expect(body).not.toContain('line-height');
   });
 
-  test('keep-with-next chain is minimal: heading and cue only, not parenthetical', () => {
+  test('keep-with-next chain covers heading, cue and parenthetical', () => {
+    // The parenthetical joined the chain on 2026-09-14 when the cue keep
+    // stopped being a wrapper; see 'the cue chain (no wrapper)' below for
+    // the device evidence and why #5's objection no longer applies.
     const paren = ruleFor(SCREENPLAY_CSS, 'p.parenthetical');
-    expect(paren).not.toContain('break-after');
+    expect(paren).toContain('break-after: avoid');
     const heading = ruleFor(SCREENPLAY_CSS, 'h2.scene-heading');
     // both spellings: the legacy prefixed property AND the modern standalone
     expect(heading).toContain('page-break-after: avoid');
@@ -212,12 +215,6 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
     expect(marker).toContain('float: right');
     // horizontal geometry in % per the CSS invariants
     expect(marker).toMatch(/margin-left:\s*\d+%/);
-  });
-
-  test('keep-together container uses break-inside avoid (the KDP-documented form)', () => {
-    const keep = ruleFor(SCREENPLAY_CSS, '.keep-together');
-    expect(keep).toContain('page-break-inside: avoid');
-    expect(keep).toContain('break-inside: avoid');
   });
 
   test('transitions may end a page but never begin one', () => {
@@ -240,29 +237,35 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
   // header comment. Default options, so the two gated-off entries
   // (`.dialogue-block`, `section.scene`) are absent by design.
   //
-  // Five entries carry BOTH spellings of one avoid (10), and .keep-together
-  // carries both spellings of TWO — inside, so a cue cannot split from its
-  // parenthetical, and after, so the wrapper cannot split from the dialogue
-  // it introduces (4). Hence fourteen. That forward pair was added after a
-  // device read showed cues stranding: with the dialogue moved out of the
-  // wrapper, the cue is the wrapper's last child and break-after on
-  // p.character governs a break that no longer exists.
-  // The remaining entry is the column-spelling shadow rule
-  // (-webkit-column-break-inside, css.ts), which re-lists two selectors
-  // already named above for multicol-paginating engines; it matches neither
-  // `page-break-inside` nor `break-inside`, so it adds an entry without
-  // adding to the count.
-  test('the avoid inventory is closed — seven entries, fourteen declarations', () => {
+  // Six entries carry BOTH spellings of one avoid, so twelve declarations.
+  // The cue keep is two of them — p.character and p.parenthetical — because
+  // it is a CHAIN on the paragraphs, not a wrapper. It stopped being a
+  // wrapper on 2026-09-14: a `.keep-together` div carried the forward bind,
+  // and the KFX converter behind Send-to-Kindle honors break-after on
+  // text-bearing elements (#5a, proved on h2.scene-heading) but not on a
+  // structural div, so cues stranded on device.
+  //
+  // `table.dual-dialogue` appears TWICE and that is not a duplicate entry:
+  // the first is the real keep, the second the column-spelling shadow rule
+  // (-webkit-column-break-inside) that re-lists it for multicol-paginating
+  // engines. The shadow matches neither `page-break-inside` nor
+  // `break-inside`, so it adds a selector without adding to the count. It
+  // now sits after the rule it shadows rather than before, so ruleFor()
+  // answers with the spelling every other engine reads.
+  //
+  // Default options, so the two gated-off entries (`.dialogue-block`,
+  // `section.scene`) are absent by design.
+  test('the avoid inventory is closed — six entries, twelve declarations', () => {
     const declarations =
       SCREENPLAY_CSS.match(/^\s*(?:page-)?break-(?:after|before|inside):\s*avoid;/gm) ?? [];
-    expect(declarations).toHaveLength(14);
+    expect(declarations).toHaveLength(12);
 
     expect(selectorsCarrying(/:\s*avoid;/)).toEqual([
-      '.keep-together',
-      '.keep-together, table.dual-dialogue',
       'h2.scene-heading',
       'p.mini-slug',
       'p.character',
+      'p.parenthetical',
+      'table.dual-dialogue',
       'table.dual-dialogue',
       'p.transition',
     ]);
@@ -367,26 +370,6 @@ describe('buildEpub', () => {
 // entire speech, and the keep became an unbreakable block as tall as the
 // speech. An eleven-line speech that would not fit moved wholesale and
 // left a page ending two thirds of the way down — the same blank-bottom
-// symptom registry #5 blames on oversized avoid chunks.
-describe('cue keep-with-dialogue wrapper', () => {
-  test('the keep holds cue and parenthetical, and lets the speech split', () => {
-    const tokens = new Fountain().parse(
-      'INT. A - DAY\n\nHi.\n\n@JACK\n(tired)\nFirst line of speech.\nSecond line of speech.\n', true,
-    ).tokens;
-    const [file] = tokensToBody(tokens).files;
-    expect(file.xhtml).toMatch(
-      /<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JACK<\/p>\s*<p class="parenthetical">\(tired\)<\/p>\s*<\/div>\s*<p class="dialogue">First line of speech\.<\/p>\s*<p class="dialogue">Second line of speech\.<\/p>\s*<\/div>/,
-    );
-  });
-
-  test('single-line speech wraps without leftovers', () => {
-    const tokens = new Fountain().parse('INT. A - DAY\n\nHi.\n\n@JACK\nOnly line.\n', true).tokens;
-    const [file] = tokensToBody(tokens).files;
-    expect(file.xhtml).toMatch(
-      /<div class="dialogue-block">\s*<div class="keep-together">\s*<p class="character">JACK<\/p>\s*<\/div>\s*<p class="dialogue">Only line\.<\/p>\s*<\/div>/,
-    );
-  });
-});
 
 // ── inline emphasis rendering ────────────────────────────
 
@@ -759,62 +742,65 @@ describe('font shifts', () => {
   });
 });
 
-// ── the cue keep holds the cue, not the whole speech ─────────────────
+// ── the forward bind lives on the text, not on a wrapper ─────────────
 //
-// `.keep-together` carries break-inside: avoid, and it used to close
-// AFTER the first dialogue token. A dialogue token is a whole paragraph,
-// so an eleven-line speech became one unbreakable eleven-line block: when
-// it would not fit, the reader got a page ending two thirds of the way
-// down and the entire speech pushed over. It also made keepSpeechesWhole
-// true in practice no matter how the setting was left.
+// Device verdict 2026-09-14, photo-confirmed: cues stranded at page
+// bottoms with their dialogue overleaf, on a script sent via Send-to-Kindle
+// web (Amazon server conversion -> KFX, Enhanced Typesetting). One of the
+// stranded cues introduced a ONE-LINE speech, which rules out every
+// size-based explanation -- orphans, an oversized pushed chunk, a speech
+// too tall to fit. Nothing bound the cue forward at all.
 //
-// The cue is bound to what follows by break-after: avoid on p.character
-// (registry #5a settled that it binds alone), and the first lines are held
-// by orphans on p.dialogue (registry #17). The keep only has to stop a cue
-// separating from a parenthetical.
-describe('the cue keep', () => {
-  const speech = (extra = '') => new Fountain().parse(
-    `@JACK\n${extra}This is a long speech that would run to many lines on a narrow screen and must be free to split across a page.\n`,
-    true,
-  ).tokens;
+// The cause is the element the bind sat on. #5a settled that
+// `break-after: avoid` binds on this exact route, but it settled it on
+// `h2.scene-heading`, a text-bearing element. The cue's bind had been moved
+// onto a `<div>` wrapper, and this converter neither honors break-after on
+// a structural div nor propagates a last child's break-after up to its
+// parent -- so `p.character`'s own rule governed a break inside the wrapper
+// that can never be taken, and the boundary the reader meets was
+// ungoverned. #8b's own lesson, fired a second time: a verdict about a
+// PROPERTY does not transfer across a change in DOM shape.
+//
+// So the wrapper goes, and the chain moves onto the elements that carry
+// text, which is the shape #5a already proved on this renderer.
+describe('the cue chain (no wrapper)', () => {
+  const body = (src: string) =>
+    tokensToBody(new Fountain().parse(src, true).tokens).files[0].xhtml;
 
-  const xhtml = (tokens: ReturnType<typeof speech>) => tokensToBody(tokens).files[0].xhtml;
-
-  test('the dialogue paragraph is outside the keep, so it can split', () => {
-    const keep = /<div class="keep-together">([\s\S]*?)<\/div>/.exec(xhtml(speech()))?.[1] ?? '';
-    expect(keep).toContain('class="character"');
-    expect(keep).not.toContain('class="dialogue"');
+  test('the cue is a direct child of the dialogue block', () => {
+    expect(body('INT. A - DAY\n\nHi.\n\n@JACK\nOnly line.\n')).toMatch(
+      /<div class="dialogue-block">\s*<p class="character">JACK<\/p>\s*<p class="dialogue">Only line\.<\/p>\s*<\/div>/,
+    );
   });
 
-  test('a parenthetical still cannot separate from its cue', () => {
-    const keep = /<div class="keep-together">([\s\S]*?)<\/div>/.exec(xhtml(speech('(tired)\n')))?.[1] ?? '';
-    expect(keep).toContain('class="character"');
-    expect(keep).toContain('class="parenthetical"');
-    expect(keep).not.toContain('class="dialogue"');
+  test('cue, parenthetical and dialogue are siblings', () => {
+    expect(body('INT. A - DAY\n\nHi.\n\n@JACK\n(tired)\nFirst line.\nSecond line.\n')).toMatch(
+      /<div class="dialogue-block">\s*<p class="character">JACK<\/p>\s*<p class="parenthetical">\(tired\)<\/p>\s*<p class="dialogue">First line\.<\/p>\s*<p class="dialogue">Second line\.<\/p>\s*<\/div>/,
+    );
   });
 
-  test('the dialogue still renders, immediately after the keep', () => {
-    const body = xhtml(speech());
-    expect(body).toContain('class="dialogue"');
-    expect(body.indexOf('class="dialogue"')).toBeGreaterThan(body.indexOf('keep-together'));
+  test('no keep-together wrapper is emitted anywhere', () => {
+    expect(body('INT. A - DAY\n\n@JACK\n(tired)\nSpeech.\n')).not.toContain('keep-together');
   });
 
-  test('the keep binds FORWARD to the dialogue it introduces', () => {
-    // Regression, found on device. Once the keep stopped containing the
-    // dialogue, the cue became the keep's LAST child, so break-after on
-    // p.character governs a break that does not exist. The break a reader
-    // actually hits is between the keep and the dialogue paragraph outside
-    // it, and only the keep can carry that one. Without this the cue
-    // strands at the foot of the page, which is the exact thing #8b exists
-    // to prevent.
-    expect(ruleFor(SCREENPLAY_CSS, '.keep-together')).toContain('break-after: avoid');
-    expect(ruleFor(SCREENPLAY_CSS, '.keep-together')).toContain('page-break-after: avoid');
+  test('the stylesheet no longer defines the dead wrapper class', () => {
+    expect(SCREENPLAY_CSS).not.toContain('.keep-together');
   });
 
-  test('the parenthetical is still NOT chained forward', () => {
-    // Registry #5: every avoid link grows the chunk a renderer pushes to
-    // the next page, and pushed chunks ARE the blank-bottom page this
-    // change exists to fix. Shrinking the keep must not smuggle one back.
-    expect(ruleFor(SCREENPLAY_CSS, 'p.parenthetical')).not.toContain('break-after');
+  test('a parenthetical binds forward, so cue plus paren cannot strand', () => {
+    // The inverse of what c3b99f0 pinned. That refusal was correct while
+    // the wrapper existed: chaining the parenthetical then grew a chunk
+    // that already held the cue AND the speech. With the wrapper gone the
+    // chunk is cue + parenthetical + the orphans minimum (#17), about four
+    // lines, which is the bound #5a traded the heading wrapper for.
+    const p = ruleFor(SCREENPLAY_CSS, 'p.parenthetical');
+    expect(p).toContain('page-break-after: avoid');
+    expect(p).toContain('break-after: avoid');
+  });
+
+  test('the cue still binds forward itself', () => {
+    const c = ruleFor(SCREENPLAY_CSS, 'p.character');
+    expect(c).toContain('page-break-after: avoid');
+    expect(c).toContain('break-after: avoid');
   });
 });

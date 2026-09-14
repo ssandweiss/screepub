@@ -345,9 +345,11 @@ and the suite will say so if you forget.
   ignores break CSS (device-map §6, MobileRead t=346874).
 - **The list is DERIVED, not maintained twice (corrected 2026-07-31):**
   the shadow rule's selectors come from the same gating that emits the
-  keeps (`columnKeeps` in css.ts) — #8b's `.keep-together`, #10a's
-  `table.dual-dialogue`, and #8c's `.dialogue-block` when
-  `keepSpeechesWhole` is on. It first shipped as a hand-written list of
+  keeps (`columnKeeps` in css.ts) — #10a's `table.dual-dialogue`, and #8c's
+  `.dialogue-block` when `keepSpeechesWhole` is on. #8b's wrapper was the
+  third member until 2026-09-14; with it deleted the rule shares a selector
+  with the table rule it shadows and is emitted AFTER it, so `ruleFor()`
+  answers with the real keep rather than the column spelling. It first shipped as a hand-written list of
   the first two, which silently left the whole-speech keep inert in
   Apple Books: the toggle did nothing there while the cue keep worked.
   A keep can no longer join the inventory and skip the shadow rule.
@@ -426,13 +428,13 @@ and the suite will say so if you forget.
   book CSS (MobileRead t=328903). Ignored: KF8/AZW3, MOBI. Unverified
   on kepub e-ink (patch-lore says its WebKit reads them; not confirmed
   on device). Apple Books: WebKit implements the properties; untested.
-- **Interaction (load-bearing):** #8b's `.keep-together` is ALWAYS on and
-  wraps cue + parentheticals + the FIRST dialogue paragraph in
-  `break-inside: avoid`. A single-paragraph speech therefore never
-  splits and its widows/orphans never fire — until that keep yields (a
-  first paragraph taller than a page still breaks, and then this does
-  apply). This rule bites on the TAIL
-  paragraphs of multi-paragraph speeches and on action. With #8c also
+- **Interaction (load-bearing; rewritten 2026-09-14):** #8b's keep used to
+  be a wrapper holding cue + parentheticals + the FIRST dialogue paragraph
+  in `break-inside: avoid`, so a single-paragraph speech never split and its
+  widows/orphans never fired. That wrapper is gone: #8b is now a chain on
+  the cue and the parenthetical, nothing wraps the dialogue, and this rule
+  therefore fires on EVERY dialogue paragraph including the first. It is
+  what bounds the chunk the chain pushes. With #8c also
   ON, whole speeches are atomic and the dialogue arm is fully inert;
   the action arm is unaffected in every mode.
 - **App option:** "Print-style split minimums" (reader rail, Page group).
@@ -502,6 +504,42 @@ and the suite will say so if you forget.
   `src/convert.ts` (`stageOneWarnings`, `CONTD_CUE`).
 
 ### 8b. Cue keeps its first dialogue line (always on)
+- **WRAPPER DELETED 2026-09-14 — the keep is a CHAIN, and the wrapper was
+  the bug.** Device verdict, photo-confirmed: on a real script sent via
+  **Send-to-Kindle web** (Amazon server conversion to KFX, Enhanced
+  Typesetting) cues stranded at page bottoms with their dialogue overleaf.
+  One stranded cue introduced a **one-line** speech, which rules out every
+  size-based explanation at once: not `orphans`, not an oversized pushed
+  chunk, not a speech too tall to fit. Nothing bound the cue forward.
+  The cause was the ELEMENT the bind sat on. The 2026-08-11 repair put
+  `break-after: avoid` on the `<div class="keep-together">` wrapper. This
+  converter honors `break-after` on elements that carry TEXT — #5a proved
+  exactly that, on this exact route, on `h2.scene-heading` — but not on a
+  structural div, and it does not propagate a last child's `break-after`
+  up to its parent. So `p.character`'s own rule governed a break inside
+  the wrapper that can never be taken, and the wrapper→dialogue boundary,
+  the only break a reader actually meets, was governed by nothing.
+  **The fix is the shape #5a already proved here:** the wrapper is gone and
+  the chain sits on the paragraphs — `break-after: avoid` on `p.character`
+  AND on `p.parenthetical`. A speech is now a flat run of `<p>` inside
+  `.dialogue-block`.
+  **The parenthetical link reverses a deliberate refusal, on purpose.**
+  #5 is right that every avoid link grows the pushed chunk, and while the
+  keep was a wrapper that objection held: the chunk already carried cue and
+  speech, and one more link bought a blank-bottom page. Without the wrapper
+  the chunk is cue + parenthetical + the `orphans` minimum (#17), about four
+  lines — the same bound #5a accepted when it traded the heading wrapper for
+  a chain. A test pins the link now; the old test pinning its absence is
+  deleted with the reason recorded here.
+  **Lesson, for the third time in this entry:** a device verdict about a
+  PROPERTY does not transfer across a change in DOM shape. 2026-08-11
+  recorded that lesson and then the repair committed the same error in the
+  other direction, carrying #5a's `h2` verdict onto a `div`.
+  **Still pending:** re-read on device, same route, and confirm a long
+  speech splits across a page break with its cue attached. The chain's
+  links are each proved on this renderer; this combination is not.
+- **SUPERSEDED 2026-09-14 (kept for the trail) — the narrowing STRANDED
+  CUES, and why.**
 - **NARROWED 2026-08-11 — the keep no longer contains the speech.** The
   wrapper closed AFTER the first dialogue TOKEN, and our serializer writes
   a whole speech as one line, so that token is the entire speech: an
@@ -561,22 +599,28 @@ and the suite will say so if you forget.
   device in documents/Downloads/Items01/). Dual-dialogue side-by-side
   tables photo-confirmed readable on device in AZW3; not yet
   re-verified in sideloaded KFX.
-- **What:** inside each dialogue block, cue + parentheticals + the first
-  dialogue line share a `keep-together` wrapper (the KDP-documented
-  container form; scene headings no longer use it — see #5a) so a cue
-  never strands at a page bottom with its speech overleaf
-  (user-requested 2026-07-22).
-- **The column spelling too (2026-07-30):** `.keep-together` additionally
-  carries `-webkit-column-break-inside: avoid`, in a SEPARATE rule of its
-  own — separate because iBooks drops both spellings when they share one
-  declaration block — which extends this keep to **Apple Books**, whose
-  WebKit honors only the old spelling, and to the **Readium family**
-  (Thorium, Kobo's mobile apps). Same wrapper, same selector, two more
-  audiences. **Not** a kepub claim: kepub paginates with multicol, so the
+- **What:** inside each dialogue block, the cue and any parentheticals each
+  carry `break-after: avoid`, so a cue never strands at a page bottom with
+  its speech overleaf (user-requested 2026-07-22). A chain on the
+  paragraphs, not a wrapper: the `keep-together` container form was tried
+  from 2026-07-22 and deleted 2026-09-14 (see the top of this entry, and
+  #5a, which made the same move for headings first).
+- **The column spelling, and the hole it now leaves (2026-07-30, revised
+  2026-09-14):** the wrapper used to carry `-webkit-column-break-inside:
+  avoid` in a SEPARATE rule — separate because iBooks drops both spellings
+  when they share one declaration block — which extended this keep to
+  **Apple Books**, whose WebKit honors only the old spelling, and to the
+  **Readium family** (Thorium, Kobo's mobile apps). With the wrapper gone
+  that rule lists only #10a's table. **There is no `-webkit-column-break-
+  after` anywhere in the stylesheet**, so on those engines the cue chain,
+  the heading chain (#5a) and the mini-slug chain (#5b) are all inert.
+  That was true before this change too — the wrapper only ever shadowed the
+  INSIDE spelling — so it is a standing gap, not a regression, and it is
+  the obvious next thing to fix here. Unverified on any of those engines. **Not** a kepub claim: kepub paginates with multicol, so the
   old spelling is a plausible reach, but the evidence on record is that it
   ignores break CSS and wants file splits (device-map §6, t=346874).
-- **Code:** `src/epub/html.ts` (`closeSpeech`), `src/epub/css.ts`
-  (`.keep-together` and the column-spelling rule beside it).
+- **Code:** `src/epub/html.ts` (`speechBlock`), `src/epub/css.ts`
+  (`p.character` and `p.parenthetical`).
 
 ### 8c. Whole-speech keep (option, default OFF; 2026-07-30)
 - **What:** `keepSpeechesWhole` makes each `.dialogue-block` atomic —
