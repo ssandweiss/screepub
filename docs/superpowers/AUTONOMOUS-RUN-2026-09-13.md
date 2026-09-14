@@ -428,3 +428,21 @@ sidecar build tool ranks its selector flags silently instead of rejecting a
 contradictory pair.
 
 **Cost if wrong:** all three are developer-facing and degrade visibly.
+
+## B1 — the one thing I could not do for you
+
+**Piece C is finished and cannot be merged from here.** This session is
+sandboxed to its own worktree and refuses git operations against the shared
+checkout, which is where `main` lives. Nothing is wrong with the work — `main`
+is still sitting on the exact commit this branch forked from, so the merge is a
+clean fast-forward with no possibility of conflict:
+
+```
+cd /home/sandywho/Projects/personal/screepub && git merge tauri-shell
+```
+
+I routed around it rather than stopping: piece D's worktree is forked from
+piece C's tip, so D builds on C exactly as it would have after the merge, and
+the merge can happen whenever you run that line. Pieces A, B and E1 merged
+cleanly earlier in the run, so this is a new restriction on this session, not a
+change in the work.
