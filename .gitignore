@@ -39,3 +39,5 @@ desktop/src-tauri/target/
 # The engine sidecar is a ~100 MB build output, produced by tools/build-sidecar.ts
 desktop/src-tauri/binaries/
 desktop/src-tauri/gen/
+# The app-bundles release job writes its installers here (see release.yml)
+/bundles/

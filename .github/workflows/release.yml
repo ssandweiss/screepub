@@ -517,3 +517,229 @@ jobs:
             cli/screepub-cli-windows-x64.zip \
             cli/SHA256SUMS \
             --clobber
+
+  # The installable app bundles: a .deb and an .rpm, two signed and
+  # notarized per-arch DMGs, and one unsigned NSIS installer. Every decision
+  # lives in tools/build-app-bundle.ts, which is unit-tested and
+  # hand-runnable; this job is a thin caller, for the same reason cross-cli
+  # is one -- workflow YAML can only be run by cutting a release.
+  #
+  # Per-arch DMGs and never a universal one: externalBin resolves
+  # {name}-{target_triple} verbatim, so a universal bundle would need a
+  # third, lipo'd sidecar that tools/build-sidecar.ts cannot make and that
+  # nothing here could verify.
+  #
+  # No AppImage. linuxdeploy runs its own patchelf over the Bun-compiled
+  # engine, moves the dynamic section past the 102 MB appended payload, and
+  # the extracted engine segfaults. Measured; see the design doc.
+  #
+  # `target` and `sidecar` are spelled out as empty strings on the Linux and
+  # Windows rows rather than left off: an absent matrix key is null, and
+  # `null != ''` is FALSE under GitHub's numeric coercion, so the two forms
+  # agree today only by an accident of type casting. Writing them down makes
+  # the step conditions below read as what they are.
+  app-bundles:
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x64
+            target: ''
+            sidecar: ''
+          - os: macos-15
+            arch: arm64
+            target: aarch64-apple-darwin
+            sidecar: bun-darwin-arm64
+          - os: macos-15
+            arch: x64
+            target: x86_64-apple-darwin
+            sidecar: bun-darwin-x64
+          - os: windows-latest
+            arch: x64
+            target: ''
+            sidecar: ''
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      # webkit2gtk, soup3 and their pkg-config files. The Rust crates fail
+      # at BUILD time without these, so their absence is loud.
+      - name: Linux webview libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
+      - run: bun install --frozen-lockfile
+      # Deliberately uncached, unlike desktop.yml's push path: a release runs
+      # a handful of times a year and must build from bytes fetched fresh,
+      # which is the same decision cross-cli's own comment records.
+      - name: Install the Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+      # The macOS legs cross-compile: each needs the Rust target, and a
+      # sidecar named for THAT triple rather than the runner's own.
+      - name: Add the Rust target
+        if: matrix.target != ''
+        run: rustup target add ${{ matrix.target }}
+      - name: Build the engine sidecar
+        shell: bash
+        env:
+          SIDECAR: ${{ matrix.sidecar }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SIDECAR" ]; then
+            bun tools/build-sidecar.ts --target "$SIDECAR"
+          else
+            bun tools/build-sidecar.ts --host
+          fi
+      # Signing and notarization are tauri-bundler's own, read from the
+      # secrets docs/release-secrets.md already documents under different
+      # names. macos/sign.rs builds its own keychain and imports the
+      # certificate itself, so this job runs no `security` command;
+      # app/release.sh is neither read nor modified, and the DMG users
+      # already download keeps being produced by that path, untouched.
+      - name: Write the App Store Connect API key
+        if: runner.os == 'macOS'
+        env:
+          AC_KEY_B64: ${{ secrets.AC_API_KEY_P8_BASE64 }}
+        run: |
+          echo "$AC_KEY_B64" | base64 --decode > "$RUNNER_TEMP/ac_api_key.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/ac_api_key.p8" >> "$GITHUB_ENV"
+      # `--out bundles` is a WORKSPACE-relative directory and not
+      # $RUNNER_TEMP on purpose. RUNNER_TEMP on windows-latest is a
+      # backslash path (D:\a\_temp), and the smoke step below globs inside
+      # this directory under `shell: bash`, where a backslash path is not
+      # reliably globbable. One relative path behaves identically on all
+      # three runners.
+      - name: Build and verify this platform's bundles
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
+          # Read by tauri-bundler's macos/sign.rs, which reads its OWN
+          # variable names. Empty on Linux and Windows, where the bundler
+          # skips signing entirely. APPLE_SIGNING_IDENTITY is a SUBSTRING
+          # guard against the identity of the certificate the bundler
+          # imported, so this loose value asserts the right kind of
+          # certificate without pinning a team name into YAML.
+          APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && secrets.DEVELOPER_ID_CERT_P12_BASE64 || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && secrets.CERT_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && 'Developer ID Application' || '' }}
+          APPLE_API_KEY: ${{ runner.os == 'macOS' && secrets.AC_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ runner.os == 'macOS' && secrets.AC_API_ISSUER_ID || '' }}
+        run: |
+          set -euo pipefail
+          rm -rf bundles
+          # The TAG, never package.json: a version mismatch must fail the
+          # build rather than ship a bundle that misreports itself.
+          ARGS=(--version "${TAG#v}" --out bundles)
+          if [ -n "$TARGET" ]; then
+            ARGS+=(--target "$TARGET" --config tauri.transition.conf.json)
+          fi
+          bun tools/build-app-bundle.ts ${ARGS[@]+"${ARGS[@]}"}
+      # Cross-compiling is not cross-testing, and bundling is not running.
+      # Each bundle is opened and its engine executed here, on the machine
+      # that built it. The x86_64 DMG built on an arm64 runner is the one
+      # exception, and this step says so out loud rather than exiting 0 and
+      # letting a green tick imply otherwise.
+      - name: Run the engine out of each bundle
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET" = "x86_64-apple-darwin" ]; then
+            echo "::notice::The x86_64 DMG was cross-compiled on an arm64 runner, so its engine is an Intel binary this machine cannot execute. It ships built, verified, signed and notarized, and its engine is NOT smoke-tested anywhere."
+            exit 0
+          fi
+          N=0
+          for B in bundles/*.deb bundles/*.rpm bundles/*.dmg bundles/*.exe; do
+            [ -e "$B" ] || continue
+            bun tools/smoke-bundle.ts --bundle "$B" --expect-version "${TAG#v}"
+            N=$((N + 1))
+          done
+          # smoke-bundle.ts refuses to exit 0 having opened nothing; this is
+          # that same property one level up. Without it, a glob that matched
+          # no file would make this whole step a no-op that passes.
+          if [ "$N" -eq 0 ]; then
+            echo "::error::bundles/ held no .deb, .rpm, .dmg or .exe. NOTHING WAS CHECKED."
+            exit 1
+          fi
+          echo "$N bundle(s) smoke-tested on this runner."
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: app-bundles-${{ matrix.os }}-${{ matrix.arch }}
+          path: bundles/*
+          # Handed straight to app-upload; once the release page has them,
+          # keeping ~220 MB of duplicates for 90 days buys nothing.
+          retention-days: 1
+          if-no-files-found: error
+
+  # Attach the bundles to the release the macOS job already published.
+  # Deliberately a SEPARATE job that runs after it, rather than moving the
+  # un-draft down here: a failure in this path must not leave the release
+  # permanently in draft, which is the rule cross-upload already follows for
+  # the same reason.
+  #
+  # SHA256SUMS-app, never SHA256SUMS: cross-upload publishes a file by that
+  # name for the three CLI archives onto this same release page, and one
+  # clobbering the other leaves every download silently uncheckable.
+  app-upload:
+    needs: [release, app-bundles]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: app-bundles-*
+          merge-multiple: true
+          path: app
+      # Each leg wrote its own SHA256SUMS-app covering only its own files,
+      # and merge-multiple keeps whichever arrived last. Rebuilt here from
+      # what actually landed, so the published file describes every file
+      # published beside it -- which no per-leg file could, since no leg
+      # ever saw the others.
+      #
+      # `cd app` is load-bearing: the file names bare filenames, which is
+      # what makes it usable by anyone who downloads into their own
+      # directory, so `-c` must run with the files as its cwd.
+      - name: Rebuild the checksums from what arrived, then verify them
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd app
+          rm -f SHA256SUMS-app
+          sha256sum *.deb *.rpm *.dmg *.exe > SHA256SUMS-app
+          # Exactly what the four legs produce between them: one .deb, one
+          # .rpm, two per-arch .dmg and one .exe. fail-fast is false, so a
+          # leg that died would otherwise publish a shorter checksums file
+          # that verified perfectly against itself.
+          LINES="$(wc -l < SHA256SUMS-app)"
+          if [ "$LINES" -ne 5 ]; then
+            echo "::error::expected 5 app bundles from the four legs, got $LINES:"
+            cat SHA256SUMS-app
+            exit 1
+          fi
+          # Not a tautology: -c re-opens every file and re-hashes it, which
+          # is what catches a truncated artifact round trip. These were
+          # hashed in another job's workspace and then crossed a job
+          # boundary through upload-artifact/download-artifact.
+          sha256sum -c SHA256SUMS-app
+          cat SHA256SUMS-app
+      - name: Upload the app bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # No checkout in this job, so gh has no repository to infer.
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd app
+          gh release upload "$TAG" \
+            *.deb *.rpm *.dmg *.exe SHA256SUMS-app \
+            --clobber

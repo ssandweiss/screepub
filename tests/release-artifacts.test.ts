@@ -65,6 +65,7 @@ describe('every workflow action is pinned to a commit', () => {
 interface Job {
   'runs-on'?: string;
   needs?: string | string[];
+  strategy?: { matrix?: { include?: Record<string, string>[] } };
   permissions?: Record<string, string>;
   steps?: { name?: string; uses?: string; run?: string; shell?: string; with?: Record<string, unknown> }[];
 }
@@ -232,6 +233,179 @@ describe('release.yml ships the cross-platform artifacts', () => {
     const jobs = Object.keys(rel.jobs);
     expect(jobs).not.toContain('smoke-linux-arm64');
     expect(runText(rel.jobs['cross-upload']!)).toContain('screepub-cli-linux-arm64.tar.gz');
+  });
+
+  // ---- the app bundles -------------------------------------------------
+  // These are the STRUCTURAL pins: which jobs exist, what they need, what
+  // their steps say. What the four bash blocks actually DO is executed,
+  // with stub executables, in tests/release-app-step.test.ts.
+
+  test('app-bundles builds on all three runners, after the checks pass', () => {
+    const job = rel.jobs['app-bundles'];
+    expect(job).toBeDefined();
+    expect(needs('app-bundles')).toEqual(['checks']);
+    // The matrix, not the file: `toContain(os)` against the whole YAML
+    // would pass on the strength of some OTHER job's runner.
+    const runners = (job!.strategy?.matrix?.include ?? []).map((r) => r.os);
+    expect(runners.sort()).toEqual(['macos-15', 'macos-15', 'ubuntu-latest', 'windows-latest']);
+    const text = runText(job!);
+    expect(text).toContain('tools/build-app-bundle.ts');
+    // The TAG, so a version mismatch fails the build rather than shipping a
+    // bundle that misreports itself.
+    expect(text).toContain('${TAG#v}');
+    const upload = (job!.steps ?? []).find((s) => (s.uses ?? '').includes('upload-artifact'));
+    expect(upload).toBeDefined();
+    expect(String(upload!.with?.['if-no-files-found'])).toBe('error');
+  });
+
+  test('the macOS leg builds two per-arch DMGs and never a universal one', () => {
+    // A universal bundle would need a third, lipo'd sidecar that
+    // tools/build-sidecar.ts cannot make: externalBin resolves
+    // {name}-{target_triple} verbatim, with no special case for
+    // universal-apple-darwin.
+    const rows = rel.jobs['app-bundles']!.strategy?.matrix?.include ?? [];
+    const macs = rows.filter((r) => r.os === 'macos-15');
+    expect(macs.map((r) => r.target).sort()).toEqual([
+      'aarch64-apple-darwin',
+      'x86_64-apple-darwin',
+    ]);
+    // Each names the sidecar for ITS OWN triple, not the runner's. Getting
+    // this wrong bundles an arm64 engine inside the Intel DMG and nothing
+    // fails until a user opens the window.
+    expect(macs.map((r) => r.sidecar).sort()).toEqual(['bun-darwin-arm64', 'bun-darwin-x64']);
+    expect(read(join(WORKFLOWS, 'release.yml'))).not.toContain('universal-apple-darwin');
+  });
+
+  test('the macOS leg passes the transition overlay so the two Mac apps coexist', () => {
+    const text = runText(rel.jobs['app-bundles']!);
+    expect(text).toContain('tauri.transition.conf.json');
+    // It must not reach the Linux or Windows legs, whose $TARGET is empty:
+    // the overlay renames the product for macOS only.
+    expect(text).toMatch(/if \[ -n "\$TARGET" \][\s\S]*tauri\.transition\.conf\.json/);
+  });
+
+  test('the macOS leg signs and notarizes from secrets the repo already has', () => {
+    const yml = read(join(WORKFLOWS, 'release.yml'));
+    // tauri-bundler reads its OWN variable names; these are the translation.
+    for (const v of [
+      'APPLE_CERTIFICATE',
+      'APPLE_CERTIFICATE_PASSWORD',
+      'APPLE_SIGNING_IDENTITY',
+      'APPLE_API_KEY',
+      'APPLE_API_ISSUER',
+      'APPLE_API_KEY_PATH',
+    ]) {
+      expect(yml).toContain(v);
+    }
+    // And no NEW secret was invented for it.
+    // [A-Z0-9_], with the digits: without them P12 and P8 truncate to
+    // "secrets.DEVELOPER_ID_CERT_P" and the list below can never match.
+    const declared = yml.match(/secrets\.[A-Z0-9_]+/g) ?? [];
+    expect([...new Set(declared)].sort()).toEqual([
+      'secrets.AC_API_ISSUER_ID',
+      'secrets.AC_API_KEY_ID',
+      'secrets.AC_API_KEY_P8_BASE64',
+      'secrets.CERT_PASSWORD',
+      'secrets.DEVELOPER_ID_CERT_P12_BASE64',
+      'secrets.KEYCHAIN_PASSWORD',
+      'secrets.TAP_TOKEN',
+    ]);
+  });
+
+  test('the Windows leg is deliberately unsigned', () => {
+    // Authenticode is a procurement problem, not an engineering one. This
+    // assertion is what keeps that a decision rather than a drift.
+    const yml = read(join(WORKFLOWS, 'release.yml'));
+    expect(yml).not.toContain('WINDOWS_CERTIFICATE');
+    expect(yml).not.toContain('signtool');
+  });
+
+  test('every bundle is smoked on the OS that built it, before any upload', () => {
+    const steps = rel.jobs['app-bundles']!.steps ?? [];
+    const build = steps.findIndex((s) => /build-app-bundle\.ts/.test(s.run ?? ''));
+    const smoke = steps.findIndex((s) => /smoke-bundle\.ts/.test(s.run ?? ''));
+    const upload = steps.findIndex((s) => (s.uses ?? '').includes('upload-artifact'));
+    expect(build).toBeGreaterThanOrEqual(0);
+    expect(smoke).toBeGreaterThan(build);
+    expect(upload).toBeGreaterThan(smoke);
+    // The upload job waits for BOTH the release job and every bundle leg.
+    // If it did not wait for the smoke, the smoke would be decoration.
+    expect(needs('app-upload').sort()).toEqual(['app-bundles', 'release']);
+    expect(rel.jobs['app-upload']!.permissions?.contents).toBe('write');
+  });
+
+  test('the x86_64 DMG says it is not smoke-tested instead of passing silently', () => {
+    // The one bundle whose engine no runner can execute. A bare `exit 0`
+    // there is indistinguishable from a check that ran.
+    const smoke = (rel.jobs['app-bundles']!.steps ?? []).find((s) =>
+      /smoke-bundle\.ts/.test(s.run ?? ''),
+    )!.run!;
+    expect(smoke).toMatch(/::notice::/);
+    expect(smoke).toContain('x86_64-apple-darwin');
+    expect(smoke).toMatch(/NOT smoke-tested/);
+    // And the step still fails, rather than exiting 0, if the glob on every
+    // OTHER leg matches nothing at all.
+    expect(smoke).toContain('NOTHING WAS CHECKED');
+  });
+
+  test('every bash step in the two new jobs declares `shell: bash`', () => {
+    // Without it, a `run:` block on windows-latest is executed by
+    // PowerShell, where `set -euo pipefail` and `ARGS=(...)` are syntax
+    // errors -- and the Windows leg is the one nobody here can try first.
+    for (const step of rel.jobs['app-bundles']!.steps ?? []) {
+      if (!step.run) continue;
+      // The two Linux/macOS-only steps are guarded by `if:` and never
+      // reach a Windows runner.
+      if (/apt-get|base64 --decode/.test(step.run)) continue;
+      if (/^\s*(rustup|cargo|bun install)/.test(step.run.trim())) continue;
+      expect(step.shell).toBe('bash');
+    }
+  });
+
+  test('the checksums are re-verified after the artifact round trip', () => {
+    // Same blind spot cross-upload already names: the files are hashed in
+    // one job's workspace and then cross a job boundary.
+    const steps = rel.jobs['app-upload']!.steps ?? [];
+    const verify = steps.findIndex((s) => /sha256sum -c SHA256SUMS-app/.test(s.run ?? ''));
+    const upload = steps.findIndex((s) => /gh release upload/.test(s.run ?? ''));
+    expect(verify).toBeGreaterThanOrEqual(0);
+    expect(verify).toBeLessThan(upload);
+    expect(steps[verify]!.run).toMatch(/cd app/);
+  });
+
+  test('the app checksums file does not overwrite the CLI one', () => {
+    // cross-upload publishes SHA256SUMS to the same release page. One
+    // clobbering the other leaves downloads silently uncheckable.
+    const text = runText(rel.jobs['app-upload']!);
+    expect(text).toContain('SHA256SUMS-app');
+    expect(text).not.toMatch(/SHA256SUMS(?!-app)/);
+  });
+
+  test('the SwiftUI release path is untouched', () => {
+    const release = runText(rel.jobs['release']!);
+    expect(release).toContain('app/release.sh');
+    for (const name of MACOS_ASSETS) expect(release).toContain(`app/dist/${name}`);
+    // The new jobs must not touch the Swift artifacts or the tap.
+    for (const jobName of ['app-bundles', 'app-upload']) {
+      const text = runText(rel.jobs[jobName]!);
+      expect(text).not.toContain('app/release.sh');
+      expect(text).not.toContain('bump-tap');
+      for (const name of MACOS_ASSETS) expect(text).not.toContain(name);
+    }
+    expect(needs('tap')).toEqual(['release']);
+    expect(needs('tap-check')).toEqual(['tap']);
+    // And nothing that already existed learned to wait on the new jobs: a
+    // failing bundle leg must not be able to strand the release in draft.
+    for (const jobName of ['release', 'tap', 'tap-check', 'cross-cli', 'cross-upload']) {
+      expect(needs(jobName)).not.toContain('app-bundles');
+      expect(needs(jobName)).not.toContain('app-upload');
+    }
+  });
+
+  test('the Linux leg ships both a .deb and an .rpm', () => {
+    const text = runText(rel.jobs['app-upload']!);
+    expect(text).toContain('.deb');
+    expect(text).toContain('.rpm');
   });
 });
 
