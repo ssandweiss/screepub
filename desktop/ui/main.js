@@ -1,7 +1,8 @@
 // Boots the window: the frame, the five surfaces, the keyboard, and the one
 // line that proves the engine is there.
-import { runEngine, argv, onFileDrag } from './app.js';
+import { runEngine, argv, onFileDrag, onDialogClosed } from './app.js';
 import { mountFrame } from './frame.js';
+import { stopAfterDialog } from './focus.js';
 import { el, text } from './dom.js';
 import * as convert from './convert.js';
 import * as read from './read.js';
@@ -31,9 +32,30 @@ const surfaces = { convert, read, tune, send, notes };
 /** The surfaces that have nothing to show until a script is open. */
 const NEEDS_SCRIPT = ['read', 'tune', 'send'];
 
+// Which surface is on screen. Kept here rather than asked of the frame,
+// because it is what decides where the keyboard goes back to.
+let showing = 'convert';
+
+/** Put the keyboard somewhere it can carry on from, for whatever surface is
+ *  actually on screen. The rule is focus.js's; this is the whole of the
+ *  binding — query the plan's selectors in order, take the first node that
+ *  can really take the focus, focus it.
+ *
+ *  Called after every native dialog (app.js says when, for every dialog it
+ *  ever opens, not just this one path) and by any surface that has just
+ *  redrawn the element the keyboard was standing on. */
+function restoreFocus() {
+  const stop = stopAfterDialog(showing, (selector) => document.querySelectorAll(selector));
+  stop?.focus();
+  return stop;
+}
+
+onDialogClosed(restoreFocus);
+
 const context = {
   state,
   goTo: (id) => frame.setSurface(id),
+  restoreFocus,
   /** Called whenever the script on screen changes, so the other surfaces
    *  stop showing a book that is no longer open. */
   scriptChanged() {
@@ -59,6 +81,7 @@ for (const [id, surface] of Object.entries(surfaces)) {
 }
 
 frame.onSurface((id) => {
+  showing = id;
   for (const [name, pane] of Object.entries(panes)) {
     const on = name === id;
     pane.hidden = !on;
@@ -72,15 +95,22 @@ frame.onSurface((id) => {
 // the paths reach the page at all.
 onFileDrag({
   over: (on) => convert.dragOver(on),
-  drop: (paths) => { frame.setSurface('convert'); convert.dropPaths(paths); },
+  drop: (paths) => convert.dropPaths(paths),
 });
 
 // Ctrl/Cmd-O opens a script from anywhere. Rust registers no menu, so the
 // window owns its own shortcuts; convert.js prints the platform's spelling.
+//
+// It does NOT move to Convert first. Converting a file does (convert.js owns
+// that, for the shortcut and for a drop alike), but ASKING for one should
+// not: someone who hits the shortcut on Tune and then changes their mind
+// used to be left on a surface they had not asked for, with the work they
+// were doing off screen. Cancelling now leaves them exactly where they were
+// — which is also what makes the focus rule above general rather than a
+// dressed-up special case for Convert.
 addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'o') {
     event.preventDefault();
-    frame.setSurface('convert');
     convert.choose();
   }
 });

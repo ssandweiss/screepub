@@ -7,7 +7,7 @@
 // pure exported function above the line, tested directly by
 // tests/desktop-ui.test.ts. Below the line is drawing: it holds no rule of
 // its own, so a live run is enough to check it.
-import { runEngine, pickScreenplay, onProgress, argv } from './app.js';
+import { runEngine, pickScreenplay, onProgress, argv, FORCE_FLAG } from './app.js';
 import { el, clear, text } from './dom.js';
 
 // ---------------------------------------------------------------- decisions
@@ -44,9 +44,34 @@ export function shortcutLabel(platform) {
   return /mac/i.test(String(platform ?? '')) ? '⌘O' : 'Ctrl+O';
 }
 
+/** The engine writes one refusal for both of its faces, and for the CLI it
+ *  is right: "Pass --force to convert it anyway" is the next thing to type.
+ *  In a window there is nothing to type it into, and the sentence lands
+ *  directly above a Convert anyway button that already does it — the
+ *  interface talking past itself, and the one place the two faces disagree.
+ *
+ *  The rule is not "reword the engine". It is narrower and it only ever
+ *  fires where the window has made the sentence redundant: when the window
+ *  has drawn the override, the sentence that names the flag comes out, and
+ *  nothing else does. The diagnosis — the part only the engine knows — is
+ *  untouched, and a refusal the window offers no button for keeps every word.
+ *
+ *  Nothing is ever dropped to nothing: a message that is ONLY the remedy is
+ *  left whole, because a blank fault body says less than a sentence a
+ *  window user cannot act on. */
+export function withoutCliRemedy(message, flag) {
+  const whole = String(message ?? '').trim();
+  const needle = String(flag ?? '');
+  if (needle === '' || !whole.includes(needle)) return whole;
+  const sentences = whole.match(/[^.!?]+[.!?]*\s*/g) ?? [];
+  const kept = sentences.filter((s) => !s.includes(needle)).join('').trim();
+  return kept === '' ? whole : kept;
+}
+
 /** What a failing answer means for the reader. The message is the engine's
- *  own, verbatim: it already says what happened and what to do, and this
- *  window is not better placed to say it. */
+ *  own: it says what happened, and this window is not better placed to say
+ *  it. The only edit is withoutCliRemedy's, and only where this window has
+ *  put a button in the sentence's place. */
 export function failureFor(input) {
   // The contract says an object with both fields; a failure whose error is
   // missing or malformed still has to render something a person can act on.
@@ -54,14 +79,27 @@ export function failureFor(input) {
   const raw = typeof error.code === 'string' ? error.code.trim() : '';
   const code = raw === '' ? 'internal' : raw;
   const message = typeof error.message === 'string' ? error.message.trim() : '';
+  // Not `code in HEADINGS`: an unknown code is a file the window knows
+  // nothing about, and guessing that it can be overridden is a lie.
+  const canForce = code === OVERRIDABLE;
+  const said = message === '' ? NO_MESSAGE : message;
   return {
     code,
     heading: HEADINGS[code] ?? HEADINGS.internal,
-    message: message === '' ? NO_MESSAGE : message,
-    // Not `code in HEADINGS`: an unknown code is a file the window knows
-    // nothing about, and guessing that it can be overridden is a lie.
-    canForce: code === OVERRIDABLE,
+    message: canForce ? withoutCliRemedy(said, FORCE_FLAG) : said,
+    canForce,
   };
+}
+
+/** What the refusal says about the book that was already open. A file the
+ *  engine would not read produced nothing to replace it with, so it replaces
+ *  nothing: Read, Tune and Send keep the script they had. Saying so is the
+ *  other half — a reader who has just been refused should not have to guess
+ *  whether the work they were tuning survived. */
+export function stillOpenNote(script) {
+  const title = typeof script?.title === 'string' ? script.title.trim() : '';
+  if (title === '') return null;
+  return `${title} is still open — this changed nothing about it.`;
 }
 
 /** The bar's next position, given where it already is and one progress line.
@@ -168,9 +206,10 @@ export function mount(node, context) {
 }
 
 export function show() {
-  // The well's button is the surface's first stop for a keyboard — but only
-  // while the well is the thing on screen.
-  if (chooseButton?.isConnected) chooseButton.focus();
+  // The surface's first stop for a keyboard. It used to name the well's
+  // button, which is only on screen in one of this surface's four states;
+  // the plan in focus.js picks the first control there actually is.
+  ctx.restoreFocus();
 }
 
 export function choose() {
@@ -232,11 +271,14 @@ function drawWell() {
 
 async function pickFileThenConvert() {
   if (busy) return;
+  // Two things this no longer does. It does not guard against a second
+  // picker — app.js does, at the one place that can, so the shortcut and the
+  // button cannot disagree about it. And it does not put the keyboard back
+  // itself: it used to re-focus the well's button, which exists on ONE of
+  // this surface's four states, so cancelling a dialog over a result or a
+  // refusal left the page with no focused element at all. main.js restores
+  // the focus for whatever surface is showing, for every dialog. See focus.js.
   const path = await pickScreenplay();
-  // desktop/README.md records that the webview does not always take keyboard
-  // focus back when the native dialog closes. Asking for it costs nothing
-  // and is the difference between a usable keyboard and a dead one.
-  if (chooseButton?.isConnected) chooseButton.focus();
   if (path === null) return;
   await convertPath(path);
 }
@@ -244,6 +286,10 @@ async function pickFileThenConvert() {
 export async function convertPath(path, { force = false } = {}) {
   if (busy) return;
   busy = true;
+  // A conversion is this surface's business, wherever it was started from: a
+  // drop on the Read surface and Ctrl-O on Tune both end up here. One rule,
+  // one place — and it fires on a file, never on the ASK for one.
+  ctx.goTo('convert');
   drawProgress(path);
   let answer;
   try {
@@ -290,6 +336,10 @@ function drawProgress(path) {
       readOut),
     el('p', { class: 'sign-off' }, 'Please stand by:'),
   );
+  // The redraw threw away whatever had the focus. This surface has no
+  // control while it works, so the plan lands on the pane itself and Tab
+  // still moves from there.
+  ctx.restoreFocus();
 }
 
 function drawResult(path, answer) {
@@ -322,6 +372,7 @@ function drawResult(path, answer) {
   );
 
   ctx.scriptChanged();
+  ctx.restoreFocus();
 }
 
 function drawFailure(error, path) {
@@ -336,18 +387,37 @@ function drawFailure(error, path) {
       onclick: () => convertPath(path, { force: true }),
     }, 'Convert anyway'));
   }
-  ways.append(el('button', { type: 'button', class: 'btn btn-outline', onclick: drawWell },
-    'Back to one'));
+  ways.append(el('button', {
+    type: 'button',
+    class: 'btn btn-outline',
+    onclick: () => { drawWell(); ctx.restoreFocus(); },
+  }, 'Back to one'));
+
+  // The script that was already open stays open: see stillOpenNote. The
+  // refusal is news about the file that was just refused, not about the book
+  // in the library, and clearing the open script here used to take Read,
+  // Tune and Send away from a book that was still perfectly good.
+  const kept = stillOpenNote(ctx.state.script);
 
   pane.append(
     el('p', { class: 'smash' }, 'Smash cut to:'),
     el('h2', { class: 'fault' }, refusal.heading),
-    // The engine's own sentence, verbatim. Not reworded, not re-classified:
-    // it already says what happened and what to do.
+    // The engine's own sentence. The only thing the window takes out of it is
+    // an instruction to type the flag the window has already drawn a button
+    // for; see withoutCliRemedy.
     el('p', { class: 'fault-body' }, refusal.message),
     ways,
-    el('p', { class: 'caption' }, refusal.code),
+    kept === null ? null : el('p', { class: 'kept-note' }, kept),
+    // The code is a support handle, not a sentence: it is what someone quotes
+    // in a bug report, and printing it as body text under the buttons read as
+    // leftover debug output. Labelled and set in the code face, it is
+    // findable without pretending to be something a reader was told.
+    el('p', { class: 'code-note' },
+      el('span', { class: 'code-note-label' }, 'Error code'),
+      el('code', { class: 'code code-chip' }, refusal.code)),
   );
-  ctx.state.script = null;
-  ctx.scriptChanged();
+  // Also on the pane, for a bug report pasted out of the DOM and for anyone
+  // reading the window with a tool rather than eyes.
+  pane.dataset.errorCode = refusal.code;
+  ctx.restoreFocus();
 }

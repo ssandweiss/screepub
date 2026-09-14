@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, test, expect } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, test, expect } from 'bun:test';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -375,10 +375,35 @@ describe('the Convert surface', () => {
     expect(convert).toContain('Ctrl');
   });
 
-  test('the surface takes focus back after the native dialog closes', () => {
-    // desktop/README.md's disclosed observation: the webview did not regain
-    // keyboard focus after the file dialog closed.
-    expect(convert).toContain('.focus()');
+  test('the surface does not place the focus after a dialog itself', () => {
+    // It used to, and it got it wrong: it re-focused the drop well's button,
+    // which exists on ONE of this surface's four states, so cancelling a
+    // dialog over a result or a refusal left the page with NO focused
+    // element and a keyboard that could not move. Where the focus goes is a
+    // decision now (focus.js) and it is placed once, for every surface and
+    // every dialog, by main.js. A surface asks; it does not choose.
+    expect(`convert.js focuses the picker's button: ${/chooseButton\??\.focus\(\)/.test(convert)}`)
+      .toBe("convert.js focuses the picker's button: false");
+    expect(convert).toContain('ctx.restoreFocus()');
+  });
+
+  test('a refusal does not close the script that was already open', () => {
+    // Dropping a file the engine will not read used to take Read, Tune and
+    // Send away from a book still sitting in the library.
+    expect(`convert.js clears the open script: ${/state\.script\s*=\s*null/.test(convert)}`)
+      .toBe('convert.js clears the open script: false');
+    expect(convert).toContain('stillOpenNote');
+  });
+
+  test('the error code is a labelled handle, not the last line of the sentence', () => {
+    // It is genuinely useful in a bug report, so it stays; it just stops
+    // being presented as prose under the buttons.
+    expect(convert).toContain('code-chip');
+    expect(convert).toContain('Error code');
+    expect(convert).toContain('dataset.errorCode');
+    const css = read('surfaces.css');
+    expect(css).toContain('.code-chip');
+    expect(css).toContain('.code-note-label');
   });
 
   test('it sets no inline style, which this window’s CSP refuses', () => {
@@ -435,6 +460,8 @@ describe('what the Convert surface decides', () => {
       code: string; heading: string; message: string; canForce: boolean;
     };
     nextProgress: (previous: Progress, line: unknown) => Progress;
+    withoutCliRemedy: (message: unknown, flag: unknown) => string;
+    stillOpenNote: (script: unknown) => string | null;
     fileName: (path: unknown) => string;
     countLine: (answer: unknown) => string;
     scriptFrom: (path: string, answer: unknown) => Record<string, unknown>;
@@ -476,13 +503,44 @@ describe('what the Convert surface decides', () => {
   });
 
   test('the engine’s sentence survives verbatim, whatever is in it', () => {
-    const said = 'No scene headings and no dialogue found — this does not look like a '
-      + 'screenplay. Pass --force to convert it anyway.';
-    expect(convert.failureFor({ code: 'not-screenplay', message: said }).message).toBe(said);
-    // Not trimmed into a summary, not re-cased, not suffixed.
-    const odd = 'cannot read the input file (EACCES)';
-    expect(convert.failureFor({ code: 'unreadable', message: odd }).message).toBe(odd);
+    // Not trimmed into a summary, not re-cased, not suffixed. The ONE edit
+    // this window makes is the CLI remedy, and only where it has drawn the
+    // button that remedy describes; every other refusal is word for word.
+    for (const [code, said] of [
+      ['unreadable', 'cannot read the input file (EACCES)'],
+      ['scanned', 'This PDF has no selectable text — it looks like a scan.'],
+      ['password', 'This PDF is password-protected.'],
+      ['internal', 'the engine did not answer in JSON:\n<!DOCTYPE html>'],
+    ] as const) {
+      expect(`${code}: ${convert.failureFor({ code, message: said }).message}`)
+        .toBe(`${code}: ${said}`);
+    }
+    // Including one that names the flag: the window draws no override for a
+    // scan, so there is nothing here talking past the reader, and taking the
+    // sentence out would delete the only instruction they have.
+    const scanned = 'This PDF is a scan. Pass --force to convert it anyway.';
+    expect(convert.failureFor({ code: 'scanned', message: scanned }).message).toBe(scanned);
   });
+
+  test('the refusal stops telling a window user to type the flag it drew a button for',
+    () => {
+      // The engine's sentence is written for a terminal and is right there.
+      // In the window it lands directly above a Convert anyway button that
+      // does exactly what it asks for.
+      const said = 'No scene headings and no dialogue found — this does not look like a '
+        + 'screenplay. Pass --force to convert it anyway.';
+      const shown = convert.failureFor({ code: 'not-screenplay', message: said });
+      // Asserted against the value it CHANGED FROM, so a function that did
+      // nothing at all cannot pass: the input carries the remedy, the output
+      // does not, and what is left is the diagnosis, whole and unedited.
+      expect(said).toContain('Pass --force');
+      expect(shown.message).toBe(
+        'No scene headings and no dialogue found — this does not look like a screenplay.',
+      );
+      expect(shown.canForce).toBe(true);
+      // And the button is still there: the remedy did not go away, it moved.
+      expect(convert.OVERRIDABLE).toBe('not-screenplay');
+    });
 
   test('a failure with no sentence still says something, and says it once', () => {
     for (const broken of [{ code: 'scanned' }, { code: 'scanned', message: '   ' }, {}, undefined]) {
@@ -658,9 +716,388 @@ describe('what the Convert surface decides', () => {
     expect(answer.ok).toBe(false);
     const shown = convert.failureFor(answer.error);
     expect(shown.canForce).toBe(true);
-    expect(shown.message).toBe(answer.error.message);
     expect(shown.heading).toBe(convert.HEADINGS['not-screenplay']);
+    // And the trim is measured against what the ENGINE really writes rather
+    // than against a sentence typed out in this file: the remedy the window
+    // replaced with a button is in the engine's message and out of the
+    // window's, and every other word of it survives.
+    expect(answer.error.message).toContain('--force');
+    expect(shown.message).not.toContain('--force');
+    expect(shown.message.length).toBeGreaterThan(20);
+    expect(answer.error.message.startsWith(shown.message)).toBe(true);
   }, 60000);
+});
+
+describe('what the Convert surface decides about a refusal', () => {
+  type ConvertBits = {
+    withoutCliRemedy: (message: unknown, flag: unknown) => string;
+    stillOpenNote: (script: unknown) => string | null;
+  };
+  let convert: ConvertBits;
+  beforeAll(async () => {
+    convert = (await import(join(UI, 'convert.js'))) as ConvertBits;
+  });
+
+  test('only the sentence naming the flag comes out, and only if one does', () => {
+    const flag = '--force';
+    // The real shape: diagnosis, then remedy. The remedy goes; the diagnosis
+    // is returned unedited, which is checked by equality rather than by
+    // "does not contain" — a function that returned the empty string, or the
+    // first word, would pass that weaker check.
+    expect(convert.withoutCliRemedy(
+      'No scene headings found. Pass --force to convert it anyway.', flag,
+    )).toBe('No scene headings found.');
+    // Three sentences, the flag in the MIDDLE: the tail is not collateral.
+    expect(convert.withoutCliRemedy(
+      'A is true. Pass --force to convert it anyway. B is still true.', flag,
+    )).toBe('A is true. B is still true.');
+    // Nothing to take out: byte for byte what came in, for a message with no
+    // flag in it at all and for one whose text merely resembles a flag.
+    for (const said of [
+      'cannot read the input file (EACCES)',
+      'This PDF is password-protected.',
+      'the line is a run-on with no full stop at all',
+      'A dash--dash is not a flag.',
+    ]) {
+      expect(`kept: ${convert.withoutCliRemedy(said, flag)}`).toBe(`kept: ${said}`);
+    }
+    // A message that is ONLY the remedy is left whole. A blank fault body
+    // says less than a sentence a window user cannot act on, and this is the
+    // failure mode of every "strip the last sentence" implementation.
+    expect(convert.withoutCliRemedy('Pass --force to convert it anyway.', flag))
+      .toBe('Pass --force to convert it anyway.');
+    // No flag to look for is not a licence to cut.
+    expect(convert.withoutCliRemedy('Pass --force to convert it anyway.', ''))
+      .toBe('Pass --force to convert it anyway.');
+    expect(convert.withoutCliRemedy(undefined, flag)).toBe('');
+  });
+
+  test('the refusal says the open script survived, and names it', () => {
+    // The decision behind it: a file the engine would not read produced
+    // nothing to replace the open book with, so it replaces nothing.
+    const note = convert.stillOpenNote({ title: 'The Last Video Store' });
+    expect(note).toContain('The Last Video Store');
+    expect(note).toContain('still open');
+    // Nothing open, nothing to reassure anyone about: a line reading
+    // "null is still open" is exactly the stray `null` this plan caught once.
+    for (const nothing of [null, undefined, {}, { title: '' }, { title: '   ' }]) {
+      expect(`${JSON.stringify(nothing)}: ${convert.stillOpenNote(nothing)}`)
+        .toBe(`${JSON.stringify(nothing)}: null`);
+    }
+  });
+});
+
+describe('where the keyboard stands when a dialog closes', () => {
+  // The defect this is the fix for: Ctrl-O then Escape, with a result on
+  // screen, could leave the page with NO focused element — Tab, Shift-Tab
+  // and the tablist's arrows all dead, and no way back without a mouse.
+  // Placing the focus is a decision, so it is a pure function and it is
+  // tested here rather than in the handler that first needed it.
+  type FakeNode = {
+    id?: string; isConnected?: boolean; disabled?: boolean; hidden?: boolean;
+    closest?: (selector: string) => unknown;
+  };
+  type FocusModule = {
+    FOCUSABLE: string;
+    ALWAYS: string;
+    focusPlan: (surface: unknown) => string[];
+    canFocus: (node: unknown) => boolean;
+    firstStop: (candidates: unknown) => unknown;
+    stopAfterDialog: (surface: string, queryAll: (s: string) => Iterable<unknown>) => unknown;
+  };
+  let focus: FocusModule;
+  const SURFACES = ['convert', 'read', 'tune', 'send', 'notes'];
+
+  beforeAll(async () => {
+    focus = (await import(join(UI, 'focus.js'))) as FocusModule;
+  });
+
+  test('every surface gets a plan, and it is that surface’s plan', () => {
+    const plans = new Map(SURFACES.map((s) => [s, focus.focusPlan(s)]));
+    for (const [surface, plan] of plans) {
+      // The order IS the decision: the surface's own work first, then the
+      // pane, then its tab, then the one tab that is never disabled.
+      expect(`${surface} steps: ${plan.length}`).toBe(`${surface} steps: 4`);
+      expect(plan[1]).toBe(`#surface-${surface}`);
+      expect(plan[2]).toBe(`#tab-${surface}`);
+      expect(plan[3]).toBe(focus.ALWAYS);
+      // The first step must be SCOPED to the showing pane. Unscoped, its
+      // first match in the document is the tablist's first tab, so every
+      // dialog on every surface would dump the reader back on Convert —
+      // and a test that only checked for 'button' would not notice.
+      for (const part of plan[0].split(', ')) {
+        expect(`${surface} step 1 part: ${part}`).toBe(
+          `${surface} step 1 part: #surface-${surface} ${part.split(' ').slice(1).join(' ')}`,
+        );
+      }
+      expect(plan[0]).toContain('button:not([disabled])');
+    }
+    // Five surfaces, five different plans: a plan that ignored its argument
+    // would satisfy everything above for whichever surface it hard-coded.
+    expect(new Set([...plans.values()].map((p) => p.join('|'))).size).toBe(SURFACES.length);
+  });
+
+  test('a disabled, detached or hidden control is not somewhere to stand', () => {
+    const good: FakeNode = { id: 'good', isConnected: true, closest: () => null };
+    expect(focus.canFocus(good)).toBe(true);
+    // Each one asserted against that same node with ONE property changed, so
+    // a canFocus() that always returned false could not pass the line above
+    // and one that always returned true cannot pass these.
+    expect(focus.canFocus({ ...good, disabled: true })).toBe(false);
+    expect(focus.canFocus({ ...good, isConnected: false })).toBe(false);
+    expect(focus.canFocus({ ...good, hidden: true })).toBe(false);
+    // A control in a pane that is hidden is just as unreachable as a hidden
+    // control: this is the case that matters, because four of the five panes
+    // are hidden at any moment.
+    expect(focus.canFocus({ ...good, closest: (sel: string) => (sel === '[hidden]' ? {} : null) }))
+      .toBe(false);
+    expect(focus.canFocus(null)).toBe(false);
+    expect(focus.canFocus(undefined)).toBe(false);
+  });
+
+  test('the first candidate that can take the focus wins, and null means leave it', () => {
+    const at = (id: string, extra: FakeNode = {}): FakeNode =>
+      ({ id, isConnected: true, closest: () => null, ...extra });
+    const dead = at('dead', { disabled: true });
+    const first = at('first');
+    const second = at('second');
+    expect(focus.firstStop([dead, first, second])).toBe(first);
+    // Not the last focusable one, which a fold written the wrong way round
+    // would return, and not the first CANDIDATE, which no filter would.
+    expect(focus.firstStop([dead, second, first])).toBe(second);
+    expect(focus.firstStop([dead, at('gone', { isConnected: false })])).toBeNull();
+    expect(focus.firstStop([])).toBeNull();
+    expect(focus.firstStop(undefined)).toBeNull();
+  });
+
+  test('the plan and the page together land the keyboard on the showing surface', () => {
+    // A fake document: selector in, nodes out, in the order a real
+    // querySelectorAll would give them. No DOM, and the composition — which
+    // is where the order can be lost — is still exercised end to end.
+    const node = (id: string, extra: FakeNode = {}): FakeNode =>
+      ({ id, isConnected: true, closest: () => null, ...extra });
+    const page = (map: Record<string, FakeNode[]>) => (selector: string) => map[selector] ?? [];
+
+    // A refusal on Convert: two buttons in the pane, the first of them is
+    // where a reader carries on from.
+    const convertButtons = [node('convert-anyway'), node('back-to-one')];
+    const plan = focus.focusPlan('convert');
+    expect(focus.stopAfterDialog('convert', page({
+      [plan[0]]: convertButtons,
+      [plan[1]]: [node('pane')],
+      [focus.ALWAYS]: [node('tab-convert')],
+    }))).toBe(convertButtons[0]);
+
+    // A surface with no control at all — the progress bar while it works.
+    // The pane carries tabindex="0", so Tab still moves from there.
+    const pane = node('pane');
+    expect(focus.stopAfterDialog('convert', page({
+      [plan[1]]: [pane], [focus.ALWAYS]: [node('tab-convert')],
+    }))).toBe(pane);
+
+    // The pane's controls are all disabled — Tune's two indent sliders are
+    // really like this — so the pane is still the answer, not the first
+    // disabled slider.
+    expect(focus.stopAfterDialog('convert', page({
+      [plan[0]]: [node('slider', { disabled: true })],
+      [plan[1]]: [pane],
+    }))).toBe(pane);
+
+    // Nothing left of the surface: the tab that exists in every state.
+    const always = node('tab-convert');
+    expect(focus.stopAfterDialog('read', page({ [focus.ALWAYS]: [always] }))).toBe(always);
+
+    // A page with nothing focusable anywhere leaves the focus alone rather
+    // than moving it somewhere worse.
+    expect(focus.stopAfterDialog('read', page({}))).toBeNull();
+
+    // And it really does use the surface it was given: the same page, asked
+    // for a different surface, finds nothing.
+    expect(focus.stopAfterDialog('send', page({ [plan[0]]: convertButtons }))).toBeNull();
+  });
+
+  test('main.js is the one place that places it, and it places it for every dialog', () => {
+    const main = read('main.js');
+    // The binding is thin on purpose, so what is checked here is that it is
+    // WIRED: the decision is imported rather than reimplemented, the dialog
+    // boundary calls it, and the surfaces are given it to call after a redraw.
+    expect(main).toContain("from './focus.js'");
+    expect(main).toContain('stopAfterDialog');
+    expect(main).toContain('onDialogClosed(restoreFocus)');
+    expect(main).toContain('restoreFocus,');
+    // It follows the surface that is showing, not a remembered one.
+    expect(main).toMatch(/showing = id/);
+    // No other surface may place the focus after a dialog behind its back.
+    for (const name of jsFiles()) {
+      if (name === 'main.js' || name === 'focus.js') continue;
+      expect(`${name} plans focus: ${/focusPlan|stopAfterDialog/.test(read(name))}`)
+        .toBe(`${name} plans focus: false`);
+    }
+  });
+
+  test('asking for a file does not move the reader off the surface they are on', () => {
+    // The shortcut used to switch to Convert before it opened the picker, so
+    // hitting it on Tune and then cancelling left someone on a surface they
+    // had not asked for, with their work off screen — and it made the focus
+    // rule above untestable as a general one, because the surface showing
+    // when a dialog closed was always Convert. Converting still moves there;
+    // asking does not.
+    const main = read('main.js');
+    const from = main.indexOf('metaKey');
+    const shortcut = main.slice(from, main.indexOf('});', from));
+    expect(shortcut).toContain('convert.choose()');
+    expect(`the shortcut switches surface: ${/setSurface\('convert'\)/.test(shortcut)}`)
+      .toBe('the shortcut switches surface: false');
+    // The drop does not switch either — the surface does it, on the file.
+    const drop = main.slice(main.indexOf('onFileDrag'), main.indexOf('metaKey'));
+    expect(drop).toContain('convert.dropPaths');
+    expect(`the drop handler switches surface: ${/setSurface\('convert'\)/.test(drop)}`)
+      .toBe('the drop handler switches surface: false');
+    expect(read('convert.js')).toContain("ctx.goTo('convert')");
+  });
+
+  test('the reader’s Tab stop is one that can show the focus', () => {
+    // The frame swallowed the focus and showed nothing for it. Measured with
+    // a probe on the live window, WebKitGTK gives a focused iframe no :focus
+    // match, no painted outline and no box-shadow, and fires NO focus, blur
+    // or focusin event for it either — so not even a class could be hung on
+    // it from script. The stop is therefore the stage around the frame, and
+    // the frame is taken out of the Tab order.
+    const reader = read('read.js');
+    expect(reader).toContain('script-stage');
+    expect(reader).toMatch(/tabindex: '-1'/);
+    expect(reader).toMatch(/tabindex: '0'/);
+    const css = read('surfaces.css');
+    const rings = [...css.matchAll(/\.script-stage:focus[^{]*\{([^}]*)\}/g)].map((m) => m[1]);
+    expect(rings.length).toBeGreaterThan(0);
+    expect(rings.every((body) => /outline:\s*\d/.test(body))).toBe(true);
+    // ...and nothing tries to ring the frame itself any more, which would be
+    // a rule that renders on no machine anyone has run this on.
+    expect(`surfaces.css rings the frame: ${/\.script-frame:focus/.test(css)}`)
+      .toBe('surfaces.css rings the frame: false');
+    // The focus plan must not send anyone to the frame either.
+    expect(`focus.js treats an iframe as a stop: ${/'iframe'/.test(read('focus.js'))}`)
+      .toBe('focus.js treats an iframe as a stop: false');
+  });
+
+  test('the arrow keys still move the script, now that the frame is not the stop', async () => {
+    // What the frame used to get free from the engine. Exercised as a
+    // decision rather than read off the handler.
+    const reader = (await import(join(UI, 'read.js'))) as {
+      scrollStep: (key: string, height: unknown) => number | string | null;
+      READER_LINE: number;
+      PAGE_FLOOR: number;
+    };
+    const step = reader.scrollStep;
+    expect(step('ArrowDown', 600)).toBe(reader.READER_LINE);
+    expect(step('ArrowUp', 600)).toBe(-reader.READER_LINE);
+    // A page is most of the frame, not all of it: reading loses its place if
+    // the line you stopped on scrolls off the top.
+    const page = step('PageDown', 600) as number;
+    expect(page).toBeLessThan(600);
+    expect(page).toBeGreaterThan(600 / 2);
+    expect(step('PageUp', 600)).toBe(-page);
+    expect(step(' ', 600)).toBe(page);
+    // Absolute, not a big number: Home and End are the ends of the script.
+    expect(step('Home', 600)).toBe('top');
+    expect(step('End', 600)).toBe('bottom');
+    // A page scales with the frame — a fixed number would be a page on one
+    // window size and a line on another — and never shrinks to nothing when
+    // the frame has no height yet to measure.
+    expect(step('PageDown', 1200)).toBeGreaterThan(page);
+    for (const nothing of [0, undefined, null, 'tall', NaN, -400]) {
+      expect(`${nothing}: ${step('PageDown', nothing)}`)
+        .toBe(`${nothing}: ${reader.PAGE_FLOOR}`);
+    }
+    // Every other key belongs to the window, not to the frame: a handler
+    // that answered Tab or ArrowRight would eat the surface's own keyboard.
+    for (const key of ['Tab', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'a', '']) {
+      expect(`${key}: ${step(key, 600)}`).toBe(`${key}: null`);
+    }
+  });
+});
+
+describe('one file dialog at a time', () => {
+  // Ctrl-O twice used to open two native pickers, both modal, both waiting
+  // on the same window. `busy` guarded a running CONVERSION and nothing else.
+  type AppModule = {
+    pickScreenplay: () => Promise<string | null>;
+    isDialogOpen: () => boolean;
+    onDialogClosed: (handler: () => void) => void;
+  };
+
+  function stubPicker() {
+    let calls = 0;
+    let settle: ((path: string | null) => void) | null = null;
+    let fail: ((err: unknown) => void) | null = null;
+    (globalThis as unknown as { window: unknown }).window = {
+      __TAURI__: {
+        core: {
+          invoke: () => {
+            calls += 1;
+            return new Promise((resolve, reject) => { settle = resolve; fail = reject; });
+          },
+        },
+      },
+    };
+    return {
+      get calls() { return calls; },
+      answer: (path: string | null) => settle!(path),
+      reject: (err: unknown) => fail!(err),
+    };
+  }
+
+  afterEach(() => { delete (globalThis as unknown as { window?: unknown }).window; });
+
+  test('a second ask while one is open opens nothing, and the first still answers', async () => {
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    const picker = stubPicker();
+
+    const first = app.pickScreenplay();
+    await Promise.resolve();
+    expect(app.isDialogOpen()).toBe(true);
+    // The assertion that matters: the count of dialogs actually OPENED.
+    // A guard that returned the first promise again, or that let the second
+    // through, both look the same from the caller.
+    expect(await app.pickScreenplay()).toBeNull();
+    expect(await app.pickScreenplay()).toBeNull();
+    expect(`pickers opened: ${picker.calls}`).toBe('pickers opened: 1');
+
+    picker.answer('/s/script.pdf');
+    expect(await first).toBe('/s/script.pdf');
+
+    // ...and the guard clears, or the window could never open a second file.
+    // Asserted against the state it changed FROM, above.
+    expect(app.isDialogOpen()).toBe(false);
+    const again = app.pickScreenplay();
+    await Promise.resolve();
+    expect(`pickers opened after: ${picker.calls}`).toBe('pickers opened after: 2');
+    picker.answer(null);
+    expect(await again).toBeNull();
+  });
+
+  test('a dialog that fails still closes, and still hands the keyboard back', async () => {
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    const picker = stubPicker();
+    let closed = 0;
+    app.onDialogClosed(() => { closed += 1; });
+
+    const asked = app.pickScreenplay().then(() => 'resolved', () => 'rejected');
+    await Promise.resolve();
+    picker.reject(new Error('no portal'));
+    expect(await asked).toBe('rejected');
+    // A guard left standing by a throw would lock the window out of ever
+    // opening a file again, and the keyboard would never be put back.
+    expect(app.isDialogOpen()).toBe(false);
+    expect(`closed: ${closed}`).toBe('closed: 1');
+
+    const after = app.pickScreenplay();
+    await Promise.resolve();
+    expect(`pickers opened: ${picker.calls}`).toBe('pickers opened: 2');
+    picker.answer(null);
+    await after;
+    expect(`closed: ${closed}`).toBe('closed: 2');
+  });
 });
 
 describe('what runEngine does with the answer it is handed', () => {

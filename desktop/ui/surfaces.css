@@ -207,6 +207,28 @@
 }
 .ways { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 
+/* The book that was already open is not closed by a refusal, and the line
+ * that says so belongs with the ways on, not with the fault above them. */
+.kept-note {
+  font-family: var(--font-structure); font-size: var(--text-note);
+  color: var(--ink-muted); margin: var(--space-5) 0 0; max-width: var(--measure);
+}
+/* The support handle. Labelled and boxed so it reads as a reference number
+ * rather than as the last sentence of the refusal. */
+.code-note {
+  display: flex; align-items: baseline; gap: var(--space-2);
+  margin: var(--space-6) 0 0;
+}
+.code-note-label {
+  font-family: var(--font-structure); font-size: var(--text-fine);
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-muted);
+}
+.code-chip {
+  font-size: var(--text-note); color: var(--ink-muted);
+  background: var(--hole); border-radius: var(--radius-mark);
+  padding: 2px var(--space-2);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .well, .fill { transition: none; }
 }
@@ -243,6 +265,7 @@
  * tokens, injected into the frame's own sheet, because a custom property
  * does not cross a document boundary. */
 .script-frame {
+  display: block;
   width: 100%;
   height: 68vh;
   min-height: 300px;
@@ -251,6 +274,19 @@
   box-shadow: inset 0 0 0 1px var(--hole);
   border-radius: var(--radius-well);
 }
+/* The frame is a Tab stop — it is the document, and a keyboard reader scrolls
+ * it — but it took the focus with nothing to show for it, which is worse than
+ * a frame that cannot take it at all: the ring is the only thing telling a
+ * reader where they are. Both :focus and :focus-visible, because the focus
+ * WebKit gives a frame arrives with no visible-focus heuristic behind it. */
+/* The stage the frame sits in, and the reader's Tab stop. The frame itself
+ * cannot be one: this window paints nothing for a focused iframe (no :focus
+ * match, no outline, no box-shadow) and fires no focus event a script could
+ * paint from, all measured live. An ordinary element rings like an ordinary
+ * element, and read.js gives it the arrow keys the frame used to get free. */
+.script-stage { display: block; border-radius: var(--radius-well); }
+.script-stage:focus { outline: 2px solid var(--ink); outline-offset: 2px; }
+.script-stage:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
 .scene-rail {
   /* Positioned so it is the offsetParent of its own buttons: read.js keeps

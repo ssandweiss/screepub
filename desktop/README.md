@@ -443,9 +443,12 @@ showed neither installed. `await document.fonts.load(...)` and then read the
   mean a new Tauri plugin and a new capability grant.
 - **No auto-update.** Notes says so on the surface.
 
-### Known, open, and found by running it (task 13, 2026-09-14)
+### Known, open, and found by running it — and fixed in 13b (task 13, 2026-09-14)
 
-Each of these was seen in the live window on Linux. None is fixed here.
+Each of these was seen in the live window on Linux by task 13 and is
+left here as the record of what was wrong. **All six are fixed**; the
+section after this one says how, and what is still open.
+
 
 - **The keyboard can be left with nowhere to stand after the native file
   dialog closes.** Ctrl-O then Escape, with a result on screen, sometimes
@@ -474,3 +477,93 @@ Each of these was seen in the live window on Linux. None is fixed here.
 - **The raw error code is printed under the buttons** (`not-screenplay`,
   `scanned`). Deliberate — it is a support handle — but on the page it reads
   as leftover debug text.
+
+### The keyboard, and where the focus goes (task 13b, 2026-09-14)
+
+Task 13's keyboard-only pass found six defects in this window; all six are
+fixed here, and every one was reproduced and then re-checked in the live
+window on this machine (Hyprland/Wayland, WebKitGTK, no pointer available).
+
+**Placing the focus is a decision, and it lives in `desktop/ui/focus.js`.**
+`convert.js` used to re-focus the drop well's button when a file dialog
+closed — a button that exists in one of that surface's four states — so
+cancelling a dialog over a result or a refusal left the page with **no
+focused element at all**: nothing for Tab, Shift-Tab or the tablist's arrows
+to move from. `focusPlan(surface)` now answers, for whatever surface is
+showing, where the keyboard goes: the first control inside the showing pane,
+then the pane itself (every pane carries `tabindex="0"`), then that surface's
+tab, then the Convert tab, which exists in every state of the window.
+`main.js` is the only place that queries it and the only place that calls
+`focus()`. `app.js` calls it after **every** dialog it opens, through
+`onDialogClosed`, and any surface may ask for it through
+`context.restoreFocus()` after a redraw that threw the focused element away.
+
+Measured after the fix, on all five surfaces: Convert lands on `Send to a
+reader` / `Convert anyway`, Read on the reader's stage, Tune on its first
+preset, and Send and Notes — which have no control at all — on the pane,
+which rings and which Tab moves on from.
+
+**One dialog at a time.** Ctrl-O twice used to open two native pickers. The
+guard is in `app.js`, at the one place that opens one, because the shortcut
+and the button must not be able to disagree about it; a second ask returns
+`null`, exactly as a cancel does, and opens nothing.
+
+**Ctrl-O no longer moves you to Convert.** Converting a file does (`convert.js`
+owns that, for a drop and for the shortcut alike); asking for one does not, so
+cancelling on Tune leaves you on Tune with your work on screen.
+
+**A refusal keeps the script that was open.** `drawFailure` used to set
+`state.script = null`, which took Read, Tune and Send away from a book still
+sitting in the library. A file the engine would not read produces nothing to
+replace the open script with, so it replaces nothing, and the refusal says so
+by name.
+
+**The window trims the CLI remedy it has already replaced with a button.**
+The engine's refusal is still rendered verbatim, and that rule is right —
+with one exception, in `withoutCliRemedy`: when the window has drawn the
+override, the engine's sentence naming the flag comes out, and nothing else
+does. `not-screenplay` therefore reads "No scene headings and no dialogue
+found — this does not look like a screenplay." directly above **Convert
+anyway**. Every other refusal keeps every word, including one that names the
+flag where the window offers no button.
+
+**The error code is a labelled handle, not prose.** It is still on the page —
+`ERROR CODE  not-screenplay`, in the code face, in a chip — and it is also on
+the pane as `data-error-code` for anyone pasting a bug report out of the DOM.
+
+### The reader frame cannot show focus, so it is no longer the Tab stop
+
+Measured with a probe on the live window, not assumed. Tabbing to the
+`<iframe>` makes it the parent's `document.activeElement`, and then:
+
+  * it does **not** match `:focus` or `:focus-visible`, so no rule fires;
+  * `outline` and `box-shadow` were both tried on those selectors, and on the
+    element directly: nothing is painted for a focused iframe;
+  * **no focus, blur or focusin event fires at all** — not on the element and
+    not on its `contentWindow` — so a class could not be hung on it from
+    script either.
+
+A frame that takes the keyboard and shows nothing is worse than one that does
+not take it, so the frame is now `tabindex="-1"` and the Tab stop is the
+`div.script-stage` around it, which is an ordinary element and rings like
+one. The arrow keys used to scroll the frame for free, because WebKit routed
+them into it; `read.js`'s `scrollStep` is that behaviour made explicit —
+arrows a line, PageUp/PageDown/Space nine tenths of the frame, Home and End
+the ends of the script — and the stage's keydown handler scrolls the
+same-origin frame with it. `focus.js`'s `FOCUSABLE` deliberately does not
+list `iframe`.
+
+### Still open after task 13b
+
+- **The rail's mark is a beat behind.** It marks the scene occupying the top
+  of the viewport, so a new heading just below the top edge still points at
+  the previous scene. Correct by `readerPlace`'s stated rule; cosmetic.
+- **The library path on the result page breaks mid-word.**
+- **A live theme switch is not picked up** — WebKitGTK only reads the new
+  preference on restart.
+- **Send and Notes have no focusable control of their own.** After a dialog
+  the keyboard lands on the pane, which is right; one Tab from there leaves
+  the page the way the end of any document does, and one more Tab comes back
+  to the tablist.
+- **Drag-and-drop is still unverified in a running window** (no way to
+  synthesise a Wayland drag from outside).

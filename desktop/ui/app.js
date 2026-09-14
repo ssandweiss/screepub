@@ -14,6 +14,12 @@
 // that runs every argv builder below and checks what it produced.
 const tauri = () => window.__TAURI__;
 
+/** The flag the window's own override button stands for. It is spelled here
+ *  with every other flag, and exported because the refusal the engine writes
+ *  names it in prose: the surface that has already drawn the button needs to
+ *  recognise the sentence telling a reader to type it. */
+export const FORCE_FLAG = '--force';
+
 /** Every argv this window ever builds. One place, so a flag cannot be spelled
  *  two ways, and so a reviewer can read the whole contract at once. */
 export const argv = {
@@ -28,7 +34,7 @@ export const argv = {
    *  and reads the ones it gets back off the answer. */
   convert: (path, { force = false, optionsJson = null } = {}) =>
     [path, '--json', '--progress', '--preview-inline', '--library',
-      force ? '--force' : null,
+      force ? FORCE_FLAG : null,
       optionsJson ? '--options-json' : null, optionsJson].filter((a) => a !== null),
 
   /** A re-render from the cached .fountain, writing the library EPUB back in
@@ -86,10 +92,36 @@ export async function runEngine(args) {
   }
 }
 
-/** Ask the OS for a screenplay. Null when the reader cancelled. */
+// One outstanding file dialog, ever. Ctrl-O twice used to open two native
+// pickers — both modal, both waiting on the same window — because the only
+// guard the window had was `busy`, and `busy` is a running CONVERSION.
+let dialogOpen = false;
+const dialogClosed = [];
+
+/** Called after every dialog this file opens closes, however it closed.
+ *  main.js puts the keyboard back with it; see focus.js for why that is not
+ *  the dialog-opening surface's business. */
+export function onDialogClosed(handler) {
+  dialogClosed.push(handler);
+}
+
+/** True while a native dialog is on screen. */
+export function isDialogOpen() {
+  return dialogOpen;
+}
+
+/** Ask the OS for a screenplay. Null when the reader cancelled — and null,
+ *  without opening anything, when a picker is already up. */
 export async function pickScreenplay() {
-  const path = await tauri().core.invoke('pick_file');
-  return path ?? null;
+  if (dialogOpen) return null;
+  dialogOpen = true;
+  try {
+    const path = await tauri().core.invoke('pick_file');
+    return path ?? null;
+  } finally {
+    dialogOpen = false;
+    for (const handler of dialogClosed) handler();
+  }
 }
 
 /** Every diagnostic line the engine writes, verbatim, as it writes it.

@@ -176,6 +176,43 @@ export function sceneLabel(heading) {
   return { place, time };
 }
 
+/** How far one key press moves the reader down the script.
+ *
+ *  The frame is the document, so a keyboard reader has to be able to move it.
+ *  It used to do that by BEING the Tab stop: WebKitGTK routed the arrow keys
+ *  straight into the frame and scrolled it. That had to go, because the same
+ *  window paints nothing at all for a focused iframe — no `:focus` match, no
+ *  `:focus-visible`, no outline, no box-shadow, and (measured with a probe on
+ *  the live window) no focus, blur or focusin event either, so not even a
+ *  class could be hung on it. A frame that takes the keyboard and shows
+ *  nothing is worse than one that does not take it, so the stop is now the
+ *  element AROUND the frame, which is an ordinary div and rings like one —
+ *  and scrolling, which came free before, is this function's job instead.
+ *
+ *  'top' and 'bottom' rather than a number, because Home and End are absolute
+ *  and a caller that added them up would only ever approximate them. A page
+ *  is nine tenths of the frame, the overlap every reader expects, and it has
+ *  a floor so a very short frame still moves more than a line. */
+export const READER_LINE = 60;
+export const PAGE_SHARE = 0.9;
+export const PAGE_FLOOR = 120;
+
+export function scrollStep(key, frameHeight) {
+  const height = Number(frameHeight);
+  const page = Number.isFinite(height) && height > 0
+    ? Math.max(PAGE_FLOOR, Math.round(height * PAGE_SHARE))
+    : PAGE_FLOOR;
+  switch (key) {
+    case 'ArrowDown': return READER_LINE;
+    case 'ArrowUp': return -READER_LINE;
+    case 'PageDown': case ' ': case 'Spacebar': return page;
+    case 'PageUp': return -page;
+    case 'Home': return 'top';
+    case 'End': return 'bottom';
+    default: return null;
+  }
+}
+
 /** The rail, from the engine's own scene sections in the engine's own order.
  *  Not from a second parse of the fountain: two parsers is two answers about
  *  what a scene is. */
@@ -349,10 +386,22 @@ function draw() {
     // rail from the document the engine wrote. Nothing more is granted, so
     // nothing inside the document can run.
     sandbox: 'allow-same-origin',
+    // NOT the Tab stop: see scrollStep. This window paints nothing for a
+    // focused iframe and fires no event that would let the page paint it
+    // instead, so the stop is the stage around it.
+    tabindex: '-1',
   });
   frame.addEventListener('load', dress);
 
-  pane.append(el('div', { class: 'reader' }, frame, rail));
+  const stage = el('div', {
+    class: 'script-stage',
+    tabindex: '0',
+    role: 'group',
+    'aria-label': `${script.title}, the script`,
+    onkeydown: onStageKey,
+  }, frame);
+
+  pane.append(el('div', { class: 'reader' }, stage, rail));
   render(script.previewHtml);
 }
 
@@ -432,6 +481,20 @@ function watch(doc, win) {
 function unwatch() {
   if (watching !== null) watching.disconnect();
   watching = null;
+}
+
+/** The arrow keys, on the stage that stands in for the frame. The frame is
+ *  same-origin, so the parent can scroll it; what each key is worth is
+ *  scrollStep's answer and not this handler's. */
+function onStageKey(event) {
+  const win = frame?.contentWindow;
+  if (!win) return;
+  const step = scrollStep(event.key, frame.clientHeight);
+  if (step === null) return;
+  event.preventDefault();
+  if (step === 'top') win.scrollTo(0, 0);
+  else if (step === 'bottom') win.scrollTo(0, win.document.documentElement.scrollHeight);
+  else win.scrollBy(0, step);
 }
 
 function adopt() {
