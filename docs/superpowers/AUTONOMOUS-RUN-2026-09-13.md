@@ -361,3 +361,70 @@ system, not visual invention. The `frontend-design` skill (which you asked for
 explicitly) should be spent on how those pieces compose into screens and on
 what the reader view becomes in a webview — not on inventing a look the
 project already has.
+
+---
+
+## D16 — I reversed my own ruling about the "Rust is a window" guards
+
+**The decision:** piece C's Task 6 turns the ADR's governing rule into tests
+that fail if logic ever creeps into the Rust shell. Those guards collided with
+the shell's own code — `epub` is a substring of `Screepub`, and the comments
+explaining the rule naturally use the very words the rule bans. I first ruled
+that the guards should use word-boundary matching to dodge the collisions.
+**That was wrong, and the reviewer proved it.** `_` counts as a word character,
+so `\bkindle\b` does not match `is_kindle_volume`; it wrote a Rust function
+making device, slugline and format decisions and watched it pass all nineteen
+guards. I reversed to plain substring matching with two narrow, by-name
+exemptions.
+
+**Why it matters:** a guard loosened to fit today's code is worse than no
+guard, because it reports safety it no longer provides. The review found three
+of these — the word-boundary hole, a comment-stripper that truncated at `//`
+inside a URL and so hid three violations behind one string, and a directory
+scan that never descended into subdirectories, leaving `src/brain/mod.rs`
+entirely ungoverned. All three are now closed, each verified by re-running the
+exact bypass that defeated them.
+
+**The lesson I am recording against myself:** I ruled on the collisions without
+asking what the loosened rule would then let through. That is the same failure
+the guards exist to prevent, committed one level up.
+
+**Cost if wrong:** a future false positive on a Rust identifier that happens to
+contain a domain word — a ten-second explicit exemption.
+
+## F6 — the guards now have teeth, demonstrated rather than asserted
+
+Every guard has been mutation-tested: `serde_json` added as a dependency and
+as a call, a `"--json"` flag literal, a third registered command, a checked
+exit status, a widened frontend permission, two hundred extra lines of Rust,
+real domain vocabulary in executable code, a drifted CSS hex in both light and
+dark. Each fails by name, and each mutation was reverted. The twelve colour
+values copied into `desktop/ui/style.css` are now pinned to `brand/tokens.json`
+the same way the web tokens are pinned to `Theme.swift`.
+
+## D17 — piece C is done, and what it costs to say so honestly
+
+**The decision:** the whole-branch review returned *ready to merge* with no
+critical findings, and confirmed by hand the thing that matters most here —
+the chain that names the engine binary, which Task 1 proved fails invisibly
+when it is wrong. That chain is now pinned in both directions, including the
+musl case and the Windows `.exe` suffix nobody here can test.
+
+**The one claim I would not let stand:** the root README said macOS and
+Windows "compile in CI". They do not yet — the workflow has never run, because
+the branch has never been pushed, and pushing is a shared-branch action I am
+leaving to you. The wording now says what is true: the workflow exists and is
+expected to compile those platforms, and has not yet done so. **The first real
+push of this branch is what turns that sentence into a fact**, and it is worth
+watching, because the Windows half of the naming chain is exercised by nothing
+else.
+
+**Three things parked rather than fixed**, each with a reason in the ledger:
+the desktop CSS also copies a radius and two font stacks that the colour pin
+cannot see (piece D deletes that file); `tauri.conf.json` says 0.6.0 while
+`package.json` still says 0.5.4 (deliberate — the bump sets all three together
+at release, and pinning them equal today would force one to be wrong); and the
+sidecar build tool ranks its selector flags silently instead of rejecting a
+contradictory pair.
+
+**Cost if wrong:** all three are developer-facing and degrade visibly.
