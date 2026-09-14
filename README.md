@@ -138,6 +138,16 @@ reader, and a tolino cannot be detected on Windows at all: it is identified by
 the name of its volume, and a Windows drive root carries none. Converting is
 the part that is well tested everywhere; sending is not.
 
+### Desktop app (in progress)
+
+A cross-platform window is being built in `desktop/`, on Tauri, around this
+same engine — the app spawns the CLI binary and renders its `--json` answer,
+so there is exactly one implementation of everything that thinks. It builds
+and runs on Linux today; macOS and Windows compile in CI but have not been
+run. Installers are not built yet. Build instructions: [`desktop/README.md`](desktop/README.md).
+
+The macOS app in `app/` is the shipping one until that work lands.
+
 ## Your script stays on your machine
 
 Scripts are confidential. Screepub is built accordingly.

@@ -353,3 +353,51 @@ describe('the desktop CSS copy of the brand tokens does not drift', () => {
     }
   });
 });
+
+describe('the desktop workflow', () => {
+  const WF = Bun.YAML.parse(
+    readFileSync(join(REPO, '.github', 'workflows', 'desktop.yml'), 'utf8'),
+  ) as {
+    on: { push: { paths: string[] } };
+    jobs: Record<string, { strategy?: { matrix?: { os?: string[] } }; steps: { run?: string }[] }>;
+  };
+
+  test('compiles on all three platforms', () => {
+    // The spec's stated position is that macOS and Windows "ride on CI
+    // building them". If this matrix quietly became ubuntu-only, that
+    // sentence would be false and nothing else would notice.
+    expect(WF.jobs.build.strategy?.matrix?.os).toEqual([
+      'ubuntu-latest',
+      'macos-15',
+      'windows-latest',
+    ]);
+  });
+
+  test('the sidecar is built before the shell is compiled', () => {
+    // tauri-build needs it present. Reversed, every job fails with the
+    // confusing not-found this piece exists to eliminate.
+    const runs = WF.jobs.build.steps.map((s) => s.run ?? '');
+    const sidecar = runs.findIndex((r) => r.includes('build-sidecar.ts'));
+    const cargo = runs.findIndex((r) => r.includes('cargo build'));
+    expect(sidecar).toBeGreaterThanOrEqual(0);
+    expect(cargo).toBeGreaterThan(sidecar);
+  });
+
+  test('it does not bundle, sign or run anything', () => {
+    // Scope guard. Bundling is piece E2; a `tauri build` appearing here
+    // would mean C had grown an installer nobody reviewed.
+    const all = JSON.stringify(WF);
+    expect(all).not.toContain('tauri build');
+    expect(all).not.toContain('codesign');
+    expect(all).not.toContain('appimage');
+  });
+
+  test('it is path-filtered, so a parser change never waits on three cargo builds', () => {
+    // Vacuous alternatives rejected: asserting the `on` key merely exists
+    // would pass for a workflow that runs on every push, which is the thing
+    // this test is for. Assert the filter itself.
+    const triggers = (WF as unknown as { on: { push: { paths: string[] } } }).on;
+    expect(triggers.push.paths).toContain('desktop/**');
+    expect(triggers.push.paths).not.toContain('src/**');
+  });
+});
