@@ -21,6 +21,7 @@ export const RELEASE = {
     {
       title: "Good to know",
       items: [
+        { lead: "", body: "That last change has been read on a Kindle, but not yet with a very long speech at a large font size. If a character name ever ends up alone at the foot of a page, that is the case worth reporting." },
       ],
     },
   ],
