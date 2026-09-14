@@ -46,8 +46,11 @@ export const READERS = [
   {
     kind: 'kindle',
     name: 'Kindle',
-    route: 'Over USB. Kindles never index a sideloaded EPUB, so Screepub builds an AZW3, '
-      + 'a KFX or its own MOBI — whichever is the best this computer can make — and copies '
+    // The ladder in its own order, best rung first: KFX, then AZW3, then the
+    // engine's MOBI. Listing it any other way would read as a preference the
+    // engine does not hold.
+    route: 'Over USB. Kindles never index a sideloaded EPUB, so Screepub builds a KFX, '
+      + 'an AZW3 or its own MOBI — whichever is the best this computer can make — and copies '
       + 'that across instead.',
   },
   {
@@ -77,7 +80,11 @@ export function platformOf(hint) {
   const said = String(hint ?? '');
   if (/mac/i.test(said)) return 'mac';
   if (/win/i.test(said)) return 'windows';
-  return 'linux';
+  if (/linux|x11|bsd/i.test(said)) return 'linux';
+  // Not 'linux': under-claiming hardware support is right, but naming the
+  // wrong operating system is not. A window that could not tell would
+  // otherwise print "never tested from Linux" on a Mac.
+  return 'unknown';
 }
 
 /** What the standing list says in its third column. */
@@ -97,8 +104,12 @@ export function provenNote(platform) {
       + 'are built and code-tested, and that is all — they are listed because Screepub will '
       + 'try, not because anyone can promise.';
   }
-  const named = where === 'windows' ? 'Windows' : 'Linux';
-  return `Sending has ${UNPROVEN} from ${named} — the one route anyone has run was a Kindle `
+  // Named only when it is known. An absent navigator.platform must not be
+  // reported as some particular operating system.
+  const named = where === 'windows' ? 'from Windows'
+    : where === 'linux' ? 'from Linux'
+      : 'on this computer’s platform';
+  return `Sending has ${UNPROVEN} ${named} — the one route anyone has run was a Kindle `
     + 'over USB, on a Mac. The code is the same on all three platforms; the confidence is not.';
 }
 
@@ -263,6 +274,39 @@ export function statusFor(phase, { device = null, detail = '' } = {}) {
   if (phase === 'preparing') return { line: `Getting the book ready for ${name}…`, bad: false };
   if (phase === 'copying') return { line: `Copying it to ${name}…`, bad: false };
   return { line: '', bad: false };
+}
+
+/** The engine's own sentence for a refusal, or a readable stand-in when it
+ *  breaks its contract and refuses without one. */
+export function failureMessage(answer) {
+  const said = typeof answer?.error?.message === 'string' ? answer.error.message.trim() : '';
+  return said === '' ? NO_MESSAGE : said;
+}
+
+/** What the two answers add up to, as the pair statusFor takes.
+ *
+ *  This is the decision the whole surface turns on, so it is HERE and not in
+ *  the drawing: whether a transfer happened. `ok !== true` is the engine's
+ *  only word for "it did not", and a surface that failed to check it would
+ *  print "Sent to Kindle." over a refusal — sentLine cannot tell, because a
+ *  refusal carries no destination and that is also the shape a reMarkable
+ *  upload takes. Both answers are checked, and the export's first: a Kindle
+ *  whose file could not be built was never copied anywhere. */
+export function outcomeFor(built, sent, device) {
+  if (built?.ok !== true) return ['failed', { device, detail: failureMessage(built) }];
+  if (sent?.ok !== true) return ['failed', { device, detail: failureMessage(sent) }];
+  return ['sent', { device, detail: sentLine(device, sent) }];
+}
+
+/** Whether this script's settings still have to be fetched before an export.
+ *  Tune stores them the moment it opens; a reader who never opened Tune has
+ *  a sidecar full of settings and nothing here that knows it, and the rung
+ *  that consults them would rebuild the book with the DEFAULTS. */
+export function needsSettings(script) {
+  if (script === null || script === undefined) return false;
+  if (script.settings !== null && script.settings !== undefined) return false;
+  const fountain = typeof script.fountainPath === 'string' ? script.fountainPath.trim() : '';
+  return fountain !== '';
 }
 
 /** Which phase the wait is in before the copy starts. The Kindle rung can
@@ -467,8 +511,7 @@ function buttons() {
  *  goes ahead exactly as it would have, with no options to pass. */
 async function ensureSettings() {
   const script = ctx.state.script;
-  if (script === null || script.settings !== null) return;
-  if (typeof script.fountainPath !== 'string' || script.fountainPath === '') return;
+  if (!needsSettings(script)) return;
   try {
     const answer = await runEngine(argv.settings(script.fountainPath));
     ctx.state.script.settings = settingsFrom(answer);
@@ -497,13 +540,21 @@ async function sendTo(device) {
       fountain: script.fountainPath,
       optionsJson: optionsJsonFor(script),
     }));
-    if (built.ok !== true) throw new Error(failureMessage(built));
+
+    // Nothing is copied when nothing was built: the export's refusal is the
+    // whole answer, and asking `send` to move a file that does not exist
+    // would replace the engine's sentence with a worse one.
+    if (built.ok !== true) {
+      say(statusFor(...outcomeFor(built, null, device)));
+      return;
+    }
 
     say(statusFor('copying', { device }));
     const sent = await runEngine(argv.send(built.path, device.id));
-    if (sent.ok !== true) throw new Error(failureMessage(sent));
 
-    say(statusFor('sent', { device, detail: sentLine(device, sent) }));
+    const [phase, detail] = outcomeFor(built, sent, device);
+    say(statusFor(phase, detail));
+    if (phase !== 'sent') return;
     const what = artifactLine(built);
     text(artifactNote, what);
     artifactNote.hidden = what === '';
@@ -517,11 +568,6 @@ async function sendTo(device) {
     sending = false;
     for (const button of buttons()) button.disabled = false;
   }
-}
-
-function failureMessage(answer) {
-  const said = typeof answer?.error?.message === 'string' ? answer.error.message.trim() : '';
-  return said === '' ? NO_MESSAGE : said;
 }
 
 function say(status) {

@@ -1812,7 +1812,40 @@ describe('the Send surface', () => {
   });
 
   test('it stops polling when the surface is hidden', () => {
-    expect(send).toContain('clearInterval');
+    // hide()'s OWN body, not "the file mentions clearInterval somewhere":
+    // show() also clears before it re-arms, so a hide() gutted to
+    // `{ poll = null; }` would satisfy a file-wide check while the poll ran
+    // on forever behind every other surface, asking the engine what is
+    // plugged in every two seconds for the life of the window.
+    const hide = /export function hide\(\) \{([\s\S]*?)\n\}/.exec(send);
+    expect(hide, 'send.js exports no hide()').not.toBe(null);
+    expect(hide![1]).toContain('clearInterval(poll)');
+  });
+
+  test('nothing is copied when nothing was built', () => {
+    // outcomeFor refuses either way, so this is not the safety check — it is
+    // the difference between showing the export's own sentence and asking
+    // `send` to move a file that was never written, which answers with a
+    // worse one about a path the reader never chose.
+    const body = send.slice(send.indexOf('async function sendTo('));
+    const exported = body.indexOf('argv.export');
+    const copied = body.indexOf('argv.send');
+    const refused = body.indexOf('built.ok !== true');
+    expect(copied).toBeGreaterThan(exported);
+    expect(`the export refusal is checked before the copy: ${refused > exported && refused < copied}`)
+      .toBe('the export refusal is checked before the copy: true');
+  });
+
+  test('the settings are fetched before the argv that carries them is built', () => {
+    // The mitigation for the first-conversion gap: a script whose sidecar
+    // this window has never read would otherwise export with the engine's
+    // DEFAULTS. Deleting the await leaves optionsJsonFor with nothing to
+    // serialise and says nothing on screen, so the order is pinned here.
+    const body = send.slice(send.indexOf('async function sendTo('));
+    const fetched = body.indexOf('await ensureSettings()');
+    const built = body.indexOf('argv.export');
+    expect(fetched, 'sendTo() does not await ensureSettings()').toBeGreaterThan(-1);
+    expect(built).toBeGreaterThan(fetched);
   });
 
   test('an optional child is never handed straight to a live node', () => {
@@ -1896,6 +1929,10 @@ describe('what the Send surface decides', () => {
     statusFor: (phase: string, opts?: { device?: unknown; detail?: string })
       => { line: string; bad: boolean };
     preparingPhase: (device: unknown) => string;
+    failureMessage: (answer: unknown) => string;
+    outcomeFor: (built: unknown, sent: unknown, device: unknown)
+      => [string, { device: unknown; detail: string }];
+    needsSettings: (script: unknown) => boolean;
   };
   let send: SendModule;
 
@@ -1956,6 +1993,24 @@ describe('what the Send surface decides', () => {
     expect(linux).toContain('Linux');
     expect(send.provenNote('Win32')).toContain('Windows');
     expect(send.provenNote('Win32')).not.toContain('Linux');
+    // navigator.platform is deprecated and navigator.userAgentData is absent
+    // on WebKitGTK, so this window can genuinely not know. Under-claiming
+    // hardware support is right; naming the wrong operating system is not —
+    // "never tested from Linux" on a Mac is a false statement about the
+    // machine, which is the one thing this surface exists to avoid.
+    for (const unknown of [undefined, null, '', 'CrOS', {}]) {
+      const said = send.provenNote(unknown);
+      expect(`${String(unknown)} names Linux: ${said.includes('Linux')}`)
+        .toBe(`${String(unknown)} names Linux: false`);
+      expect(`${String(unknown)} names Windows: ${said.includes('Windows')}`)
+        .toBe(`${String(unknown)} names Windows: false`);
+      // It still says the thing that is true everywhere.
+      expect(said).toContain(send.UNPROVEN);
+      expect(send.platformOf(unknown)).toBe('unknown');
+    }
+    expect(send.platformOf('Linux aarch64')).toBe('linux');
+    expect(send.platformOf('MacIntel')).toBe('mac');
+    expect(send.platformOf('Win32')).toBe('windows');
     // The Mac line is a different sentence from the other two, or the note is
     // saying the same thing everywhere and telling nobody anything.
     expect(new Set([mac, linux, send.provenNote('Win32')]).size).toBe(3);
@@ -2087,6 +2142,73 @@ describe('what the Send surface decides', () => {
     for (const phase of ['building', 'preparing', 'copying']) {
       expect(send.statusFor(phase, { device: kindle }).line).toContain('Kindle');
     }
+  });
+
+  test('a refusal is never dressed up as a transfer', () => {
+    // The decision the whole surface turns on. sentLine CANNOT tell a refusal
+    // from a success on its own: a refused answer carries no destination, and
+    // "no destination" is also the shape a reMarkable upload takes — so it
+    // would render a refusal as "Sent to Kindle." with no alarm. Both answers
+    // are checked here, and both are checked in the failing direction.
+    const good = { ok: true, label: 'AZW3 — for USB sideload to Kindle', path: '/x.azw3' };
+    const refusedExport = {
+      ok: false,
+      error: { code: 'export-failed', message: "Can't rebuild the Kindle file." },
+    };
+    const refusedSend = {
+      ok: false,
+      error: { code: 'send-failed', message: 'no reader is connected' },
+    };
+
+    const [sentPhase, sentDetail] = send.outcomeFor(good, { ok: true, destination: '/m/K/x.azw3' }, kindle);
+    expect(sentPhase).toBe('sent');
+    expect(send.statusFor(sentPhase, sentDetail)).toEqual({
+      line: sentDetail.detail, bad: false,
+    });
+    expect(sentDetail.detail).toContain('Sent to Kindle');
+
+    for (const [built, sent, why] of [
+      [refusedExport, null, 'the export was refused'],
+      [refusedExport, { ok: true, destination: '/m/K/x.azw3' }, 'the export was refused'],
+      [good, refusedSend, 'the copy was refused'],
+      [good, { ok: false }, 'the copy was refused with no sentence'],
+      [good, null, 'no answer came back at all'],
+      [null, null, 'nothing came back at all'],
+    ] as [unknown, unknown, string][]) {
+      const [phase, detail] = send.outcomeFor(built, sent, kindle);
+      expect(`${why}: ${phase}`).toBe(`${why}: failed`);
+      const status = send.statusFor(phase, detail);
+      // The two claims a refusal must never make.
+      expect(`${why} says Sent: ${status.line.includes('Sent')}`)
+        .toBe(`${why} says Sent: false`);
+      expect(`${why} is calm: ${status.bad === false}`).toBe(`${why} is calm: false`);
+      expect(status.line.trim()).not.toBe('');
+    }
+    // The engine's own sentence survives, verbatim, in both positions.
+    expect(send.outcomeFor(refusedExport, null, kindle)[1].detail)
+      .toBe("Can't rebuild the Kindle file.");
+    expect(send.outcomeFor(good, refusedSend, kindle)[1].detail)
+      .toBe('no reader is connected');
+    expect(send.failureMessage({ ok: false })).toBe(send.NO_MESSAGE);
+  });
+
+  test('a script whose settings this window has not read yet gets them fetched', () => {
+    // Without the fetch, optionsJsonFor has nothing to serialise and the
+    // export silently rebuilds with the engine's DEFAULTS — the recorded
+    // first-conversion gap, landing on Send.
+    const fresh = { epubPath: '/lib/s.epub', fountainPath: '/lib/s.fountain', settings: null };
+    expect(send.needsSettings(fresh)).toBe(true);
+    // And the fetch is what changes the answer: asserted against the value it
+    // changes FROM, so a no-op cannot pass.
+    expect(send.optionsJsonFor(fresh)).toBe(null);
+    const loaded = { ...fresh, settings: { dialogueSideMarginPct: 27 } };
+    expect(send.needsSettings(loaded)).toBe(false);
+    expect(send.optionsJsonFor(loaded)).not.toBe(null);
+    // Nothing to fetch from, or nothing to fetch for.
+    expect(send.needsSettings({ ...fresh, fountainPath: null })).toBe(false);
+    expect(send.needsSettings({ ...fresh, fountainPath: '  ' })).toBe(false);
+    expect(send.needsSettings(null)).toBe(false);
+    expect(send.needsSettings(undefined)).toBe(false);
   });
 
   test('what went across is named in the engine’s words, not guessed at', () => {
