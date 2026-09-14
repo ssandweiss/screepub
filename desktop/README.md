@@ -349,19 +349,17 @@ The bar's width is written through a constructed stylesheet
 `default-src 'self'` refuses an inline style; observed painting correctly at
 83% and 85% in a live run.
 
-### A very large `--preview-inline` answer does not survive the pipe
+### A very large `--preview-inline` answer: fixed, see above
 
-Converting a synthetic **3,601-page** script (stdout 6.0 MB, most of it
-`previewHtml`) failed in the window with `the engine did not answer in JSON:`
-followed by a valid-looking prefix of that object — i.e. what reached
-`JSON.parse` was not the whole 6 MB. The same argv run straight from a shell
-prints a complete, parseable object. Nothing in `sidecar.rs` truncates
-(it concatenates every `CommandEvent::Stdout` chunk), so the loss is further
-down — the shell plugin's line reader or the IPC response itself. Real
-scripts are nowhere near this size (a 120-page script's preview is a few
-hundred KB) and every fixture converts fine, so this is recorded rather than
-fixed. The failure was at least legible: the window showed the engine's raw
-output under `INT. THE ENGINE DID NOT ANSWER - DAY`.
+A synthetic **3,601-page** script (stdout 6.0 MB, most of it `previewHtml`)
+once failed here with `the engine did not answer in JSON:` followed by a
+valid-looking prefix of that object. That was the same defect measured and
+fixed in "Why a big answer used to arrive cut in half" above: the engine's
+own buffered `console.log` to a pipe, exiting without waiting for the tail,
+from roughly 400 KB up — not 6 MB, and not the shell plugin or the IPC
+response, both of which that section rules out by measurement. The fix is
+`sayLine` in `src/cli.ts`; answers up to 3.47 MB now arrive whole through
+the live window.
 
 ## The library, and what the first conversion does NOT apply (task 10b, 2026-09-14)
 
@@ -567,3 +565,10 @@ list `iframe`.
   to the tablist.
 - **Drag-and-drop is still unverified in a running window** (no way to
   synthesise a Wayland drag from outside).
+- **A file dropped WHILE a conversion is running is discarded in silence.**
+  `convertPath` opens with `if (busy) return;`, so the second drop leaves no
+  mark at all — the progress bar for the first script just keeps going and
+  nothing says the new file was ignored. Correct as a refusal (two
+  conversions at once is the thing to prevent) and wrong as feedback; the
+  smallest fix is a line on the progress surface naming the file that was
+  not taken.

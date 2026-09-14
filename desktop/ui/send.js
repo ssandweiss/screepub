@@ -350,6 +350,12 @@ let drawn = null;
  *  underneath it — a redraw mid-send would hand back a fresh, enabled
  *  button and let a second one start. */
 let sending = false;
+/** Which script this surface is showing. A send already in flight cannot be
+ *  cancelled — the engine has been asked — but it must not SAY anything once
+ *  the script under it has been replaced, or "Sent to Kindle." lands in the
+ *  status line beside a script that was never sent. Same shape as tune.js's
+ *  `era`. */
+let era = 0;
 
 /** Under a person's patience, well above the cost of a mount scan. */
 const POLL_MS = 2000;
@@ -361,6 +367,7 @@ export function mount(node, context) {
 }
 
 export function scriptChanged() {
+  era += 1;
   drawn = null;
   draw();
 }
@@ -525,10 +532,14 @@ async function ensureSettings() {
 async function sendTo(device) {
   if (sending) return;
   sending = true;
+  const mine = era;
+  /** Another script was opened while this send was in flight. */
+  const stale = () => era !== mine;
   for (const button of buttons()) button.disabled = true;
   artifactNote.hidden = true;
   try {
     await ensureSettings();
+    if (stale()) return;
     const script = ctx.state.script;
     say(statusFor(preparingPhase(device), { device }));
 
@@ -544,6 +555,7 @@ async function sendTo(device) {
     // Nothing is copied when nothing was built: the export's refusal is the
     // whole answer, and asking `send` to move a file that does not exist
     // would replace the engine's sentence with a worse one.
+    if (stale()) return;
     if (built.ok !== true) {
       say(statusFor(...outcomeFor(built, null, device)));
       return;
@@ -551,6 +563,7 @@ async function sendTo(device) {
 
     say(statusFor('copying', { device }));
     const sent = await runEngine(argv.send(built.path, device.id));
+    if (stale()) return;
 
     const [phase, detail] = outcomeFor(built, sent, device);
     say(statusFor(phase, detail));
@@ -563,7 +576,7 @@ async function sendTo(device) {
     // written for a person — "no reader is connected — plug one in over USB
     // and try again", "reMarkable accepts PDF and EPUB, not .mobi." — and
     // this window is not better placed to say it.
-    say(statusFor('failed', { device, detail: err.message }));
+    if (!stale()) say(statusFor('failed', { device, detail: err.message }));
   } finally {
     sending = false;
     for (const button of buttons()) button.disabled = false;

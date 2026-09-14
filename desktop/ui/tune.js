@@ -333,8 +333,9 @@ export const FAULT = {
   way: 'Convert it again',
 };
 
-export const LEDE = 'These settings belong to this script alone. They are saved beside it, '
-  + 'and the book on disk is rebuilt to match, so what you send is what you see.';
+export const LEDE = 'These settings belong to this script alone. They are kept with it in '
+  + 'your library, never beside the PDF you dropped, and the book on disk is rebuilt to '
+  + 'match, so what you send is what you see.';
 
 export const PRESET_LABEL = 'Start from';
 

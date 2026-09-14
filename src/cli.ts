@@ -181,6 +181,15 @@ async function writeFileAtomic(
  * already several buffers deep, and the desktop window reads exactly this
  * way. Anything that can exceed 64 KiB goes through here.
  *
+ * Deliberately NOT everything. `fail()`, `showHelp()`, `showVersion()`, the
+ * catch-all and the verb handlers all still use `console.log`, because each
+ * of them writes a bounded answer — an error object, a fixed usage screen, a
+ * version string, a device list — that cannot approach one pipe buffer, and
+ * a plain `console.log` keeps them synchronous and callable from anywhere,
+ * including a `never`-returning exit path where there is no one to await.
+ * The rule is about SIZE, not about stdout: route a writer through `sayLine`
+ * the moment its output can grow with the script.
+ *
  * The wait is UNCONDITIONAL, not `if (!write(...)) await drain`. The
  * conditional form is correct only while the runtime flushes a write that
  * stayed under the high-water mark before it exits — true of Bun today, and

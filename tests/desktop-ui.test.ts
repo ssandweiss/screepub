@@ -137,10 +137,18 @@ describe('the window uses the brand, not its own colours (scripts too)', () => {
     // assigning a literal. The two brand-verbatim gradient stops in frame.js
     // (#fff / #000, copied from brand/components/brad.html) are three-digit
     // and deliberately not matched by the six-digit form.
+    // Widened after a mutation slipped through: the six-digit-hex-and-rgb()
+    // form let `'#f00'` and `'hsl(0 100% 50%)'` past. A colour is a colour in
+    // whatever notation it is written, so every notation is named here, and
+    // the brand-verbatim #fff/#000 are the only exemption.
+    const KEEP = new Set(['#fff', '#ffffff', '#000', '#000000']);
     for (const name of jsFiles()) {
-      const hexes = [...read(name).matchAll(/#[0-9a-fA-F]{6}\b/g)].map((m) => m[0]);
-      const rgba = [...read(name).matchAll(/\brgba?\(/g)].map((m) => m[0]);
-      expect(`${name}: ${[...hexes, ...rgba].join(', ')}`).toBe(`${name}: `);
+      const hexes = [...read(name).matchAll(/#[0-9a-fA-F]{3,8}\b/g)]
+        .map((m) => m[0])
+        .filter((h) => !KEEP.has(h.toLowerCase()));
+      const funcs = [...read(name).matchAll(/\b(?:rgba?|hsla?|hwb|la[bc]|lch|oklab|oklch|color)\(/g)]
+        .map((m) => m[0]);
+      expect(`${name}: ${[...hexes, ...funcs].join(', ')}`).toBe(`${name}: `);
     }
   });
 });
@@ -172,8 +180,14 @@ describe('the engine contract lives in exactly one file', () => {
 
   test('only app.js knows an engine flag', () => {
     for (const name of jsFiles()) {
+      // notes.js is GENERATED from docs/releases/*.md and is prose, not code:
+      // it names no flag today, and if a release note ever quotes one, the
+      // fix is the note, not this window's boundary. Every other carve-out in
+      // these suites says why; this one used to be the exception.
       if (name === 'app.js' || name === 'notes.js') continue;
-      const flags = [...read(name).matchAll(/'(--[a-z-]+)'/g)].map((m) => m[1]);
+      // Any quoting. Mutation-confirmed: single-quotes-only let both
+      // `const M1 = "--force";` and a backtick `--options-json` through.
+      const flags = [...read(name).matchAll(/['"`](--[a-z][a-z-]*)['"`]/g)].map((m) => m[1]);
       expect(`${name} names flags: ${flags.join(', ')}`).toBe(`${name} names flags: `);
     }
   });
@@ -406,18 +420,23 @@ describe('the Convert surface', () => {
     expect(css).toContain('.code-note-label');
   });
 
-  test('it sets no inline style, which this window’s CSP refuses', () => {
+  test('NO surface sets an inline style, which this window’s CSP refuses', () => {
     // Measured in piece C: with `default-src 'self'` an appended <style>, a
     // style= attribute and a <style> inside srcdoc all fail silently. The
     // bar's width is the one computed value on this surface, so this is the
-    // rule most easily broken here.
-    expect(`convert.js sets .style: ${/\.style\b/.test(convert)}`).toBe(
-      'convert.js sets .style: false',
-    );
-    expect(`convert.js sets a style attribute: ${/['"]style['"]\s*:/.test(convert)}`).toBe(
-      'convert.js sets a style attribute: false',
-    );
-    // ...and the route it uses instead, which piece C measured as working.
+    // rule most easily broken here — but naming only convert.js left read.js,
+    // tune.js, send.js and frame.js free to break it silently. The CSP is the
+    // whole window's, so the guard is too.
+    for (const name of jsFiles()) {
+      expect(`${name} sets .style: ${/\.style\b/.test(read(name))}`).toBe(
+        `${name} sets .style: false`,
+      );
+      expect(`${name} sets a style attribute: ${/['"`]style['"`]\s*:/.test(read(name))}`).toBe(
+        `${name} sets a style attribute: false`,
+      );
+    }
+    // ...and the route convert.js uses instead, which piece C measured as
+    // working.
     expect(convert).toContain('adoptedStyleSheets');
   });
 

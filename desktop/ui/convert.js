@@ -267,6 +267,11 @@ function drawWell() {
     well,
   );
   pane.dataset.state = 'idle';
+  // The code belongs to the refusal that set it, not to the pane. Left in
+  // place it would ride along on the next success — a `data-state="done"`
+  // carrying `data-error-code="not-screenplay"` is exactly the wrong thing to
+  // find in a bug report pasted out of the DOM.
+  delete pane.dataset.errorCode;
 }
 
 async function pickFileThenConvert() {
@@ -345,6 +350,7 @@ function drawProgress(path) {
 function drawResult(path, answer) {
   clear(pane);
   pane.dataset.state = 'done';
+  delete pane.dataset.errorCode;
   ctx.state.script = scriptFrom(path, answer);
   const script = ctx.state.script;
 

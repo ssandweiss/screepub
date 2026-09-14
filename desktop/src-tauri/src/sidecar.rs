@@ -69,6 +69,13 @@ pub async fn run(app: &AppHandle, args: Vec<String>) -> Result<String, String> {
                 // Ignoring the result on purpose: a window that has gone
                 // away must not turn into an engine failure.
                 let _ = app.emit(LINE_EVENT, line.clone());
+                // Kept in full, unbounded on purpose. The engine's stderr is
+                // progress lines and notes — about 100 short lines on the
+                // longest `--progress` run, so a few KB — and it lives only
+                // for this one call. A cap would have to choose between the
+                // head and the tail of a crash report, and the tail is what
+                // the empty-stdout branch below needs. If the engine ever
+                // learns to stream something per-scene, cap it then.
                 diagnostics.push_str(&line);
             }
             CommandEvent::Terminated(status) => exit = status.code,

@@ -239,8 +239,13 @@ one folder per script:
 
 Under **Documents**, not under application state: a converted `.epub` is a
 document the reader opens, copies to a device and backs up, not something the
-program keeps for itself. It is also where the SwiftUI app keeps its library,
-so a Mac user running both does not end up with two.
+program keeps for itself. It is also the SwiftUI app's DEFAULT
+output folder, so on a Mac the two usually write into the same place — but
+only usually, and never into the same shape. The app's folder is settable, so
+a Mac user who moved it does end up with two libraries; and the app writes
+flat (`<folder>/<stem>.epub`) where the window writes one folder per script
+(`<folder>/<stem>/<stem>.epub`). The window does not list, reuse, or inherit
+tuning from books the app left flat in that folder.
 
 `SCREEPUB_LIBRARY` overrides all three. Two different scripts with the same
 filename do not share a folder: the second gets `<stem>-<hash>`, keyed on its
