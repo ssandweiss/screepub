@@ -29,6 +29,17 @@
       "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "publisher": "Darkwell Entertainment LLC",
+    "category": "Productivity",
+    "shortDescription": "Turn a screenplay PDF into a reflowable e-book.",
+    "longDescription": "Screepub converts a screenplay PDF into an EPUB or MOBI that reflows properly on an e-reader, keeping cues with their dialogue and scenes with their headings, and copies the finished book onto a connected reader over USB.",
+    "resources": {
+      "../../LICENSE": "LICENSE",
+      "../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md"
+    },
+    "fileAssociations": [
+      { "ext": ["pdf"], "mimeType": "application/pdf", "name": "PDF", "role": "Viewer" }
     ]
   }
 }

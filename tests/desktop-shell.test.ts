@@ -619,3 +619,65 @@ describe('the icon set the bundlers need', () => {
     }
   });
 });
+
+describe('what the Linux package tells a user about itself', () => {
+  test('the publisher is the company, not a slice of the bundle identifier', () => {
+    // Absent this, tauri-bundler derives Maintainer: from the SECOND segment
+    // of com.darkwell.screepub.desktop and the .deb says "Maintainer:
+    // darkwell". Observed, before this change, in a real build's control file.
+    expect(CONFIG.bundle.publisher).toBe('Darkwell Entertainment LLC');
+  });
+
+  test('the descriptions are written for a user, not for a contributor', () => {
+    const short = CONFIG.bundle.shortDescription as string;
+    const long = CONFIG.bundle.longDescription as string;
+    // Both reach `apt show`. The crate's own description -- "A window around
+    // the engine; no logic lives here" -- is a note to the next maintainer
+    // and was what shipped.
+    expect(short.length).toBeGreaterThan(20);
+    expect(long.length).toBeGreaterThan(60);
+    for (const text of [short, long]) {
+      expect(text.toLowerCase()).not.toContain('sidecar');
+      expect(text.toLowerCase()).not.toContain('shell');
+      expect(text.toLowerCase()).not.toContain('no logic lives here');
+    }
+    // The short one also becomes Comment= in the .desktop entry, where a
+    // trailing newline or a leading space would be copied verbatim.
+    expect(short).toBe(short.trim());
+    expect(short).not.toContain('\n');
+  });
+
+  test('the AGPL text and the third-party notices travel with the binary', () => {
+    // app/build-app.sh puts both inside Screepub.app for exactly this
+    // reason: the AGPL requires the licence to accompany the work, and the
+    // compiled engine embeds Apache-2.0 and MIT libraries. Paths are
+    // relative to tauri.conf.json, hence ../../.
+    expect(CONFIG.bundle.resources).toEqual({
+      '../../LICENSE': 'LICENSE',
+      '../../THIRD-PARTY-NOTICES.md': 'THIRD-PARTY-NOTICES.md',
+    });
+    // And the sources really exist, or the bundle step fails minutes later
+    // with a glob that matched nothing.
+    expect(existsSync(join(REPO, 'LICENSE'))).toBe(true);
+    expect(existsSync(join(REPO, 'THIRD-PARTY-NOTICES.md'))).toBe(true);
+  });
+
+  test('the launcher entry offers to open a PDF and files itself under Office', () => {
+    // MimeType= comes from fileAssociations[].mimeType and Categories= from
+    // the category enum. The Swift app declares com.adobe.pdf in
+    // CFBundleDocumentTypes so "Open With" offers it; this is the same
+    // promise on Linux, and on macOS the same key produces the same plist.
+    expect(CONFIG.bundle.category).toBe('Productivity');
+    expect(CONFIG.bundle.fileAssociations).toEqual([
+      { ext: ['pdf'], mimeType: 'application/pdf', name: 'PDF', role: 'Viewer' },
+    ]);
+  });
+
+  test('the window title is NOT changed by any of this', () => {
+    // productName drives the package name and the .app filename; the window
+    // title is a separate key. Task 10 overrides productName for macOS only,
+    // and this is the assertion that catches the overlay reaching too far.
+    expect(CONFIG.productName).toBe('Screepub');
+    expect(CONFIG.app.windows[0].title).toBe('Screepub');
+  });
+});

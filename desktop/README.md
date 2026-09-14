@@ -572,3 +572,15 @@ list `iframe`.
   conversions at once is the thing to prevent) and wrong as feedback; the
   smallest fix is a line on the progress surface naming the file that was
   not taken.
+
+### Why the launcher entry says `Categories=Office;` and not `Office;Publishing;`
+
+The design doc asked for both. `bundle.category` is a fixed enum, not a
+free string, and `Productivity` maps to the literal `"Office;"`
+(`tauri-bundler/src/bundle/category.rs`); no enum member produces
+`Publishing;`. The only way to add it is a custom
+`linux.deb.desktopTemplate`, which replaces the generated `.desktop` file
+wholesale and so takes over `Exec=`, `Icon=`, `StartupWMClass=` and
+`MimeType=` as well — four more things to keep correct by hand, on a
+surface nobody here can test, to add one category string. Not worth it.
+`Office;` is what ships and this paragraph is why.
