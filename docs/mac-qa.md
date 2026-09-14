@@ -5,9 +5,14 @@ mounts the new Mac build, opens it, and converts a script. Until that
 happens, `app/` does not get deleted.
 
 Everything in the Tauri app has been exercised on Linux, where it builds,
-launches and converts. **No part of it has ever run on a Mac.** CI now
-compiles and bundles for macOS, but a green CI run is not the same fact as a
-window opening past Gatekeeper — which is the whole reason this page exists.
+launches and converts. As of 2026-09-14 CI has also built it on macOS for the
+first time: run 34876329117 compiled the shell on `macos-15`, produced
+`Screepub_0.6.0_aarch64.dmg`, opened it without installing, and ran the engine
+out of it.
+
+**That is a build, not a person.** Nobody has mounted that DMG, cleared
+Gatekeeper, seen the window, or converted a script on a Mac — which is the
+whole reason this page exists.
 
 You are not looking for polish. You are answering one question: **does it
 work at all on a Mac, and does it lie about anything.**
@@ -18,7 +23,7 @@ work at all on a Mac, and does it lie about anything.**
 
 ```bash
 cd ~/Projects/personal/screepub   # or wherever it lives on the Mac
-git pull                          # main is 133 commits ahead of where you left it
+git pull                          # main moved a long way; this is the whole program
 bun install
 bun test                          # expect 1445 pass / 3 skip / 0 fail
 ```
@@ -28,7 +33,7 @@ ever been run on Linux, and a macOS-only failure is itself a finding.
 
 ---
 
-## 1. Does the DMG exist, and did CI actually sign it
+## 1. Get a DMG, and know whether it is signed
 
 Look at the newest `desktop` workflow run:
 
@@ -37,10 +42,12 @@ gh run list --workflow=desktop.yml --limit 5
 gh run view <id> --log | grep -iE 'signing|notariz|codesign|bundling'
 ```
 
-**What matters:** whether the macOS legs bundled at all, and whether the
-signing step ran or was skipped. The signing path was written by reading
-`tauri-bundler`'s source, not by executing it. If it never ran, say so — that
-is a real answer, not a failure of the QA.
+**What matters now is signing, not bundling** — bundling is settled, CI did it.
+The signing and notarization path was written by reading `tauri-bundler`'s
+source and has still never executed, because those secrets only reach a
+tagged release. So expect the push-triggered runs to produce an **unsigned**
+DMG: Gatekeeper will object, and that is the expected state today, not a
+defect. The signed path is first exercised by cutting `v0.6.0`.
 
 To get an actual DMG in your hands you need a tagged release (`v0.6.0`), or
 you can build one locally:

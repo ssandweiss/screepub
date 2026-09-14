@@ -21,8 +21,18 @@ one.
 disqualifying fact is short enough to state in one sentence:
 
 > The application that would replace the shipping Mac app **has never been
-> built, launched or run on a Mac by anyone**, and the workflow that would
-> prove it can be has never executed once.
+> launched or run on a Mac by a person**, and no one has seen it open past
+> Gatekeeper.
+
+**Updated 2026-09-14, after this spec was written:** the branch was pushed and
+`desktop.yml` ran for the first time (run 34876329117). All three legs passed.
+The shell now demonstrably *compiles* on macos-15 and windows-latest, a `.dmg`
+and an NSIS installer were produced, and CI opened each and ran the engine out
+of it. That closes the "never built" half of the sentence above and leaves the
+half that matters for this gate: **a build is not a person.** Nobody has
+mounted the DMG, cleared Gatekeeper, opened the window, or converted a script
+on a Mac. `docs/mac-qa.md` is the checklist for doing exactly that, and gate 1
+stays shut until someone works through it.
 
 `.github/workflows/desktop.yml` says this about itself in its own header
 comment: "As of the commit that added the bundle steps, this workflow had

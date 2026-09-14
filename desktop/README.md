@@ -748,12 +748,21 @@ aarch64-unknown-linux-gnu, Arch/Asahi, live Hyprland session):
   `tauri-cli 2.11.4` and reaches `productName`, producing a throwaway
   `Screepub Desktop_0.6.0_arm64.deb`.
 
-**Verified only by CI, and only as far as CI can reach.** Read the first
-sentence before the list: **none of this has happened yet.** `desktop.yml`
-has never executed a single run, because the branch it was written on has
-never been pushed, and `release.yml`'s bundle jobs have never run either.
-What follows is what those workflows are configured to check on their first
-run, and the ceiling of what they could ever prove:
+**Verified only by CI, and only as far as CI can reach.** `desktop.yml` ran
+for the first time on 2026-09-14 (run 34876329117), and **all three legs
+passed**: the shell compiled on ubuntu-latest, macos-15 and windows-latest,
+a `.dmg` and an NSIS `.exe` were produced, and `smoke-bundle.ts` opened each
+without installing it and ran the engine out of it —
+
+```
+smoke-bundle: dmg ok -- .../Screepub_0.6.0_aarch64.dmg
+smoke-bundle: nsis ok -- ...\Screepub_0.6.0_x64-setup.exe
+smoke-bundle: 1 bundle(s) report 0.5.4 and convert the fixture
+```
+
+`release.yml`'s bundle jobs have still never run — those need a tag. The
+list below is what CI now checks on every push, and the ceiling of what it
+could ever prove:
 
 - That the shell compiles on macOS and Windows at all.
 - That a `.dmg` and an NSIS installer can be produced.
