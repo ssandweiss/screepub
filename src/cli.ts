@@ -17,6 +17,7 @@ import {
 } from './convert';
 import { mapConversionError, CliError, errorMessage, type JsonError } from './cli-errors';
 import { resolveCommand, devicesCommand, sendCommand, VERBS, type Verb } from './cli-devices';
+import { settingsCommand } from './cli-settings';
 import type { ListDevicesOptions } from './device/list';
 
 const USAGE = `screepub — screenplay PDF → reflowable EPUB3 (via Fountain)
@@ -53,6 +54,8 @@ Commands:
   screepub devices [--json]                 list connected e-readers
   screepub send <file> [--device <id>] [--json]
                                             send an existing file to one
+  screepub settings <file.fountain> [--set <json>] [--json]
+                                            read/write a script's own settings
 
 A verb is only a verb when no file of that name exists: a script saved as
 "devices" still converts, and "./devices" always means the file.
@@ -92,8 +95,25 @@ Options:
   -h, --help             show this help
 `;
 
+const SETTINGS_USAGE = `screepub settings — this script's own formatting
+
+Usage:
+  screepub settings <file.fountain> [--set <json>] [--json]
+
+Reads the settings stored beside the script (<Stem>.screepub.json). --set
+overlays a partial JSON object on what is there and saves it; knobs you do
+not mention keep their values.
+
+Options:
+  --set <json>           a partial FormatOptions object to overlay and save
+  --json                 machine-readable result on stdout (for the app)
+  -h, --help             show this help
+`;
+
 function verbUsage(verb: Verb): string {
-  return verb === 'devices' ? DEVICES_USAGE : SEND_USAGE;
+  if (verb === 'devices') return DEVICES_USAGE;
+  if (verb === 'settings') return SETTINGS_USAGE;
+  return SEND_USAGE;
 }
 
 // --json is the app's only channel: EVERY exit in that mode must be one
@@ -203,6 +223,7 @@ function parseVerbArgs(args: string[]) {
     allowPositionals: true,
     options: {
       device: { type: 'string' },
+      set: { type: 'string' },
       json: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -231,6 +252,9 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       if (values.device !== undefined) {
         fail({ code: 'usage', message: 'devices takes no --device — it lists every reader (--device belongs to send)' });
       }
+      if (values.set !== undefined) {
+        fail({ code: 'usage', message: 'devices takes no --set (--set belongs to settings)' });
+      }
       if (positionals.length > 0) {
         fail({ code: 'usage', message: `devices takes no arguments (got "${positionals[0]}")` });
       }
@@ -244,6 +268,22 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
         return;
       }
       for (const d of devices) console.log(`${d.name} (${d.kind}) — ${d.id}`);
+      return;
+    }
+
+    if (verb === 'settings') {
+      if (positionals.length !== 1) {
+        fail({ code: 'usage', message: 'expected exactly one .fountain (see --help)' });
+      }
+      const result = settingsCommand({ fountain: positionals[0], set: values.set });
+      if (jsonMode) {
+        console.log(JSON.stringify({ ok: true, ...result }));
+        return;
+      }
+      console.log(`settings for ${basename(positionals[0])} — ${result.sidecar}`);
+      for (const [key, value] of Object.entries(result.settings)) {
+        console.log(`  ${key}: ${value}`);
+      }
       return;
     }
 

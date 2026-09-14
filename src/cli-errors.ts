@@ -16,7 +16,10 @@ export interface JsonError {
     | 'ambiguous-device'
     | 'unknown-device'
     | 'send-failed'
-    | 'unsupported-file';
+    | 'unsupported-file'
+    // Settings and export verbs (piece D). Same contract, same stdout rule.
+    | 'bad-settings'
+    | 'export-failed';
   message: string;
 }
 
