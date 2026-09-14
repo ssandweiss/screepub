@@ -361,3 +361,22 @@ scripts are nowhere near this size (a 120-page script's preview is a few
 hundred KB) and every fixture converts fine, so this is recorded rather than
 fixed. The failure was at least legible: the window showed the engine's raw
 output under `INT. THE ENGINE DID NOT ANSWER - DAY`.
+
+## The library, and what the first conversion does NOT apply (task 10b, 2026-09-14)
+
+`argv.convert` passes `--library`, so the `.epub`, the `.fountain` and the
+settings sidecar land in `<Documents>/Screepub/<stem>/` and never beside the
+user's PDF. The window names no path: `src/library.ts` resolves the library
+and the window reads `epubPath`/`fountainPath` back off the answer.
+`SCREEPUB_LIBRARY` overrides the location (it is also the tests' only seam —
+no test may write into a real home).
+
+**Known, pre-existing, and the kind of thing a user reports as a bug:** the
+FIRST conversion of a script sends no `--options-json`, so the book it builds
+uses the engine's defaults even when that script already has a tuned sidecar
+— including one carried in from beside the PDF by `adoptSidecar`. Tune reads
+the sidecar and a re-render applies it, so the settings are not lost, but
+"my settings did not apply to the first conversion" is exactly what it looks
+like from the outside. Whoever wires Convert to Tune (or does the final pass)
+should decide whether the first conversion reads the sidecar too; the engine
+side already exists — `src/settings/sidecar.ts`'s `loadScriptSettings`.

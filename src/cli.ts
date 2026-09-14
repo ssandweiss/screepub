@@ -37,9 +37,8 @@ Options:
   -o, --output <file>    EPUB output path (default: <input>.epub)
   --library              write into the library folder instead of beside the
                          input: <library>/<stem>/<stem>.epub. The library is
-                         ~/Library/Application Support/Screepub on macOS,
-                         %APPDATA%\\Screepub on Windows and
-                         $XDG_DATA_HOME/screepub (else ~/.local/share/screepub)
+                         <Documents>/Screepub — ~/Documents on macOS and
+                         Windows, and XDG_DOCUMENTS_DIR (else ~/Documents)
                          elsewhere; $SCREEPUB_LIBRARY overrides it
   --fountain <file>      Fountain output path (default: <input>.fountain for PDF input)
   --no-fountain          skip writing the intermediate .fountain file

@@ -3,7 +3,7 @@ import {
   chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, win32 } from 'node:path';
 import { adoptSidecar, libraryOutput, libraryRoot } from '../src/library';
 
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -54,44 +54,116 @@ describe('where the library is', () => {
   // Every platform's answer is checked from this one machine: the paths are
   // the product's promise on three operating systems and only one of them
   // can ever run these tests.
+  //
+  // This HOME does not exist, which is the point: resolving must not depend
+  // on reading anything, and nothing here may touch a real home directory.
   const HOME = '/home/ada';
 
-  test('each platform gets its own conventional folder', () => {
-    expect(libraryRoot('darwin', { HOME })).toBe('/home/ada/Library/Application Support/Screepub');
-    // Windows paths are computed the WINDOWS way even from this Linux test
-    // run — that is the seam where a host-flavoured isAbsolute() would have
-    // thrown %APPDATA% away.
-    expect(libraryRoot('win32', { HOME, APPDATA: 'C:\\Users\\Ada\\AppData\\Roaming' }))
-      .toBe('C:\\Users\\Ada\\AppData\\Roaming\\Screepub');
-    expect(libraryRoot('linux', { HOME })).toBe('/home/ada/.local/share/screepub');
-    expect(libraryRoot('linux', { HOME, XDG_DATA_HOME: '/data/ada' }))
-      .toBe('/data/ada/screepub');
+  test('the library is under Documents, not under application state', () => {
+    // A converted book is the user's document, not our state — and
+    // ~/Documents/Screepub is where the SwiftUI app this replaces already
+    // keeps one.
+    expect(libraryRoot('darwin', { HOME })).toBe('/home/ada/Documents/Screepub');
+    expect(libraryRoot('linux', { HOME })).toBe('/home/ada/Documents/Screepub');
+    // The locations this deliberately moved OFF, named so a revert is loud.
+    for (const platform of ['darwin', 'win32', 'linux'] as NodeJS.Platform[]) {
+      expect(libraryRoot(platform, { HOME })).not.toContain('.local');
+      expect(libraryRoot(platform, { HOME })).not.toContain('Application Support');
+      expect(libraryRoot(platform, { HOME })).not.toContain('AppData');
+    }
+  });
+
+  test('Windows keeps Documents under the profile, the Windows way', () => {
+    // Computed with WINDOWS path rules even from this Linux test run — the
+    // seam where a host-flavoured join() gets it wrong.
+    expect(libraryRoot('win32', { USERPROFILE: 'C:\\Users\\Ada' }))
+      .toBe('C:\\Users\\Ada\\Documents\\Screepub');
+    // USERPROFILE stands in for HOME, which Windows usually does not set.
+    expect(libraryRoot('win32', { HOME: 'C:\\Users\\Bo' }))
+      .toBe('C:\\Users\\Bo\\Documents\\Screepub');
   });
 
   test('SCREEPUB_LIBRARY wins on every platform, and that is the test seam', () => {
     for (const platform of ['darwin', 'win32', 'linux'] as NodeJS.Platform[]) {
-      expect(libraryRoot(platform, {
-        HOME, APPDATA: 'C:\\Roaming', XDG_DATA_HOME: '/data', SCREEPUB_LIBRARY: '/tmp/lib',
-      })).toBe('/tmp/lib');
+      expect(libraryRoot(platform, { HOME, SCREEPUB_LIBRARY: '/tmp/lib' })).toBe('/tmp/lib');
     }
   });
 
-  test('a blank or relative override is not a library', () => {
+  test('a blank override is not a library', () => {
     // An empty SCREEPUB_LIBRARY is how an unset variable arrives through a
     // shell wrapper; honouring it would make the library the process's cwd.
     expect(libraryRoot('linux', { HOME, SCREEPUB_LIBRARY: '  ' }))
-      .toBe('/home/ada/.local/share/screepub');
-    // XDG says a relative XDG_DATA_HOME must be ignored. Resolving it would
-    // put the library wherever the window happened to be launched from.
-    expect(libraryRoot('linux', { HOME, XDG_DATA_HOME: 'data' }))
-      .toBe('/home/ada/.local/share/screepub');
-    expect(libraryRoot('win32', { USERPROFILE: 'C:\\Users\\Ada', APPDATA: 'Roaming' }))
-      .toBe('C:\\Users\\Ada\\AppData\\Roaming\\Screepub');
+      .toBe('/home/ada/Documents/Screepub');
+  });
+});
+
+describe('the Documents folder a Linux user actually has', () => {
+  /** A fake home with an xdg-user-dirs file in it. Never a real one. */
+  function homeWithUserDirs(body: string | null): string {
+    const home = scratch('home');
+    if (body !== null) {
+      mkdirSync(join(home, '.config'), { recursive: true });
+      writeFileSync(join(home, '.config', 'user-dirs.dirs'), body);
+    }
+    return home;
+  }
+
+  test('a renamed Documents folder is honoured, not overruled', () => {
+    // The whole reason this reads a file: XDG_DOCUMENTS_DIR is almost never
+    // in a process's environment — xdg-user-dirs writes it here and only a
+    // login shell sources it. A Dutch desktop's folder is "Documenten", and
+    // writing to ~/Documents there would make a second one beside it.
+    const home = homeWithUserDirs(
+      '# generated\nXDG_DESKTOP_DIR="$HOME/Bureaublad"\nXDG_DOCUMENTS_DIR="$HOME/Documenten"\n',
+    );
+    expect(libraryRoot('linux', { HOME: home })).toBe(join(home, 'Documenten', 'Screepub'));
   });
 
-  test('USERPROFILE stands in for HOME, as it does on Windows', () => {
-    expect(libraryRoot('win32', { USERPROFILE: 'C:\\Users\\Ada' }))
-      .toBe('C:\\Users\\Ada\\AppData\\Roaming\\Screepub');
+  test('an absolute path in the file is taken as written', () => {
+    const home = homeWithUserDirs('XDG_DOCUMENTS_DIR="/mnt/work/docs"\n');
+    expect(libraryRoot('linux', { HOME: home })).toBe('/mnt/work/docs/Screepub');
+  });
+
+  test('XDG_CONFIG_HOME says where that file is', () => {
+    const home = scratch('home');
+    const config = scratch('config');
+    writeFileSync(join(config, 'user-dirs.dirs'), 'XDG_DOCUMENTS_DIR="$HOME/Papers"\n');
+    expect(libraryRoot('linux', { HOME: home, XDG_CONFIG_HOME: config }))
+      .toBe(join(home, 'Papers', 'Screepub'));
+  });
+
+  test('the environment variable wins over the file when it is set', () => {
+    const home = homeWithUserDirs('XDG_DOCUMENTS_DIR="$HOME/Documenten"\n');
+    expect(libraryRoot('linux', { HOME: home, XDG_DOCUMENTS_DIR: '/srv/docs' }))
+      .toBe('/srv/docs/Screepub');
+  });
+
+  test('no file, no entry, or a Documents that is the home itself: ~/Documents', () => {
+    // The common path on a minimal install: no user-dirs.dirs at all, and
+    // often no Documents folder either. Resolving never creates it — the
+    // conversion that needs it does, with mkdir -p.
+    const bare = homeWithUserDirs(null);
+    expect(libraryRoot('linux', { HOME: bare })).toBe(join(bare, 'Documents', 'Screepub'));
+    expect(existsSync(join(bare, 'Documents'))).toBe(false);
+
+    const noEntry = homeWithUserDirs('XDG_MUSIC_DIR="$HOME/Music"\n');
+    expect(libraryRoot('linux', { HOME: noEntry })).toBe(join(noEntry, 'Documents', 'Screepub'));
+
+    // xdg-user-dirs writes `"$HOME/"` for "this user has no such folder".
+    // Taking it literally would scatter script folders across the home
+    // directory, so it falls through to ~/Documents like the others.
+    const disabled = homeWithUserDirs('XDG_DOCUMENTS_DIR="$HOME/"\n');
+    expect(libraryRoot('linux', { HOME: disabled })).toBe(join(disabled, 'Documents', 'Screepub'));
+
+    const relative = homeWithUserDirs('XDG_DOCUMENTS_DIR="Documenten"\n');
+    expect(libraryRoot('linux', { HOME: relative })).toBe(join(relative, 'Documents', 'Screepub'));
+  });
+
+  test('macOS and Windows do not read the file, even if one is there', () => {
+    // ~/Documents is fixed on both; macOS localizes the display name only.
+    const home = homeWithUserDirs('XDG_DOCUMENTS_DIR="$HOME/Documenten"\n');
+    expect(libraryRoot('darwin', { HOME: home })).toBe(join(home, 'Documents', 'Screepub'));
+    expect(libraryRoot('win32', { HOME: home })).toBe(win32.join(home, 'Documents', 'Screepub'));
   });
 });
 

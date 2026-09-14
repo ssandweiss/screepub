@@ -12,20 +12,63 @@ import { homedir } from 'node:os';
 import { basename, dirname, extname, join, posix, resolve, win32 } from 'node:path';
 
 /** Names this folder's script, so a second PDF with the same stem cannot
- * quietly overwrite the first one's book. One file per script folder. */
-const SOURCE_FILE = 'source.json';
+ * quietly overwrite the first one's book. One file per script folder.
+ *
+ * Exported because it is the one name a Library listing has to know: every
+ * other entry in a script folder is the script's, and this one is the
+ * engine's bookkeeping. Skip it when listing — or read it, to show where a
+ * book came from. */
+export const SOURCE_FILE = 'source.json';
 
 type Env = Record<string, string | undefined>;
 
+/** The user's Documents folder on a freedesktop system.
+ *
+ * XDG_DOCUMENTS_DIR is where this lives — but it is almost never in a
+ * process's environment: xdg-user-dirs writes it to `user-dirs.dirs`, which
+ * only a login shell sources. Reading that file is therefore the difference
+ * between honouring a Documents folder the user renamed or moved and
+ * ignoring it, and it is the one place a non-English name can be checked.
+ *
+ * Anything unreadable, unparseable or relative falls through to ~/Documents,
+ * which is what the file would have said anyway on a default install. */
+function xdgDocuments(home: string, env: Env): string | null {
+  const fromEnv = (env.XDG_DOCUMENTS_DIR ?? '').trim();
+  if (posix.isAbsolute(fromEnv)) return fromEnv;
+
+  const configHome = (env.XDG_CONFIG_HOME ?? '').trim();
+  const config = posix.isAbsolute(configHome) ? configHome : posix.join(home, '.config');
+  let text: string;
+  try {
+    text = readFileSync(posix.join(config, 'user-dirs.dirs'), 'utf8');
+  } catch {
+    return null;
+  }
+  // The file's own format: shell assignments, one per line, `$HOME`-relative
+  // by convention. Comments and every other XDG_*_DIR are ignored.
+  const line = text.split('\n').find((l) => l.trimStart().startsWith('XDG_DOCUMENTS_DIR='));
+  if (line === undefined) return null;
+  const value = line.slice(line.indexOf('=') + 1).trim().replace(/^"(.*)"$/, '$1');
+  const expanded = value.startsWith('$HOME') ? posix.join(home, value.slice('$HOME'.length)) : value;
+  // A bare `XDG_DOCUMENTS_DIR="$HOME/"` means "no Documents folder, use the
+  // home directory itself" — which is not somewhere a library may be made.
+  const documents = posix.isAbsolute(expanded) ? posix.resolve(expanded) : '';
+  return documents !== '' && documents !== posix.resolve(home) ? documents : null;
+}
+
 /** Where the library lives, per platform.
  *
- * SCREEPUB_LIBRARY wins everywhere. It is the seam the tests use: no test
- * may write into a real home directory, and without an override there is no
- * way to exercise this at all.
+ * Under Documents, NOT under the platform's application-state directory. A
+ * converted .epub and .fountain are the user's documents — things they open,
+ * copy to a reader, email and back up — not our state, and ~/.local/share is
+ * for what a user is not expected to browse. It also matches the SwiftUI app
+ * this window replaces (~/Documents/Screepub), so a Mac user running both
+ * does not silently accumulate two libraries in two places.
  *
- * A relative XDG_DATA_HOME or APPDATA is IGNORED rather than resolved
- * against the process's cwd — the XDG spec says so, and "relative to
- * wherever the app was launched from" is a library that moves. */
+ * SCREEPUB_LIBRARY wins everywhere. It is the seam the tests use — no test
+ * may write into a real home directory, and without an override there is no
+ * way to exercise this at all — and it is the escape hatch for anyone who
+ * keeps their scripts somewhere else. */
 export function libraryRoot(
   platform: NodeJS.Platform = process.platform,
   env: Env = process.env,
@@ -35,23 +78,21 @@ export function libraryRoot(
 
   // The PLATFORM's own path rules, not the host's: `isAbsolute` on a POSIX
   // build says "C:\\Users\\Ada" is relative, so a host-flavoured check would
-  // throw away a perfectly good %APPDATA% — and would do it only when the
-  // answer is computed for a platform other than the one asking, which is
-  // exactly the case a test can reach and a user cannot.
+  // throw away a perfectly good path — and would do it only when the answer
+  // is computed for a platform other than the one asking, which is exactly
+  // the case a test can reach and a user cannot.
   const path = platform === 'win32' ? win32 : posix;
   const home = env.HOME || env.USERPROFILE || homedir();
-  if (platform === 'darwin') {
-    return path.join(home, 'Library', 'Application Support', 'Screepub');
-  }
-  if (platform === 'win32') {
-    const appData = env.APPDATA ?? '';
-    return path.join(
-      path.isAbsolute(appData) ? appData : path.join(home, 'AppData', 'Roaming'),
-      'Screepub',
-    );
-  }
-  const xdg = env.XDG_DATA_HOME ?? '';
-  return path.join(path.isAbsolute(xdg) ? xdg : path.join(home, '.local', 'share'), 'screepub');
+  // macOS and Windows both keep Documents at a fixed path under the home
+  // directory. macOS localizes only the DISPLAY name, so ~/Documents is
+  // right in every language. Windows lets the folder be relocated (OneDrive
+  // moves it), but the authority for that is the registry, which the engine
+  // cannot read without shelling out — SCREEPUB_LIBRARY covers the user who
+  // moved it.
+  const documents = platform === 'darwin' || platform === 'win32'
+    ? path.join(home, 'Documents')
+    : xdgDocuments(home, env) ?? path.join(home, 'Documents');
+  return path.join(documents, 'Screepub');
 }
 
 /** The folder name a script would like: its own, undecorated. */

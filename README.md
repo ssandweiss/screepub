@@ -222,15 +222,22 @@ one folder per script:
 
 | Platform | Library |
 | --- | --- |
-| macOS | `~/Library/Application Support/Screepub` |
-| Windows | `%APPDATA%\Screepub` |
-| Linux / other | `$XDG_DATA_HOME/screepub`, else `~/.local/share/screepub` |
+| macOS | `~/Documents/Screepub` |
+| Windows | `%USERPROFILE%\Documents\Screepub` |
+| Linux / other | `<Documents>/Screepub`, where `<Documents>` is `XDG_DOCUMENTS_DIR` — from the environment, else from `~/.config/user-dirs.dirs` — and `~/Documents` when neither says otherwise |
+
+Under **Documents**, not under application state: a converted `.epub` is a
+document the reader opens, copies to a device and backs up, not something the
+program keeps for itself. It is also where the SwiftUI app keeps its library,
+so a Mac user running both does not end up with two.
 
 `SCREEPUB_LIBRARY` overrides all three. Two different scripts with the same
 filename do not share a folder: the second gets `<stem>-<hash>`, keyed on its
 own path, so neither book can overwrite the other. A `<stem>.screepub.json`
 sitting beside the PDF from an earlier conversion is copied in the first time
-that script reaches the library, so tuning is not silently lost.
+that script reaches the library, so tuning is not silently lost. The
+`source.json` in each script folder records which PDF it came from; it is the
+one file a library listing should skip.
 
 #### Device commands
 
