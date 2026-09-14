@@ -20,6 +20,76 @@ installers are piece E2.
 The sidecar must exist before the app starts — on this toolchain it must
 exist before `cargo build` even *compiles*, see below.
 
+## How long the build takes (measured 2026-09-13)
+
+Numbers from one machine — aarch64-unknown-linux-gnu, 10 cores, rustc
+1.98.1 / cargo 1.98.1, bun 1.3.11 — with the crate sources already in
+`~/.cargo` (nothing was downloaded). They are here so the next person knows
+whether their wait is normal.
+
+| step | time |
+| --- | --- |
+| `bun tools/build-sidecar.ts --host` (engine → 102 MB binary) | **0.11 s** real |
+| `cargo build` from an empty `target/` — 288 crates | **36.6 s** (`Finished dev profile [unoptimized + debuginfo] target(s) in 36.64s`) |
+| `cargo build` after only the sidecar changed | 4.5 s |
+| `cargo build` after a touched `tauri.conf.json`/sidecar, relink only | 6.3 s |
+
+A cold build of four minutes would be *abnormal* here; the crate graph is
+288 crates and it parallelises well. The 2.5 GB `target/` and the 98 MB
+`binaries/` are both gitignored.
+
+## Running it: what a good run looks like (observed 2026-09-13)
+
+`cargo run` opens the window; `engine 0.5.4` appears under the title as soon
+as the shell has run `--version --json` through the sidecar. Choosing
+`tests/fixtures/screenplay.pdf` renders, verbatim from the engine's JSON:
+
+    The Last Video Store
+    A. N. Placeholder
+    5 pages · 5 scenes · 3 speaking characters
+
+which is exactly what `bun src/cli.ts tests/fixtures/screenplay.pdf --json`
+prints for `title`/`author`/`pages`/`scenes`/`characters`. Choosing
+`tests/fixtures/prose.pdf` renders the engine's own refusal, word for word,
+with its code beneath it — not a crash and not a reworded message:
+
+    No scene headings and no dialogue found — this does not look like a
+    screenplay. Pass --force to convert it anyway.
+    not-screenplay
+
+**The app writes its output beside the input.** Converting a file inside the
+repo therefore drops a `.epub` and a `.fountain` next to it — e.g. picking
+`tests/fixtures/screenplay.pdf` leaves `tests/fixtures/screenplay.epub` and
+`tests/fixtures/screenplay.fountain` untracked. Delete them, or convert a
+copy from outside the tree.
+
+### What a missing engine looks like
+
+Removing the engine from beside the app binary (`target/debug/screepub-engine`)
+and starting the app shows, in the window, in red, with the button still
+usable:
+
+    could not start the Screepub engine (sidecar "screepub-engine"): No such
+    file or directory (os error 2). Run `bun tools/build-sidecar.ts --host`
+    to build it.
+
+**Giving the engine the wrong name produces the same message**, which is the
+point of wrapping it: renaming `target/debug/screepub-engine` to
+`screepub-engin` and starting the app prints that same line — where Tauri on
+its own would have surfaced only a bare `No such file or directory (os error
+2)` naming nothing (see the transcript below).
+
+Note which of the two wrapped messages appears: it is always the
+`.output()` one ("could not **start**"). `sidecar()` itself returns `Ok`
+even when no such file exists, so the "could not **find**" message — the
+`map_err` on `sidecar()` — did not fire in either experiment.
+
+`mv desktop/src-tauri/binaries desktop/src-tauri/binaries.off` does **not**
+reproduce this, because `binaries/` is consumed at build time: with it gone,
+`cargo run` never gets as far as a window and fails with
+
+    resource path `binaries/screepub-engine-aarch64-unknown-linux-gnu` doesn't exist
+
 ## How Tauri finds the engine (observed 2026-09-13, on aarch64-unknown-linux-gnu)
 
 This section is a transcript, not a summary. Tauri 2.11.5 /
