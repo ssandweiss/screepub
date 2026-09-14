@@ -848,6 +848,39 @@ describe('the Read surface', () => {
     expect(reader).toMatch(/export function hide\(\)[\s\S]{0,120}keep\(\)/);
   });
 
+  test('a second re-render in a row does not throw the reader back to the top', () => {
+    // Found by driving Tune in the live window, and invisible from one
+    // change: re-rendering happens while THIS pane is hidden, so the new
+    // document cannot be measured (measure() needs layout) and the frame
+    // holding it reports scrollY 0. render() calls keep() first, so the
+    // SECOND re-render read that 0 against the previous document's marks and
+    // overwrote a good place with "the top of scene one".
+    //
+    // Measured, both ways, with the reader parked 0.331 into sc-012:
+    //   one knob   — document 14486px -> 16313px, scroll 7967 -> 9296, still
+    //                sc-012 at 0.331 (a different pixel, the same place)
+    //   two knobs  — scroll 77, sc-001, the rail marking nothing
+    //
+    // The guard is `measured`: true only while `marks` describe the document
+    // the frame is holding. It looks like dead code to anyone who did not
+    // watch the second knob lose the place.
+    expect(reader).toMatch(/let measured = false/);
+    // keep() refuses to take a place it cannot trust...
+    const keeper = reader.slice(reader.indexOf('function keep()'));
+    expect(keeper.slice(0, 200)).toContain('!measured');
+    // ...render() is what makes it untrustworthy...
+    const render = reader.slice(reader.indexOf('export function render('));
+    expect(render.slice(0, 700)).toMatch(/srcdoc[\s\S]{0,300}measured = false/);
+    // ...and measuring the new document is the only thing that restores it,
+    // which is what makes coming back to Read land in the right place.
+    const measure = reader.slice(reader.indexOf('function measure()'));
+    expect(measure.slice(0, 400)).toContain('measured = true');
+    // The order inside render() is load-bearing: keeping the place has to
+    // happen BEFORE the document it describes is replaced.
+    expect(render.slice(0, 700).indexOf('keep()'))
+      .toBeLessThan(render.slice(0, 700).indexOf('measured = false'));
+  });
+
   test('the rail can scroll its own mark into view', () => {
     // read.js keeps the marked scene inside the rail with
     // `rail.scrollTop = button.offsetTop`, which is only the offset WITHIN
@@ -1266,5 +1299,338 @@ describe('what the Read surface decides', () => {
     expect(main).toMatch(/NEEDS_SCRIPT[\s\S]{0,80}'read'/);
     expect(main).toMatch(/frame\.enable\(id, open\)/);
     expect(reader.NO_SCENES.length).toBeGreaterThan(0);
+  });
+});
+
+describe('the Tune surface', () => {
+  const source = read('tune.js');
+  const REPO = new URL('..', import.meta.url).pathname;
+
+  /** An engine module with its prose taken out. Every claim below about
+   *  "which knob does the engine read here" is a claim about CODE; a key
+   *  named in a comment would otherwise answer for one that is not. */
+  const engine = (...parts: string[]) =>
+    readFileSync(join(REPO, ...parts), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/.*$/gm, ' ');
+
+  let tune: Record<string, any>;
+  beforeAll(async () => { tune = await import(join(UI, 'tune.js')); });
+
+  test('the eighteen are the engine’s eighteen, in both directions', async () => {
+    // A surface with seventeen has silently dropped one and a reader would
+    // never know which; a nineteenth invented here would be sent to the
+    // engine and discarded by resolveFormatOptions without a word.
+    const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+    expect([...tune.OPTION_KEYS].sort()).toEqual(Object.keys(DEFAULT_FORMAT_OPTIONS).sort());
+    // Drawn once each: the same key in two groups would be two controls
+    // fighting over one value.
+    expect(new Set(tune.OPTION_KEYS).size).toBe(tune.OPTION_KEYS.length);
+    // And each one is actually a control with words on it. A knob with an
+    // empty label is a row of blank space next to a switch.
+    for (const knob of tune.KNOBS) {
+      expect(['toggle', 'range', 'choice'], `${knob.key} has no kind`).toContain(knob.kind);
+      expect(knob.label.length, `${knob.key} has no label`).toBeGreaterThan(2);
+      // The label names the thing; the sentence beside it does the
+      // explaining. A label that has become documentation is the tell.
+      expect(knob.label.length, `${knob.key}'s label is a paragraph`).toBeLessThan(42);
+      if (knob.help !== undefined) {
+        expect(knob.help.length, `${knob.key}'s help says nothing`).toBeGreaterThan(40);
+      }
+    }
+  });
+
+  test('every slider stops exactly where src/options.ts clamps', () => {
+    // A slider that goes to 60 on a knob clamped at 30 lets a reader drag
+    // into a value the engine will quietly discard. The bounds are READ OUT
+    // of the engine rather than copied here, so this fails if either side
+    // moves — a hand-written table would only fail if the surface did.
+    const clamps = new Map<string, [number, number]>();
+    for (const [, key, lo, hi] of engine('src', 'options.ts')
+      .matchAll(/num\('(\w+)',\s*([\d.]+),\s*([\d.]+)\)/g)) {
+      clamps.set(key, [Number(lo), Number(hi)]);
+    }
+    const ranges = tune.KNOBS.filter((knob: any) => knob.kind === 'range');
+    expect(ranges.map((knob: any) => knob.key).sort()).toEqual([...clamps.keys()].sort());
+    expect(ranges.length).toBe(4);
+    for (const knob of ranges) {
+      expect([knob.min, knob.max], `${knob.key} is not clamped where the engine clamps`)
+        .toEqual(clamps.get(knob.key)!);
+      expect(knob.step, `${knob.key} has no step`).toBeGreaterThan(0);
+    }
+  });
+
+  test('every choice offered is one the engine will actually keep', async () => {
+    // resolveFormatOptions falls back to the default for a value it does not
+    // recognise. An option list with a fourth typeface in it would render,
+    // save, and change nothing.
+    const { resolveFormatOptions, DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+    const choices = tune.KNOBS.filter((knob: any) => knob.kind === 'choice');
+    expect(choices.length).toBe(4);
+    for (const knob of choices) {
+      expect(knob.choices.length, `${knob.key} offers nothing`).toBeGreaterThan(1);
+      for (const [value, label] of knob.choices) {
+        expect(label.length, `${knob.key}'s ${value} has no words`).toBeGreaterThan(2);
+        const resolved = resolveFormatOptions({ [knob.key]: value }) as unknown as Record<string, unknown>;
+        expect(resolved[knob.key], `the engine discards ${knob.key}=${value}`).toBe(value);
+      }
+      // What the script already has must be selectable, or the control opens
+      // showing a value it cannot return to.
+      const current = (DEFAULT_FORMAT_OPTIONS as unknown as Record<string, unknown>)[knob.key];
+      expect(knob.choices.map(([value]: [string, string]) => value),
+        `${knob.key} cannot show its default`).toContain(current);
+    }
+  });
+
+  test('which knobs can move the preview is the engine’s answer, not this file’s', () => {
+    // The brief said two knobs are decided while the PDF is read. The engine
+    // says four: src/fountain/serialize.ts consumes showPageMarkers and
+    // dualDialogue as well, and re-rendering from the stored script with
+    // either flipped was measured to produce a byte-identical document. Both
+    // sat under "Content" and "Dialogue", where they would have looked live
+    // and done nothing.
+    //
+    // So the grouping is derived from the engine and checked against it,
+    // three ways and exhaustively:
+    //   live      — read by the preview builder (src/epub/html.ts, css.ts)
+    //   book      — read only where the BOOK is packaged (src/epub/build.ts)
+    //   reconvert — read while the PDF becomes a script (fountain/serialize)
+    const preview = engine('src', 'epub', 'html.ts') + engine('src', 'epub', 'css.ts');
+    const packaging = engine('src', 'epub', 'build.ts');
+    const serialize = engine('src', 'fountain', 'serialize.ts');
+
+    for (const knob of tune.KNOBS) {
+      expect(tune.EFFECTS, `${knob.key} claims an effect that does not exist`)
+        .toContain(knob.effect);
+      if (knob.effect === 'live') {
+        expect(preview.includes(knob.key),
+          `${knob.key} is called live but the preview never reads it`).toBe(true);
+      } else {
+        expect(preview.includes(knob.key),
+          `${knob.key} DOES move the preview and is not called live`).toBe(false);
+      }
+      if (knob.effect === 'reconvert') {
+        expect(serialize.includes(knob.key),
+          `${knob.key} is not read while the PDF becomes a script`).toBe(true);
+      } else {
+        expect(serialize.includes(knob.key),
+          `${knob.key} IS read while the PDF becomes a script`).toBe(false);
+      }
+      if (knob.effect === 'book') {
+        expect(packaging.includes(knob.key), `${knob.key} changes nothing about the book`)
+          .toBe(true);
+      }
+    }
+    // The counts, so a classification that collapsed into one bucket cannot
+    // pass the loop above by accident.
+    const count = (effect: string) =>
+      tune.KNOBS.filter((k: any) => k.effect === effect).length;
+    expect([count('live'), count('book'), count('reconvert')]).toEqual([13, 1, 4]);
+  });
+
+  test('the knobs that cannot move the preview say so, in the reader’s words', () => {
+    const group = tune.GROUPS.find((g: any) => g.effect === 'reconvert');
+    expect(group?.knobs.map((k: any) => k.key).sort())
+      .toEqual(['contdMode', 'dualDialogue', 'rejoinSplitDialogue', 'showPageMarkers']);
+    // Not hidden, and not silently inert: the note is on the group, it says
+    // both halves — saved, and not visible now — and it says them without
+    // naming a file format at the reader.
+    expect(group.note.length).toBeGreaterThan(80);
+    expect(group.note).toContain('not change what you see now');
+    expect(group.note.toLowerCase()).toContain('next time you convert');
+    expect(group.note).not.toContain('.fountain');
+    expect(group.note).not.toContain('serialize');
+    // The one knob that changes the book without changing the preview owes
+    // the same explanation, for the same reason.
+    const title = tune.knobFor('includeTitlePage');
+    expect(title.effect).toBe('book');
+    expect(title.help).toContain('preview');
+  });
+
+  test('a knob that is doing nothing says why, rather than vanishing', () => {
+    // The cue indents mean nothing while cues are centered. Hiding them
+    // takes the explanation away with the control, and the reader is left
+    // hunting for a knob that was there a moment ago.
+    const indent = tune.knobFor('cueIndentPct');
+    const centered = { cueAlignment: 'centered' };
+    const indented = { cueAlignment: 'indented' };
+    const reason = tune.idleReason(indent, centered);
+    expect(reason).not.toBe(null);
+    expect(reason.toLowerCase()).toContain('indented');
+    expect(tune.idleReason(indent, indented)).toBe(null);
+    expect(tune.idleReason(tune.knobFor('parentheticalIndentPct'), centered)).not.toBe(null);
+    // Every other knob is always live: a reason that fired on a knob with no
+    // condition would disable it forever.
+    for (const knob of tune.KNOBS) {
+      if (knob.needs !== undefined) continue;
+      expect(tune.idleReason(knob, centered), `${knob.key} idles for no reason`).toBe(null);
+    }
+    // Nothing is removed from the surface by a setting: eighteen controls
+    // are eighteen controls whatever the script is tuned to.
+    expect(tune.GROUPS.flatMap((g: any) => g.knobs).length).toBe(18);
+    expect(source).toContain('disabled');
+  });
+
+  test('a control’s value becomes something the engine will keep, or nothing', () => {
+    // A range arrives from the DOM as a STRING, and a string is exactly what
+    // resolveFormatOptions throws away: the knob would appear to move and
+    // the book would not change.
+    const margin = tune.knobFor('dialogueSideMarginPct');
+    expect(tune.coerceValue(margin, '17')).toBe(17);
+    expect(tune.coerceValue(margin, '99')).toBe(30);
+    expect(tune.coerceValue(margin, '-4')).toBe(0);
+    expect(tune.coerceValue(margin, 'twelve')).toBe(null);
+    const spacing = tune.knobFor('elementSpacingEm');
+    expect(tune.coerceValue(spacing, '1.4')).toBe(1.4);
+    expect(tune.coerceValue(spacing, '0')).toBe(0.4);
+    const toggle = tune.knobFor('scenePageBreaks');
+    expect(tune.coerceValue(toggle, true)).toBe(true);
+    expect(tune.coerceValue(toggle, false)).toBe(false);
+    // Not coerced: 'false' from an attribute is not a decision to turn it on.
+    expect(tune.coerceValue(toggle, 'false')).toBe(null);
+    const face = tune.knobFor('fontFamily');
+    expect(tune.coerceValue(face, 'serif')).toBe('serif');
+    expect(tune.coerceValue(face, 'comic')).toBe(null);
+    expect(tune.coerceValue(null, 'serif')).toBe(null);
+  });
+
+  test('two knobs moved in one breath are both saved', () => {
+    // The debounce cancels the pending save, so a change that only carried
+    // "the knob that moved last" would SAVE only that one — and the engine,
+    // which overlays a partial on what is stored, would answer with the
+    // first change missing and the surface would redraw it away.
+    let owed = {};
+    expect(tune.isPending(owed)).toBe(false);
+    owed = tune.mergePending(owed, 'dialogueSideMarginPct', 12);
+    owed = tune.mergePending(owed, 'fontFamily', 'serif');
+    expect(owed).toEqual({ dialogueSideMarginPct: 12, fontFamily: 'serif' });
+    // The same knob twice is the later value, not two of them.
+    owed = tune.mergePending(owed, 'dialogueSideMarginPct', 14);
+    expect(owed).toEqual({ dialogueSideMarginPct: 14, fontFamily: 'serif' });
+    expect(tune.isPending(owed)).toBe(true);
+    expect(tune.isPending({})).toBe(false);
+    expect(tune.isPending(undefined)).toBe(false);
+  });
+
+  test('an answer that is not a settings answer is refused, not drawn', async () => {
+    const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+    const whole = tune.settingsFrom({ settings: { ...DEFAULT_FORMAT_OPTIONS } });
+    expect(whole).toEqual({ ...DEFAULT_FORMAT_OPTIONS });
+    // One key short: seventeen sliders and one at NaN.
+    const short: Record<string, unknown> = { ...DEFAULT_FORMAT_OPTIONS };
+    delete short.cueIndentPct;
+    expect(tune.settingsFrom({ settings: short })).toBe(null);
+    // Right keys, wrong kinds — each would draw a control that cannot show
+    // its own value.
+    expect(tune.settingsFrom({ settings: { ...DEFAULT_FORMAT_OPTIONS, cueIndentPct: '33' } }))
+      .toBe(null);
+    expect(tune.settingsFrom({ settings: { ...DEFAULT_FORMAT_OPTIONS, fontFamily: 'comic' } }))
+      .toBe(null);
+    expect(tune.settingsFrom({ settings: { ...DEFAULT_FORMAT_OPTIONS, justifyText: 'yes' } }))
+      .toBe(null);
+    expect(tune.settingsFrom({ settings: null })).toBe(null);
+    expect(tune.settingsFrom({ settings: [] })).toBe(null);
+    expect(tune.settingsFrom({})).toBe(null);
+    expect(tune.settingsFrom(undefined)).toBe(null);
+    // A nineteenth knob from a newer engine survives the round trip rather
+    // than being quietly dropped out of the script's settings.
+    const future = tune.settingsFrom({
+      settings: { ...DEFAULT_FORMAT_OPTIONS, sceneNumberSide: 'left' },
+    });
+    expect(future.sceneNumberSide).toBe('left');
+    // And it is a copy: the surface mutates its settings on every change.
+    const original = { ...DEFAULT_FORMAT_OPTIONS };
+    expect(tune.settingsFrom({ settings: original })).not.toBe(original);
+  });
+
+  test('a preset that would only half-apply is not offered', async () => {
+    const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+    const broken: Record<string, unknown> = { ...DEFAULT_FORMAT_OPTIONS };
+    delete broken.fontFamily;
+    const presets = tune.presetsFrom({
+      presets: [
+        { displayName: 'Kindle e-ink (6")', settings: { ...DEFAULT_FORMAT_OPTIONS } },
+        { displayName: 'Half a preset', settings: broken },
+        { displayName: '', settings: { ...DEFAULT_FORMAT_OPTIONS } },
+      ],
+    });
+    expect(presets.map((p: any) => p.displayName)).toEqual(['Kindle e-ink (6")']);
+    expect(presets[0].settings.fontFamily).toBe('courier');
+    expect(tune.presetsFrom({})).toEqual([]);
+    expect(tune.presetsFrom({ presets: 'kindle' })).toEqual([]);
+  });
+
+  test('the surface never says "saved" about something that was not', () => {
+    expect(tune.statusFor('saved').line).toContain('Saved');
+    expect(tune.statusFor('saved').bad).toBe(false);
+    expect(tune.statusFor('pending').line).not.toContain('Saved');
+    expect(tune.statusFor('saving').line).not.toContain('Saved.');
+    expect(tune.statusFor('idle').line).toBe('');
+    // A failure shows the engine's own sentence, and never the word.
+    const failed = tune.statusFor('failed', 'cannot read the script: /gone.fountain');
+    expect(failed.line).toBe('cannot read the script: /gone.fountain');
+    expect(failed.bad).toBe(true);
+    // An engine that broke its contract and failed without a sentence still
+    // has to say something a person can act on.
+    expect(tune.statusFor('failed', '   ').line).toBe(tune.NO_MESSAGE);
+    expect(tune.statusFor('failed', undefined).line).toBe(tune.NO_MESSAGE);
+    expect(tune.statusFor('failed').bad).toBe(true);
+    // An unknown phase is silence, not a lie.
+    expect(tune.statusFor('elsewhere').line).toBe('');
+  });
+
+  test('a read-out carries its unit, and never reads NaN', () => {
+    const margin = tune.knobFor('dialogueSideMarginPct');
+    expect(tune.displayValue(margin, 20)).toBe('20%');
+    // Whole-numbered knobs do not grow a decimal point.
+    expect(tune.displayValue(margin, '7')).toBe('7%');
+    const spacing = tune.knobFor('elementSpacingEm');
+    expect(tune.displayValue(spacing, 1)).toBe('1.0 em');
+    expect(tune.displayValue(spacing, 1.25)).toBe('1.3 em');
+    expect(tune.displayValue(spacing, undefined)).toBe('—');
+    expect(tune.displayValue(spacing, null)).toBe('—');
+  });
+
+  test('two settings objects are compared by the eighteen, not by identity', () => {
+    const a: Record<string, unknown> = { extra: 1 };
+    for (const key of tune.OPTION_KEYS) a[key] = 1;
+    a.fontFamily = 'serif';
+    const b = { ...a, extra: 2 };
+    expect(tune.sameSettings(a, b)).toBe(true);
+    expect(tune.sameSettings(a, { ...a, fontFamily: 'sans' })).toBe(false);
+    expect(tune.sameSettings(null, null)).toBe(true);
+    expect(tune.sameSettings(a, null)).toBe(false);
+  });
+
+  test('it saves through the engine rather than inventing its own storage', () => {
+    expect(source).toContain('argv.settings');
+    expect(source).toContain('argv.reconvert');
+    expect(source).not.toContain('localStorage');
+    expect(source).not.toContain('sessionStorage');
+    // The clamp above is the engine's; the file must not carry a second
+    // opinion about what a setting means, or run the engine's resolver
+    // itself.
+    expect(source).not.toMatch(/resolveFormatOptions\s*\(/);
+    expect(source).not.toContain('screepub.json');
+  });
+
+  test('re-renders are debounced and serialised', () => {
+    // A knob dragged across its range fires a hundred times. Without a
+    // debounce that is a hundred conversions; without serialisation a slow
+    // early one can finish last and leave the file disagreeing with the
+    // screen.
+    expect(source).toContain('setTimeout');
+    expect(source).toContain('clearTimeout');
+    expect(source).toMatch(/running\s*=\s*running/);
+  });
+
+  test('every control is tied to its label and its explanation', () => {
+    // One id per key, a <label for> pointing at it, and the sentence beside
+    // it named by aria-describedby — otherwise the help is invisible to the
+    // reader most likely to need it.
+    expect(source).toMatch(/const id = `knob-\$\{knob\.key\}`/);
+    expect(source).toMatch(/el\('label', \{ for: id/);
+    expect(source).toContain('aria-describedby');
+    expect(source).toContain("role: 'status'");
   });
 });

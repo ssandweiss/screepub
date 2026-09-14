@@ -312,3 +312,68 @@
 @media (prefers-reduced-motion: reduce) {
   .scene-link { transition: none; }
 }
+
+/* Tune — a form set on a script page. Eighteen controls is where an
+ * interface most easily becomes a wall of switches, so the row is built to
+ * be read rather than scanned: the label in the structure face at reading
+ * size on the left, the control ranged right against it, and the sentence
+ * that says why the knob exists below both, in the column the label starts.
+ * The value read-out is tabular so a dragged slider cannot jitter the row
+ * it sits in. */
+.presets { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3);
+  margin: var(--space-6) 0 var(--space-8); }
+.presets-label { margin: 0; }
+.btn-small { font-size: var(--text-label); padding: 6px 18px; letter-spacing: 0.07em; }
+
+.knob-group { margin: 0 0 var(--space-8); max-width: var(--measure); }
+.knob-group-title { margin-top: 0; }
+.knob-group-note { margin: 0 0 var(--space-3); }
+
+.knob {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: baseline;
+  column-gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--hole);
+}
+.knob-label {
+  font-family: var(--font-structure);
+  font-size: var(--text-ui);
+  line-height: 1.5;
+  color: var(--ink);
+}
+.knob-why { grid-column: 1 / -1; margin: var(--space-1) 0 0; font-size: var(--text-ui); }
+/* A knob that does nothing right now still says what it is and why it is
+ * quiet, so it reads as an explanation rather than as a bug. */
+.knob-idle .knob-label, .knob-idle .knob-value { color: var(--ink-muted); }
+
+.knob-value {
+  font-family: var(--font-structure);
+  font-size: var(--text-note);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+  justify-self: end;
+}
+.knob-slider { grid-column: 1 / -1; width: 100%; margin: var(--space-2) 0 0;
+  accent-color: var(--brass); }
+.knob-box { width: 16px; height: 16px; accent-color: var(--brass); justify-self: end; }
+.knob-select {
+  font-family: var(--font-structure);
+  font-size: var(--text-label);
+  color: var(--ink);
+  background: none;
+  border: 1px solid var(--ink-muted);
+  border-radius: var(--radius);
+  padding: 4px 6px;
+}
+.knob input:focus-visible, .knob select:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.knob input:disabled, .knob select:disabled { opacity: 0.4; }
+
+/* The one line that makes a claim about a file on disk. It sits at the foot
+ * of the form, where the reader's eye lands after the last knob. */
+.tune-status { min-height: 1.4em; margin-top: 0; }
+.tune-status.bad { color: var(--alarm); }

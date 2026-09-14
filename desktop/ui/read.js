@@ -238,6 +238,9 @@ let marks = [];
 let place = null;
 let sheetCss = '';
 let markedId = null;
+/** Whether `marks` describe the document the frame is holding RIGHT NOW.
+ *  See keep(). */
+let measured = false;
 let ticking = false;
 let resizing = false;
 let watching = null;
@@ -304,6 +307,10 @@ export function render(previewHtml) {
   const parts = splitPreview(previewHtml, new DOMParser());
   sheetCss = parts.css;
   frame.setAttribute('srcdoc', parts.html);
+  // The marks now describe a document that is being thrown away, and the
+  // replacement starts at scroll 0. Until something measures the new one,
+  // nothing may ask the frame where the reader is.
+  measured = false;
 }
 
 function draw() {
@@ -315,6 +322,7 @@ function draw() {
   rail = null;
   railButtons = new Map();
   marks = [];
+  measured = false;
   markedId = null;
 
   const state = readerState(ctx.state.script);
@@ -447,15 +455,27 @@ function measure() {
     top: scene.offsetTop,
     height: scene.offsetHeight,
   }));
+  measured = true;
 }
 
 /** Take the place while the frame can still say where it is. This runs as
  *  the surface goes away, by which time the pane is ALREADY hidden — so it
  *  must not ask for layout, and does not: `scrollY` still answers, and the
- *  marks were measured while the frame was on screen. */
+ *  marks were measured while the frame was on screen.
+ *
+ *  `measured` is the guard that makes that true, and it is not theoretical.
+ *  Tune re-renders while this pane is hidden, so the new document cannot be
+ *  measured (measure() needs layout) — and the frame holding it reports
+ *  `scrollY` 0. A SECOND re-render's keep() would then read 0 against the
+ *  OLD document's marks and overwrite a perfectly good place with "the top
+ *  of scene one". Measured in the live window: one knob kept the reader at
+ *  sc-012, 0.331 into it, across a real reflow (14486px → 16313px); two
+ *  knobs in a row landed them at scroll 77 with the rail marking nothing.
+ *  The place is not re-taken here between renders — it was taken when the
+ *  surface was left and is still the truth. */
 function keep() {
   const win = frame?.contentWindow;
-  if (!win || marks.length === 0) return;
+  if (!win || marks.length === 0 || !measured) return;
   place = readerPlace(marks, win.scrollY);
 }
 
