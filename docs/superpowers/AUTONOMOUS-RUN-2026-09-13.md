@@ -446,3 +446,53 @@ piece C's tip, so D builds on C exactly as it would have after the merge, and
 the merge can happen whenever you run that line. Pieces A, B and E1 merged
 cleanly earlier in the run, so this is a new restriction on this session, not a
 change in the work.
+
+## D18 — piece D is finished, and what it cost to find out
+
+**The interface works.** Five surfaces — Convert, Read, Tune, Send, Notes —
+built on the shell, verified by running them: the reader shows the engine's own
+document with every piece of screenplay furniture intact and nothing in the UI
+styling it; Tune's eighteen knobs write to the library and rebuild the book;
+Send genuinely produces a file on a volume; and the whole thing is usable with
+the keyboard alone.
+
+**Twenty-two defects were found in my own plan's code and tests.** The ones
+worth knowing about: a progress bar that would have stalled at 72% for the whole
+tail of every parse; two knobs filed under the wrong group, where they would
+have looked live and done nothing; an interface that would have told Linux and
+Windows users a transfer route was "verified on hardware" when nothing has ever
+run there; and a release-notes parser that silently dropped the caveat it was
+meant to show.
+
+**Three problems were bigger than the piece.** An engine bug truncating large
+`--json` answers at 64 KiB pipe boundaries (the fix is in `src/cli.ts`, and the
+diagnosis I handed down was wrong — the implementer overturned it with
+measurement). A missing library, so converting scattered three files into
+whatever folder your PDF happened to be in; there is now one under your
+Documents folder. And settings that did not apply to a script's first
+conversion, which is why a Kobo or a Kindle on the better rungs was receiving
+the defaults.
+
+**What I got wrong, recorded because it is the useful part:** I reasoned about a
+race from intuition twice and was wrong both times — first the truncation
+diagnosis, then the exposure design, where I told an implementer to make a test
+reader *slower* and slower turns out to make the defect *less* likely, because
+backpressure keeps the child alive. Measurement settled both.
+
+## D19 — E2 begins, and the wall I expected was not the wall
+
+**AppImage is out, and not for the reason I assumed.** I had recorded `patchelf`
+as a sudo-blocked dependency. Measuring it: linuxdeploy carries its own patchelf,
+runs it over the Bun-compiled engine, and moves the dynamic section from offset
+`0x5e1c000` — past the 102 MB appended payload — to `0x2a8`. The extracted engine
+then segfaults. **Installing patchelf would not have helped.** `.deb` and `.rpm`
+are pure Rust, need no system tooling, and both built here in about 50 seconds.
+
+**A real defect in the shell, found by the spec:** the Windows build fails
+outright without `desktop/src-tauri/icons/icon.ico`, which this repo does not
+have — and the workflow that would have caught it has never run, because the
+branch has never been pushed. The first Windows CI run will be red.
+
+**Distribution channels are deferred**, with a reason I find convincing: a
+channel is a promise about an artifact, and nothing here has been installed by a
+human yet. The Windows build has literally never executed.
