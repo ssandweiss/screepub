@@ -138,27 +138,69 @@ reader, and a tolino cannot be detected on Windows at all: it is identified by
 the name of its volume, and a Windows drive root carries none. Converting is
 the part that is well tested everywhere; sending is not.
 
-### Desktop app (in progress)
+### Desktop app
 
-A cross-platform window is being built in `desktop/`, on Tauri, around this
-same engine — the app spawns the CLI binary and renders its `--json` answer,
-so there is exactly one implementation of everything that thinks. It has five
-surfaces: convert a script, read it, tune its formatting, send it to a
-reader, and the release notes.
+From 0.6.0 there is a window as well as a command line, built on Tauri in
+`desktop/` around this same engine: the app spawns the engine binary and
+renders its `--json` answer, so there is exactly one implementation of
+everything that thinks. It has five surfaces — convert a script, read it,
+tune its formatting, send it to a reader, and the release notes.
 
-Build and run it with:
+| Machine | File |
+| --- | --- |
+| Linux, Debian or Ubuntu, Intel or AMD | `Screepub_0.6.0_amd64.deb` |
+| Linux, Fedora or openSUSE, Intel or AMD | `Screepub-0.6.0-1.x86_64.rpm` |
+| macOS, Apple Silicon | `Screepub-Desktop-macOS-arm64.dmg` |
+| macOS, Intel | `Screepub-Desktop-macOS-x64.dmg` |
+| Windows, 64-bit | `Screepub-0.6.0-setup.exe` |
 
-    bun tools/build-sidecar.ts --host
-    cd desktop/src-tauri && cargo run
+```bash
+sudo apt install ./Screepub_0.6.0_amd64.deb     # Debian, Ubuntu
+sudo dnf install ./Screepub-0.6.0-1.x86_64.rpm  # Fedora, openSUSE
+```
 
-**Linux is the only place it has actually been run.** A CI workflow compiles
-the shell on macOS and Windows as well, and compiling is not running: nothing
-on those two platforms has been started, clicked or looked at. There are no
-installers yet, on any platform — that is the next piece of work. Build
-instructions and what the window does not do:
+`SHA256SUMS-app` on the release page covers these five files. (`SHA256SUMS`,
+beside it, covers the three command-line downloads.) There is no Linux ARM
+package: no ARM runner builds one, and shipping a filename nothing produces
+is worse than shipping nothing. `tools/build-app-bundle.ts` makes one by
+hand on an ARM machine if you want it.
+
+**On a Mac, `Screepub-macOS.dmg` is still the supported download.** It
+installs `Screepub.app` and it is the one this project has been shipping.
+The two `Screepub-Desktop-macOS-*.dmg` files are the new cross-platform app;
+they install `Screepub Desktop.app`, a different name and a different bundle
+identifier from the Mac app's, so installing one is not installing over the
+other. Both write into `~/Documents/Screepub/` by default, in different
+shapes — see [the library](#the-library) below. When the new app replaces the
+old one, that name goes back to `Screepub.app`.
+
+**Windows will warn you, the same way the command-line download does.** The
+installer is unsigned too: it carries no code-signing certificate, so
+SmartScreen shows a "publisher unknown" screen the first time you run it.
+Choose **More info**, then **Run anyway**. It is the same warning, for the
+same reason, from the same missing certificate — not a second problem.
+
+**The Windows installer may need the network once.** It installs Microsoft's
+WebView2 runtime if the machine has none — Windows 11 ships it, Windows 10
+may not — and fetches it from Microsoft at install time. Converting itself
+never touches the network, on any platform, and never has.
+
+**Nobody has installed these yet.** Four of the five are built by automation
+that opens the bundle and runs the engine out of it before anything is
+published, which catches a broken payload and catches nothing a person would
+notice about the window. These have
+never been installed on a real machine: not the `.deb`, not the `.rpm`, not
+a `.dmg`, not the installer, by anyone. The window itself has only ever been
+started on Linux: no build runner has a display, so on macOS and Windows
+nobody has started, clicked or looked at it. The Intel Mac DMG is the fifth
+and the least proven — it is cross-compiled on an Apple Silicon runner, so
+not even its engine has been executed anywhere. Treat 0.6.0's app downloads
+as a first release that wants your bug reports.
+
+Build instructions, and a ledger of exactly who has verified what:
 [`desktop/README.md`](desktop/README.md).
 
-The macOS app in `app/` is the shipping one until that work lands.
+The macOS app in `app/` remains the supported Mac app.
 
 ## Your script stays on your machine
 
@@ -172,9 +214,12 @@ Scripts are confidential. Screepub is built accordingly.
   any kind. Your PDF is read from disk and the e-book is written back to disk.
 - **No training data, ever.** There is no server to send scripts to.
 - **No accounts, no telemetry, no analytics.** Screepub does not track usage,
-  report crashes, or phone home. It works fully offline.
+  report crashes, or phone home. Converting works fully offline, on every
+  platform. The one exception is not the converter but the Windows
+  *installer*, which fetches Microsoft's WebView2 runtime once if the machine
+  has none; see [Desktop app](#desktop-app) above.
 
-The app touches the network in five places, each needing your click: uploading
+The Mac app touches the network in five places, each needing your click: uploading
 to a **docked reMarkable** over USB (your own hardware, not the internet),
 opening **Amazon's Send-to-Kindle page**, opening **GitHub** to report a bug,
 **only if you opt in** asking GitHub whether a newer release exists, and
@@ -186,6 +231,10 @@ unauthenticated request to `api.github.com`, at most once a day, carrying the
 app name and version and nothing else. **Install and Relaunch** verifies the
 DMG's Apple signature against this project's Developer ID *and* checks it is the
 exact version offered before swapping anything.
+
+The cross-platform window has fewer: no update check, no external links, and
+no Send-to-Kindle page. Its only network touchpoint is the first one on that
+list, the upload to a docked reMarkable over USB.
 
 The one thing worth being clear about: **you** can choose to send a script
 somewhere. If you email it to your `@kindle.com` address, Amazon receives it and

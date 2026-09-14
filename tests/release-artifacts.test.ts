@@ -2,6 +2,12 @@ import { describe, test, expect } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { TARGETS } from '../tools/build-cli';
+import {
+  BUNDLE_KINDS,
+  kindsForOs,
+  type BundleArch,
+  type BundleOs,
+} from '../tools/build-app-bundle';
 
 const WORKFLOWS = '.github/workflows';
 const read = (p: string) => readFileSync(p, 'utf8');
@@ -558,5 +564,220 @@ describe('the two limits are stated where a reader meets them', () => {
     expect(notes).toContain('windows');
     expect(/not signed|unsigned/.test(notes)).toBe(true);
     expect(notes).toContain('tolino');
+  });
+});
+
+describe('the app downloads are described where a reader meets them', () => {
+  const readme = read('README.md');
+  const notes = read('docs/releases/0.6.0.md');
+  const site = read('site/index.html');
+  const rel = workflow('release.yml');
+  const VERSION = '0.6.0';
+
+  // The names are DERIVED, not restated: release.yml's matrix says which
+  // OS/arch legs run, and BUNDLE_KINDS says what each leg is named. So a
+  // renamed artifact, a dropped leg or an ADDED leg (an arm64 Linux runner,
+  // say) fails a documentation test rather than leaving these three pages
+  // naming a file the release does not carry -- or silently omitting one it
+  // does. Restating the filenames in the test would catch neither.
+  const published = new Set<string>();
+  const unpublished = new Set<string>();
+  for (const row of rel.jobs['app-bundles']!.strategy?.matrix?.include ?? []) {
+    const os: BundleOs = row.os!.startsWith('ubuntu')
+      ? 'linux'
+      : row.os!.startsWith('macos')
+        ? 'macos'
+        : 'windows';
+    for (const kind of kindsForOs(os)) {
+      published.add(kind.releasedName(VERSION, row.arch as BundleArch));
+    }
+  }
+  for (const kind of BUNDLE_KINDS) {
+    for (const arch of ['x64', 'arm64'] as const) {
+      const name = kind.releasedName(VERSION, arch);
+      if (!published.has(name)) unpublished.add(name);
+    }
+  }
+
+  const NUMBER_WORD = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+
+  test('the derivation found the five files the release actually uploads', () => {
+    // Guards every loop below: a matrix this parse did not understand would
+    // make them all vacuously true. Five is what app-upload's own line-count
+    // check demands: one .deb, one .rpm, two .dmg, one .exe.
+    expect([...published].sort()).toEqual([
+      'Screepub-0.6.0-1.x86_64.rpm',
+      'Screepub-0.6.0-setup.exe',
+      'Screepub-Desktop-macOS-arm64.dmg',
+      'Screepub-Desktop-macOS-x64.dmg',
+      'Screepub_0.6.0_amd64.deb',
+    ]);
+    // And the ones no leg builds, which no page may offer.
+    expect([...unpublished].sort()).toEqual([
+      'Screepub-0.6.0-1.aarch64.rpm',
+      'Screepub_0.6.0_arm64.deb',
+    ]);
+  });
+
+  test('the README names every file it tells people to download', () => {
+    for (const name of published) expect(readme).toContain(name);
+  });
+
+  test('no page offers a bundle the release does not carry', () => {
+    // The Linux arm64 .deb and .rpm build by hand and are in no matrix row.
+    // Naming one is an empty-handed download with no error to explain it.
+    for (const text of [readme, notes, site]) {
+      for (const name of unpublished) expect(text).not.toContain(name);
+    }
+  });
+
+  test('the README says how many files the app checksums cover', () => {
+    // Spelled out, so adding a leg without touching this sentence fails
+    // here rather than publishing a checksums file covering more than the
+    // page admits to.
+    expect(readme).toContain(`covers these ${NUMBER_WORD[published.size]} files`);
+  });
+
+  test('the README says the Windows installer is unsigned, in the same words as the CLI note', () => {
+    // Scoped to the INSTALLER's own section: E1's CLI paragraph already
+    // puts "SmartScreen" on the page, so an unscoped search would pass with
+    // nothing said about the installer at all.
+    const section = readme.slice(readme.indexOf('### Desktop app')).toLowerCase();
+    expect(section).toContain('smartscreen');
+    expect(/not signed|unsigned/.test(section)).toBe(true);
+    // E1 already wrote this paragraph for the CLI. Two differently-worded
+    // warnings on one page read as two different problems, so both say
+    // More info and Run anyway, and both are still there.
+    const cli = readme
+      .slice(readme.indexOf('### Linux and Windows'), readme.indexOf('### Desktop app'))
+      .toLowerCase();
+    for (const phrase of ['smartscreen', 'more info', 'run anyway']) {
+      expect(cli).toContain(phrase);
+      expect(section).toContain(phrase);
+    }
+  });
+
+  test('the README does not claim the installer works fully offline', () => {
+    // NSIS's default webviewInstallMode downloads the WebView2 bootstrapper
+    // when the machine has none. Windows 11 ships it; Windows 10 may not.
+    // The APP still makes no network requests and that claim stands -- but
+    // the INSTALLER sentence has to be precise enough not to be caught out.
+    const section = readme.slice(readme.indexOf('### Desktop app'));
+    expect(section.toLowerCase()).toContain('webview2');
+    // And the standing "works fully offline" promise, which sits in another
+    // section entirely, carries the same qualifier where it is made. A
+    // reader who stops at the privacy section never reaches the other note.
+    const privacy = readme.slice(readme.indexOf('## Your script stays on your machine'));
+    expect(privacy.slice(0, privacy.indexOf('## For developers')).toLowerCase()).toContain(
+      'webview2',
+    );
+  });
+
+  test('the README says which of these artifacts CI actually executed', () => {
+    const lower = readme.toLowerCase();
+    // The x86_64 DMG is cross-compiled on an arm64 runner and its engine is
+    // never run. Saying so is the difference between a limitation and a
+    // surprise.
+    expect(/intel mac|x86_64|x64/.test(lower)).toBe(true);
+    expect(lower).toContain('never been installed');
+  });
+
+  test('the README does not claim the window has been run off Linux', () => {
+    // The one sentence a stranger would most reasonably write and that
+    // nobody has earned: no runner has a display, so the GUI half of this
+    // app has been started on exactly one operating system.
+    const section = readme.slice(readme.indexOf('### Desktop app'));
+    expect(section).toContain('Linux');
+    expect(/never been (started|run|opened)|nobody has (started|run|opened)/.test(section)).toBe(
+      true,
+    );
+  });
+
+  test('the 0.6.0 notes carry the same three limits', () => {
+    const lower = notes.toLowerCase();
+    expect(/not signed|unsigned/.test(lower)).toBe(true);
+    expect(lower).toContain('smartscreen');
+    expect(lower).toContain('never been installed');
+    // E1's limits are still there and were not overwritten.
+    expect(lower).toContain('tolino');
+  });
+
+  test('the notes name the app downloads too, not only the CLI ones', () => {
+    for (const name of published) expect(notes).toContain(name);
+  });
+
+  test('the download page carries the unsigned-Windows warning', () => {
+    // site/index.html offered only the macOS DMG before this piece, so this
+    // is a new section rather than an edited one.
+    const lower = site.toLowerCase();
+    expect(lower).toContain('smartscreen');
+    expect(/not signed|unsigned/.test(lower)).toBe(true);
+  });
+
+  test('the site still offers the SwiftUI DMG as the supported Mac download', () => {
+    // Two Mac downloads on one page will confuse somebody. The mitigation
+    // is that the page says which one is supported; piece F is the real fix.
+    expect(site).toContain('Screepub-macOS.dmg');
+    expect(site.toLowerCase()).toContain('supported');
+    // And the page's own three buttons still point at it, so the new
+    // section cannot have quietly redirected the call to action.
+    expect((site.match(/releases\/latest\/download\/Screepub-macOS\.dmg/g) ?? []).length).toBe(3);
+  });
+
+  test('nothing anywhere promises an AppImage, a cask, winget or the AUR', () => {
+    // All four are out of scope, three of them deferred with reasons and
+    // one ruled out on merits. A promise in prose is a promise.
+    for (const text of [readme, notes, site]) {
+      const lower = text.toLowerCase();
+      expect(lower).not.toContain('appimage');
+      expect(lower).not.toContain('winget');
+      expect(lower).not.toContain('aur ');
+    }
+    // The Homebrew tap is still named -- it serves the SwiftUI app and the
+    // macOS CLI, and that is unchanged -- but never beside the Tauri app.
+    const around = readme.slice(readme.indexOf('### Desktop app'));
+    expect(around.toLowerCase()).not.toContain('brew install');
+  });
+});
+
+describe('desktop/README.md keeps the ledger of who verified what', () => {
+  const doc = read('desktop/README.md');
+
+  test('it has all three headings, in order: a person, CI, nobody', () => {
+    const person = doc.indexOf('Verified on a real machine, by a person');
+    const ci = doc.indexOf('Verified only by CI');
+    const nobody = doc.indexOf('Verified by nobody');
+    expect(person).toBeGreaterThan(0);
+    expect(ci).toBeGreaterThan(person);
+    expect(nobody).toBeGreaterThan(ci);
+  });
+
+  test('the "by a person" list claims only the architecture that was built here', () => {
+    // The .deb and .rpm a person opened and launched are aarch64. The
+    // release publishes amd64 and x86_64, which nobody has built. Saying
+    // "the Linux bundles" without the architecture is exactly the
+    // overstatement this ledger exists to prevent.
+    const person = doc.slice(
+      doc.indexOf('Verified on a real machine, by a person'),
+      doc.indexOf('Verified only by CI'),
+    );
+    expect(person).toContain('Screepub_0.6.0_arm64.deb');
+    expect(person).toContain('Screepub-0.6.0-1.aarch64.rpm');
+    expect(person).not.toContain('amd64');
+    expect(person).not.toContain('x86_64');
+  });
+
+  test('the ledger says the workflows have not run at all yet', () => {
+    const nobody = doc.slice(doc.indexOf('Verified by nobody'));
+    expect(/never run|never been run|has not run|never executed/.test(nobody)).toBe(true);
+    expect(nobody).toContain('x86_64-apple-darwin');
+  });
+
+  test('nothing in this file still calls bundling future work', () => {
+    // It said "bundling and installers are piece E2" and "once a later
+    // piece wires that job up". Both landed in this piece; a reader who
+    // believes either goes looking for work that is already done.
+    expect(doc).not.toContain('installers are piece E2');
+    expect(doc).not.toContain('once a later piece wires that job up');
   });
 });

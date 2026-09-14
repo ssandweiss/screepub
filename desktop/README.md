@@ -14,8 +14,9 @@ the CLI and the app share one implementation and one test suite. See
 
 `cargo run` is the whole dev loop. The frontend is three static files that
 `tauri-build` embeds at compile time, so there is no dev server, no bundler
-and no npm dependency. The Tauri CLI is not used here; bundling and
-installers are piece E2.
+and no npm dependency. The Tauri CLI is not used by `cargo run` at all; the
+installable bundles are built by `bun tools/build-app-bundle.ts`, which calls
+`cargo tauri build` for you. See the bundling section below.
 
 The sidecar must exist before the app starts — on this toolchain it must
 exist before `cargo build` even *compiles*, see below.
@@ -674,9 +675,9 @@ produced by this project at all.
 
 `desktop/src-tauri/tauri.transition.conf.json` renames the macOS product to
 `Screepub Desktop` so the Tauri app and the SwiftUI app can both be
-installed. The overlay is passed only by release.yml's macOS job, once a
-later piece wires that job up; **piece F deletes the file** and the name
-becomes `Screepub.app`.
+installed. The overlay is passed only by release.yml's two macOS bundle legs,
+which now pass it; **piece F deletes the file** and the name becomes
+`Screepub.app`.
 
 The overlay is exactly one key — `{"productName": "Screepub Desktop"}`,
 nothing else. An earlier draft added a leading-underscore `"_why"` key to
@@ -715,3 +716,71 @@ Swift app's `com.darkwell.screepub`) and the window title (`app.windows[0].
 title`, left untouched at `"Screepub"`) were not re-verified here beyond
 what `tests/desktop-shell.test.ts` already pins, since neither one is
 touched by this piece.
+
+## What nobody has verified
+
+The honest version of this app's status, kept here so that the next person
+does not have to infer it from a green checkmark. Three lists, and an item
+only moves up one when somebody does the thing.
+
+**Verified on a real machine, by a person** (2026-09-14, one machine:
+aarch64-unknown-linux-gnu, Arch/Asahi, live Hyprland session):
+
+- `Screepub_0.6.0_arm64.deb` and `Screepub-0.6.0-1.aarch64.rpm` build, and
+  both contain the engine, `LICENSE`, `THIRD-PARTY-NOTICES.md`, four icon
+  sizes and a `.desktop` entry with `Categories=Office;` and a human
+  `Comment=`. Note the architecture: these are the bundles an ARM machine
+  makes. The two Intel packages the release actually publishes have never
+  been built here at all.
+- The engine runs straight out of both, converts
+  `tests/fixtures/screenplay.pdf`, and refuses `--expect-version 9.9.9`,
+  which is what makes the passing run evidence rather than decoration.
+- The window opens, converts a PDF and shows a result, from `cargo run`. See
+  "Running it: what a good run looks like" above.
+- The window also opened **out of an unpacked `.deb`**: mapped, CONVERT page
+  rendered, `ENGINE 0.5.4` in the corner, which means the shell found and
+  spawned the engine from inside the unpacked tree. That launch was of the
+  pair built earlier the same day, before the PDF file association was
+  withdrawn; the pair on disk now was rebuilt afterwards and differs only in
+  that its `.desktop` entry no longer claims a `MimeType`.
+- `cargo tauri build --config tauri.transition.conf.json` is accepted by
+  `tauri-cli 2.11.4` and reaches `productName`, producing a throwaway
+  `Screepub Desktop_0.6.0_arm64.deb`.
+
+**Verified only by CI, and only as far as CI can reach.** Read the first
+sentence before the list: **none of this has happened yet.** `desktop.yml`
+has never executed a single run, because the branch it was written on has
+never been pushed, and `release.yml`'s bundle jobs have never run either.
+What follows is what those workflows are configured to check on their first
+run, and the ceiling of what they could ever prove:
+
+- That the shell compiles on macOS and Windows at all.
+- That a `.dmg` and an NSIS installer can be produced.
+- That the engine inside the Linux bundles, the arm64 `.dmg` and the Windows
+  installer runs and converts the fixture. CI opens each bundle without
+  installing it.
+
+Until that first run, every macOS and Windows claim in this repository rests
+on reading `tauri-bundler`'s source and on unit tests driven by fakes.
+
+**Verified by nobody:**
+
+- Installing any of these. No `.deb`, `.rpm`, `.dmg` or `.exe` has been
+  installed on a real machine.
+- The window, on macOS or on Windows. No runner has a display, so the GUI
+  half of the app has never been exercised off Linux, and the workflows that
+  would at least compile it have never run.
+- Any `.dmg` or NSIS installer at all. Neither has been produced on any
+  machine, by CI or by hand.
+- The `x86_64-apple-darwin` `.dmg` specifically. It is cross-compiled on an
+  Apple Silicon runner, so even when CI does run, its engine is executed
+  nowhere: it is built, verified as a container, signed and published. The
+  release job prints a `::notice::` saying exactly that instead of exiting 0
+  quietly.
+- Gatekeeper actually accepting the notarized bundle, and SmartScreen
+  actually showing the screen `README.md` describes.
+- The launcher entry, exercised by a desktop environment. The app has only
+  ever been started from a shell.
+
+No sentence in `README.md`, `site/index.html` or the release notes may move
+an item up this list without someone doing the thing.
