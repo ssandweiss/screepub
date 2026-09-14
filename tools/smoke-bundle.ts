@@ -1,0 +1,291 @@
+// Open a built bundle WITHOUT installing it, and run the engine from
+// inside.
+//
+//   bun tools/smoke-bundle.ts --bundle dist/Screepub_0.6.0_arm64.deb \
+//     --expect-version 0.6.0
+//
+// The cheapest check that catches a broken bundle before a user does, and
+// the one that would have caught a 0.6.0 installer whose engine answers
+// 0.5.4. It is deliberately NOT "launch the app and look at it": no CI
+// runner has a display, the GUI half of the bundle cannot be exercised
+// anywhere, and the part that silently breaks during bundling is the
+// sidecar -- which is exactly what AppImage's linuxdeploy pass broke.
+//
+// --expect-version is required rather than read from package.json, unlike
+// smoke-cli.ts. A bundle's NAME comes from tauri.conf.json and the engine
+// inside it is built from package.json; catching those two disagreeing is
+// the entire point, so the number to compare against comes from outside.
+//
+// WHAT THIS EXERCISES, PER PLATFORM. A .deb and an .rpm are opened in
+// TypeScript and their engine is executed, so on Linux this is a real end
+// to end check. A .dmg needs hdiutil and an NSIS .exe needs 7z, and both
+// produce a binary for a foreign OS; neither can be opened, let alone run,
+// anywhere but on macOS and Windows respectively. So this tool REFUSES
+// those two off their own OS (see platformRefusal) rather than returning
+// quietly. A check that prints nothing on two of three platforms and exits
+// 0 is indistinguishable from a check that ran, which is how a bundle with
+// no working sidecar reaches a user.
+
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { parseArgs } from 'node:util';
+import { bundleEntries, findEntry } from './bundle-archive';
+import {
+  checkConvertResult,
+  checkEpubBytes,
+  soleJson,
+  type RunResult,
+  type Runner,
+} from './smoke-cli';
+
+const realRun: Runner = (argv) => {
+  const proc = Bun.spawnSync(argv, { stdout: 'pipe', stderr: 'pipe' });
+  return {
+    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout.toString(),
+    stderr: proc.stderr.toString(),
+  };
+};
+
+/** The engine's own `--version --json`, checked against the version the
+ *  bundle claims to be. soleJson enforces the one-object contract, so a
+ *  progress line before the answer fails here rather than downstream. */
+export function checkEngineVersion(result: RunResult, expected: string): void {
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `smoke-bundle: the engine inside the bundle exited ${result.exitCode}: ` +
+        result.stderr.trim().slice(0, 500),
+    );
+  }
+  const json = soleJson(result.stdout, 'the bundled engine');
+  if (json.ok !== true) {
+    throw new Error(`smoke-bundle: the bundled engine reported ${JSON.stringify(json)}`);
+  }
+  if (json.version !== expected) {
+    throw new Error(
+      `smoke-bundle: the engine inside this bundle says ${JSON.stringify(json.version)} but the ` +
+        `bundle is ${expected}. An installer whose About line contradicts its own filename ` +
+        'lies about itself in every bug report it appears in.',
+    );
+  }
+}
+
+/** The engine's path inside an installed tree, per container. */
+const ENGINE_IN_ARCHIVE = 'usr/bin/screepub-engine';
+const ENGINE_IN_APP = join('Contents', 'MacOS', 'screepub-engine');
+const ENGINE_IN_EXE = 'screepub-engine.exe';
+
+/** Which bundles this machine can actually open and run, and why not.
+ *
+ *  Deliberately NOT a silent skip. The .deb and .rpm readers are pure
+ *  TypeScript and run anywhere, but the binary inside one is for the host
+ *  OS, so the run half is real only on Linux; hdiutil exists only on macOS
+ *  and an NSIS payload is a Windows executable. Returning a refusal string
+ *  rather than `false` means the CLI can say which platform this had to be
+ *  run on, instead of exiting 0 having done nothing. */
+export function platformRefusal(bundlePath: string, platform: string): string | undefined {
+  const wrongOs = (os: string, tool: string): string =>
+    `smoke-bundle: ${bundlePath} can only be opened (${tool}) and its engine run on ${os}, and ` +
+    `this machine is ${platform}. NOTHING WAS CHECKED -- run this step on a ${os} runner. ` +
+    'Reporting success here would mean reporting success for a sidecar no one has executed.';
+
+  if (bundlePath.endsWith('.deb') || bundlePath.endsWith('.rpm')) {
+    // The readers are pure TypeScript and run anywhere; the ELF inside does
+    // not.
+    return platform === 'linux' ? undefined : wrongOs('Linux', 'no external tool');
+  }
+  if (bundlePath.endsWith('.dmg')) {
+    return platform === 'darwin' ? undefined : wrongOs('macOS', 'hdiutil');
+  }
+  if (bundlePath.endsWith('.exe')) {
+    return platform === 'win32' ? undefined : wrongOs('Windows', '7z');
+  }
+  return `smoke-bundle: ${bundlePath} is not a .deb, .rpm, .dmg or .exe`;
+}
+
+/** A .deb or an .rpm, opened in TypeScript -- no dpkg-deb, no rpm2cpio, no
+ *  7z, nothing to apt-get on a runner.
+ *
+ *  Only the engine is pulled out, and deliberately so: the real .deb and
+ *  the real .rpm do NOT hold the same files (the deb ships four icon sizes
+ *  to the rpm's one, and their desktop binaries differ in size), so a
+ *  shared file manifest would be a fiction. What must be true of both is
+ *  that the sidecar is in it and works. */
+export function extractArchiveEngine(bundlePath: string, workDir: string): string {
+  const entry = findEntry(bundleEntries(bundlePath), ENGINE_IN_ARCHIVE);
+  const dest = join(workDir, ENGINE_IN_ARCHIVE);
+  mkdirSync(dirname(dest), { recursive: true });
+  writeFileSync(dest, entry.data);
+  // The archive records the mode; writeFileSync does not honour it. Without
+  // this the run below fails with a bare EACCES naming no file.
+  chmodSync(dest, 0o755);
+  return dest;
+}
+
+/** A .dmg, via hdiutil. macOS only; nothing else has hdiutil. Returns a
+ *  `detach` the caller must run in a finally -- an attached image on a
+ *  runner outlives the job and the next one inherits a busy mount point. */
+export function extractDmgEngine(
+  bundlePath: string,
+  workDir: string,
+  run: Runner = realRun,
+): { enginePath: string; detach: () => void } {
+  const mount = join(workDir, 'mnt');
+  mkdirSync(mount, { recursive: true });
+  // -readonly so verifying an artifact cannot modify it; -nobrowse so no
+  // volume appears on a desktop the next job inherits.
+  const attach = run([
+    'hdiutil',
+    'attach',
+    bundlePath,
+    '-readonly',
+    '-nobrowse',
+    '-mountpoint',
+    mount,
+  ]);
+  if (attach.exitCode !== 0) {
+    throw new Error(
+      `smoke-bundle: hdiutil attach failed on ${bundlePath}: ${attach.stderr.trim().slice(0, 500)}`,
+    );
+  }
+  const detach = (): void => {
+    run(['hdiutil', 'detach', mount, '-force']);
+  };
+  try {
+    // Found by suffix, not by name: the transition overlay ships "Screepub
+    // Desktop.app" and piece F renames it to "Screepub.app".
+    // Sorted so a two-.app error names them in a stable order.
+    const apps = readdirSync(mount)
+      .filter((n) => n.endsWith('.app'))
+      .sort();
+    if (apps.length !== 1) {
+      throw new Error(
+        `smoke-bundle: expected exactly one .app on the mounted image, found ` +
+          `${apps.length}${apps.length ? ` (${apps.join(', ')})` : ''}`,
+      );
+    }
+    return { enginePath: join(mount, apps[0]!, ENGINE_IN_APP), detach };
+  } catch (err) {
+    detach();
+    throw err;
+  }
+}
+
+/** An NSIS installer, via 7z, which is present on GitHub's Windows image.
+ *  Extracting rather than installing keeps the runner clean and, more to
+ *  the point, proves the payload without needing a machine to install on. */
+export function extractExeEngine(
+  bundlePath: string,
+  workDir: string,
+  run: Runner = realRun,
+): string {
+  const result = run(['7z', 'x', bundlePath, `-o${workDir}`, '-y']);
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `smoke-bundle: 7z could not unpack ${bundlePath}: ${result.stderr.trim().slice(0, 500)}`,
+    );
+  }
+  const dest = join(workDir, ENGINE_IN_EXE);
+  if (!existsSync(dest)) {
+    throw new Error(
+      `smoke-bundle: no ${ENGINE_IN_EXE} under ${workDir} after unpacking ${bundlePath} ` +
+        `(it holds: ${readdirSync(workDir).join(', ') || '<nothing>'})`,
+    );
+  }
+  return dest;
+}
+
+/** Two runs of the engine that came out of the bundle: its own version, and
+ *  a real conversion of the committed fixture. The second is smoke-cli.ts's
+ *  assertion applied to a bundled engine rather than a downloaded one, and
+ *  it imports checkConvertResult rather than restating it.
+ *
+ *  The EPUB's bytes are then read back. checkConvertResult only reads what
+ *  the engine SAID; a sidecar that prints a success object and writes
+ *  nothing -- or writes a truncated file -- passes every string check and
+ *  fails the first reader. */
+export function smokeBundle(
+  bundlePath: string,
+  fixture: string,
+  workDir: string,
+  expectedVersion: string,
+  run: Runner = realRun,
+): void {
+  if (!existsSync(bundlePath)) throw new Error(`smoke-bundle: no bundle at ${bundlePath}`);
+  if (!existsSync(fixture)) throw new Error(`smoke-bundle: no fixture at ${fixture}`);
+
+  let enginePath: string;
+  let detach: (() => void) | undefined;
+  if (bundlePath.endsWith('.deb') || bundlePath.endsWith('.rpm')) {
+    enginePath = extractArchiveEngine(bundlePath, workDir);
+  } else if (bundlePath.endsWith('.dmg')) {
+    ({ enginePath, detach } = extractDmgEngine(bundlePath, workDir, run));
+  } else if (bundlePath.endsWith('.exe')) {
+    enginePath = extractExeEngine(bundlePath, workDir, run);
+  } else {
+    throw new Error(`smoke-bundle: ${bundlePath} is not a .deb, .rpm, .dmg or .exe`);
+  }
+
+  try {
+    checkEngineVersion(run([enginePath, '--version', '--json']), expectedVersion);
+    const epub = join(workDir, 'smoke.epub');
+    checkConvertResult(run([enginePath, fixture, '-o', epub, '--no-fountain', '--json']), epub);
+    if (!existsSync(epub)) {
+      throw new Error(
+        `smoke-bundle: the bundled engine reported a successful conversion but ${epub} is not ` +
+          'there. A success object is not a book.',
+      );
+    }
+    const fd = openSync(epub, 'r');
+    try {
+      const head = new Uint8Array(8);
+      const read = readSync(fd, head, 0, 8, 0);
+      checkEpubBytes(head.subarray(0, read));
+    } finally {
+      closeSync(fd);
+    }
+  } finally {
+    detach?.();
+  }
+}
+
+if (import.meta.main) {
+  try {
+    const { values } = parseArgs({
+      args: Bun.argv.slice(2),
+      options: {
+        bundle: { type: 'string' },
+        'expect-version': { type: 'string' },
+        fixture: { type: 'string' },
+      },
+      strict: true,
+      allowPositionals: false,
+    });
+    if (!values.bundle) throw new Error('smoke-bundle: --bundle <path> is required');
+    const expected = (values['expect-version'] ?? '').replace(/^v/, '');
+    if (!expected) throw new Error('smoke-bundle: --expect-version <version> is required');
+    const refusal = platformRefusal(values.bundle, process.platform);
+    if (refusal) throw new Error(refusal);
+    const repo = join(import.meta.dir, '..');
+    const fixture = values.fixture ?? join(repo, 'tests', 'fixtures', 'screenplay.pdf');
+    const work = mkdtempSync(join(tmpdir(), 'screepub-bundle-smoke-'));
+    smokeBundle(values.bundle, fixture, work, expected);
+    console.log(
+      `smoke-bundle: the engine inside ${values.bundle} reports ${expected} and converts the fixture`,
+    );
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(1);
+  }
+}
