@@ -1,11 +1,22 @@
 // Per-script formatting overrides, stored beside the script's .fountain in
 // the library: `<Stem>.screepub.json`. Absent sidecar = the caller's base.
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, extname, join } from 'node:path';
 import { resolveFormatOptions, type FormatOptions } from '../options';
 
+/** `<Stem>.screepub.json`, beside the file it belongs to.
+ *
+ * The stem is taken with `extname`, which is the SAME rule `src/library.ts`'s
+ * `stemOf` uses to name a script's library folder and its `.fountain` — and
+ * therefore the same rule `adoptSidecar` uses to name the file it carries in.
+ * Two rules that agree today can disagree tomorrow: a hand-rolled
+ * `/\.[^.]*$/` strip and `extname` part company on a dotfile with no
+ * extension (`.hidden` → `.screepub.json` one way, `.hidden.screepub.json`
+ * the other), which is a settings file written under one name and looked for
+ * under another. One rule, so there is nothing to drift. */
 export function sidecarPath(fountainPath: string): string {
-  const stem = basename(fountainPath).replace(/\.[^.]*$/, '');
+  const name = basename(fountainPath);
+  const stem = basename(name, extname(name));
   return join(dirname(fountainPath), `${stem}.screepub.json`);
 }
 

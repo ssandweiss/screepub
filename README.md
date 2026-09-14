@@ -142,10 +142,21 @@ the part that is well tested everywhere; sending is not.
 
 A cross-platform window is being built in `desktop/`, on Tauri, around this
 same engine — the app spawns the CLI binary and renders its `--json` answer,
-so there is exactly one implementation of everything that thinks. It builds
-and runs on Linux today. A CI workflow exists to compile the shell on macOS
-and Windows too, but it has not actually run yet. Installers are not built
-yet. Build instructions: [`desktop/README.md`](desktop/README.md).
+so there is exactly one implementation of everything that thinks. It has five
+surfaces: convert a script, read it, tune its formatting, send it to a
+reader, and the release notes.
+
+Build and run it with:
+
+    bun tools/build-sidecar.ts --host
+    cd desktop/src-tauri && cargo run
+
+**Linux is the only place it has actually been run.** A CI workflow compiles
+the shell on macOS and Windows as well, and compiling is not running: nothing
+on those two platforms has been started, clicked or looked at. There are no
+installers yet, on any platform — that is the next piece of work. Build
+instructions and what the window does not do:
+[`desktop/README.md`](desktop/README.md).
 
 The macOS app in `app/` is the shipping one until that work lands.
 

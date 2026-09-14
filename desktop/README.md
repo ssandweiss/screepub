@@ -57,11 +57,12 @@ with its code beneath it — not a crash and not a reworded message:
     screenplay. Pass --force to convert it anyway.
     not-screenplay
 
-**The app writes its output beside the input.** Converting a file inside the
-repo therefore drops a `.epub` and a `.fountain` next to it — e.g. picking
-`tests/fixtures/screenplay.pdf` leaves `tests/fixtures/screenplay.epub` and
-`tests/fixtures/screenplay.fountain` untracked. Delete them, or convert a
-copy from outside the tree.
+**The app writes its output into the library, never beside the input** (see
+the library section below; that was not true before task 10b). Converting
+`tests/fixtures/screenplay.pdf` therefore leaves `tests/fixtures/` untouched
+and puts the book in `<Documents>/Screepub/screenplay/`. Set
+`SCREEPUB_LIBRARY` before `cargo run` to send a session's output somewhere
+else.
 
 ### What a missing engine looks like
 
@@ -371,12 +372,105 @@ and the window reads `epubPath`/`fountainPath` back off the answer.
 `SCREEPUB_LIBRARY` overrides the location (it is also the tests' only seam —
 no test may write into a real home).
 
-**Known, pre-existing, and the kind of thing a user reports as a bug:** the
-FIRST conversion of a script sends no `--options-json`, so the book it builds
-uses the engine's defaults even when that script already has a tuned sidecar
-— including one carried in from beside the PDF by `adoptSidecar`. Tune reads
-the sidecar and a re-render applies it, so the settings are not lost, but
-"my settings did not apply to the first conversion" is exactly what it looks
-like from the outside. Whoever wires Convert to Tune (or does the final pass)
-should decide whether the first conversion reads the sidecar too; the engine
-side already exists — `src/settings/sidecar.ts`'s `loadScriptSettings`.
+**This was once a defect and is now fixed, in the engine rather than here.**
+The first conversion still sends no `--options-json` — it has no settings to
+send — but `src/cli.ts` now reads the script's own `.screepub.json` before it
+renders and says so on stderr, so a tuned script comes back tuned on the very
+first conversion. Confirmed in the running window on 2026-09-14: page markers
+switched on in Tune, then the same PDF dropped again, and the new `.fountain`
+carried `= pg N`. The window passes no flag for this and needs none.
+
+## The interface (piece D)
+
+`desktop/ui/` is the app. No build step, no bundler, no npm: `index.html`
+loads three stylesheets and one ES module, and `tauri-build` embeds the
+directory at compile time.
+
+| file | what it owns |
+| --- | --- |
+| `app.js` | **the only file that talks to Rust**, and the only one that knows an engine flag. Every argv the window builds is in `argv`. |
+| `main.js` | boot, the shared `state`, the surface routing, the Ctrl/Cmd-O shortcut. |
+| `frame.js` | the sheet, the punched holes, the brads, the tablist. |
+| `dom.js` | `el` / `clear` / `text`. Nothing else, and no innerHTML. |
+| `convert.js` `read.js` `tune.js` `send.js` `notes-surface.js` | one surface each. |
+| `tokens.css` | **generated** from `brand/tokens.json` by `tools/build-desktop-tokens.ts`. |
+| `notes.js` | **generated** from `docs/releases/<version>.md` by `tools/build-desktop-notes.ts`. |
+| `style.css` | the seven core colours (pinned by `tests/desktop-shell.test.ts`), the fonts, the frame. |
+
+Regenerate both generated files after touching `brand/tokens.json` or the
+release notes; CI diffs them and fails if you didn't.
+
+### Why the reader is an iframe with an adopted stylesheet
+
+The window's CSP is `default-src 'self'`, which blocks **every** inline
+style — including a `<style>` inside an `<iframe srcdoc>`, because srcdoc
+frames inherit the parent's policy. Measured, not assumed: an engine preview
+dropped into a srcdoc frame renders completely unstyled, with no error
+anywhere.
+
+CSSOM is not blocked. So `read.js` lifts the `<style>` out of the engine's
+document and adopts its text as a constructed stylesheet instead — the same
+bytes, nothing rewritten. Three details are load-bearing:
+
+- The sheet must be constructed **in the frame's realm**
+  (`new frame.contentWindow.CSSStyleSheet()`); one built in the parent is
+  rejected on adoption.
+- The frame is `sandbox="allow-same-origin"` with **no** `allow-scripts`, so
+  the parent can keep the reader's scroll position and build the scene rail,
+  while nothing inside the document can run.
+- The engine's CSS asks for "Courier Prime" by name and nothing inside the
+  frame says where that file is, so `read.js` supplies the `@font-face`
+  rules. `about:srcdoc` resolves relative URLs against the parent, so
+  `url(fonts/…)` reaches the bundled subsets under the strict CSP.
+
+The asset protocol was tried and rejected: it renders, but the frame is
+cross-origin, so the parent cannot script it and it cannot reach the bundled
+fonts. It also needs a `protocol-asset` cargo feature and a path-scope grant.
+
+### Fonts
+
+Courier Prime and Literata are bundled as the same six WOFF2 subsets the
+website self-hosts. **Do not use `document.fonts.check()` to verify one is
+present** — it was measured returning `true` on a machine where `fc-list`
+showed neither installed. `await document.fonts.load(...)` and then read the
+`FontFace.status`.
+
+### What piece D does not do
+
+- **No Cancel during conversion** (see the progress section above).
+- **No global "app defaults"** — settings are per script, in the sidecar
+  `src/settings/sidecar.ts` owns. A cross-platform preference store would
+  mean a new Tauri plugin and a new capability grant.
+- **No auto-update.** Notes says so on the surface.
+
+### Known, open, and found by running it (task 13, 2026-09-14)
+
+Each of these was seen in the live window on Linux. None is fixed here.
+
+- **The keyboard can be left with nowhere to stand after the native file
+  dialog closes.** Ctrl-O then Escape, with a result on screen, sometimes
+  leaves no focused element: Tab, Shift-Tab and the tablist's arrow keys all
+  do nothing, and re-focusing the window does not help. `convert.js` already
+  re-focuses `chooseButton` when the picker returns, but that button is only
+  connected while the drop well is on screen, so the result and refusal
+  surfaces have no such anchor. Intermittent, and the section above already
+  records that the webview does not always take focus back.
+- **Ctrl-O while a picker is already open opens a second picker.** `busy`
+  only guards a running conversion, not an open dialog.
+- **The reader iframe takes focus without showing it.** Tabbing into the
+  reader leaves no visible focus ring for one stop; the tablist is still
+  reachable by tabbing on round to the rail and the panel, but a keyboard
+  user cannot see where they are for those presses.
+- **The not-a-screenplay refusal tells a window user to type a CLI flag.**
+  The engine's sentence ends "Pass `--force` to convert it anyway", and the
+  window prints it verbatim directly above a **Convert anyway** button that
+  does exactly that. `drawFailure`'s comment says the engine's sentence
+  "already says what to do"; for `not-screenplay` in a window, it does not.
+- **A refusal closes whatever script was open.** `drawFailure` sets
+  `state.script = null`, so dropping a non-screenplay after converting a
+  script takes Read, Tune and Send away from the script that is still
+  perfectly good in the library. Defensible, but it is a decision, not an
+  accident, and nothing on the surface says the earlier book is still there.
+- **The raw error code is printed under the buttons** (`not-screenplay`,
+  `scanned`). Deliberate — it is a support handle — but on the page it reads
+  as leftover debug text.

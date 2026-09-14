@@ -524,6 +524,19 @@ describe('the desktop workflow', () => {
     expect(cargo).toBeGreaterThan(sidecar);
   });
 
+  test('CI regenerates the window’s generated files rather than trusting them', () => {
+    // Both are committed, so both can go stale between a brand/tokens.json
+    // edit and someone noticing. Asserting the step exists is not enough:
+    // assert it DIFFS, which is the half that makes it a gate.
+    const runs = WF.jobs.build.steps.map((s) => s.run ?? '');
+    const regen = runs.findIndex((r) => r.includes('build-desktop-tokens.ts'));
+    expect(regen).toBeGreaterThanOrEqual(0);
+    expect(runs[regen]).toContain('build-desktop-notes.ts');
+    expect(runs[regen]).toContain('git diff --exit-code');
+    const cargo = runs.findIndex((r) => r.includes('cargo build'));
+    expect(regen).toBeLessThan(cargo);
+  });
+
   test('it does not bundle, sign or run anything', () => {
     // Scope guard. Bundling is piece E2; a `tauri build` appearing here
     // would mean C had grown an installer nobody reviewed.

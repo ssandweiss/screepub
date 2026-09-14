@@ -932,6 +932,31 @@ and the suite will say so if you forget.
 
 ## Mac app notes
 
+**These eighteen options now have two interfaces, not one.** Besides the
+SwiftUI reader rail described below, they are the **Tune surface of the
+cross-platform Tauri window** (`desktop/ui/tune.js`), in the same four groups
+— the page, dialogue, the text, what the book carries — plus the four
+`Read from the PDF` knobs. The window owns no formatting rule of its own: it
+reaches every option through the CLI, `screepub settings <fountain> --set`
+to read and store the per-script sidecar and `--options-json` to re-render
+from the cached `.fountain`, so the engine remains the only thing that
+decides what a knob means. The `From the PDF` knobs carry the same "won't
+change the preview" caveat there as in the Swift rail: they are decided while
+the PDF is being read and only the next conversion from the PDF can apply
+them.
+
+**The two interfaces disagree about how many those are, and the window is
+the one that is right.** `ReaderRail.swift`'s `From the PDF` section holds
+two knobs (`rejoinSplitDialogue`, `contdMode`) and says in a comment that
+they are "the only knobs consumed in fountain/serialize.ts". They are not:
+`showPageMarkers` and `dualDialogue` are read there too (serialize.ts's
+`= pg N` marker and its `^` caret), so both are written INTO the `.fountain`
+when the PDF is read and neither can move a preview that re-renders from
+that cached `.fountain`. The Swift rail files them under `Content` and
+`Dialogue`, where they read as live knobs. `desktop/ui/tune.js` groups all
+four together under `Read from the PDF` with the caveat. Whoever next opens
+the Mac app should move those two; nothing in the engine needs to change.
+
 - All knobs above funnel into two seams: **CSS generation**
   (`src/epub/css.ts` — make it a function of an options object) and
   **serializer/packing flags** (`tokensToBody` opts, `prepare` in the

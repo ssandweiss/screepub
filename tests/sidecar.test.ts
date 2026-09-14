@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import { DEFAULT_FORMAT_OPTIONS, type FormatOptions } from '../src/options';
 import { sidecarPath, loadScriptSettings, saveScriptSettings } from '../src/settings/sidecar';
 
@@ -14,6 +14,20 @@ function library(): string {
 test('sidecar path derives from the fountain stem', () => {
   const fountain = join(library(), 'Test Script.fountain');
   expect(basename(sidecarPath(fountain))).toBe('Test Script.screepub.json');
+});
+
+// The one naming question the window's own flows could not settle on their
+// own: a script whose stem contains a dot. `settings` is handed a .fountain,
+// `adoptSidecar` is handed a library output prefix with no extension at all,
+// and both have to land on the same file or a script's tuning is written
+// under one name and read under another. Pinned against library.ts's own
+// rule rather than against a literal, so the two cannot drift apart.
+test('sidecar naming agrees with the library for every stem it can meet', () => {
+  const dir = library();
+  for (const name of ['Draft.pdf', 'My.Script.pdf', 'My.Script.fountain', 'a.b.c', '.hidden']) {
+    const stem = basename(name, extname(name));
+    expect(basename(sidecarPath(join(dir, name)))).toBe(`${stem}.screepub.json`);
+  }
 });
 
 test('sidecar round-trips settings', () => {
