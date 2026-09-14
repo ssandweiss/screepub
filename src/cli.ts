@@ -40,6 +40,7 @@ Options:
   --mobi                 also write a .mobi (for USB sideload to Kindle)
   --preview-html <file>  also write the script as one self-contained HTML file
   --options <file.json>  formatting options (see docs/formatting-options-log.md)
+  --options-json <json>  the same options as one JSON argument (for the app)
   --json                 machine-readable result on stdout (for the app)
   --progress             emit NDJSON progress to STDERR while converting
   --debug                also dump classified elements, and let pdf.js's
@@ -172,6 +173,7 @@ function parseCliArgs() {
       mobi: { type: 'boolean', default: false },
       'preview-html': { type: 'string' },
       options: { type: 'string' },
+      'options-json': { type: 'string' },
       json: { type: 'boolean', default: false },
       progress: { type: 'boolean', default: false },
       debug: { type: 'boolean', default: false },
@@ -322,6 +324,12 @@ async function main() {
   const stem = join(dirname(epubPath), basename(epubPath, extname(epubPath)));
 
   let format: Record<string, unknown> | undefined;
+  if (values.options !== undefined && values['options-json'] !== undefined) {
+    fail({
+      code: 'bad-options',
+      message: 'pass --options or --options-json, not both',
+    });
+  }
   if (values.options) {
     try {
       format = JSON.parse(await readFile(values.options, 'utf8'));
@@ -331,6 +339,21 @@ async function main() {
       // would leak a temp path into a user-facing message.
       fail({ code: 'bad-options', message: `cannot read options file ${values.options}` });
     }
+  }
+  if (values['options-json'] !== undefined) {
+    // The app's channel: the window has no filesystem, so its settings
+    // arrive as one argv element. The PAYLOAD never reaches the message —
+    // it is a whole settings object and would bury the sentence.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(values['options-json']);
+    } catch {
+      fail({ code: 'bad-options', message: '--options-json is not valid JSON' });
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      fail({ code: 'bad-options', message: '--options-json must be a JSON object' });
+    }
+    format = parsed as Record<string, unknown>;
   }
 
   // Progress goes to STDERR, never stdout. --json's contract is that stdout

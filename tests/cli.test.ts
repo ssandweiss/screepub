@@ -7,6 +7,7 @@ import { mapConversionError } from '../src/cli-errors';
 const ROOT = new URL('..', import.meta.url).pathname;
 const FIXTURES = new URL('./fixtures/', import.meta.url).pathname;
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-cli-'));
+const FIXTURE_PDF = `${FIXTURES}screenplay.pdf`;
 
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
@@ -258,4 +259,93 @@ describe('the default conversion path is unchanged by verb dispatch', () => {
       expect(result.pages).toBeGreaterThan(0);
     }
   }, 120000);
+});
+
+describe('--options-json', () => {
+  test('applies a knob passed as an argv string', async () => {
+    const previewPath = `${SCRATCH}/options-json-applies.html`;
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-html', previewPath,
+      '-o', `${SCRATCH}/options-json-applies.epub`, '--no-fountain',
+      '--options-json', '{"dialogueSideMarginPct":7}']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.ok).toBe(true);
+    const html = await Bun.file(previewPath).text();
+    // Not "it didn't crash": the number we passed has to reach the CSS.
+    // The brief's own version of this assertion (bare "7%" / not "20%")
+    // is a false negative waiting to happen: section.titlepage carries a
+    // static `margin-top: 20%` unrelated to this knob, so "not contain
+    // 20%" would fail against a CORRECT implementation the day someone
+    // reads that titlepage rule. Anchor on the actual declaration.
+    expect(html).toContain('margin-left: 7%');
+    expect(html).not.toContain('margin-left: 20%'); // the default this overrode
+  }, 60000);
+
+  test('clamps out-of-range values instead of trusting them', async () => {
+    const previewPath = `${SCRATCH}/options-json-clamps.html`;
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-html', previewPath,
+      '-o', `${SCRATCH}/options-json-clamps.epub`, '--no-fountain',
+      '--options-json', '{"dialogueSideMarginPct":999}']);
+    expect(JSON.parse(out.stdout).ok).toBe(true);
+    const html = await Bun.file(previewPath).text();
+    expect(html).toContain('margin-left: 30%'); // resolveFormatOptions' documented ceiling
+    expect(html).not.toContain('margin-left: 999%');
+  }, 60000);
+
+  test('rejects a non-object payload with bad-options', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json', '--options-json', '[1,2]']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.ok).toBe(false);
+    expect(answer.error.code).toBe('bad-options');
+    expect(answer.error.message).toContain('--options-json');
+  });
+
+  test('rejects malformed JSON with bad-options and does not leak the payload', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json', '--options-json', '{oops']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.error.code).toBe('bad-options');
+    expect(answer.error.message).not.toContain('oops');
+  });
+
+  test('refuses both --options and --options-json rather than picking one', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json', '--options', 'x.json',
+      '--options-json', '{}']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.error.code).toBe('bad-options');
+    expect(answer.error.message).toContain('not both');
+  });
+
+  // Beyond the brief: resolveFormatOptions ignores unknown keys and falls
+  // back to the default for a wrong-typed value rather than rejecting the
+  // whole payload — that's the SAME merge path --options already uses, so
+  // --options-json must inherit that behavior rather than validating twice
+  // (a second, stricter check here would be the "two merge rules" the task
+  // exists to avoid). These tests catch an implementation that skips
+  // resolveFormatOptions and spreads the parsed JSON directly: that would
+  // either crash rendering or leak the raw string into the CSS.
+  test('ignores an unknown key without failing the conversion', async () => {
+    const previewPath = `${SCRATCH}/options-json-unknown-key.html`;
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-html', previewPath,
+      '-o', `${SCRATCH}/options-json-unknown-key.epub`, '--no-fountain',
+      '--options-json', '{"notARealKnob":123,"dialogueSideMarginPct":12}']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.ok).toBe(true);
+    const html = await Bun.file(previewPath).text();
+    // The unknown key is dropped silently; the valid sibling key still lands.
+    expect(html).toContain('margin-left: 12%');
+  }, 60000);
+
+  test('falls back to the default for a wrong-typed value instead of crashing', async () => {
+    const previewPath = `${SCRATCH}/options-json-wrong-type.html`;
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-html', previewPath,
+      '-o', `${SCRATCH}/options-json-wrong-type.epub`, '--no-fountain',
+      '--options-json', '{"dialogueSideMarginPct":"wide"}']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.ok).toBe(true);
+    const html = await Bun.file(previewPath).text();
+    // A naive `JSON.parse` + spread would template the raw string straight
+    // into the CSS ("wide%"); resolveFormatOptions must fall back to the
+    // documented default instead.
+    expect(html).not.toContain('wide%');
+    expect(html).toContain('margin-left: 20%');
+  }, 60000);
 });
