@@ -91,6 +91,11 @@
       "category": "doc",
       "breaks": "The options registry names Swift files as the implementing code for three behaviours and kit-check as their guard. CLAUDE.md calls this file the app's options registry, so a stale entry here misleads by design."
     },
+    "docs/mac-qa.md": {
+      "refs": 4,
+      "category": "note",
+      "breaks": "The gate-1 QA checklist. It names Screepub.app and the flat ~/Documents/Screepub layout because its whole job is telling a tester how the shipping app and its replacement differ while BOTH are installed. At F2 the coexistence sections stop applying; at F3 the file should go, since the gate it describes will have been passed."
+    },
     "docs/release-notes-template.md": {
       "refs": 5,
       "category": "doc",
