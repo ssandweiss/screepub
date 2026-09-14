@@ -502,14 +502,18 @@ export function sha256File(path: string): string {
  *  failure this file exists to catch. A named file that is gone is dropped,
  *  loudly, rather than left behind to fail `-c` for a download nobody
  *  published. */
-export function writeChecksums(outDir: string, archiveNames: string[]): string {
-  const path = join(outDir, 'SHA256SUMS');
+export function writeChecksums(
+  outDir: string,
+  archiveNames: string[],
+  fileName: string = 'SHA256SUMS',
+): string {
+  const path = join(outDir, fileName);
   const carried: string[] = [];
   if (existsSync(path)) {
     for (const name of parseChecksums(readFileSync(path, 'utf8')).keys()) {
       if (archiveNames.includes(name)) continue;
       if (existsSync(join(outDir, name))) carried.push(name);
-      else console.warn(`build-cli: ${name} is named in SHA256SUMS but no longer in ${outDir}; dropping it`);
+      else console.warn(`build-cli: ${name} is named in ${fileName} but no longer in ${outDir}; dropping it`);
     }
   }
 

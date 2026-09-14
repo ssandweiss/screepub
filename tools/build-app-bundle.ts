@@ -1,0 +1,409 @@
+// Build, name and VERIFY the installable app bundles.
+//
+//   bun tools/build-app-bundle.ts --version 0.6.0 --out dist/
+//   bun tools/build-app-bundle.ts --version 0.6.0 --out dist/ \
+//     --target aarch64-apple-darwin --config tauri.transition.conf.json
+//
+// A Bun script and not workflow YAML, following tools/build-cli.ts exactly:
+// YAML can only be tested by cutting a release, and a release tool nobody
+// can run locally is a release tool nobody can debug. It is also how the
+// Linux arm64 .deb gets made by hand if no arm64 runner is available.
+//
+// It never signs anything. On macOS, tauri-bundler signs and notarizes from
+// the APPLE_* environment variables the release workflow sets; there is no
+// codesign call in this file and app/release.sh is neither read nor touched.
+
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  statSync,
+} from 'node:fs';
+import { basename, join, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+import { REPO_DIR, writeChecksums, type Spawn } from './build-cli';
+
+export type BundleOs = 'linux' | 'macos' | 'windows';
+export type BundleArch = 'x64' | 'arm64';
+
+export interface BundleKind {
+  id: 'deb' | 'rpm' | 'dmg' | 'nsis';
+  os: BundleOs;
+  /** The directory under `target/[<triple>/]release/bundle/`. */
+  dir: string;
+  ext: string;
+  /** Container magic, checked rather than assumed. */
+  magic: readonly number[];
+  /** Where that magic sits. A UDIF image's `koly` block is the LAST 512
+   *  bytes of the file; a DMG has no header magic at all. */
+  magicAt: 'head' | 'udif-trailer';
+  floorBytes: number;
+  /** The stable published filename. Deliberately ours, not the bundler's:
+   *  tauri names the DMG after productName, which the macOS transition
+   *  overlay changes to "Screepub Desktop" (with a space). */
+  releasedName(version: string, arch: BundleArch): string;
+}
+
+/** Every bundle carries the ~102 MB engine — the real arm64 .deb and .rpm
+ *  measure ~44.3 MB compressed — so 10 MB is an unambiguous floor. Same
+ *  reasoning as build-cli.ts's RELEASE_FLOORS. */
+const FLOOR = 10_000_000;
+
+const ARCH_MAGIC = [0x21, 0x3c, 0x61, 0x72, 0x63, 0x68, 0x3e, 0x0a]; // "!<arch>\n"
+const RPM_MAGIC = [0xed, 0xab, 0xee, 0xdb];
+const MZ_MAGIC = [0x4d, 0x5a]; // "MZ"
+const KOLY_MAGIC = [0x6b, 0x6f, 0x6c, 0x79]; // "koly", the UDIF trailer
+
+export const BUNDLE_KINDS: readonly BundleKind[] = [
+  {
+    id: 'deb',
+    os: 'linux',
+    dir: 'deb',
+    ext: '.deb',
+    magic: ARCH_MAGIC,
+    magicAt: 'head',
+    floorBytes: FLOOR,
+    releasedName: (v, arch) => `Screepub_${v}_${arch === 'x64' ? 'amd64' : 'arm64'}.deb`,
+  },
+  {
+    id: 'rpm',
+    os: 'linux',
+    dir: 'rpm',
+    ext: '.rpm',
+    magic: RPM_MAGIC,
+    magicAt: 'head',
+    floorBytes: FLOOR,
+    releasedName: (v, arch) => `Screepub-${v}-1.${arch === 'x64' ? 'x86_64' : 'aarch64'}.rpm`,
+  },
+  {
+    // "Desktop" in the name, and NOT Screepub-macOS.dmg: app/release.sh
+    // uploads that one to the same release page and tools/bump-tap.sh
+    // hardcodes it. Two Mac downloads is confusing enough without a clash.
+    id: 'dmg',
+    os: 'macos',
+    dir: 'dmg',
+    ext: '.dmg',
+    magic: KOLY_MAGIC,
+    magicAt: 'udif-trailer',
+    floorBytes: FLOOR,
+    releasedName: (_v, arch) => `Screepub-Desktop-macOS-${arch}.dmg`,
+  },
+  {
+    // Only x86-64 ships, so the arch is not in the name; an arm64 Windows
+    // build would need its own row here rather than a silent overwrite.
+    id: 'nsis',
+    os: 'windows',
+    dir: 'nsis',
+    ext: '.exe',
+    magic: MZ_MAGIC,
+    magicAt: 'head',
+    floorBytes: FLOOR,
+    releasedName: (v) => `Screepub-${v}-setup.exe`,
+  },
+];
+
+export const DESKTOP_DIR = join(REPO_DIR, 'desktop', 'src-tauri');
+
+export function kindsForOs(os: BundleOs): BundleKind[] {
+  return BUNDLE_KINDS.filter((k) => k.os === os);
+}
+
+/** The `--bundles` value, pinned per OS and NEVER the default: on Linux the
+ *  default is deb, rpm and appimage, so a bare `cargo tauri build` attempts
+ *  an AppImage whose linuxdeploy pass corrupts the Bun-compiled engine, and
+ *  fails the whole run. `app,dmg` rather than `dmg` alone is redundant --
+ *  the dmg step builds the .app itself -- but it says what is produced. */
+export function bundleListFor(os: BundleOs): string {
+  if (os === 'linux') return 'deb,rpm';
+  if (os === 'macos') return 'app,dmg';
+  return 'nsis';
+}
+
+export function buildArgv(os: BundleOs, opts: { target?: string; config?: string }): string[] {
+  const argv = ['cargo', 'tauri', 'build', '--bundles', bundleListFor(os)];
+  if (opts.target) argv.push('--target', opts.target);
+  if (opts.config) argv.push('--config', opts.config);
+  return argv;
+}
+
+/** `cargo tauri build --target X` writes to `target/X/release/bundle/...`,
+ *  not `target/release/bundle/...`. Looking in the wrong one is how a build
+ *  "succeeds" and produces nothing.
+ *
+ *  `desktopDir` is a parameter and not only the constant so a test can point
+ *  a whole run at a temporary tree instead of writing fake artifacts into
+ *  the repo's own `target/`, where they would be found by the NEXT run. */
+export function bundleDirFor(
+  kind: BundleKind,
+  target?: string,
+  desktopDir: string = DESKTOP_DIR,
+): string {
+  return target
+    ? join(desktopDir, 'target', target, 'release', 'bundle', kind.dir)
+    : join(desktopDir, 'target', 'release', 'bundle', kind.dir);
+}
+
+/** The one file the bundler wrote, found rather than reconstructed.
+ *
+ *  Reconstructing tauri's own filename would mean two places agreeing about
+ *  a third party's format string -- and productName, which is half of it,
+ *  is exactly what the macOS transition overlay changes. So: glob for the
+ *  extension and insist on EXACTLY ONE match, which is what turns a glob
+ *  into a fact. `rw.` is excluded by name because bundle_dmg leaves
+ *  `rw.$$.<name>.dmg` behind when it dies partway. */
+export function discoverArtifact(dir: string, kind: BundleKind): string {
+  if (!existsSync(dir)) {
+    throw new Error(
+      `build-app-bundle: ${kind.id}: no bundle directory at ${dir}. cargo tauri build ` +
+        'reported success and produced nothing there.',
+    );
+  }
+  const found = readdirSync(dir)
+    .filter((n) => n.endsWith(kind.ext) && !n.startsWith('rw.'))
+    .sort();
+  if (found.length !== 1) {
+    throw new Error(
+      `build-app-bundle: ${kind.id}: expected exactly one ${kind.ext} in ${dir}, found ` +
+        `${found.length}${found.length ? ` (${found.join(', ')})` : ''}. A leftover from an ` +
+        'earlier version is the usual cause; clear the directory and rebuild.',
+    );
+  }
+  return join(dir, found[0]!);
+}
+
+/** Read `n` bytes at a position, never the whole file: a real bundle is
+ *  ~44 MB and this inspects at most eight bytes of it. */
+function bytesAt(path: string, n: number, position: number): Uint8Array {
+  const fd = openSync(path, 'r');
+  try {
+    const buf = new Uint8Array(n);
+    const read = readSync(fd, buf, 0, n, position);
+    return buf.subarray(0, read);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Check what was PRODUCED. `cargo tauri build` can exit 0 and leave a
+ *  truncated image, and a copy step can put the wrong container behind the
+ *  right name.
+ *
+ *  There is deliberately no shared file-list assertion across kinds: the
+ *  real .deb and .rpm of the same build do NOT carry the same payload (the
+ *  deb ships four icon sizes, the rpm one; their binaries differ in size),
+ *  so the only thing true of every kind is its container and its scale. */
+export function verifyBundleFile(path: string, kind: BundleKind): void {
+  if (!existsSync(path)) {
+    throw new Error(`build-app-bundle: ${kind.id}: nothing at ${path}`);
+  }
+  const bytes = statSync(path).size;
+  if (bytes < kind.floorBytes) {
+    throw new Error(
+      `build-app-bundle: ${kind.id}: ${basename(path)} is ${bytes} bytes, under the ` +
+        `${kind.floorBytes}-byte floor. Every bundle carries the ~102 MB engine.`,
+    );
+  }
+  const window =
+    kind.magicAt === 'udif-trailer'
+      ? bytesAt(path, 512, bytes - 512)
+      : bytesAt(path, kind.magic.length, 0);
+  const ok = window.length >= kind.magic.length && kind.magic.every((b, i) => window[i] === b);
+  if (!ok) {
+    const got = [...window.subarray(0, kind.magic.length)]
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join(' ');
+    throw new Error(
+      `build-app-bundle: ${kind.id}: ${basename(path)} does not carry the ${kind.id} container ` +
+        `magic at the ${kind.magicAt === 'head' ? 'start' : 'UDIF trailer'} (saw ${got}). ` +
+        'A renamed file of another format is the usual cause.',
+    );
+  }
+}
+
+const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
+
+/** The crate's own version: the `version` key of the `[package]` TABLE and
+ *  nothing else. A naive "first version after [package]" scan runs straight
+ *  past the end of the table into `[dependencies]` when [package] has no
+ *  version of its own, and then reports a dependency's `version = "2"` as
+ *  the crate's -- a gate that fails OPEN. The table is cut at the next
+ *  header first, so a missing key answers undefined and the gate fails. */
+export function cargoPackageVersion(text: string): string | undefined {
+  const header = /^[ \t]*\[package\][ \t]*\r?$/m.exec(text);
+  if (!header) return undefined;
+  const rest = text.slice(header.index + header[0].length);
+  const next = /^[ \t]*\[/m.exec(rest);
+  const table = next ? rest.slice(0, next.index) : rest;
+  return /^[ \t]*version[ \t]*=[ \t]*"([^"]*)"/m.exec(table)?.[1];
+}
+
+/** package.json is what the ENGINE reports, Cargo.toml is the crate, and
+ *  tauri.conf.json names the bundle file, the Info.plist, the deb Version:
+ *  and the NSIS product version. A release in which they disagree ships an
+ *  installer whose About line contradicts its own filename -- which is
+ *  exactly what a real 0.6.0 bundle around a 0.5.4 engine did on
+ *  2026-09-14. This is a RELEASE-tool gate, not a `bun test` assertion: the
+ *  split is a normal working-branch state (package.json is 0.5.4 while the
+ *  crate and the config are already 0.6.0) and a test that failed on every
+ *  branch would be deleted within a week. */
+export function assertBundleVersions(version: string, repoDir: string = REPO_DIR): void {
+  const pkg = (
+    JSON.parse(readFileSync(join(repoDir, 'package.json'), 'utf8')) as { version?: string }
+  ).version;
+  const cargo = cargoPackageVersion(
+    readFileSync(join(repoDir, 'desktop', 'src-tauri', 'Cargo.toml'), 'utf8'),
+  );
+  const conf = (
+    JSON.parse(readFileSync(join(repoDir, 'desktop', 'src-tauri', 'tauri.conf.json'), 'utf8')) as {
+      version?: string;
+    }
+  ).version;
+
+  for (const [file, found] of [
+    ['package.json', pkg],
+    ['desktop/src-tauri/Cargo.toml', cargo],
+    ['desktop/src-tauri/tauri.conf.json', conf],
+  ] as const) {
+    if (found !== version) {
+      throw new Error(
+        `build-app-bundle: ${file} says ${found ?? '<nothing>'} but the version being built is ` +
+          `${version}. All three must agree at a release, or the bundle's filename and the ` +
+          'engine inside it tell a user two different things.',
+      );
+    }
+  }
+}
+
+export interface BundleArgs {
+  version: string;
+  outDir: string;
+  os: BundleOs;
+  arch: BundleArch;
+  target?: string;
+  config?: string;
+}
+
+export function osForPlatform(platform: string): BundleOs {
+  if (platform === 'linux') return 'linux';
+  if (platform === 'darwin') return 'macos';
+  if (platform === 'win32') return 'windows';
+  throw new Error(`build-app-bundle: no app bundle is defined for platform "${platform}"`);
+}
+
+export function parseBundleArgs(
+  argv: string[],
+  platform: string = process.platform,
+  arch: string = process.arch,
+): BundleArgs {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      version: { type: 'string' },
+      out: { type: 'string' },
+      target: { type: 'string' },
+      config: { type: 'string' },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+
+  const version = (values.version ?? '').replace(/^v/, '');
+  if (!VERSION_RE.test(version)) {
+    throw new Error(
+      `build-app-bundle: --version must be MAJOR.MINOR.PATCH (got ${
+        values.version ?? '<missing>'
+      }). release.yml can be dispatched against a branch, and a branch name must never ` +
+        'reach a bundle filename.',
+    );
+  }
+  if (!values.out) {
+    throw new Error(
+      'build-app-bundle: --out <dir> is required. There is no default: each bundle is ' +
+        '~44 MB and a Linux run writes two of them plus a checksums file.',
+    );
+  }
+  if (arch !== 'x64' && arch !== 'arm64') {
+    throw new Error(`build-app-bundle: no app bundle is defined for architecture "${arch}"`);
+  }
+
+  return {
+    version,
+    outDir: resolve(values.out),
+    os: osForPlatform(platform),
+    arch,
+    target: values.target,
+    config: values.config,
+  };
+}
+
+const realSpawn: Spawn = (argv, cwd) => {
+  const proc = Bun.spawnSync(argv, { cwd, stdout: 'inherit', stderr: 'pipe' });
+  return { exitCode: proc.exitCode ?? 1, stderr: proc.stderr.toString() };
+};
+
+/** Where a run reads the repo and writes its build tree. Parameters, not
+ *  constants, so the rename-and-checksum half can be exercised by a test:
+ *  the version gate refuses to run in the repo on any working branch, which
+ *  would otherwise leave this whole function untested until a release. */
+export interface BundleDirs {
+  repoDir?: string;
+  desktopDir?: string;
+}
+
+/** One cargo run per OS, then discover, verify, rename and checksum.
+ *
+ *  Verifying BEFORE the rename means a broken artifact fails naming the
+ *  bundler's own file, which is the one a person can go and look at. */
+export async function buildBundles(
+  args: BundleArgs,
+  spawn: Spawn = realSpawn,
+  dirs: BundleDirs = {},
+): Promise<string[]> {
+  const repoDir = dirs.repoDir ?? REPO_DIR;
+  const desktopDir = dirs.desktopDir ?? join(repoDir, 'desktop', 'src-tauri');
+  assertBundleVersions(args.version, repoDir);
+  mkdirSync(args.outDir, { recursive: true });
+
+  const argv = buildArgv(args.os, { target: args.target, config: args.config });
+  console.log(`── ${argv.join(' ')}`);
+  const { exitCode, stderr } = spawn(argv, desktopDir);
+  if (exitCode !== 0) {
+    throw new Error(
+      `build-app-bundle: cargo tauri build failed (exit ${exitCode})\n${stderr.trim()}`,
+    );
+  }
+
+  const names: string[] = [];
+  for (const kind of kindsForOs(args.os)) {
+    const built = discoverArtifact(bundleDirFor(kind, args.target, desktopDir), kind);
+    verifyBundleFile(built, kind);
+    const name = kind.releasedName(args.version, args.arch);
+    const dest = join(args.outDir, name);
+    copyFileSync(built, dest);
+    // Verified again AFTER the copy: a full disk truncates silently.
+    verifyBundleFile(dest, kind);
+    console.log(`   ${basename(built)} → ${name}  ${statSync(dest).size} bytes  ok`);
+    names.push(name);
+  }
+
+  // NOT "SHA256SUMS": release.yml's cross-upload job already publishes a
+  // file by that name for the three CLI archives, onto the same release.
+  writeChecksums(args.outDir, names, 'SHA256SUMS-app');
+  return names.map((n) => join(args.outDir, n));
+}
+
+if (import.meta.main) {
+  try {
+    const args = parseBundleArgs(Bun.argv.slice(2));
+    const made = await buildBundles(args);
+    console.log(`\n${made.length} bundle(s) + SHA256SUMS-app in ${args.outDir}`);
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(1);
+  }
+}
