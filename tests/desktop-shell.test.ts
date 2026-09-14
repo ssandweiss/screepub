@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { SIDECAR_BASENAME } from '../tools/sidecar-targets';
 
@@ -553,5 +553,69 @@ describe('the desktop workflow', () => {
     const triggers = (WF as unknown as { on: { push: { paths: string[] } } }).on;
     expect(triggers.push.paths).toContain('desktop/**');
     expect(triggers.push.paths).not.toContain('src/**');
+  });
+});
+
+describe('the icon set the bundlers need', () => {
+  const icons = join(REPO, 'desktop', 'src-tauri', 'icons');
+
+  test('tauri.conf.json names every icon the three bundlers ask for', () => {
+    // Order matters to nobody, presence matters to everybody: without
+    // icons/icon.ico the Windows build script errors out before a single
+    // Rust file compiles (tauri-build's lib.rs, "required for generating a
+    // Windows Resource file"). desktop.yml's Windows leg has never run, so
+    // this list is the only thing standing between it and a red first run.
+    expect(CONFIG.bundle.icon).toEqual([
+      'icons/32x32.png',
+      'icons/128x128.png',
+      'icons/128x128@2x.png',
+      'icons/icon.png',
+      'icons/icon.icns',
+      'icons/icon.ico',
+    ]);
+  });
+
+  test('every file it names is really there', () => {
+    for (const rel of CONFIG.bundle.icon as string[]) {
+      expect(existsSync(join(REPO, 'desktop', 'src-tauri', rel))).toBe(true);
+    }
+  });
+
+  test('icon.ico is a real ICO and not a renamed PNG', () => {
+    // A copied-and-renamed icon.png passes an existsSync check and then
+    // fails the Windows build anyway. The ICONDIR header is 6 bytes:
+    // reserved=0 (u16 LE), type=1 (u16 LE, 1 = icon), count > 0 (u16 LE).
+    const head = readFileSync(join(icons, 'icon.ico')).subarray(0, 6);
+    const u16 = (o: number) => head[o]! | (head[o + 1]! << 8);
+    expect(u16(0)).toBe(0);
+    expect(u16(2)).toBe(1);
+    expect(u16(4)).toBeGreaterThan(0);
+  });
+
+  test('icon.icns is a real ICNS whose declared length matches the file', () => {
+    // Same trap on the macOS side. The header is the ASCII magic 'icns'
+    // followed by the total file length as a BIG-endian u32 -- so a
+    // truncated copy fails here even though its first four bytes are right.
+    const bytes = readFileSync(join(icons, 'icon.icns'));
+    expect(bytes.subarray(0, 4).toString('latin1')).toBe('icns');
+    expect(bytes.readUInt32BE(4)).toBe(bytes.length);
+  });
+
+  test('icon.png is still the 512-pixel square the Linux packages scale from', () => {
+    // The .deb installs the largest PNG as the hicolor icon. IHDR puts
+    // width and height at bytes 16..24, big-endian.
+    const bytes = readFileSync(join(icons, 'icon.png'));
+    expect(bytes.subarray(1, 4).toString('latin1')).toBe('PNG');
+    expect(bytes.readUInt32BE(16)).toBe(512);
+    expect(bytes.readUInt32BE(20)).toBe(512);
+  });
+
+  test('the platform icon sets nobody ships were not committed', () => {
+    // `cargo tauri icon` also writes android/, ios/, Square*Logo.png and
+    // StoreLogo.png. Screepub has no mobile build and no MSIX, so those are
+    // 750 KB of files no bundler opens.
+    for (const junk of ['android', 'ios', 'StoreLogo.png', 'Square44x44Logo.png']) {
+      expect(existsSync(join(icons, junk))).toBe(false);
+    }
   });
 });
