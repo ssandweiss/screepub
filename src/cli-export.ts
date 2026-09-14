@@ -91,6 +91,14 @@ export async function exportCommand(
     throw new CliError('unreadable', `cannot read the book to export: ${options.epub}`);
   }
 
+  // Parsed here, before the epub branch returns and before any toolchain
+  // probe: --options-json is either well-formed argv or it is not, and that
+  // cannot depend on what --for happens to say. The epub rung ignores the
+  // VALUE (it converts nothing), but a window sending malformed JSON must
+  // hear the same 'bad-options' either way, or the same argv is valid and
+  // invalid at once.
+  const formatOptions = readFormat(options.optionsJson);
+
   const calibreAvailable = (deps.calibreAvailable ?? isCalibreAvailable)();
   const available = availableFormats(options.epub, calibreAvailable);
   const format: ExportFormat = wanted;
@@ -110,12 +118,6 @@ export async function exportCommand(
   const kfx = await (deps.kfxStatus ?? realKfxStatus)();
   const state = { calibreAvailable, kfxReady: kfx.ready };
   const stages: string[] = [];
-  // Parsed BEFORE the try below: readFormat throws its own CliError
-  // ('bad-options'), and that code has to reach the caller as-is. Evaluating
-  // it inside the try would let the catch's unconditional rewrap turn a bad
-  // --options-json into 'export-failed' — the right message, wrong code,
-  // which matters because the code is what a UI switches on.
-  const formatOptions = readFormat(options.optionsJson);
   let path: string;
   try {
     path = await (deps.freshKindleArtifact ?? realFreshKindleArtifact)({

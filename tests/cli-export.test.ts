@@ -354,3 +354,25 @@ describe('screepub export (through the CLI)', () => {
     expect(answer.error.code).not.toBe('usage');
   });
 });
+
+describe('--options-json validity does not depend on --for', () => {
+  // The epub rung ignores the option VALUES — it converts nothing — but a
+  // window sending malformed JSON must hear the same code either way.
+  // Before this, `--for epub` returned before readFormat ran, so the same
+  // argv was accepted on one rung and rejected on the other: a contract that
+  // is valid or invalid depending on a second flag is one a UI cannot trust.
+  test('malformed JSON is bad-options on the epub rung too', async () => {
+    await expect(
+      exportCommand({ epub, for: 'epub', optionsJson: '{oops' }),
+    ).rejects.toMatchObject({ code: 'bad-options' });
+  });
+
+  test('malformed JSON is bad-options on the kindle rung', async () => {
+    await expect(
+      exportCommand(
+        { epub, for: 'kindle', optionsJson: '{oops' },
+        { calibreAvailable: () => false, kfxStatus: async () => noToolchainStatus },
+      ),
+    ).rejects.toMatchObject({ code: 'bad-options' });
+  });
+});
