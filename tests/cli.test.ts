@@ -349,3 +349,65 @@ describe('--options-json', () => {
     expect(html).toContain('margin-left: 20%');
   }, 60000);
 });
+
+describe('--preview-inline', () => {
+  test('puts the same document in the JSON that --preview-html writes to disk', async () => {
+    const previewPath = `${SCRATCH}/preview-inline-parity.html`;
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-inline',
+      '--preview-html', previewPath, '-o', `${SCRATCH}/preview-inline-parity.epub`,
+      '--no-fountain']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.ok).toBe(true);
+    const onDisk = await Bun.file(previewPath).text();
+    // Byte equality, not "contains something": the reader's whole premise is
+    // that what you proof is what ships, so two producers would be a defect.
+    expect(answer.previewHtml).toBe(onDisk);
+  }, 60000);
+
+  test('the inlined document carries the stylesheet, not a link to one', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-inline',
+      '-o', `${SCRATCH}/preview-inline-style.epub`, '--no-fountain']);
+    const { previewHtml } = JSON.parse(out.stdout);
+    expect(previewHtml).toContain('<style>');
+    expect(previewHtml).not.toContain('<link rel="stylesheet"');
+    expect(previewHtml).toContain('h2.scene-heading');
+  }, 60000);
+
+  test('stdout is still exactly one JSON object', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-inline',
+      '-o', `${SCRATCH}/preview-inline-single-line.epub`, '--no-fountain']);
+    expect(out.stdout.trim().split('\n')).toHaveLength(1);
+    expect(() => JSON.parse(out.stdout)).not.toThrow();
+  }, 60000);
+
+  test('the key is absent unless asked for', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json',
+      '-o', `${SCRATCH}/preview-inline-absent.epub`, '--no-fountain']);
+    expect(JSON.parse(out.stdout).previewHtml).toBeUndefined();
+  }, 60000);
+
+  test('it is a usage error without --json', async () => {
+    const out = await runCli([FIXTURE_PDF, '--preview-inline']);
+    expect(out.exitCode).toBe(1);
+    expect(out.stderr).toContain('--preview-inline');
+  }, 60000);
+
+  // Beyond the brief: the absent-key test above proves the flag stays off
+  // by default, but not that turning it on actually does something beyond
+  // "doesn't crash" when no --preview-html is also given (that's the ONLY
+  // combination the app itself will ever use — the window has no
+  // filesystem to point --preview-html at). Assert the content, not just
+  // its presence, so a stub that emits `previewHtml: ''` would fail here.
+  test('with no --preview-html, the inlined document is still the real preview', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-inline',
+      '-o', `${SCRATCH}/preview-inline-standalone.epub`, '--no-fountain']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.ok).toBe(true);
+    expect(typeof answer.previewHtml).toBe('string');
+    expect(answer.previewHtml.length).toBeGreaterThan(1000);
+    // The preview document has no title page (that's an EPUB-only section),
+    // so anchor on body content the fixture is known to render instead.
+    expect(answer.previewHtml).toContain('<p class="character">MARGO</p>');
+    expect(answer.previewHtmlPath).toBeUndefined();
+  }, 60000);
+});

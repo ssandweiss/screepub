@@ -39,6 +39,7 @@ Options:
   --force                convert even if it doesn't look like a screenplay
   --mobi                 also write a .mobi (for USB sideload to Kindle)
   --preview-html <file>  also write the script as one self-contained HTML file
+  --preview-inline       put that same HTML in the --json result (for the app)
   --options <file.json>  formatting options (see docs/formatting-options-log.md)
   --options-json <json>  the same options as one JSON argument (for the app)
   --json                 machine-readable result on stdout (for the app)
@@ -172,6 +173,7 @@ function parseCliArgs() {
       force: { type: 'boolean', default: false },
       mobi: { type: 'boolean', default: false },
       'preview-html': { type: 'string' },
+      'preview-inline': { type: 'boolean', default: false },
       options: { type: 'string' },
       'options-json': { type: 'string' },
       json: { type: 'boolean', default: false },
@@ -314,6 +316,17 @@ async function main() {
   if (positionals.length > 1) {
     fail({ code: 'usage', message: 'expected exactly one input file' });
   }
+  // Checked before any file I/O: without --json there is nowhere for the
+  // document to go (stdout is human-readable text, not the app's decode
+  // target), so failing here — rather than after a full conversion has
+  // already written .epub/.fountain output — avoids doing (and writing)
+  // work the caller cannot use.
+  if (values['preview-inline'] && !jsonMode) {
+    fail({
+      code: 'usage',
+      message: '--preview-inline needs --json: the document rides inside the result object',
+    });
+  }
 
   const input = positionals[0];
   const ext = extname(input).toLowerCase();
@@ -441,6 +454,10 @@ async function main() {
         fountainPath,
         previewHtmlPath: previewPath,
         debugPath,
+        // Spread, not a plain key: the app asks for this and nothing else
+        // does, and a megabyte of HTML on every conversion would be a tax
+        // every other caller pays for one caller's convenience.
+        ...(values['preview-inline'] ? { previewHtml: result.previewHtml } : {}),
       }),
     );
     return;
