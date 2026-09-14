@@ -496,3 +496,55 @@ branch has never been pushed. The first Windows CI run will be red.
 **Distribution channels are deferred**, with a reason I find convincing: a
 channel is a promise about an artifact, and nothing here has been installed by a
 human yet. The Windows build has literally never executed.
+
+## D20 — E2 shipped, and the trap that caught us three times
+
+**Screepub is installable.** `.deb` and `.rpm` build here, the app launches out
+of an unpacked one and converts a script, and the release path is written to
+build, smoke and attach five app downloads. Twenty-five more defects turned up
+in that plan's own code and tests along the way, including two that were
+vacuous by construction — one regex could never match its own expected list.
+
+**The recurring failure was not a bug, it was a habit.** Three times on this
+branch a claim was measured against a *stale* artifact and believed: once
+producing a "the deb and rpm differ" finding that I then repeated into three
+task briefs, once caught by a gated test after a config change, and once
+surviving all the way into shipped documentation. The lesson is narrow and
+worth keeping: **an artifact is only evidence about the tree that built it**,
+and nothing in this repo pins prose against a real bundle.
+
+**One claim was withdrawn rather than documented.** The Linux package
+advertised that it could open PDFs. It could not — the launcher entry passes no
+path and the shell never reads one — so "Open with Screepub" put the app in the
+user's menu and then opened an empty window. Appearing in a menu and doing
+nothing is worse than not appearing, because the user has already chosen you by
+then.
+
+## D21 — piece F: the answer is "not yet", and here is what nobody had checked
+
+**F cannot execute now, and the reason is not caution.** Retiring the SwiftUI
+app would remove the only thing Mac users can install, in favour of a
+replacement **nobody has ever built or run on a Mac**. The spec puts the
+retirement behind three gates and three stages; only the first, a freeze that
+deletes nothing, can happen today.
+
+**The finding that matters most: the test migration the ADR assumed never
+happened.** The ADR says "`kit-check` becomes `bun test`". Measured against the
+tree: **171 of its 264 assertions — 65% — have no TypeScript counterpart.** The
+send menu and route ordering, the updater, the self-update installer, Apple
+Books and mail, update selection, decoding, error descriptions, engine
+cancellation. The device, Calibre, KFX, sidecar, preset, export and `--json`
+sections *were* genuinely ported.
+
+The cause is traceable and unglamorous: piece A's scope deferred the updater and
+OS-launch shims "to piece C", C did not take them, D explicitly did not either,
+and the debt arrived at F unremarked. **Deleting `app/` today would delete
+coverage that was never replaced, for features the new app does not have.**
+
+**Four more things the ADR did not know.** Deleting the transition overlay is
+ten edits, not one file — a workflow and nine tests pin it. The KFX plugin zip
+exists only inside `app/`. `tests/theme-colors.ts` reads `Theme.swift` as the
+*source* of the brand tokens, so deleting `app/` breaks the brand suite until
+`tokens.json` is promoted. And a user's tuned settings silently revert to
+defaults across the flat-to-per-script library change, so F owns a migration
+nobody had scoped.
