@@ -1,0 +1,118 @@
+/* Shared surface vocabulary, adapted from brand/components/. Per-surface
+ * rules are appended by the tasks that build each surface; this is what they
+ * all build on. */
+
+.slug {
+  font-family: var(--font-structure);
+  font-weight: 700;
+  font-size: var(--text-body);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin: 0 0 var(--space-3);
+}
+.subslug {
+  font-family: var(--font-structure);
+  font-weight: 700;
+  font-size: var(--text-caption);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin: var(--space-7) 0 var(--space-2);
+}
+.prose {
+  font-size: var(--text-body);
+  line-height: 1.72;
+  color: var(--ink-soft);
+  max-width: var(--measure);
+  margin: 0;
+}
+.caption {
+  font-size: var(--text-caption);
+  color: var(--ink-muted);
+  margin: var(--space-2) 0 0;
+  max-width: var(--measure);
+}
+.code {
+  font-family: var(--font-structure);
+  font-weight: 400;
+  font-size: var(--text-code);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.state-label {
+  font-family: var(--font-structure);
+  font-size: var(--text-note);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin: 0 0 var(--space-2);
+}
+.sign-off {
+  font-family: var(--font-structure);
+  font-size: var(--text-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  text-align: right;
+  margin: var(--space-6) 0 0;
+}
+.row {
+  display: flex;
+  gap: var(--space-5);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* brand/components/buttons.html, unchanged in behaviour. Hover is
+ * anticipation and active is commitment, so hover brightens to the brass
+ * ramp's own highlight stop and active dims. */
+.btn {
+  font-family: var(--font-structure);
+  font-weight: 700;
+  font-size: var(--text-ui);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 10px 30px;
+  border-radius: var(--radius);
+  border: none;
+  cursor: pointer;
+  display: inline-block;
+  transition: opacity var(--motion-press) var(--ease),
+    transform var(--motion-press) var(--ease),
+    background var(--motion-press) var(--ease);
+}
+.btn-brad { background: var(--brass); color: var(--ink-on-brass); }
+.btn-brad:hover:not(:disabled) { background: var(--brass-highlight); }
+.btn-brad:active { opacity: 0.75; transform: scale(0.985); }
+.btn-outline { background: none; color: var(--ink); box-shadow: inset 0 0 0 1.2px var(--ink); }
+.btn-outline:hover:not(:disabled) { background: var(--hole); }
+.btn-outline:active { opacity: 0.7; }
+.btn-quiet {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--font-structure);
+  font-weight: 700;
+  font-size: var(--text-note);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.btn-quiet:hover:not(:disabled) { color: var(--ink); }
+.btn:disabled, .btn-quiet:disabled { opacity: 0.35; cursor: default; }
+.btn:focus-visible, .btn-quiet:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  /* A button wider than the column would push the page sideways. */
+  .btn { padding: 10px var(--space-5); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: none; }
+  .btn-brad:active { transform: none; }
+}

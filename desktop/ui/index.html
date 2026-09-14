@@ -4,18 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Screepub</title>
+    <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="surfaces.css" />
   </head>
   <body>
-    <main>
-      <h1>Screepub</h1>
-      <p id="engine" class="muted">looking for the engine…</p>
-
-      <button id="convert" type="button">Choose a screenplay…</button>
-
-      <section id="result" hidden></section>
-      <section id="failure" hidden></section>
-    </main>
-    <script src="app.js"></script>
+    <div id="app"></div>
+    <script type="module" src="main.js"></script>
   </body>
 </html>
