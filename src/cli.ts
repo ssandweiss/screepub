@@ -476,24 +476,6 @@ async function main() {
       message: 'pass --library or -o, not both — -o already says where the output goes',
     });
   }
-  let inputStem = join(dirname(input), basename(input, extname(input)));
-  if (values.library) {
-    try {
-      inputStem = libraryOutput(input);
-      // Tuning the user already did beside the PDF follows the script in,
-      // so the library does not start it over at the defaults.
-      adoptSidecar(input, inputStem);
-    } catch (err) {
-      // The app's contract holds even here: one JSON object, never a throw
-      // from deep inside node:fs.
-      fail({ code: 'library', message: `cannot open the library folder — ${errorMessage(err)}` });
-    }
-  }
-  const epubPath = values.output ?? `${inputStem}.epub`;
-  // Companion outputs (.mobi/.fountain/.elements.json) follow the EPUB, so
-  // -o into a library folder keeps everything together.
-  const stem = join(dirname(epubPath), basename(epubPath, extname(epubPath)));
-
   let format: Record<string, unknown> | undefined;
   if (values.options !== undefined && values['options-json'] !== undefined) {
     fail({
@@ -570,6 +552,38 @@ async function main() {
     if (mapped) fail(mapped);
     throw err;
   }
+
+  // WHERE the output goes is decided only once there is output to put there.
+  // Resolving the library earlier made a folder — and CLAIMED the plain stem
+  // name, pushing the real script of that name into a hashed one — for every
+  // typo'd path and every file that turned out not to be a screenplay.
+  // Nothing above this line writes anything, so a refusal leaves the library
+  // exactly as it found it.
+  let inputStem = join(dirname(input), basename(input, extname(input)));
+  if (values.library) {
+    try {
+      inputStem = libraryOutput(input);
+      // Tuning the user already did beside the PDF follows the script in,
+      // so the library does not start it over at the defaults.
+      adoptSidecar(input, inputStem);
+    } catch (err) {
+      // The app's contract holds even here: one JSON object, never a throw
+      // from deep inside node:fs.
+      //
+      // This message DOES carry the raw node:fs text, path and all, where
+      // bad-options deliberately does not. The difference: a bad --options
+      // path is a temp file the app made and the user has never seen, while
+      // this one is a folder in the user's own home that they are the only
+      // person who can fix. "EACCES … mkdir '/home/ada/Documents/Screepub'"
+      // is the whole of the fix; "cannot open the library folder" alone
+      // would send them looking for a location we never named.
+      fail({ code: 'library', message: `cannot open the library folder — ${errorMessage(err)}` });
+    }
+  }
+  const epubPath = values.output ?? `${inputStem}.epub`;
+  // Companion outputs (.mobi/.fountain/.elements.json) follow the EPUB, so
+  // -o into a library folder keeps everything together.
+  const stem = join(dirname(epubPath), basename(epubPath, extname(epubPath)));
 
   await writeFileAtomic(epubPath, result.epub);
 

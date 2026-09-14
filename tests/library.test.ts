@@ -138,6 +138,30 @@ describe('the Documents folder a Linux user actually has', () => {
       .toBe('/srv/docs/Screepub');
   });
 
+  test('the environment branch gets every guard the file branch gets', () => {
+    // It used not to: the variable was taken raw, so each of these four was
+    // read one way out of the environment and the opposite way out of
+    // user-dirs.dirs — the same value, from the same authority, disagreeing
+    // with itself. Each case is checked against the FILE's answer for the
+    // identical value, so the two can never drift apart again.
+    const cases = ['$HOME', '$HOME/', '/', '"$HOME/Documenten"'];
+    for (const value of cases) {
+      const home = homeWithUserDirs(`XDG_DOCUMENTS_DIR=${value}\n`);
+      expect(`${value} → ${libraryRoot('linux', { HOME: home, XDG_DOCUMENTS_DIR: value })}`)
+        .toBe(`${value} → ${libraryRoot('linux', { HOME: home })}`);
+    }
+    // And what those answers are, so agreeing on a wrong answer is not a pass.
+    const home = scratch('home');
+    for (const value of ['$HOME', '$HOME/', '/']) {
+      // "no such folder", and the filesystem root: neither may hold a library.
+      expect(libraryRoot('linux', { HOME: home, XDG_DOCUMENTS_DIR: value }))
+        .toBe(join(home, 'Documents', 'Screepub'));
+    }
+    // A quoted value is honoured, not silently dropped on the floor.
+    expect(libraryRoot('linux', { HOME: home, XDG_DOCUMENTS_DIR: '"$HOME/Documenten"' }))
+      .toBe(join(home, 'Documenten', 'Screepub'));
+  });
+
   test('no file, no entry, or a Documents that is the home itself: ~/Documents', () => {
     // The common path on a minimal install: no user-dirs.dirs at all, and
     // often no Documents folder either. Resolving never creates it — the
@@ -197,6 +221,55 @@ describe('which folder a script owns', () => {
     // Both are stable, so neither ever moves out from under its own book.
     expect(libraryOutput('/producers/bob/Draft.pdf', root)).toBe(theirs);
     expect(libraryOutput('/producers/alice/Draft.pdf', root)).toBe(mine);
+  });
+
+  test('the hashed name is not a free-for-all either', () => {
+    // A script really called `Draft-5a47cba7` owns that folder by its PLAIN
+    // name. Handing it to some other Draft.pdf — which is where the hashed
+    // candidate lands — overwrote its marker and orphaned it from its own
+    // .epub: it would come back next time to a further-hashed folder and
+    // find none of its files.
+    // What the intruder's hashed name WILL be, learned from a throwaway
+    // library rather than hard-coded. Getting this by hand is how the first
+    // draft of this test quietly stopped testing anything: on a fresh root
+    // `Draft` is free, so the intruder never reaches its hashed name at all
+    // and the test re-ran the ordinary collision.
+    const probe = scratch('lib');
+    libraryOutput('/x/Draft.pdf', probe);
+    const hashed = basename(dirname(libraryOutput('/producers/bob/Draft.pdf', probe)));
+    expect(hashed).toMatch(/^Draft-[0-9a-f]{8}$/);
+
+    // Now a library where `Draft` is somebody else's AND a script genuinely
+    // called `Draft-<those 8 hex>` has already claimed its own plain name.
+    const root = scratch('lib');
+    libraryOutput('/x/Draft.pdf', root);
+    const decoy = libraryOutput(`/a/${hashed}.pdf`, root);
+    expect(dirname(decoy)).toBe(join(root, hashed));
+
+    const intruder = libraryOutput('/producers/bob/Draft.pdf', root);
+    expect(dirname(intruder)).not.toBe(join(root, hashed));
+    expect(basename(dirname(intruder))).toMatch(/^Draft-[0-9a-f]{12}$/);
+    // The marker is still the decoy's — this is the value the bug rewrote,
+    // and rewriting it orphaned the decoy from its own .epub.
+    expect(JSON.parse(readFileSync(join(root, hashed, 'source.json'), 'utf8')))
+      .toEqual({ source: `/a/${hashed}.pdf` });
+    // So the decoy still comes home to its own folder, not a further-hashed
+    // one, and the intruder is stable too.
+    expect(libraryOutput(`/a/${hashed}.pdf`, root)).toBe(decoy);
+    expect(libraryOutput('/producers/bob/Draft.pdf', root)).toBe(intruder);
+  });
+
+  test('a FILE standing where the folder would go is not clobbered', () => {
+    // Not hypothetical: the SwiftUI app writes its library flat, so
+    // `~/Documents/Screepub/Draft.epub` is a file it made — and a PDF called
+    // `Draft.epub.pdf` asks for exactly that name. It is the existsSync
+    // check plus recordedSource failing with ENOTDIR that reroutes this, not
+    // any "files and folders cannot collide" property.
+    const root = scratch('lib');
+    writeFileSync(join(root, 'Draft.epub'), 'the Mac app’s book');
+    const output = libraryOutput('/scripts/Draft.epub.pdf', root);
+    expect(basename(dirname(output))).toMatch(/^Draft\.epub-[0-9a-f]{8}$/);
+    expect(readFileSync(join(root, 'Draft.epub'), 'utf8')).toBe('the Mac app’s book');
   });
 
   test('a folder the engine did not make is left alone', () => {
@@ -308,6 +381,39 @@ describe('the CLI with --library', () => {
     const settings = JSON.parse(said.stdout);
     expect(settings.settings.cueIndentPct).toBe(41);
     expect(settings.sidecar).toBe(join(root, 'Tuned', 'Tuned.screepub.json'));
+  }, 90000);
+
+  test('a refused input leaves NO trace in the library', async () => {
+    // The library used to be opened before the input was even looked at, so
+    // every typo'd path and every wrong file type left a permanent marked
+    // folder behind — and it claimed the PLAIN stem name, so the real script
+    // called that would afterwards be pushed into a hashed folder by a file
+    // that never converted.
+    const root = scratch('lib');
+    const scripts = scratch('scripts');
+    writeFileSync(join(scripts, 'readme.md'), '# not a screenplay\n');
+
+    const wrongType = await runCli([join(scripts, 'readme.md'), '--library', '--json'],
+      { SCREEPUB_LIBRARY: root });
+    expect(JSON.parse(wrongType.stdout).error.code).toBe('unsupported-type');
+
+    const missing = await runCli([join(scripts, 'ghost.pdf'), '--library', '--json'],
+      { SCREEPUB_LIBRARY: root });
+    expect(JSON.parse(missing.stdout).error.code).toBe('unreadable');
+
+    const notScreenplay = await runCli([`${FIXTURES}prose.pdf`, '--library', '--json'],
+      { SCREEPUB_LIBRARY: root });
+    expect(JSON.parse(notScreenplay.stdout).error.code).toBe('not-screenplay');
+
+    // Not "no folder called readme" — NOTHING. The root itself is untouched.
+    expect(readdirSync(root)).toEqual([]);
+    expect(readdirSync(scripts)).toEqual(['readme.md']);
+
+    // And the name is still free, so the real script of that name gets it.
+    const real = await scriptFolderWith('readme.pdf');
+    const { stdout } = await runCli([join(real, 'readme.pdf'), '--library', '--json'],
+      { SCREEPUB_LIBRARY: root });
+    expect(JSON.parse(stdout).epubPath).toBe(join(root, 'readme', 'readme.epub'));
   }, 90000);
 
   test('--library and -o together is a refusal, not a silent winner', async () => {

@@ -33,8 +33,24 @@ type Env = Record<string, string | undefined>;
  * Anything unreadable, unparseable or relative falls through to ~/Documents,
  * which is what the file would have said anyway on a default install. */
 function xdgDocuments(home: string, env: Env): string | null {
-  const fromEnv = (env.XDG_DOCUMENTS_DIR ?? '').trim();
-  if (posix.isAbsolute(fromEnv)) return fromEnv;
+  // BOTH branches go through this. They used not to: the environment branch
+  // took its value raw, so `$HOME`, `$HOME/` and `/` all became libraries and
+  // a value the user had quoted was thrown away — while the file branch,
+  // reading the same variable from the same authority, rejected all four.
+  const asDocuments = (raw: string): string | null => {
+    const value = raw.trim().replace(/^"(.*)"$/, '$1');
+    // The file's own convention. The variable is usually copied out of it, so
+    // it can arrive with `$HOME` still in front.
+    const expanded = value.startsWith('$HOME') ? posix.join(home, value.slice('$HOME'.length)) : value;
+    if (!posix.isAbsolute(expanded)) return null;
+    const documents = posix.resolve(expanded);
+    // `$HOME/` is what xdg-user-dirs writes for "this user has no such
+    // folder", and `/` is not one either. Neither may hold a library.
+    return documents === posix.resolve(home) || documents === '/' ? null : documents;
+  };
+
+  const fromEnv = asDocuments(env.XDG_DOCUMENTS_DIR ?? '');
+  if (fromEnv !== null) return fromEnv;
 
   const configHome = (env.XDG_CONFIG_HOME ?? '').trim();
   const config = posix.isAbsolute(configHome) ? configHome : posix.join(home, '.config');
@@ -47,13 +63,7 @@ function xdgDocuments(home: string, env: Env): string | null {
   // The file's own format: shell assignments, one per line, `$HOME`-relative
   // by convention. Comments and every other XDG_*_DIR are ignored.
   const line = text.split('\n').find((l) => l.trimStart().startsWith('XDG_DOCUMENTS_DIR='));
-  if (line === undefined) return null;
-  const value = line.slice(line.indexOf('=') + 1).trim().replace(/^"(.*)"$/, '$1');
-  const expanded = value.startsWith('$HOME') ? posix.join(home, value.slice('$HOME'.length)) : value;
-  // A bare `XDG_DOCUMENTS_DIR="$HOME/"` means "no Documents folder, use the
-  // home directory itself" — which is not somewhere a library may be made.
-  const documents = posix.isAbsolute(expanded) ? posix.resolve(expanded) : '';
-  return documents !== '' && documents !== posix.resolve(home) ? documents : null;
+  return line === undefined ? null : asDocuments(line.slice(line.indexOf('=') + 1));
 }
 
 /** Where the library lives, per platform.
@@ -126,16 +136,29 @@ function recordedSource(folder: string): string | null {
  * Which folder an input owns is therefore decided by what is ON DISK, not by
  * the name alone — and it is stable, because the same input path always
  * re-recognises its own source.json and gets the same folder back. */
-function scriptFolder(input: string, root: string): string {
-  const source = resolve(input);
+function scriptFolder(source: string, root: string): string {
   const stem = stemOf(source);
-  const plain = join(root, stem);
-  const recorded = recordedSource(plain);
-  // Not ours and not free: a folder with no source.json (one the user made,
-  // or an older layout) is left alone rather than written into.
-  const folder = !existsSync(plain) || recorded === source
-    ? plain
-    : join(root, `${stem}-${createHash('sha256').update(source).digest('hex').slice(0, 8)}`);
+  const hash = createHash('sha256').update(source).digest('hex');
+  // Free, or already ours. A folder with no source.json (one the user made,
+  // or an older layout) is neither, and is left alone rather than written
+  // into — and so is one that belongs to a DIFFERENT script, which the
+  // hashed name is not immune to: a script actually called `Draft-5a47cba7`
+  // owns `Draft-5a47cba7/` by its plain name, and handing that folder to
+  // some other Draft.pdf would overwrite its marker and orphan it from its
+  // own .epub.
+  const ours = (folder: string) => !existsSync(folder) || recordedSource(folder) === source;
+
+  let folder = join(root, stem);
+  for (let attempt = 0; !ours(folder); attempt += 1) {
+    // Widening the hash rather than counting keeps the name a function of
+    // the path alone. 32 hex characters in, two different paths sharing a
+    // name is not a case worth more code than a clear failure.
+    const mark = attempt === 0 ? hash.slice(0, 8) : hash.slice(0, 8 + attempt * 4);
+    if (mark.length > 32) {
+      throw new Error(`too many scripts already claim the name "${stem}" in the library`);
+    }
+    folder = join(root, `${stem}-${mark}`);
+  }
 
   mkdirSync(folder, { recursive: true });
   if (recordedSource(folder) !== source) {
@@ -153,7 +176,11 @@ function scriptFolder(input: string, root: string): string {
  * making directories in someone's home. A failure (read-only home, no
  * permission) throws, and the CLI turns it into its one JSON object. */
 export function libraryOutput(input: string, root: string = libraryRoot()): string {
-  return join(scriptFolder(input, root), stemOf(input));
+  // Resolved ONCE, and both halves built from the same string: `stemOf(input)`
+  // and `stemOf(resolve(input))` disagree for an input like "." — one folder
+  // name, one file stem, one source of truth.
+  const source = resolve(input);
+  return join(scriptFolder(source, root), stemOf(source));
 }
 
 /** A script converted beside its PDF before the library existed has its
