@@ -185,10 +185,11 @@ WebView2 runtime if the machine has none — Windows 11 ships it, Windows 10
 may not — and fetches it from Microsoft at install time. Converting itself
 never touches the network, on any platform, and never has.
 
-**Nobody has installed these yet.** Four of the five are built by automation
-that opens the bundle and runs the engine out of it before anything is
-published, which catches a broken payload and catches nothing a person would
-notice about the window. These have
+**Nobody has installed these yet.** The release path is built to open four of
+the five bundles and run the engine out of each before anything is published
+— that catches a broken payload, and catches nothing a person would notice
+about the window. It has not run yet either: 0.6.0 is the first release that
+will exercise it. These have
 never been installed on a real machine: not the `.deb`, not the `.rpm`, not
 a `.dmg`, not the installer, by anyone. The window itself has only ever been
 started on Linux: no build runner has a display, so on macOS and Windows
