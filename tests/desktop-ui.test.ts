@@ -756,3 +756,429 @@ describe('what runEngine does with the answer it is handed', () => {
     }
   });
 });
+
+describe('the Read surface', () => {
+  const reader = read('read.js');
+
+  test('it renders the engine’s document, not a document of its own', () => {
+    expect(reader).toContain('previewHtml');
+    expect(reader).toContain('DOMParser');
+    // A reader that built its own screenplay CSS would be a second opinion
+    // about formatting, which is the one thing this surface must not be.
+    for (const invented of ['scene-heading {', 'p.dialogue {', 'text-transform']) {
+      expect(`read.js styles screenplays itself: ${reader.includes(invented)}`).toBe(
+        'read.js styles screenplays itself: false',
+      );
+    }
+  });
+
+  test('it takes the stylesheet out of the markup and adopts it', () => {
+    // Measured: a <style> inside srcdoc is blocked by the window's CSP, and
+    // CSSOM is not. An implementation that left the <style> in place renders
+    // an unstyled script and looks like it "nearly works".
+    expect(reader).toContain("querySelector('style')");
+    expect(reader).toContain('adoptedStyleSheets');
+    expect(reader).toContain('replaceSync');
+  });
+
+  test('it builds the sheet in the frame’s own realm', () => {
+    // `new CSSStyleSheet()` from the parent realm is rejected when adopted
+    // into another document. This is the line that makes or breaks it.
+    expect(reader).toMatch(/new\s+\w+\.CSSStyleSheet\(\)/);
+  });
+
+  test('the frame is sandboxed same-origin, with no script permission', () => {
+    expect(reader).toContain('allow-same-origin');
+    expect(reader).not.toContain('allow-scripts');
+    expect(reader).toContain('sandbox');
+  });
+
+  test('it supplies the faces the engine’s CSS asks for by name', () => {
+    // The engine's CSS says "Courier Prime"; nothing inside the frame
+    // declares where that file is, so the reader must.
+    expect(reader).toContain('@font-face');
+    expect(reader).toContain('fonts/courier-prime-400-latin.woff2');
+  });
+
+  test('a re-render keeps the reader where they were', () => {
+    // Tune re-renders on every knob. A reader thrown back to FADE IN on
+    // each keystroke is unusable.
+    expect(reader).toContain('scrollY');
+    expect(reader).toContain('scrollTo');
+  });
+
+  test('the rail is built from the engine’s own scene sections', () => {
+    // Not from a second parse of the fountain: two parsers is two answers.
+    expect(reader).toContain('section.scene');
+    expect(reader).toContain('scrollIntoView');
+  });
+
+  test('the rail follows the reader through the frame’s own observer', () => {
+    // Measured in the live window, because the obvious wiring is the wrong
+    // one: a sandboxed srcdoc frame delivers NO scroll event to the parent —
+    // not on the frame's window, its document, its documentElement or its
+    // body — while the parent reads `scrollY` off that same frame correctly
+    // the whole time. A reader wired to 'scroll' therefore renders perfectly
+    // and leaves its mark on scene one forever, which is exactly the kind of
+    // defect nothing else here would catch. An IntersectionObserver built in
+    // the FRAME's realm does fire (counted: 1 → 2 → 3 → 4 across two
+    // scrolls, against 0 scroll events).
+    expect(reader).toMatch(/new\s+\w+\.IntersectionObserver\(/);
+    expect(`read.js listens for a scroll event: ${/addEventListener\('scroll'/.test(reader)}`)
+      .toBe('read.js listens for a scroll event: false');
+    // And the observer says WHEN to look, never WHERE the reader is: one
+    // definition of the current scene, which is readerPlace()'s.
+    const watcher = reader.slice(reader.indexOf('new win.IntersectionObserver'));
+    expect(watcher.slice(0, 400)).toContain('markCurrent');
+    expect(watcher.slice(0, 400)).not.toContain('entries');
+  });
+
+  test('coming back to the reader re-asserts the place, and really moves the frame', () => {
+    // Measured in the live window, and not guessable: after a
+    // display:none → display:block round trip this webview REPORTS the scroll
+    // position the frame had and PAINTS the document somewhere else, and a
+    // scrollTo() to the position the frame already claims is a no-op. So
+    // show() restores rather than trusting the frame, and restore() goes to
+    // the top first when the target is where the frame says it already is.
+    // Both look like dead code to anyone who did not watch it fail.
+    expect(reader).toMatch(/export function show\(\)[\s\S]{0,600}restore\(\)/);
+    expect(reader).toMatch(/scrollY === target[\s\S]{0,200}scrollTo\(0, 0\)/);
+    // And the place is taken on the way OUT, while the frame can still say
+    // where it is — asking a hidden pane for layout answers zero.
+    expect(reader).toMatch(/export function hide\(\)[\s\S]{0,120}keep\(\)/);
+  });
+
+  test('the parser the window uses is the real one', () => {
+    // splitPreview() takes its parser as an argument so it can be exercised
+    // below without a browser. That is only honest if the window itself
+    // hands it a DOMParser — a reader that passed a regex of its own would
+    // pass every test above.
+    expect(reader).toMatch(/splitPreview\([^)]*new DOMParser\(\)\)/);
+  });
+
+  test('the frame’s theme follows the desktop’s, inside the frame too', () => {
+    // The window's colour tokens are declared on THIS document; a custom
+    // property does not cascade into another one, so a frame that only
+    // named them would render black ink on a dark ground in dark mode.
+    expect(reader).toContain('getPropertyValue');
+    expect(reader).toContain('prefers-color-scheme');
+  });
+});
+
+describe('what the Read surface decides', () => {
+  // The decisions, exercised directly, the same way the Convert surface's
+  // are. The drawing over them rides on the live run.
+  type Place = { id: string; into: number };
+  type Mark = { id: string; top: number; height: number };
+  type ReadModule = {
+    FONT_CSS: string;
+    PAPER_TOKENS: string[];
+    OPENING: string;
+    NO_SCENES: string;
+    NOTICES: Record<string, { slug: string; line: string; way: string }>;
+    deviceCss: (tokens: unknown) => string;
+    sheetText: (engineCss: unknown, tokens: unknown) => string;
+    splitPreview: (html: string, parser: unknown) => { css: string; html: string };
+    readerState: (script: unknown) => string;
+    sceneLabel: (heading: unknown) => { place: string; time: string | null };
+    railEntries: (scenes: unknown) => { id: string; place: string; time: string | null }[];
+    railCount: (total: number) => string;
+    readerPlace: (marks: Mark[], scrollTop: number) => Place | null;
+    scrollTarget: (marks: Mark[], place: Place | null) => number;
+  };
+  let reader: ReadModule;
+  /** The engine's own preview document, from the engine, once. */
+  let preview: string;
+
+  beforeAll(async () => {
+    reader = (await import(join(UI, 'read.js'))) as ReadModule;
+    const root = new URL('..', import.meta.url).pathname;
+    const proc = Bun.spawn(
+      ['bun', join(root, 'src', 'cli.ts'), join(root, 'tests', 'fixtures', 'screenplay.pdf'),
+        '--json', '--preview-inline', '--no-fountain',
+        '-o', join(tmpdir(), 'screepub-read-surface.epub')],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    const answer = JSON.parse(stdout);
+    expect(answer.ok).toBe(true);
+    preview = answer.previewHtml;
+    // The input every test below leans on: the real thing, with a real
+    // stylesheet inside it and real scene sections.
+    expect(preview).toContain('<style>');
+    expect(preview).toContain('<section class="scene"');
+  }, 60000);
+
+  /** A reference HTML document, built with regexes rather than a DOM, that
+   *  answers the four things splitPreview() asks of a parser. It is not a
+   *  browser and proves nothing about one — what it proves is that
+   *  splitPreview TAKES the stylesheet OUT and hands it back, which is the
+   *  step the CSP makes load-bearing and the one an implementation that
+   *  "nearly works" gets wrong. The live window is where the rest is
+   *  settled; see the report for task 9. */
+  function referenceParser() {
+    return {
+      parseFromString(source: string) {
+        let style: string | null =
+          (source.match(/<style>([\s\S]*?)<\/style>/) ?? [])[1] ?? null;
+        const node = style === null ? null : {
+          get textContent() { return style; },
+          remove() { style = null; },
+        };
+        return {
+          querySelector: (selector: string) => (selector === 'style' ? node : null),
+          get documentElement() {
+            return {
+              get outerHTML() {
+                return source
+                  .replace(/<\?xml[\s\S]*?\?>\s*/, '')
+                  .replace(/<!DOCTYPE[^>]*>\s*/i, '')
+                  .replace(
+                    /<style>[\s\S]*?<\/style>/,
+                    style === null ? '' : `<style>${style}</style>`,
+                  );
+              },
+            };
+          },
+        };
+      },
+    };
+  }
+
+  test('the stylesheet comes OUT of the document and comes back whole', () => {
+    const split = reader.splitPreview(preview, referenceParser());
+    // Out: a <style> left in place is silently dropped by the CSP and the
+    // script renders unstyled.
+    expect(split.html).not.toContain('<style');
+    // Whole: the engine's rules, not a summary of them. Byte-for-byte
+    // against what the engine actually wrote.
+    const engineCss = preview.slice(preview.indexOf('<style>') + '<style>'.length,
+      preview.indexOf('</style>'));
+    expect(engineCss.length).toBeGreaterThan(1000);
+    expect(split.css).toBe(engineCss);
+    // The body survived the trip.
+    expect(split.html).toContain('<section class="scene"');
+    expect(split.html).toContain('class="dialogue-block"');
+  });
+
+  test('the document the frame gets is a standards-mode document', () => {
+    const split = reader.splitPreview(preview, referenceParser());
+    // The engine writes XHTML with an XML prolog in front. Left there, a
+    // text/html parse puts the frame in quirks mode and the engine's
+    // vertical rhythm is not what renders.
+    expect(split.html.startsWith('<!doctype html>')).toBe(true);
+    expect(split.html).not.toContain('<?xml');
+    expect(split.html.toLowerCase().indexOf('<html')).toBe('<!doctype html>'.length);
+  });
+
+  test('an empty preview yields no document and no stylesheet', () => {
+    const split = reader.splitPreview('', referenceParser());
+    expect(split.css).toBe('');
+    expect(split.html).toBe('<!doctype html>');
+  });
+
+  test('the engine’s stylesheet is adopted verbatim, and last but for the device', () => {
+    const engineCss = preview.slice(preview.indexOf('<style>') + '<style>'.length,
+      preview.indexOf('</style>'));
+    const sheet = reader.sheetText(engineCss, { ink: 'black', paper: 'white' });
+    // Verbatim: not reindented, not filtered, not re-prefixed.
+    expect(sheet).toContain(engineCss);
+    // The faces have to be declared before anything asks for them, and the
+    // device layer has to come after the book's own sheet or the engine's
+    // `html, body { padding: 0 }` wins and the script touches the frame edge.
+    expect(sheet.indexOf('@font-face')).toBeLessThan(sheet.indexOf(engineCss));
+    expect(sheet.indexOf(engineCss)).toBeLessThan(sheet.lastIndexOf('body {'));
+    expect(sheet.indexOf('color: black')).toBeGreaterThan(sheet.indexOf(engineCss));
+  });
+
+  test('the reader declares every face the engine’s CSS names, from bundled files', () => {
+    const engineCss = preview.slice(preview.indexOf('<style>'), preview.indexOf('</style>'));
+    // Every family the engine names that is not a generic or a system
+    // fallback must be declared here, or the frame renders it in something
+    // else and the preview stops being the book.
+    const named = new Set(
+      [...engineCss.matchAll(/font-family:\s*([^;]+);/g)]
+        .flatMap(([, list]) => list.split(',').map((f) => f.trim().replace(/["']/g, ''))),
+    );
+    expect(named.has('Courier Prime')).toBe(true);
+    const bundled = readdirSync(join(UI, 'fonts'));
+    // The families the window actually ships a file for: the filenames are
+    // <family>-<weight>-<subset>.woff2, so "courier" (the system face the
+    // engine names as a FALLBACK) is not one of them and "courier-prime" is.
+    const shipped = new Set(bundled.map((file) => file.replace(/-\d+-[a-z-]+\.woff2$/, '')));
+    expect(shipped.has('courier-prime')).toBe(true);
+    expect(shipped.has('courier')).toBe(false);
+    let checked = 0;
+    for (const family of named) {
+      if (!shipped.has(family.toLowerCase().replace(/\s+/g, '-'))) continue; // a fallback
+      checked += 1;
+      expect(`${family} is declared: ${reader.FONT_CSS.includes(`"${family}"`)}`)
+        .toBe(`${family} is declared: true`);
+    }
+    expect(checked).toBeGreaterThan(0);
+    // Every file it points at exists, and the weights the engine's CSS uses
+    // are both there: a cue set in a synthesized bold is not the book.
+    const urls = [...reader.FONT_CSS.matchAll(/url\(([^)]+)\)/g)]
+      .map(([, url]) => url.replace(/["']/g, ''));
+    expect(urls.length).toBeGreaterThanOrEqual(2);
+    for (const url of urls) {
+      expect(url).toMatch(/^fonts\/[a-z0-9-]+\.woff2$/);
+      expect(bundled).toContain(url.slice('fonts/'.length));
+    }
+    for (const weight of ['400', '700']) {
+      expect(`weight ${weight}: ${reader.FONT_CSS.includes(`font-weight: ${weight}`)}`)
+        .toBe(`weight ${weight}: true`);
+    }
+    // And they are the same files the window itself uses — two declarations
+    // of one typeface drifting apart is how the frame ends up in a different
+    // Courier from the page around it.
+    const windowFaces = [...read('style.css').matchAll(/url\((fonts\/courier-prime[^)]+)\)/g)]
+      .map(([, url]) => url.replace(/["']/g, ''));
+    expect([...urls].sort()).toEqual([...new Set(windowFaces)].sort());
+  });
+
+  test('a token that did not resolve is left out, not written as blank', () => {
+    // getPropertyValue() returns '' for a property that is not declared.
+    // `color: ;` is a dropped declaration at best and a dropped RULE in a
+    // stricter parser, which would take the page margin down with it.
+    const partial = reader.deviceCss({ ink: '', paper: 'white' });
+    expect(partial).not.toContain('color:');
+    expect(partial).toContain('background:');
+    expect(partial).toContain('padding');
+    const none = reader.deviceCss({});
+    expect(none).not.toContain('color:');
+    expect(none).not.toContain('background:');
+    // The margin is not a theme and does not depend on one.
+    expect(none).toContain('padding');
+    expect(reader.PAPER_TOKENS).toEqual(['ink', 'paper']);
+  });
+
+  test('a slugline is split at its LAST separator, not its first', () => {
+    // "INT./EXT. DELIVERY VAN - MOVING - LATER" is a van that is moving,
+    // later. Splitting at the first separator calls the time "MOVING -
+    // LATER" and loses the place entirely.
+    expect(reader.sceneLabel('INT./EXT. DELIVERY VAN - MOVING - LATER')).toEqual({
+      place: 'INT./EXT. DELIVERY VAN - MOVING', time: 'LATER',
+    });
+    expect(reader.sceneLabel('INT. THE LAST VIDEO STORE - NIGHT')).toEqual({
+      place: 'INT. THE LAST VIDEO STORE', time: 'NIGHT',
+    });
+    // An em or en dash is the same separator to a reader.
+    expect(reader.sceneLabel('EXT. ROOF — DAWN').time).toBe('DAWN');
+    // A hyphenated word is not a separator: it has no spaces around it.
+    expect(reader.sceneLabel('INT. DRIVE-THRU')).toEqual({
+      place: 'INT. DRIVE-THRU', time: null,
+    });
+    expect(reader.sceneLabel('INT. KITCHEN')).toEqual({ place: 'INT. KITCHEN', time: null });
+    // Nothing to split, and nothing to lose: a half-empty split would print
+    // a rail entry with no place in it.
+    expect(reader.sceneLabel('- DAY')).toEqual({ place: '- DAY', time: null });
+    expect(reader.sceneLabel('INT. HALL -')).toEqual({ place: 'INT. HALL -', time: null });
+    // A scene with no heading is the run of script before the first
+    // slugline, which the engine's own table of contents calls "Opening".
+    expect(reader.sceneLabel('')).toEqual({ place: 'Opening', time: null });
+    expect(reader.sceneLabel(undefined)).toEqual({ place: 'Opening', time: null });
+    expect(reader.OPENING).toBe('Opening');
+    // The word is the engine's, not this file's invention.
+    const engine = readFileSync(
+      join(new URL('..', import.meta.url).pathname, 'src', 'epub', 'html.ts'), 'utf8');
+    expect(engine).toContain(`'${reader.OPENING}'`);
+  });
+
+  test('the rail keeps the engine’s order and skips what it cannot link to', () => {
+    const entries = reader.railEntries([
+      { id: 'sc-001', heading: 'INT. ARCHIVE - NIGHT' },
+      { id: '', heading: 'INT. NOWHERE - DAY' },
+      { id: 'sc-002', heading: undefined },
+      { id: 'sc-003', heading: 'EXT. DOCK - CONTINUOUS' },
+    ]);
+    // A section with no id cannot be scrolled to; a link to it would be a
+    // dead one.
+    expect(entries.map((e) => e.id)).toEqual(['sc-001', 'sc-002', 'sc-003']);
+    expect(entries[1]).toEqual({ id: 'sc-002', place: 'Opening', time: null });
+    expect(entries[2].time).toBe('CONTINUOUS');
+    expect(reader.railEntries(null)).toEqual([]);
+    expect(reader.railCount(1)).toBe('1 scene');
+    expect(reader.railCount(12)).toBe('12 scenes');
+    expect(reader.railCount(0)).toBe('0 scenes');
+  });
+
+  test('the reader’s place is a scene and a fraction, not a pixel offset', () => {
+    // THE test this surface turns on. Tune re-renders on every knob, and a
+    // knob that changes the type size changes every pixel in the document.
+    // A remembered scrollY lands the reader somewhere else in the script.
+    const before: Mark[] = [
+      { id: 'sc-001', top: 0, height: 100 },
+      { id: 'sc-002', top: 100, height: 200 },
+      { id: 'sc-003', top: 300, height: 100 },
+    ];
+    // Halfway through the second scene.
+    const place = reader.readerPlace(before, 200);
+    expect(place).toEqual({ id: 'sc-002', into: 0.5 });
+
+    // The same script, reflowed at a larger type size: every scene is twice
+    // as tall. Halfway through scene two is now 400px down.
+    const after: Mark[] = [
+      { id: 'sc-001', top: 0, height: 200 },
+      { id: 'sc-002', top: 200, height: 400 },
+      { id: 'sc-003', top: 600, height: 200 },
+    ];
+    expect(reader.scrollTarget(after, place)).toBe(400);
+    // What a remembered scrollY would have done: 200px, which is the TOP of
+    // scene two — a scroll jump on every keystroke.
+    expect(reader.scrollTarget(after, place)).not.toBe(200);
+    // Unreflowed, it is exactly where it was.
+    expect(reader.scrollTarget(before, place)).toBe(200);
+  });
+
+  test('every boundary of the place has an answer', () => {
+    const marks: Mark[] = [
+      { id: 'sc-001', top: 40, height: 100 },
+      { id: 'sc-002', top: 140, height: 0 },
+      { id: 'sc-003', top: 140, height: 60 },
+    ];
+    // Above the first section (the document can start with matter above it).
+    expect(reader.readerPlace(marks, 0)).toEqual({ id: 'sc-001', into: 0 });
+    // Exactly on a boundary belongs to the scene that starts there.
+    expect(reader.readerPlace(marks, 140)!.id).toBe('sc-003');
+    // Past the end clamps rather than running off.
+    expect(reader.readerPlace(marks, 10_000)).toEqual({ id: 'sc-003', into: 1 });
+    // A zero-height section cannot divide by itself.
+    expect(Number.isFinite(reader.readerPlace([marks[1]], 140)!.into)).toBe(true);
+    // Nothing measured yet, and a scroll position that is not a number.
+    expect(reader.readerPlace([], 10)).toBe(null);
+    expect(reader.readerPlace(marks, Number.NaN)).toEqual({ id: 'sc-001', into: 0 });
+    // A place whose scene is gone — re-converted, and the heading with it —
+    // is the top, which is the only honest answer.
+    expect(reader.scrollTarget(marks, { id: 'sc-404', into: 0.5 })).toBe(0);
+    expect(reader.scrollTarget(marks, null)).toBe(0);
+    // A place is never a negative scroll.
+    expect(reader.scrollTarget([{ id: 'a', top: 0, height: 10 }], { id: 'a', into: 0 }))
+      .toBe(0);
+  });
+
+  test('there are three things the reader can be, and two of them are words', () => {
+    expect(reader.readerState(null)).toBe('closed');
+    expect(reader.readerState(undefined)).toBe('closed');
+    // scriptFrom() normalises a missing preview to '', so a script that
+    // converted without one must not land on an empty white frame.
+    expect(reader.readerState({ previewHtml: '' })).toBe('blank');
+    expect(reader.readerState({ previewHtml: '   \n ' })).toBe('blank');
+    expect(reader.readerState({ previewHtml: undefined })).toBe('blank');
+    expect(reader.readerState({ previewHtml: preview })).toBe('ready');
+
+    // An empty reader is an invitation, not a blank panel: every state that
+    // is not the script says what happened AND offers the way on.
+    for (const state of ['closed', 'blank']) {
+      const notice = reader.NOTICES[state];
+      expect(`${state} has a slug: ${(notice?.slug ?? '').length > 0}`)
+        .toBe(`${state} has a slug: true`);
+      expect(notice.line.length).toBeGreaterThan(40);
+      expect(notice.way.length).toBeGreaterThan(0);
+    }
+    // The two are not the same notice with a different name: a blank preview
+    // is not the same situation as no script at all.
+    expect(reader.NOTICES.closed.line).not.toBe(reader.NOTICES.blank.line);
+    expect(reader.NO_SCENES.length).toBeGreaterThan(0);
+  });
+});

@@ -210,3 +210,101 @@
 @media (prefers-reduced-motion: reduce) {
   .well, .fill { transition: none; }
 }
+
+/* The way on from an empty reader: far enough below the invitation to read
+ * as an answer to it rather than part of it. */
+.read-ways { display: flex; gap: var(--space-3); margin-top: var(--space-7); }
+
+/* Read — the script and its rail. Everything INSIDE the frame belongs to the
+ * engine's own stylesheet; this file owns only the box it sits in and the
+ * margin beside it. There is deliberately no rule here for a slugline, a cue
+ * or a line of dialogue: the one in the frame is the book's. */
+.read-head {
+  border-bottom: 1px solid var(--hole);
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+.read-title {
+  font-family: var(--font-structure); font-weight: 700; font-size: var(--text-ui);
+  letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink); margin: 0;
+}
+.read-by {
+  font-family: var(--font-structure); font-size: var(--text-note);
+  color: var(--ink-muted); margin: 2px 0 0;
+}
+
+.reader {
+  display: grid;
+  grid-template-columns: 1fr minmax(150px, 218px);
+  gap: var(--space-6);
+  align-items: start;
+}
+/* The paper the book is read on. The ink inside is set from the same two
+ * tokens, injected into the frame's own sheet, because a custom property
+ * does not cross a document boundary. */
+.script-frame {
+  width: 100%;
+  height: 68vh;
+  min-height: 300px;
+  border: none;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--hole);
+  border-radius: var(--radius-well);
+}
+
+.scene-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  max-height: 68vh;
+  overflow-y: auto;
+  border-left: 1px solid var(--hole);
+  padding-left: var(--space-4);
+}
+.rail-count {
+  font-family: var(--font-structure); font-size: var(--text-fine);
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-muted);
+  margin: 0 0 var(--space-2);
+}
+/* A rail entry is a slugline, set the way a slugline is set: where in caps,
+ * when beside it in muted ink. */
+.scene-link {
+  display: block;
+  font-family: var(--font-structure);
+  font-size: var(--text-note);
+  line-height: 1.5;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--ink-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius-mark);
+  padding: 3px var(--space-2) 3px var(--space-2);
+  margin-left: calc(-1 * var(--space-2));
+  cursor: pointer;
+  transition: color var(--motion-state) var(--ease);
+}
+.scene-when { opacity: 0.62; }
+.scene-link:hover { color: var(--ink); }
+.scene-link-on { color: var(--ink); background: var(--hole); }
+.scene-link:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+
+/* Narrow: the rail goes above the page rather than squeezing it. */
+@media (max-width: 720px) {
+  .reader { grid-template-columns: 1fr; }
+  .scene-rail {
+    max-height: 6.5rem; flex-direction: row; flex-wrap: wrap;
+    gap: var(--space-3); border-left: none; padding-left: 0;
+  }
+  .scene-link { display: inline-block; }
+  .script-frame { height: 58vh; }
+}
+@media (max-height: 560px) {
+  .script-frame { height: 62vh; }
+  .scene-rail { max-height: 62vh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scene-link { transition: none; }
+}
