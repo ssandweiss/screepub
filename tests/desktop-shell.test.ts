@@ -282,6 +282,12 @@ describe('Rust is a window, not a brain', () => {
     // If a refactor changes this number, that is the assertion doing its
     // job — work out which of the three moved, do not raise the count.
     expect(body.match(/\bexit\b/g) ?? []).toHaveLength(3);
+    // A count reaches the binding it NAMES and not its source, so pin the
+    // upstream one too: `status` can be inspected before it ever becomes
+    // `exit`, leaving the count above untouched while the Rust decides a
+    // non-zero exit means failure. Two uses: bound by the match arm, and
+    // its code stored.
+    expect(body.match(/\bstatus\b/g) ?? []).toHaveLength(2);
   });
 
   test('a forwarded line is forwarded, not read', () => {
@@ -327,6 +333,11 @@ describe('Rust is a window, not a brain', () => {
     // appended to the diagnostics buffer. A fifth is the Rust reading it.
     // Do not raise this number to make a refactor pass.
     expect(body.match(/(?<![A-Z_])\bline\b/g) ?? []).toHaveLength(4);
+    // Same reasoning as `status` above: the raw `bytes` can be inspected
+    // before they are ever decoded into `line`, which would filter WHICH
+    // lines get forwarded while leaving the count above untouched. Four
+    // uses: bound and decoded, once per stream.
+    expect(body.match(/\bbytes\b/g) ?? []).toHaveLength(4);
   });
 });
 
