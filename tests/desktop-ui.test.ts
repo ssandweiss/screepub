@@ -1624,6 +1624,126 @@ describe('the Tune surface', () => {
     expect(source).toMatch(/running\s*=\s*running/);
   });
 
+
+  test('the sentence beside a knob is the CURRENT one, in both directions', () => {
+    // Found live, after idleReason() was tested hard and then bound wrongly:
+    // the sentence was written at draw time and never corrected, so
+    //   drawn centered, switched to Indented -> "Only when character cues
+    //     are indented." stood beside a control that had just become live
+    //   drawn indented, switched to Centered -> a greyed-out slider with no
+    //     explanation at all, and nothing for aria-describedby to point at
+    // Both are answers about (knob, settings), so both come from one
+    // function and the test asks it directly.
+    const indent = tune.knobFor('cueIndentPct');
+    const centered = { cueAlignment: 'centered' };
+    const indented = { cueAlignment: 'indented' };
+    expect(tune.notesFor(indent, centered)).toEqual([
+      'Only when character cues are indented.',
+    ]);
+    // Live again: nothing to say, and nothing said.
+    expect(tune.notesFor(indent, indented)).toEqual([]);
+
+    // A knob with a help sentence keeps it either way, and the reason it is
+    // idle comes FIRST when there is one — a reader wants to know why the
+    // control is grey before they want to know what it is for.
+    const speeches = tune.knobFor('keepSpeechesWhole');
+    expect(tune.notesFor(speeches, centered)).toEqual([speeches.help]);
+    const both = tune.notesFor(
+      { ...indent, help: 'What it is for.' }, centered,
+    );
+    expect(both).toEqual(['Only when character cues are indented.', 'What it is for.']);
+
+    // A knob that can never explain itself draws no element to explain with;
+    // one that can, draws one even while it is empty, or there is nothing to
+    // rewrite when the setting it depends on moves.
+    expect(tune.canExplain(tune.knobFor('scenePageBreaks'))).toBe(false);
+    expect(tune.canExplain(indent)).toBe(true);
+    expect(tune.canExplain(speeches)).toBe(true);
+    expect(tune.canExplain(null)).toBe(false);
+    for (const knob of tune.KNOBS) {
+      expect(tune.canExplain(knob), `${knob.key} can explain itself`)
+        .toBe(tune.notesFor(knob, indented).length > 0 || knob.needs !== undefined);
+    }
+  });
+
+  test('one function decides a control’s state, so the two cannot disagree', () => {
+    // The defect above was not a wrong rule, it was a rule with two
+    // bindings: drawKnob wrote the sentence and refreshIdle only toggled
+    // `disabled`. A test that asserted the source merely CONTAINS
+    // 'aria-describedby' passed throughout. So: both paths go through
+    // state(), and state() is the only thing that touches either.
+    const stateFn = source.slice(source.indexOf('function state('));
+    expect(stateFn.slice(0, 800)).toContain('notesFor');
+    expect(stateFn.slice(0, 800)).toContain('input.disabled');
+    expect(stateFn.slice(0, 800)).toContain('aria-describedby');
+    const drawKnob = source.slice(
+      source.indexOf('function drawKnob('), source.indexOf('function state('));
+    expect(drawKnob).toMatch(/state\(controls\.get/);
+    const refresh = source.slice(source.indexOf('function refreshIdle('));
+    expect(refresh.slice(0, 400)).toMatch(/state\(control\)/);
+    // Nothing enables, disables or describes a control behind its back.
+    expect([...source.matchAll(/\.disabled\s*=/g)].length).toBe(1);
+    // Attribute(...) rather than the bare word, so the comment that
+    // explains the defect does not count as a second binding.
+    expect([...source.matchAll(/Attribute\('aria-describedby'/g)].length).toBe(2);
+    // And an empty sentence is hidden rather than pointed at — via `hidden`,
+    // because the CSP refuses an inline style.
+    expect(stateFn.slice(0, 800)).toContain('why.hidden');
+    expect(source).not.toContain('.style.');
+  });
+
+  test('a save that failed is still owed, and is not claimed as done', () => {
+    // flush() clears `pending` before it asks the engine — that is what makes
+    // a knob moved DURING a save land in the next one. A failure therefore
+    // has to put back what the attempt carried, or the knobs on screen keep
+    // values the engine never stored and nothing is left to store them.
+    const owed = { dialogueSideMarginPct: 12, fontFamily: 'serif' };
+    expect(tune.restorePending(owed, {})).toEqual(owed);
+    // Anything moved since the attempt began is the newer answer and wins.
+    expect(tune.restorePending(owed, { fontFamily: 'sans' }))
+      .toEqual({ dialogueSideMarginPct: 12, fontFamily: 'sans' });
+    expect(tune.isPending(tune.restorePending(owed, {}))).toBe(true);
+    // Every way out of a failed save goes through it: a non-settings answer,
+    // a refused rebuild, and a throw.
+    const flush = source.slice(source.indexOf('async function flush('));
+    const failures = [...flush.matchAll(/statusFor\('failed'/g)];
+    expect(failures.length).toBe(3);
+    for (const [, before] of flush.matchAll(/(.{0,120})say\(statusFor\('failed'/gs)) {
+      expect(before, 'a failure that does not put back what it owed').toContain('giveBack()');
+    }
+    // And a failure never says "saved".
+    expect(tune.statusFor('failed', 'the engine fell over').line).not.toContain('Saved');
+  });
+
+  test('a settings read that failed can be tried again', () => {
+    // show() marks the surface loaded BEFORE awaiting, so a transient engine
+    // failure — a disk not mounted yet, a sidecar being written — would
+    // otherwise strand Tune on its fault screen for the life of the script.
+    const load = source.slice(source.indexOf('async function load('));
+    // The catch block ITSELF, not "somewhere after it" — the branch below it
+    // resets `loaded` too, and a loose slice would let that one answer for
+    // this one. (It did, until a deliberate mutation went unnoticed.)
+    const caught = /\} catch \(err\) \{([\s\S]*?)\n  \}/.exec(load);
+    expect(caught, 'load() has no catch').not.toBe(null);
+    expect(caught![1]).toContain('loaded = false');
+  });
+
+  test('a save in flight cannot paint the previous script into the reader', () => {
+    // scriptChanged() clears what is owed and the timer, but a flush already
+    // chained onto `running` cannot be cancelled: it would finish and hand
+    // renderReader() the OLD script's pages.
+    expect(source).toMatch(/era \+= 1/);
+    const changed = source.slice(source.indexOf('export function scriptChanged()'));
+    expect(changed.slice(0, 200)).toContain('era += 1');
+    const flush = source.slice(source.indexOf('async function flush('));
+    expect(flush.slice(0, 900)).toMatch(/const mine = era/);
+    // Checked after every await, and before anything is painted.
+    const awaits = [...flush.matchAll(/await runEngine/g)].length;
+    expect(awaits).toBe(2);
+    expect([...flush.matchAll(/stale\(\)/g)].length).toBeGreaterThanOrEqual(awaits + 1);
+    expect(flush.indexOf('stale()')).toBeLessThan(flush.indexOf('renderReader'));
+  });
+
   test('every control is tied to its label and its explanation', () => {
     // One id per key, a <label for> pointing at it, and the sentence beside
     // it named by aria-describedby — otherwise the help is invisible to the

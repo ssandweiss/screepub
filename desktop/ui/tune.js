@@ -184,6 +184,29 @@ export function idleReason(knob, settings) {
   return null;
 }
 
+/** Everything that belongs beside a control right now: why it is doing
+ *  nothing, then what it is for — in that order, because the reason it is
+ *  greyed out is the more urgent of the two.
+ *
+ *  Drawing a knob and re-stating one both go through this, because they were
+ *  once two answers and the second was never asked. The sentence was written
+ *  at draw time only, so switching cues to Indented left "Only when character
+ *  cues are indented." standing beside a control that had just become live —
+ *  and a surface opened WITH cues indented had no sentence to show at all
+ *  when they were switched back, leaving a greyed-out slider with no
+ *  explanation and nothing for aria-describedby to point at. */
+export function notesFor(knob, settings) {
+  return [idleReason(knob, settings), knob?.help]
+    .filter((note) => typeof note === 'string' && note.trim() !== '');
+}
+
+/** Whether a knob can ever have something to say. Its sentence element is
+ *  drawn whenever this is true — empty and hidden if there is nothing to say
+ *  yet — so there is always something for notesFor() to rewrite. */
+export function canExplain(knob) {
+  return Boolean(knob?.needs) || typeof knob?.help === 'string';
+}
+
 /** What a control's read-out says. Tabular and unit-carrying: "20%" is an
  *  answer, "20" is a number. A value the engine never sends still has to
  *  render as something rather than as NaN. */
@@ -229,6 +252,16 @@ export function mergePending(pending, key, value) {
 
 export function isPending(pending) {
   return Object.keys(pending ?? {}).length > 0;
+}
+
+/** What is owed after a save that did not happen. `pending` is cleared
+ *  before the engine is asked — that is what makes a knob moved DURING a
+ *  save land in the next one — so a failure has to put back what the
+ *  attempt carried, or the screen would show values the engine never stored
+ *  and nothing would be left to store them. Anything moved since the attempt
+ *  started wins: it is the newer answer about that knob. */
+export function restorePending(owed, pending) {
+  return { ...owed, ...pending };
 }
 
 /** The engine's settings answer, or null if it is not one. Checked key by
@@ -317,6 +350,11 @@ let running = Promise.resolve();
 let pending = {};
 let statusLine = null;
 let controls = new Map();
+/** Which script these knobs belong to. A flush already chained onto
+ *  `running` cannot be cancelled, so it checks this before it paints
+ *  anything: converting a second PDF while a save is in flight must not put
+ *  the first script's pages back into the reader. */
+let era = 0;
 
 /** Long enough that a dragged slider is one conversion rather than a
  *  hundred, short enough that a single click does not feel ignored. */
@@ -331,6 +369,7 @@ export function mount(node, context) {
 /** The script on screen changed, or went away: these knobs belong to the
  *  other one. */
 export function scriptChanged() {
+  era += 1;
   loaded = false;
   settings = null;
   presets = [];
@@ -357,6 +396,10 @@ async function load() {
     presets = presetsFrom(answer);
   } catch (err) {
     settings = null;
+    // Openable again: a sidecar that could not be read once — a disk that
+    // was not there yet, an engine that did not start — must not strand
+    // this surface on the fault screen for the life of the script.
+    loaded = false;
     draw(statusFor('failed', err.message));
     return;
   }
@@ -418,56 +461,67 @@ function drawGroup(group) {
 
 function drawKnob(knob) {
   const id = `knob-${knob.key}`;
-  const idle = idleReason(knob, settings);
   const value = settings[knob.key];
-  const notes = [idle, knob.help].filter((note) => note !== null && note !== undefined);
-  const described = notes.length === 0 ? null : `${id}-why`;
+  // Drawn whenever this knob could ever explain itself, even if it has
+  // nothing to say yet: state() below is what fills it in, now and every
+  // time the setting it depends on moves.
+  const why = canExplain(knob)
+    ? el('p', { class: 'caption knob-why', id: `${id}-why` })
+    : null;
 
-  const row = el('div', {
-    class: `knob knob-${knob.kind}${idle === null ? '' : ' knob-idle'}`,
-  },
-  el('label', { for: id, class: 'knob-label' }, knob.label));
+  const row = el('div', { class: `knob knob-${knob.kind}` },
+    el('label', { for: id, class: 'knob-label' }, knob.label));
+  let input;
 
   if (knob.kind === 'range') {
     const readOut = el('span', { class: 'knob-value' }, displayValue(knob, value));
-    const slider = el('input', {
+    input = el('input', {
       type: 'range', id, class: 'knob-slider',
       min: knob.min, max: knob.max, step: knob.step, value: String(value),
-      disabled: idle !== null,
-      'aria-describedby': described,
       oninput: (event) => {
         text(readOut, displayValue(knob, event.target.value));
         change(knob, event.target.value);
       },
     });
-    row.append(readOut, slider);
-    controls.set(knob.key, { input: slider, readOut, knob });
+    row.append(readOut, input);
+    controls.set(knob.key, { input, readOut, why, knob });
   } else if (knob.kind === 'toggle') {
-    const box = el('input', {
+    input = el('input', {
       type: 'checkbox', id, class: 'knob-box',
-      disabled: idle !== null,
-      'aria-describedby': described,
       onchange: (event) => change(knob, event.target.checked),
     });
-    box.checked = value === true;
-    row.append(box);
-    controls.set(knob.key, { input: box, knob });
+    input.checked = value === true;
+    row.append(input);
+    controls.set(knob.key, { input, why, knob });
   } else {
-    const select = el('select', {
+    input = el('select', {
       id, class: 'knob-select',
-      disabled: idle !== null,
-      'aria-describedby': described,
       onchange: (event) => change(knob, event.target.value),
     }, ...knob.choices.map(([choice, label]) => el('option', { value: choice }, label)));
-    select.value = String(value);
-    row.append(select);
-    controls.set(knob.key, { input: select, knob });
+    input.value = String(value);
+    row.append(input);
+    controls.set(knob.key, { input, why, knob });
   }
 
-  if (described !== null) {
-    row.append(el('p', { class: 'caption knob-why', id: described }, notes.join(' ')));
-  }
+  if (why !== null) row.append(why);
+  state(controls.get(knob.key), row);
   return row;
+}
+
+/** Put one control into the state the current settings ask for: live or
+ *  idle, and the sentences that go with that. The ONE place that decides it,
+ *  so a knob drawn idle and a knob that becomes idle cannot disagree. */
+function state({ input, why, knob }, row = input.closest('.knob')) {
+  const notes = notesFor(knob, settings);
+  const idle = idleReason(knob, settings) !== null;
+  input.disabled = idle;
+  row?.classList.toggle('knob-idle', idle);
+  if (why === null) return;
+  text(why, notes.join(' '));
+  // An empty <p> is not something to point a screen reader at.
+  why.hidden = notes.length === 0;
+  if (notes.length === 0) input.removeAttribute('aria-describedby');
+  else input.setAttribute('aria-describedby', why.id);
 }
 
 /** A preset overwrites every knob at once, so the whole surface is redrawn
@@ -498,15 +552,14 @@ function change(knob, raw) {
   schedule();
 }
 
-/** Re-state which knobs are doing nothing, without rebuilding the surface —
- *  a redraw under the reader's pointer would drop the control they are
- *  holding. */
+/** Re-state the knobs whose meaning depends on another setting, without
+ *  rebuilding the surface — a redraw under the reader's pointer would drop
+ *  the control they are holding. Same state() the draw uses, so the sentence
+ *  beside a control is corrected rather than left standing. */
 function refreshIdle() {
-  for (const { input, knob } of controls.values()) {
-    if (!knob.needs) continue;
-    const idle = idleReason(knob, settings);
-    input.disabled = idle !== null;
-    input.closest('.knob')?.classList.toggle('knob-idle', idle !== null);
+  for (const control of controls.values()) {
+    if (!control.knob.needs) continue;
+    state(control);
   }
 }
 
@@ -522,14 +575,28 @@ function schedule() {
 
 async function flush() {
   const script = ctx.state.script;
+  const mine = era;
   const owed = pending;
   pending = {};
   if (!isPending(owed) || !script?.fountainPath) return;
+
+  /** A change that was not stored is still owed. Clearing `pending` before
+   *  the engine is asked is what makes a knob moved DURING the save land in
+   *  the next one; but if the save itself fails, dropping what it carried
+   *  would leave the screen showing values the engine never wrote. */
+  const giveBack = () => { pending = restorePending(owed, pending); };
+  /** Another script was opened while this was in flight. The engine has
+   *  already been asked and there is no taking that back, but painting its
+   *  answer would put the previous script's pages into the reader. */
+  const stale = () => era !== mine;
+
   say(statusFor('saving'));
   try {
     const saved = settingsFrom(await runEngine(
       argv.settings(script.fountainPath, JSON.stringify(owed))));
+    if (stale()) return;
     if (saved === null) {
+      giveBack();
       say(statusFor('failed', NO_MESSAGE));
       return;
     }
@@ -550,7 +617,12 @@ async function flush() {
     }
     const answer = await runEngine(
       argv.reconvert(script.fountainPath, script.epubPath, JSON.stringify(script.settings)));
+    if (stale()) return;
     if (answer.ok !== true) {
+      // The settings ARE stored; it is the book that did not get rebuilt,
+      // and the surface may not claim otherwise. Owing them again is what
+      // makes the next change try the rebuild again.
+      giveBack();
       say(statusFor('failed', answer.error?.message));
       return;
     }
@@ -558,6 +630,8 @@ async function flush() {
     renderReader(script.previewHtml);
     say(statusFor(isPending(pending) ? 'pending' : 'saved'));
   } catch (err) {
+    if (stale()) return;
+    giveBack();
     say(statusFor('failed', err.message));
   }
 }
