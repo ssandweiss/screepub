@@ -431,7 +431,14 @@ describe('the Convert surface', () => {
       expect(`${name} sets .style: ${/\.style\b/.test(read(name))}`).toBe(
         `${name} sets .style: false`,
       );
-      expect(`${name} sets a style attribute: ${/['"`]style['"`]\s*:/.test(read(name))}`).toBe(
+      // The key may be unquoted, and here it usually IS: every el() call in
+      // this window writes `{ class: 'prose' }`, and dom.js falls through to
+      // setAttribute for any key it does not special-case, so `{ style: '…' }`
+      // is a real inline style written in the house spelling. The lookbehind
+      // is what keeps `font-style:` in read.js's @font-face block from
+      // reading as a violation.
+      const styleKey = /(?<![\w-])['"`]?style['"`]?\s*:/;
+      expect(`${name} sets a style attribute: ${styleKey.test(read(name))}`).toBe(
         `${name} sets a style attribute: false`,
       );
     }
@@ -2223,6 +2230,28 @@ describe('the Tune surface', () => {
 
 describe('the Send surface', () => {
   const send = read('send.js');
+
+  test('a send in flight cannot report into a script that replaced it', () => {
+    // The same rule tune.js carries, and for a worse failure: a sendTo()
+    // whose script is swapped mid-flight would say "Sent to Kindle." beside
+    // a script that was never sent. Pinned by shape, because deleting the
+    // counter or stubbing stale() to false leaves the suite green otherwise.
+    expect(send).toMatch(/era \+= 1/);
+    const changed = send.slice(send.indexOf('export function scriptChanged()'));
+    expect(changed.slice(0, 200)).toContain('era += 1');
+    const sendTo = send.slice(send.indexOf('async function sendTo('));
+    expect(sendTo.slice(0, 400)).toMatch(/const mine = era/);
+    expect(sendTo.slice(0, 400)).toMatch(/era !== mine/);
+    // One check per await boundary, so no continuation can paint blind.
+    // Counted over every `await`, not just the two direct engine calls:
+    // ensureSettings() awaits inside itself, and that boundary is exactly
+    // where a script can be replaced.
+    const body = sendTo.slice(0, sendTo.indexOf('\n}'));
+    const awaits = [...body.matchAll(/\bawait\s/g)].length;
+    expect(`sendTo has await boundaries: ${awaits}`).toBe('sendTo has await boundaries: 3');
+    const checks = [...body.matchAll(/if \(stale\(\)\)/g)].length;
+    expect(`sendTo checks staleness: ${checks}`).toBe('sendTo checks staleness: 3');
+  });
 
   test('it asks the engine what is connected rather than guessing', () => {
     expect(send).toContain('argv.devices');
