@@ -653,18 +653,19 @@ describe('what the Convert surface decides', () => {
   }, 60000);
 });
 
-describe('the engine’s answer survives the trip out of Rust', () => {
-  // Measured, not supposed: before the engine was fixed, a 384 KB answer
-  // came back whole twice and TRUNCATED twice in the same session, and a
-  // 3.4 MB answer was short on every attempt. The cause was upstream of this
-  // file — the engine exiting without waiting for its own buffered stdout,
-  // fixed in src/cli.ts and pinned by tests/cli.test.ts — but the window is
-  // where it showed, so the size this file can carry is asserted here too.
+describe('what runEngine does with the answer it is handed', () => {
+  // Scope, stated plainly, because these used to claim more than they
+  // covered: `invoke` is a stub here, so NOTHING below tests a transport.
+  // Whether a large answer survives the trip out of the engine is settled
+  // where it can be — tests/cli.test.ts drives the real binary through a
+  // real pipe — and whether it survives Tauri's IPC was settled by measuring
+  // the live window (desktop/README.md).
   //
-  // The answer arrives as a string. Returning it from Rust as bytes was
-  // tried (it takes the other route through Tauri's IPC) and timed in the
-  // live window: slower at every size, so it was reverted and the decode
-  // branch with it. desktop/README.md has the numbers.
+  // What is left for this file is the one decision runEngine makes on its
+  // own: it parses what it is given, and it truncates the RAW text only in
+  // the message for an answer that did not parse. Getting that backwards —
+  // capping the success path, or not capping the failure path — is the kind
+  // of mistake a stub can catch, so it is caught here.
   async function answering(answer: unknown) {
     const { runEngine } = await import(join(UI, 'app.js'));
     (globalThis as unknown as { window: unknown }).window = {
@@ -684,22 +685,26 @@ describe('the engine’s answer survives the trip out of Rust', () => {
     return JSON.stringify(answer);
   }
 
-  test('half a megabyte arrives whole', async () => {
+  test('the 300-character cap never touches an answer that parses', async () => {
+    // The cap belongs to the failure message and nowhere else. Applied one
+    // step too early — to the stdout, before the parse — every answer over
+    // 300 characters would become a syntax error, which is to say every
+    // real one. A 500 KB answer makes that unmissable.
     const json = bigAnswer(500_000);
-    expect(json.length).toBeGreaterThan(400_000); // the old floor, exceeded
+    expect(json.length).toBeGreaterThan(400_000);
     const parsed = await answering(json);
-    // Length first: a handler that dropped the tail would still produce an
-    // object if it happened to cut on a brace, so assert the size.
+    // Length, not just shape: a cap that cut on a brace could still parse.
     expect(JSON.stringify(parsed).length).toBe(json.length);
     expect(parsed).toEqual(JSON.parse(json));
   });
 
-  test('multi-byte characters survive, whatever the transport does', async () => {
-    // An em dash is in the engine's own refusal text, and a transport that
-    // went byte-wise somewhere would mangle it first.
-    const json = JSON.stringify({ ok: false, error: { code: 'x', message: 'é — 日本語' } });
-    const parsed = await answering(new TextDecoder().decode(new TextEncoder().encode(json)));
-    expect((parsed as { error: { message: string } }).error.message).toBe('é — 日本語');
+  test('the engine’s own words come back unedited', async () => {
+    // The refusal a reader sees is the engine's sentence, em dash and all.
+    // runEngine must hand it over exactly, not normalise or re-encode it.
+    const message = 'No scene headings — this does not look like a screenplay. é 日本語';
+    const json = JSON.stringify({ ok: false, error: { code: 'not-screenplay', message } });
+    const parsed = await answering(json);
+    expect((parsed as { error: { message: string } }).error.message).toBe(message);
   });
 
   test('an answer that is not JSON is reported in a readable length', async () => {

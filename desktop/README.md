@@ -149,8 +149,20 @@ identical run redirected to a FILE was always whole. The engine's
 `console.log` to a pipe is buffered, and the process was exiting without
 waiting for the tail. `src/cli.ts` now writes that one answer through
 `sayLine`, which waits for `drain`; `tests/cli.test.ts` has the regression
-test (a deliberately slow reader plus six attempts — the defect restored,
-that pair caught it six runs out of six).
+test.
+
+That test had to be rebuilt once, and the reason is worth carrying: its first
+version used a deliberately SLOW reader, on the theory that a full pipe makes
+the loss more likely. The opposite is true — backpressure keeps the child
+alive until it has flushed, which hides the very defect being tested. Measured
+per attempt with the defect restored, 20 attempts each: reading at full speed
+lost 30%, pausing 5 ms between reads 10%, pausing 50 ms 0%, and waiting 400 ms
+before reading (what the first version did) 5%. It passed against a live
+defect 5 runs in 16. The test now runs its eight attempts **in parallel**, so
+they contend for the machine: with the defect restored that caught it in 20
+standalone runs out of 20, worst round still losing 3 of its 8 attempts, and
+with the fix in place 20 runs of 8 — 160 attempts — lost nothing. It also got
+faster, about half a second for all eight.
 
 Measured after the fix, through the live window, four attempts each:
 212 KB, 384 KB, 487 KB, 694 KB and **3.47 MB** all arrived whole and parsed,

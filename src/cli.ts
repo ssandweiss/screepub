@@ -166,13 +166,18 @@ async function writeFileAtomic(
  * --preview-inline answer is 1.85-2.6 KB per page, so a 120-page script is
  * already several buffers deep, and the desktop window reads exactly this
  * way. Anything that can exceed 64 KiB goes through here.
+ *
+ * The wait is UNCONDITIONAL, not `if (!write(...)) await drain`. The
+ * conditional form is correct only while the runtime flushes a write that
+ * stayed under the high-water mark before it exits — true of Bun today, and
+ * exactly the sort of unstated assumption that produced this bug. Waiting
+ * for the write's own callback depends on nothing: measured over 10 runs of
+ * a small answer, both forms take the same time to the millisecond.
  */
 async function sayLine(text: string): Promise<void> {
-  if (!process.stdout.write(`${text}\n`)) {
-    await new Promise<void>((resolve) => {
-      process.stdout.once('drain', () => resolve());
-    });
-  }
+  await new Promise<void>((resolve) => {
+    process.stdout.write(`${text}\n`, () => resolve());
+  });
 }
 
 function fail(error: JsonError): never {

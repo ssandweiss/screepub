@@ -414,42 +414,40 @@ describe('--preview-inline', () => {
 
 describe('a large answer survives a pipe', () => {
   // The desktop window reads the engine's stdout through a pipe, and a pipe
-  // buffer is 64 KiB. `console.log` to a pipe is buffered and exiting does
-  // not wait for the tail: measured on this machine before the fix, the
-  // answer for the script generated below came back to a piped caller cut
-  // to exactly 262,144 or 655,360 bytes — 64 KiB multiples — roughly one run
-  // in four, while the same command redirected to a FILE was always whole.
-  // Nothing in the app was involved; `bun src/cli.ts … | cat` reproduced it.
-  //
+  // buffer is 64 KiB. `console.log` to a pipe is buffered, and exiting does
+  // not wait for the tail: measured before the fix, the answer for the
+  // script generated below reached a piped caller cut to exact 64 KiB
+  // multiples (262,144 / 589,824 / 655,360 …) with no app and no Tauri
+  // anywhere, while the same command redirected to a FILE was always whole.
   // The engine's own suite never saw it because every other answer here fits
-  // in one buffer. --preview-inline is 1.85-2.6 KB per page, so a 120-page
+  // in one buffer; --preview-inline is 1.85-2.6 KB per page, so a 120-page
   // script is already several buffers deep.
   //
-  // Repeating the plain spawn was NOT enough: with the defect restored, six
-  // attempts caught it in four runs out of five and ten in three out of
-  // five — the race can fall either way whatever the count. So the reader is
-  // made slow as well: nothing drains the pipe for the first moments, so the
-  // answer cannot fit in the 64 KiB buffer while an engine that does not
-  // wait for its own tail is exiting. Measured with the defect restored,
-  // that combination caught it in six runs out of six; the slow reader alone
-  // did not (one run in three still passed).
-  const READER_WAIT_MS = 400;
-  const ATTEMPTS = 6;
-
-  /** Run the CLI, leave its stdout unread for a moment, then drain it. */
-  async function runCliSlowReader(args: string[]) {
-    const proc = Bun.spawn(['bun', `${ROOT}src/cli.ts`, ...args], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    await Bun.sleep(READER_WAIT_MS);
-    const [stdout] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    return stdout;
-  }
+  // HOW THIS TEST IS SHAPED, because the obvious shapes do not work and one
+  // of them shipped here and had to be replaced.
+  //
+  // The loss is a race between the process exiting and its last writes
+  // leaving. So the reader must be FAST, not slow. A deliberately slow
+  // reader — the first version of this test — makes the race LESS likely,
+  // not more: backpressure keeps the child alive until it has flushed, which
+  // is the thing being tested for. Measured per attempt with the defect
+  // restored, 20 attempts each: reading at full speed lost 30%, pausing 5 ms
+  // between reads lost 10%, pausing 50 ms lost 0%, and waiting 400 ms before
+  // reading at all — what this test used to do — lost 5%. Six attempts at 5%
+  // is a test that passes against a live defect most of the time, and a
+  // reviewer duly caught it doing so (11 of 16 runs).
+  //
+  // What does work is CONTENDING for the machine: the attempts run in
+  // PARALLEL, so eight conversions race each other and the scheduler. That
+  // raises the loss rate and cuts the wall clock at the same time — eight
+  // attempts take about half a second in total, where six serial ones took
+  // three seconds.
+  //
+  // Measured with the defect restored: 20 rounds of 8, every round caught it,
+  // and the WORST round still lost 3 of its 8 attempts (best, 7 of 8). So
+  // this is not a knife edge. With the fix in place, 20 rounds of 8 — 160
+  // attempts — lost nothing, so there are no false reds either.
+  const ATTEMPTS = 8;
 
   /** An invented screenplay, big enough to need several pipe buffers. */
   function generated(scenes: number) {
@@ -468,12 +466,19 @@ length, which is the whole point of sample number ${i}.\n\n`);
     const script = `${SCRATCH}/pipe-load.fountain`;
     writeFileSync(script, generated(1000), 'utf8');
 
+    // One output path each: the attempts run at once and must not race for a
+    // file as well as for the CPU.
+    const answers = await Promise.all(
+      Array.from({ length: ATTEMPTS }, (_, i) =>
+        runCli([script, '--json', '--preview-inline',
+          '--no-fountain', '-o', `${SCRATCH}/pipe-load-${i}.epub`])),
+    );
+
     const lengths: number[] = [];
-    for (let i = 0; i < ATTEMPTS; i += 1) {
-      const stdout = (await runCliSlowReader([script, '--json', '--preview-inline',
-        '--no-fountain', '-o', `${SCRATCH}/pipe-load.epub`])).trim();
+    for (const [i, out] of answers.entries()) {
+      const stdout = out.stdout.trim();
       lengths.push(stdout.length);
-      // Named by attempt, so a failure says which run lost the tail.
+      // Named by attempt, so a failure says which run lost its tail.
       expect(`attempt ${i} parses: ${(() => {
         try {
           return JSON.parse(stdout).ok === true;
