@@ -3,8 +3,13 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { exportCommand } from '../src/cli-export';
-import { availableFormats } from '../src/export/artifact';
+import { availableFormats, type FreshKindleArtifactOptions } from '../src/export/artifact';
 import { isCalibreAvailable } from '../src/export/calibre';
+import type { KfxStatus } from '../src/export/kfx';
+
+const kfxReadyStatus: KfxStatus = { calibre: true, previewer: true, pluginInstalled: true, ready: true };
+const calibreOnlyStatus: KfxStatus = { calibre: true, previewer: false, pluginInstalled: false, ready: false };
+const noToolchainStatus: KfxStatus = { calibre: false, previewer: false, pluginInstalled: false, ready: false };
 
 let dir: string;
 let epub: string;
@@ -52,43 +57,114 @@ describe('exportCommand', () => {
     expect(result.available).toEqual(availableFormats(epub, isCalibreAvailable()));
   });
 
-  test('kindle with no Calibre and no .mobi says what is missing, not "failed"', async () => {
-    const result = await exportCommand({ epub, for: 'kindle', fountain }).catch((e) => e);
-    if (result instanceof Error) {
-      expect(result.message).toMatch(/Calibre|Kindle/);
-    } else {
-      // On a machine that CAN build one, it must be a real file beside the EPUB.
-      expect(existsSync(result.path)).toBe(true);
-      expect(['kfx', 'azw3', 'mobi']).toContain(result.extension);
-    }
+  // --- Kindle rung selection, driven deterministically through the seam ---
+  //
+  // freshKindleArtifact's own staleness rules and toolchain-error mapping
+  // are already covered by tests/export-artifact.test.ts. What belongs to
+  // THIS wrapper is: does it probe the right things, thread the resulting
+  // state INTO the ladder, and report the extension/label/stages that state
+  // implies? Injecting calibreAvailable/kfxStatus lets every rung be
+  // asserted on every machine, regardless of what's actually installed —
+  // real Calibre on Linux checks fixed paths before PATH (calibreTool's
+  // candidatePaths), so a genuine install can't be shadowed the way the
+  // rest of the codebase shadows a missing one.
+
+  test('kindle rung: KFX ready selects the KFX rung', async () => {
+    const fakeKfx = join(dir, 'Script.kfx');
+    writeFileSync(fakeKfx, 'fake-kfx-bytes');
+    const seen: { opts?: FreshKindleArtifactOptions } = {};
+    const result = await exportCommand(
+      { epub, for: 'kindle', fountain },
+      {
+        calibreAvailable: () => true,
+        kfxStatus: async () => kfxReadyStatus,
+        freshKindleArtifact: async (opts) => {
+          seen.opts = opts;
+          opts.onStage?.('converting to KFX (Kindle Previewer can take ~20s to start)…');
+          return fakeKfx;
+        },
+      },
+    );
+    // The ladder must be HANDED the ready state, not just told it exists —
+    // a wrapper that forgot to thread kfxReady through picks a rung the
+    // ladder never agreed to.
+    expect(seen.opts?.kfxReady).toBe(true);
+    expect(seen.opts?.calibreAvailable).toBe(true);
+    expect(result.path).toBe(fakeKfx);
+    expect(result.extension).toBe('kfx');
+    expect(result.label).toContain('best quality');
+    expect(result.stages.join(' ')).toContain('KFX');
   });
 
-  test('kindle without Calibre rebuilds a MOBI from the .fountain', async () => {
-    // The bottom rung, which needs no external toolchain and so is the one
-    // branch that is deterministic on every machine this runs on.
-    const result = await exportCommand({
-      epub, for: 'kindle', fountain,
-      optionsJson: '{"showSceneNumbers":true}',
-    });
-    if (result.extension !== 'mobi') return; // Calibre present: covered above
-    expect(existsSync(result.path)).toBe(true);
+  test('kindle rung: Calibre present without KFX selects the AZW3 rung', async () => {
+    const fakeAzw3 = join(dir, 'Script.azw3');
+    writeFileSync(fakeAzw3, 'fake-azw3-bytes');
+    const seen: { opts?: FreshKindleArtifactOptions } = {};
+    const result = await exportCommand(
+      { epub, for: 'kindle', fountain },
+      {
+        calibreAvailable: () => true,
+        kfxStatus: async () => calibreOnlyStatus,
+        freshKindleArtifact: async (opts) => {
+          seen.opts = opts;
+          opts.onStage?.('converting to AZW3 for Kindle…');
+          return fakeAzw3;
+        },
+      },
+    );
+    expect(seen.opts?.kfxReady).toBe(false);
+    expect(seen.opts?.calibreAvailable).toBe(true);
+    expect(result.path).toBe(fakeAzw3);
+    expect(result.extension).toBe('azw3');
+    expect(result.label).not.toContain('best quality');
+    expect(result.stages.join(' ')).toContain('AZW3');
+  });
+
+  test('kindle rung: neither Calibre nor KFX rebuilds a real MOBI from the .fountain', async () => {
+    // The bottom rung needs no external toolchain at all — convertFountain
+    // is the engine's own pure-TS code, not Calibre — so this runs through
+    // the REAL ladder (no freshKindleArtifact fake) with only the PROBE
+    // results forced via the seam, proving the wrapper's own detection
+    // actually drives rung selection, not just its plumbing.
+    const result = await exportCommand(
+      { epub, for: 'kindle', fountain, optionsJson: '{"showSceneNumbers":true}' },
+      { calibreAvailable: () => false, kfxStatus: async () => noToolchainStatus },
+    );
+    expect(result.extension).toBe('mobi');
     expect(result.path).toBe(join(dir, 'Script.mobi'));
+    expect(existsSync(result.path)).toBe(true);
     expect(result.stages.join(' ')).toContain('rebuilding');
   });
 
-  // Names the exact defect this piece is guarding against: a wrapper that
-  // reuses whatever sits beside the EPUB without checking the ladder's own
-  // staleness rule. Only exercised on a machine with no Calibre (where the
-  // MOBI rung is reachable at all) — self-skips elsewhere, same as the test
-  // above.
+  test('kindle rung: neither Calibre nor an existing .mobi refuses deterministically', async () => {
+    let message = '';
+    try {
+      await exportCommand(
+        { epub, for: 'kindle' }, // no fountain: the bottom rung cannot rebuild
+        { calibreAvailable: () => false, kfxStatus: async () => noToolchainStatus },
+      );
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toMatch(/\.fountain/);
+  });
+
+  // Names the exact defect this piece is guarding against: a wrapper (or a
+  // ladder call site) that reuses whatever sits beside the EPUB without
+  // checking the staleness rule. Forced onto the MOBI rung via the seam, so
+  // this asserts on every machine rather than self-skipping wherever real
+  // Calibre happens to be installed.
   test('a stale .mobi beside the EPUB is rebuilt, not returned as-is', async () => {
     const mobiPath = join(dir, 'Script.mobi');
     writeFileSync(mobiPath, 'stale-placeholder');
     const past = new Date(Date.now() - 60_000);
     utimesSync(mobiPath, past, past); // older than the epub -> stale
 
-    const result = await exportCommand({ epub, for: 'kindle', fountain });
-    if (result.extension !== 'mobi') return; // Calibre present: azw3 rung instead
+    const result = await exportCommand(
+      { epub, for: 'kindle', fountain },
+      { calibreAvailable: () => false, kfxStatus: async () => noToolchainStatus },
+    );
+    expect(result.extension).toBe('mobi');
     expect(result.path).toBe(mobiPath);
     expect(readFileSync(result.path, 'utf8')).not.toBe('stale-placeholder');
     expect(result.stages.join(' ')).toContain('rebuilding');
@@ -97,7 +173,7 @@ describe('exportCommand', () => {
   // The inverse: a FRESH .mobi must be reused with NO stages at all — a
   // wrapper that fabricates a "reusing…" stage the ladder itself never
   // emits (freshKindleArtifact returns the cached path with no onStage
-  // call) would fail this.
+  // call) would fail this. Also forced deterministic via the seam.
   test('a fresh .mobi beside the EPUB is reused with no invented stages', async () => {
     const mobiPath = join(dir, 'Script.mobi');
     writeFileSync(mobiPath, 'already-built');
@@ -105,22 +181,33 @@ describe('exportCommand', () => {
     utimesSync(epub, new Date(now.getTime() - 10_000), new Date(now.getTime() - 10_000));
     utimesSync(mobiPath, now, now);
 
-    const result = await exportCommand({ epub, for: 'kindle', fountain });
-    if (result.extension !== 'mobi') return; // Calibre present: azw3 rung instead
+    const result = await exportCommand(
+      { epub, for: 'kindle', fountain },
+      { calibreAvailable: () => false, kfxStatus: async () => noToolchainStatus },
+    );
+    expect(result.extension).toBe('mobi');
     expect(result.path).toBe(mobiPath);
     expect(readFileSync(result.path, 'utf8')).toBe('already-built');
     expect(result.stages).toEqual([]);
   });
 
-  test('kindle with no .fountain and no Calibre refuses with a reason', async () => {
-    let message = '';
-    try {
-      await exportCommand({ epub, for: 'kindle' });
-    } catch (err) {
-      message = (err as Error).message;
+  // The one test in this file that genuinely cannot be made deterministic:
+  // confirming the REAL, non-injected production path (real
+  // isCalibreAvailable, real kfxStatus, real freshKindleArtifact) produces
+  // a genuine file when a real toolchain is present requires that real
+  // toolchain to actually run and emit bytes — no seam can substitute for
+  // that without testing a fake instead of the real wiring it exists to
+  // exercise. It never SKIPS — there is always an answer, either a real
+  // file or a message naming Calibre/Kindle — it just can't pin which
+  // branch runs, because that is a property of the machine, not the code.
+  test('kindle rung on the real, non-injected toolchain: a real file, or a named reason', async () => {
+    const result = await exportCommand({ epub, for: 'kindle', fountain }).catch((e) => e);
+    if (result instanceof Error) {
+      expect(result.message).toMatch(/Calibre|Kindle/);
+    } else {
+      expect(existsSync(result.path)).toBe(true);
+      expect(['kfx', 'azw3', 'mobi']).toContain(result.extension);
     }
-    // Either rung may answer depending on the machine; both must name a cause.
-    expect(message === '' || /\.fountain|Calibre|Kindle/.test(message)).toBe(true);
   });
 
   test('a missing EPUB is unreadable, not a ladder failure', async () => {

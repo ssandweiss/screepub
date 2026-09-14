@@ -5,10 +5,14 @@
 // the answer out. Returns a value; cli.ts owns stdout.
 import { statSync } from 'node:fs';
 import { CliError, errorMessage } from './cli-errors';
-import { availableFormats, freshKindleArtifact } from './export/artifact';
+import {
+  availableFormats,
+  freshKindleArtifact as realFreshKindleArtifact,
+  type FreshKindleArtifactOptions,
+} from './export/artifact';
 import { isCalibreAvailable } from './export/calibre';
 import { fileExtension, formatLabel, type ExportFormat } from './export/formats';
-import { kfxStatus } from './export/kfx';
+import { kfxStatus as realKfxStatus, type KfxStatus } from './export/kfx';
 import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from './options';
 
 export interface ExportResult {
@@ -31,6 +35,27 @@ export interface ExportOptions {
   optionsJson?: string;
 }
 
+// Injectable seams, same shape as tools/build-cli.ts's `Spawn` and
+// tools/sidecar-targets.ts's `HostTriple`: a typed function, defaulted to
+// the real thing, so a test can drive a specific rung (KFX ready / Calibre
+// only / neither) without depending on which toolchain happens to be
+// installed on the machine running the suite. Real Calibre on Linux checks
+// FIXED paths before PATH (src/export/calibre.ts's candidatePaths), so the
+// PATH-shadowing trick used elsewhere in this codebase cannot reach a
+// machine that has a genuine install — this seam is the only way to test
+// the wrapper's rung SELECTION independently of what is actually on disk.
+// Production call sites pass no `deps` at all and get the real detectors
+// untouched.
+export type CalibreProbe = () => boolean;
+export type KfxProbe = () => Promise<KfxStatus>;
+export type KindleLadder = (opts: FreshKindleArtifactOptions) => Promise<string>;
+
+export interface ExportDeps {
+  calibreAvailable?: CalibreProbe;
+  kfxStatus?: KfxProbe;
+  freshKindleArtifact?: KindleLadder;
+}
+
 function readFormat(optionsJson: string | undefined): FormatOptions {
   if (optionsJson === undefined) return DEFAULT_FORMAT_OPTIONS;
   let parsed: unknown;
@@ -45,7 +70,10 @@ function readFormat(optionsJson: string | undefined): FormatOptions {
   return resolveFormatOptions(parsed as Record<string, unknown>);
 }
 
-export async function exportCommand(options: ExportOptions): Promise<ExportResult> {
+export async function exportCommand(
+  options: ExportOptions,
+  deps: ExportDeps = {},
+): Promise<ExportResult> {
   const wanted = options.for ?? 'epub';
   if (wanted !== 'epub' && wanted !== 'kindle') {
     throw new CliError('usage', `--for takes epub or kindle, not "${wanted}"`);
@@ -63,7 +91,7 @@ export async function exportCommand(options: ExportOptions): Promise<ExportResul
     throw new CliError('unreadable', `cannot read the book to export: ${options.epub}`);
   }
 
-  const calibreAvailable = isCalibreAvailable();
+  const calibreAvailable = (deps.calibreAvailable ?? isCalibreAvailable)();
   const available = availableFormats(options.epub, calibreAvailable);
   const format: ExportFormat = wanted;
 
@@ -79,12 +107,12 @@ export async function exportCommand(options: ExportOptions): Promise<ExportResul
     };
   }
 
-  const kfx = await kfxStatus();
+  const kfx = await (deps.kfxStatus ?? realKfxStatus)();
   const state = { calibreAvailable, kfxReady: kfx.ready };
   const stages: string[] = [];
   let path: string;
   try {
-    path = await freshKindleArtifact({
+    path = await (deps.freshKindleArtifact ?? realFreshKindleArtifact)({
       epub: options.epub,
       fountainPath: options.fountain ?? null,
       format: readFormat(options.optionsJson),
