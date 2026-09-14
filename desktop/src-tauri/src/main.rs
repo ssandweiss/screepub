@@ -11,16 +11,10 @@ use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
 
 /// Run the engine with exactly the arguments the window supplied, and
-/// resolve with exactly what it printed. The window decodes and parses it.
-///
-/// `Response` is what makes the answer arrive whole: it marks the body raw,
-/// and Tauri sends a raw body down the IPC channel instead of injecting it
-/// into the webview as a JS string literal, which silently truncated large
-/// answers. See the note in `sidecar.rs`. It is a transport wrapper, not a
-/// decision about content — the bytes are passed through untouched.
+/// resolve with exactly what it printed. The window parses it.
 #[tauri::command]
-async fn run_engine(app: AppHandle, args: Vec<String>) -> Result<tauri::ipc::Response, String> {
-    sidecar::run(&app, args).await.map(tauri::ipc::Response::new)
+async fn run_engine(app: AppHandle, args: Vec<String>) -> Result<String, String> {
+    sidecar::run(&app, args).await
 }
 
 /// Ask the OS for a file. Returns `null` when the user cancels.

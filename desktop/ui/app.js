@@ -49,41 +49,24 @@ export const argv = {
 };
 
 /** How much of an unparseable answer goes in the message a person reads.
- *  A truncated 400 KB answer is still 400 KB of JSON, and the fault body is
- *  a 52-character column: the first few lines say what went wrong, and the
- *  rest only buries the two buttons under it. */
+ *  A truncated answer is still the whole of whatever did arrive, and the
+ *  fault body is a 52-character column: the first few lines say what went
+ *  wrong, and the rest only buries the two buttons under it. */
 const RAW_SHOWN = 300;
 
-/** The engine's stdout, as text.
- *
- *  Rust hands it over as BYTES, not as a string, and that is load-bearing
- *  rather than a style choice. Tauri routes an IPC answer one of two ways
- *  (`tauri-2.11.5/src/ipc/protocol.rs:373-407`): a raw body goes down the
- *  channel, a JSON body only when it starts with `{` or `[`. A Rust String
- *  arrives as `"…"`, so it took the other route — injected into WebKitGTK as
- *  a JS string literal — and above roughly 400 KB that arrives TRUNCATED,
- *  nondeterministically. A 120-page script with --preview-inline is already
- *  220-320 KB, so this was not a theoretical ceiling.
- *
- *  Both shapes are accepted because Tauri's own routing is per platform:
- *  Linux and Windows deliver the raw body as an ArrayBuffer down the
- *  channel, while macOS and iOS still eval it, where a Vec<u8> serialises as
- *  an array of numbers. The string branch is what a test double hands over,
- *  and what the old transport produced. */
-function decodeAnswer(answer) {
-  if (typeof answer === 'string') return answer;
-  if (answer instanceof ArrayBuffer) return new TextDecoder().decode(answer);
-  if (ArrayBuffer.isView(answer)) return new TextDecoder().decode(answer);
-  if (Array.isArray(answer)) return new TextDecoder().decode(Uint8Array.from(answer));
-  return String(answer ?? '');
-}
-
 /** Run the engine and parse its one line of stdout.
- *  Throws an Error whose message is fit to show a person. */
+ *  Throws an Error whose message is fit to show a person.
+ *
+ *  The answer arrives as a string, however big it is. That was measured
+ *  rather than assumed: returning it from Rust as BYTES instead — which
+ *  takes a different route through Tauri's IPC — was tried and timed in the
+ *  live window at 384 KB, 1.04 MB and 3.47 MB, and was SLOWER every time
+ *  (median 430 vs 330 ms, 1006 vs 718 ms, 4803 vs 3864 ms), so the decode
+ *  branch it needed was taken out again. See desktop/README.md. */
 export async function runEngine(args) {
   let stdout;
   try {
-    stdout = decodeAnswer(await tauri().core.invoke('run_engine', { args }));
+    stdout = await tauri().core.invoke('run_engine', { args });
   } catch (message) {
     // Rust rejected: it could not find or start the binary at all.
     throw new Error(String(message));

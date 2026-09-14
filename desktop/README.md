@@ -154,15 +154,37 @@ that pair caught it six runs out of six).
 
 Measured after the fix, through the live window, four attempts each:
 212 KB, 384 KB, 487 KB, 694 KB and **3.47 MB** all arrived whole and parsed,
-20 of 20.
+20 of 20. Re-measured on the `String` build that actually ships (below), six
+attempts each at 384 KB, 1.04 MB and 3.47 MB: whole and parsed, 18 of 18.
 
-Two things changed here as well, both secondary:
+### Bytes or a String? Measured, then reverted
 
-  * `run_engine` returns the stdout as **bytes** (`tauri::ipc::Response`)
-    rather than a `String`, and `desktop/ui/app.js` decodes them. A String
-    return is serialised by Tauri into a quoted JSON string and parsed back
-    out again, so a multi-megabyte answer was escaped and parsed twice for
-    no reason. This was *not* what fixed the truncation.
+`run_engine` briefly returned the stdout as **bytes**
+(`tauri::ipc::Response`), with `app.js` decoding them, on the argument that a
+`String` return makes Tauri escape the whole answer into a quoted JSON string
+which the window then parses back out. Plausible, and wrong. Timed in the
+live window, `--preview-inline`, six runs each, median of `invoke`:
+
+| answer | bytes | String |
+| --- | --- | --- |
+| 384 KB | 430 ms / 417 ms (two sessions) | **330 ms** |
+| 1.04 MB | 1006 ms / 1025 ms | **718 ms** |
+| 3.47 MB | 4803 ms / 4795 ms | **3864 ms** |
+
+Spreads were comparable (bytes max−min 120-250 ms, String ~130 ms), and the
+client-side decode-and-parse was single-digit milliseconds either way. The
+String is faster at every size, by about 20%, so the bytes return and the
+decode branch that went with it were both taken out. **A `String` is what
+ships.**
+
+Two cautions for anyone re-running that measurement. Tauri picks the IPC
+route per page load and can fall back permanently (below), so check which
+route a run actually used before comparing two of them: both bytes runs above
+landed on the `eval` route, its worst case, and the route could not be forced.
+And `cargo run` after a change to `desktop/ui/` alone may serve the
+**previously embedded** frontend: put a build stamp in the page and read it
+back, or the numbers are quietly from the old code.
+
   * A dead end worth recording: Tauri only sends a JSON IPC body down the
     channel when it starts with `{` or `[`
     (`tauri-2.11.5/src/ipc/protocol.rs:373-407`), and otherwise injects it
