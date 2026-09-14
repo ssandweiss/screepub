@@ -21,9 +21,13 @@ export const argv = {
 
   /** The first conversion. --progress makes the engine narrate to stderr,
    *  which the shell forwards as `engine-line`; --preview-inline puts the
-   *  reader's document in the answer, because the window cannot read files. */
+   *  reader's document in the answer, because the window cannot read files;
+   *  --library keeps the .epub, the .fountain and the sidecar out of whatever
+   *  folder the reader happened to drag the PDF from. Where the library IS
+   *  belongs to the engine (src/library.ts) — this window never names a path,
+   *  and reads the ones it gets back off the answer. */
   convert: (path, { force = false, optionsJson = null } = {}) =>
-    [path, '--json', '--progress', '--preview-inline',
+    [path, '--json', '--progress', '--preview-inline', '--library',
       force ? '--force' : null,
       optionsJson ? '--options-json' : null, optionsJson].filter((a) => a !== null),
 

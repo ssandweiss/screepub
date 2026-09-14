@@ -24,6 +24,7 @@ export const HEADINGS = {
   'unsupported-type': 'Int. wrong kind of file - day',
   'bad-options': 'Int. bad settings - day',
   'usage': 'Int. bad settings - day',
+  'library': 'Int. no way into the library - day',
   'internal': 'Int. the engine did not answer - day',
 };
 

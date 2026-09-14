@@ -16,6 +16,7 @@ import {
   type ConvertStage,
 } from './convert';
 import { mapConversionError, CliError, errorMessage, type JsonError } from './cli-errors';
+import { adoptSidecar, libraryOutput } from './library';
 import { resolveCommand, devicesCommand, sendCommand, VERBS, type Verb } from './cli-devices';
 import { settingsCommand } from './cli-settings';
 import { exportCommand } from './cli-export';
@@ -34,6 +35,12 @@ README's "Fountain input" section.
 
 Options:
   -o, --output <file>    EPUB output path (default: <input>.epub)
+  --library              write into the library folder instead of beside the
+                         input: <library>/<stem>/<stem>.epub. The library is
+                         ~/Library/Application Support/Screepub on macOS,
+                         %APPDATA%\\Screepub on Windows and
+                         $XDG_DATA_HOME/screepub (else ~/.local/share/screepub)
+                         elsewhere; $SCREEPUB_LIBRARY overrides it
   --fountain <file>      Fountain output path (default: <input>.fountain for PDF input)
   --no-fountain          skip writing the intermediate .fountain file
   --title <text>         override detected title
@@ -232,6 +239,7 @@ function parseCliArgs() {
     allowPositionals: true,
     options: {
       output: { type: 'string', short: 'o' },
+      library: { type: 'boolean', default: false },
       fountain: { type: 'string' },
       'no-fountain': { type: 'boolean', default: false },
       title: { type: 'string' },
@@ -459,7 +467,29 @@ async function main() {
 
   const input = positionals[0];
   const ext = extname(input).toLowerCase();
-  const inputStem = join(dirname(input), basename(input, extname(input)));
+  // -o already says where the output goes, so --library beside it says
+  // nothing this run can act on. Rejected rather than ignored, the same way
+  // --options with --options-json is: a flag that silently did nothing
+  // teaches the caller it did something.
+  if (values.library && values.output !== undefined) {
+    fail({
+      code: 'usage',
+      message: 'pass --library or -o, not both — -o already says where the output goes',
+    });
+  }
+  let inputStem = join(dirname(input), basename(input, extname(input)));
+  if (values.library) {
+    try {
+      inputStem = libraryOutput(input);
+      // Tuning the user already did beside the PDF follows the script in,
+      // so the library does not start it over at the defaults.
+      adoptSidecar(input, inputStem);
+    } catch (err) {
+      // The app's contract holds even here: one JSON object, never a throw
+      // from deep inside node:fs.
+      fail({ code: 'library', message: `cannot open the library folder — ${errorMessage(err)}` });
+    }
+  }
   const epubPath = values.output ?? `${inputStem}.epub`;
   // Companion outputs (.mobi/.fountain/.elements.json) follow the EPUB, so
   // -o into a library folder keeps everything together.

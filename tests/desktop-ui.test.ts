@@ -220,6 +220,12 @@ describe('the engine contract lives in exactly one file', () => {
     const after = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
 
     const plain = argv.convert('/s/script.pdf');
+    // Pinned WHOLE, not probed flag by flag: this argv is the entire contract
+    // between the window and the engine, and an extra or missing element is
+    // exactly what a wrong edit leaves behind.
+    expect(plain).toEqual(
+      ['/s/script.pdf', '--json', '--progress', '--preview-inline', '--library'],
+    );
     expect(plain[0]).toBe('/s/script.pdf');
     // The reader cannot read files, so the document must ride in the answer,
     // and the progress lines must be asked for or the bar never moves.
@@ -239,8 +245,12 @@ describe('the engine contract lives in exactly one file', () => {
     expect(after(argv.settings('/s/x.fountain', '{"a":1}'), '--set')).toBe('{"a":1}');
 
     // A re-render writes the library EPUB back in place, so what gets sent
-    // stays what was previewed.
-    expect(after(argv.reconvert('/s/x.fountain', '/s/x.epub', '{}'), '-o')).toBe('/s/x.epub');
+    // stays what was previewed. It names that path with -o, so it must NOT
+    // also ask for --library: the engine refuses the pair rather than picking
+    // a winner, and a re-render that did both would fail every time.
+    const again = argv.reconvert('/s/x.fountain', '/s/x.epub', '{}');
+    expect(after(again, '-o')).toBe('/s/x.epub');
+    expect(again).not.toContain('--library');
 
     const exported = argv.export('/s/x.epub', {
       forFormat: 'azw3', fountain: '/s/x.fountain', optionsJson: '{}',

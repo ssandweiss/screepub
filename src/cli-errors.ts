@@ -11,6 +11,8 @@ export interface JsonError {
     | 'usage'
     | 'bad-options'
     | 'internal'
+    // The library folder could not be opened or made.
+    | 'library'
     // Device commands (piece B). Same contract, same stdout rule.
     | 'no-devices'
     | 'ambiguous-device'

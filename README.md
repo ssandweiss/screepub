@@ -201,6 +201,7 @@ bun src/cli.ts <input.pdf | input.fountain> [options]
 | Option | Effect |
 | --- | --- |
 | `-o, --output <file>` | EPUB path (default `<input>.epub`; companions follow it) |
+| `--library` | write into the library instead of beside the input (see below) |
 | `--mobi` | also write a MOBI 6 (dependency-free USB sideload) |
 | `--preview-html <file>` | also write the script as one self-contained HTML file |
 | `--fountain <file>` / `--no-fountain` | intermediate `.fountain` control |
@@ -210,6 +211,26 @@ bun src/cli.ts <input.pdf | input.fountain> [options]
 | `--json` | machine-readable result (the app↔engine contract) |
 | `--progress` | NDJSON progress on **stderr** while converting |
 | `--debug` | dump classified elements JSON |
+
+#### The library
+
+Without `--library` the CLI writes beside its input, which is what a
+command-line tool is expected to do. `--library` — what the desktop window
+passes, so a converted script never litters the folder the PDF was dragged
+from — puts the book, its `.fountain` and its settings sidecar together in
+one folder per script:
+
+| Platform | Library |
+| --- | --- |
+| macOS | `~/Library/Application Support/Screepub` |
+| Windows | `%APPDATA%\Screepub` |
+| Linux / other | `$XDG_DATA_HOME/screepub`, else `~/.local/share/screepub` |
+
+`SCREEPUB_LIBRARY` overrides all three. Two different scripts with the same
+filename do not share a folder: the second gets `<stem>-<hash>`, keyed on its
+own path, so neither book can overwrite the other. A `<stem>.screepub.json`
+sitting beside the PDF from an earlier conversion is copied in the first time
+that script reaches the library, so tuning is not silently lost.
 
 #### Device commands
 
