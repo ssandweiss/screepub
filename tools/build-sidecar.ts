@@ -2,7 +2,7 @@
 //
 //   bun tools/build-sidecar.ts --host           # this machine, ~30s
 //   bun tools/build-sidecar.ts --target bun-windows-x64
-//   bun tools/build-sidecar.ts --all            # every target (~500 MB)
+//   bun tools/build-sidecar.ts --all            # every target (~100 MB each)
 //
 // This is a build input, not a release artifact: it produces no archive, no
 // checksum and nothing that reaches a user. Release artifacts are
@@ -115,8 +115,9 @@ export function parseSidecarArgs(
   } else {
     throw new Error(
       'build-sidecar: say which targets — --host, --target <bun-target> or --all. ' +
-        'There is no default: --all costs five cross-compiles and about 500 MB, ' +
-        'and --host would build the wrong machine’s binary in CI.',
+        `There is no default: --all costs ${SIDECAR_TARGETS.length} cross-compiles and ` +
+        `about ${SIDECAR_TARGETS.length * 100} MB, and --host would build the wrong ` +
+        'machine’s binary in CI.',
     );
   }
 

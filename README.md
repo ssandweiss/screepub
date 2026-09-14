@@ -143,8 +143,9 @@ the part that is well tested everywhere; sending is not.
 A cross-platform window is being built in `desktop/`, on Tauri, around this
 same engine — the app spawns the CLI binary and renders its `--json` answer,
 so there is exactly one implementation of everything that thinks. It builds
-and runs on Linux today; macOS and Windows compile in CI but have not been
-run. Installers are not built yet. Build instructions: [`desktop/README.md`](desktop/README.md).
+and runs on Linux today. A CI workflow exists to compile the shell on macOS
+and Windows too, but it has not actually run yet. Installers are not built
+yet. Build instructions: [`desktop/README.md`](desktop/README.md).
 
 The macOS app in `app/` is the shipping one until that work lands.
 

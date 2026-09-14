@@ -43,11 +43,23 @@ describe('parseSidecarArgs', () => {
   });
 
   test('no target selector at all is an error, not a default', () => {
-    // A default of "--all" would cost five cross-compiles (~500 MB and
-    // minutes) to someone who typed the command to see its help; a default
-    // of "--host" would silently build the wrong thing in CI for another
-    // platform. Say which.
+    // A default of "--all" would cost a cross-compile per table entry
+    // (hundreds of MB and minutes) to someone who typed the command to see
+    // its help; a default of "--host" would silently build the wrong thing
+    // in CI for another platform. Say which.
     expect(() => parseSidecarArgs([])).toThrow(/--host, --target .* or --all/);
+  });
+
+  test('the no-target error names the true cost of --all, derived from the table', () => {
+    // Three prose copies of "five cross-compiles" went stale when
+    // SIDECAR_TARGETS grew to seven rows (the musl fix) and nothing
+    // noticed. This one is code, not prose, so it is checked against the
+    // table's actual length rather than a number typed by hand — a
+    // hardcoded "7" here would pass today and go stale exactly the same
+    // way the moment an eighth target is added.
+    expect(() => parseSidecarArgs([])).toThrow(
+      new RegExp(`--all costs ${SIDECAR_TARGETS.length} cross-compiles`),
+    );
   });
 
   test('an unknown target is rejected by name', () => {

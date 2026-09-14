@@ -12,12 +12,18 @@
 # filtered-out run simply never reports rather than hanging a PR under
 # branch protection. Re-check both files together if protection is ever
 # turned on.
+#
+# brand/tokens.json is listed here even though it lives outside desktop/:
+# ci.yml ignores brand/** entirely (see its own comment), so this is the
+# ONLY workflow an edit to that file can trigger. tests/desktop-shell.test.ts
+# pins desktop/ui/style.css's hex literals to it, and that guard is useless
+# if the file it guards can drift without any check ever running.
 name: desktop
 on:
   push:
-    paths: ['desktop/**', 'tools/build-sidecar.ts', 'tools/sidecar-targets.ts', '.github/workflows/desktop.yml']
+    paths: ['desktop/**', 'tools/build-sidecar.ts', 'tools/build-cli.ts', 'tools/sidecar-targets.ts', 'brand/tokens.json', '.github/workflows/desktop.yml']
   pull_request:
-    paths: ['desktop/**', 'tools/build-sidecar.ts', 'tools/sidecar-targets.ts', '.github/workflows/desktop.yml']
+    paths: ['desktop/**', 'tools/build-sidecar.ts', 'tools/build-cli.ts', 'tools/sidecar-targets.ts', 'brand/tokens.json', '.github/workflows/desktop.yml']
 permissions:
   contents: read
 jobs:
@@ -48,7 +54,7 @@ jobs:
           key: cargo-${{ matrix.os }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
       - run: bun install --frozen-lockfile
       # tauri-build needs the sidecar present, under the host's own triple.
-      # --host is the fast path: one target, not five.
+      # --host is the fast path: one target, not every target in the table.
       - name: Build the engine sidecar for this runner
         run: bun tools/build-sidecar.ts --host
       - name: Compile the shell

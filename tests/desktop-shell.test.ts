@@ -1,22 +1,36 @@
 import { describe, test, expect } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { SIDECAR_BASENAME } from '../tools/sidecar-targets';
 
 const REPO = new URL('..', import.meta.url).pathname;
-const RUST_DIR = join(REPO, 'desktop', 'src-tauri', 'src');
+const RUST_DIR = join(REPO, 'desktop', 'src-tauri');
 const CARGO = readFileSync(join(REPO, 'desktop', 'src-tauri', 'Cargo.toml'), 'utf8');
 const CONFIG = JSON.parse(
   readFileSync(join(REPO, 'desktop', 'src-tauri', 'tauri.conf.json'), 'utf8'),
 );
 
-// Recursive: a submodule (e.g. a `mod brain;` under a subdirectory) is the
-// most natural shape "one more small thing in Rust" takes, and a
-// non-recursive read would leave it entirely ungoverned by every guard
-// below.
-const rustFiles = (readdirSync(RUST_DIR, { recursive: true }) as string[]).filter((f) =>
-  f.endsWith('.rs'),
-);
+// Recursive, and rooted at the whole crate rather than only src/: a
+// `build.rs` beside Cargo.toml, or a sibling crate someone drops in its own
+// subdirectory (e.g. `mod brain;` pulled in from
+// `desktop/src-tauri/brain/src/lib.rs`), is exactly the "one more small
+// thing in Rust" shape a submodule under src/ already is — and a scan that
+// stopped at src/ left both entirely ungoverned by every guard below.
+// (Demonstrated: appending code to build.rs, and adding a brain/ crate,
+// each passed every test here before this glob was widened to the crate
+// root.)
+//
+// The three excluded directories are cargo/tauri build OUTPUT, never
+// source a person wrote by hand: target/ (cargo's build dir, full of
+// generated .rs files from build scripts), gen/ (tauri-cli's generated
+// schemas) and binaries/ (the compiled sidecar). All three are gitignored
+// for the same reason — see root .gitignore.
+const EXCLUDED_DIRS = new Set(['target', 'gen', 'binaries']);
+const rustFiles = (readdirSync(RUST_DIR, { recursive: true }) as string[]).filter((f) => {
+  if (!f.endsWith('.rs')) return false;
+  const segments = f.split(/[\\/]/);
+  return !segments.some((seg) => EXCLUDED_DIRS.has(seg));
+});
 const rustSources = rustFiles.map((f) => ({
   name: f,
   text: readFileSync(join(RUST_DIR, f), 'utf8'),
@@ -113,6 +127,16 @@ describe('Rust is a window, not a brain', () => {
     }
   });
 
+  test('Cargo.toml declares no local path dependency', () => {
+    // The other door out of the file scan above: a sibling crate need not
+    // live anywhere under desktop/src-tauri at all. `brain = { path =
+    // "../../somewhere/else" }` pulls in code the recursive scan above will
+    // never see, no matter how wide its glob gets — Cargo.toml is the one
+    // place that dependency has to be named, so it is the one place left
+    // to check for it.
+    expect(CARGO).not.toMatch(/path\s*=/);
+  });
+
   test('the Rust knows no engine flag', () => {
     // The frontend builds the whole argv, --json included. A literal
     // starting with "--" in here would be the first piece of contract
@@ -183,7 +207,7 @@ describe('Rust is a window, not a brain', () => {
     // A third command is the shape every "just one small thing in Rust"
     // takes. Adding one is allowed — but it must be a deliberate edit to
     // this list, in a diff someone reviews.
-    const main = rustSources.find((f) => f.name === 'main.rs')!.text;
+    const main = rustSources.find((f) => basename(f.name) === 'main.rs')!.text;
     const handler = main.match(/generate_handler!\[([^\]]*)\]/);
     expect(handler).not.toBeNull();
     const registered = handler![1].split(',').map((s) => s.trim()).filter(Boolean);
@@ -194,7 +218,7 @@ describe('Rust is a window, not a brain', () => {
     // `--json` errors exit 1 while printing a valid error object. A shell
     // that failed on a non-zero status would turn every not-a-screenplay
     // into "the engine crashed", which is acceptance criterion 3 broken.
-    const sidecar = rustSources.find((f) => f.name === 'sidecar.rs')!.text;
+    const sidecar = rustSources.find((f) => basename(f.name) === 'sidecar.rs')!.text;
     expect(sidecar).toContain('output.stdout');
     expect(sidecar).not.toMatch(/status\s*\.\s*success\s*\(\)/);
   });
@@ -205,7 +229,7 @@ describe('the sidecar name is agreed on both sides', () => {
     // Two languages, one string. They cannot be checked by the compiler,
     // so they are checked here. A mismatch is a runtime "not found" in a
     // window — the exact failure Task 1 was arranged to prevent.
-    const sidecar = rustSources.find((f) => f.name === 'sidecar.rs')!.text;
+    const sidecar = rustSources.find((f) => basename(f.name) === 'sidecar.rs')!.text;
     expect(sidecar).toContain(`"${SIDECAR_BASENAME}"`);
   });
 
