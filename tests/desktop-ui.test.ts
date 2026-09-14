@@ -1,5 +1,5 @@
-import { beforeAll, describe, test, expect } from 'bun:test';
-import { readFileSync, readdirSync } from 'node:fs';
+import { afterAll, beforeAll, describe, test, expect } from 'bun:test';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -1762,5 +1762,473 @@ describe('the Tune surface', () => {
     expect(source).toMatch(/el\('label', \{ for: id/);
     expect(source).toContain('aria-describedby');
     expect(source).toContain("role: 'status'");
+  });
+});
+
+describe('the Send surface', () => {
+  const send = read('send.js');
+
+  test('it asks the engine what is connected rather than guessing', () => {
+    expect(send).toContain('argv.devices');
+    // A window that knew what a Kindle volume looks like would be the exact
+    // duplication the ADR forbids.
+    for (const knowledge of ['/Volumes', 'documents', 'system/version.txt', '.kobo']) {
+      expect(`send.js knows ${knowledge}: ${send.includes(knowledge)}`).toBe(
+        `send.js knows ${knowledge}: false`,
+      );
+    }
+  });
+
+  test('a Kindle gets the ladder, not the raw EPUB', () => {
+    // A Kindle never indexes a sideloaded EPUB. Sending one would be a
+    // known-broken path dressed up as success.
+    expect(send).toContain('argv.export');
+    expect(send).toContain("'kindle'");
+    expect(send).toContain('forFormat');
+  });
+
+  test('the export carries this script’s own settings', () => {
+    // Passing the defaults instead would silently rebuild the book in
+    // formatting the reader never chose.
+    expect(send).toContain('optionsJson');
+    expect(send).toContain('state.script.settings');
+  });
+
+  test('nothing connected is an answer, not an error', () => {
+    expect(send).toContain('no reader');
+    expect(send).not.toContain('devices.length === 0 ? throw');
+  });
+
+  test('the verb stays constant through the flow', () => {
+    // "Send" produces "Sent". The one copy rule the spec names twice.
+    expect(send).toContain('Send to');
+    expect(send).toContain('Sent to');
+  });
+
+  test('it tells the truth about what has met hardware', () => {
+    // The project's own stated limit. A row that looks as confident as the
+    // Kindle row would be the interface overstating what is known.
+    expect(send).toContain('never been tested on real hardware');
+  });
+
+  test('it stops polling when the surface is hidden', () => {
+    expect(send).toContain('clearInterval');
+  });
+
+  test('an optional child is never handed straight to a live node', () => {
+    // el() drops a null child; Node.append() renders it as the word "null".
+    // The empty state did exactly that — a stray "null" under the list of
+    // readers, on every platform but Windows — and it was only found by
+    // looking at the screen. An optional child goes through el().
+    // The argument list of each .append(...), taken by matching parentheses
+    // so the window is the call itself and not everything up to the next
+    // semicolon.
+    const args = (from: number) => {
+      let depth = 0;
+      for (let i = from; i < send.length; i += 1) {
+        if (send[i] === '(') depth += 1;
+        else if (send[i] === ')') {
+          depth -= 1;
+          if (depth === 0) return send.slice(from + 1, i);
+        }
+      }
+      return '';
+    };
+    const calls = [...send.matchAll(/\.append\(/g)]
+      .map((m) => args(m.index! + '.append'.length));
+    expect(calls.length).toBeGreaterThan(2);
+    for (const call of calls) {
+      // A conditional at the TOP level of the argument list is a child this
+      // node receives directly; one nested inside el(...) is el()'s to drop.
+      let depth = 0;
+      let conditional = false;
+      for (const char of call) {
+        if (char === '(' || char === '[' || char === '{') depth += 1;
+        else if (char === ')' || char === ']' || char === '}') depth -= 1;
+        else if (char === '?' && depth === 0) conditional = true;
+      }
+      expect(`a conditional child appended directly: ${conditional}`)
+        .toBe('a conditional child appended directly: false');
+    }
+  });
+
+  test('a send takes the whole list out of reach, and the poll leaves it alone', () => {
+    // Not cosmetic: the MOBI rung of src/export/artifact.ts REWRITES the
+    // library EPUB in place before it writes the .mobi beside it, so two
+    // sends at once is a race over one file. Disabling only the row that was
+    // pressed — and letting the two-second poll rebuild fresh, enabled
+    // buttons underneath it — would let a second one start.
+    expect(send).toMatch(/for \(const button of buttons\(\)\) button\.disabled = true/);
+    const refresh = send.slice(send.indexOf('async function refresh('));
+    const body = refresh.slice(0, refresh.indexOf('\n}'));
+    expect(body, 'refresh() redraws rows during a send').toContain('if (sending) return');
+    // And after the await too, not only before it: the answer arrives later
+    // than the question, and a send can begin in between.
+    const awaits = [...body.matchAll(/await runEngine/g)].length;
+    expect(awaits).toBe(1);
+    expect([...body.matchAll(/sending/g)].length).toBeGreaterThanOrEqual(awaits + 1);
+  });
+});
+
+describe('what the Send surface decides', () => {
+  type Device = { id: string; kind: string; name: string; volume: string | null };
+  type SendModule = {
+    UNPROVEN: string;
+    PROVEN: { kind: string; platform: string };
+    KINDS: string[];
+    READERS: { kind: string; name: string; route: string }[];
+    NO_MESSAGE: string;
+    platformOf: (hint: unknown) => string;
+    readerStatus: (kind: string, platform: unknown) => { proven: boolean; text: string };
+    undetectable: (platform: unknown) => string | null;
+    provenNote: (platform: unknown) => string;
+    caveatFor: (device: unknown, platform: unknown) => string | null;
+    deviceFrom: (entry: unknown) => Device | null;
+    devicesFrom: (answer: unknown) => Device[];
+    sameDevices: (a: unknown, b: unknown) => boolean;
+    forFormat: (device: unknown) => string;
+    whereLine: (device: unknown) => string;
+    blockedReason: (script: unknown) => string | null;
+    optionsJsonFor: (script: unknown) => string | null;
+    sendLabel: (device: Device) => string;
+    sentLine: (device: Device, answer: unknown) => string;
+    artifactLine: (built: unknown) => string;
+    statusFor: (phase: string, opts?: { device?: unknown; detail?: string })
+      => { line: string; bad: boolean };
+    preparingPhase: (device: unknown) => string;
+  };
+  let send: SendModule;
+
+  const kindle: Device = { id: '/m/Kindle', kind: 'kindle', name: 'Kindle', volume: '/m/Kindle' };
+  const kobo: Device = { id: '/m/KOBOe', kind: 'kobo', name: 'Kobo', volume: '/m/KOBOe' };
+  const rm: Device = { id: 'remarkable', kind: 'remarkable', name: 'reMarkable', volume: null };
+
+  beforeAll(async () => { send = (await import(join(UI, 'send.js'))) as SendModule; });
+
+  test('only the one combination anyone has actually plugged in reads as proven', () => {
+    // The limit is a KIND and a PLATFORM together. A surface that keyed off
+    // the kind alone — the obvious implementation — would put "Verified on
+    // hardware" beside a Kindle on this very Linux machine, where no device
+    // transfer has ever been run. That is the value this asserts a change
+    // FROM: kindle+linux and kindle+windows must be unproven.
+    expect(send.readerStatus('kindle', 'MacIntel').proven).toBe(true);
+    for (const platform of ['Linux aarch64', 'Win32', undefined]) {
+      expect(`kindle on ${platform}: ${send.readerStatus('kindle', platform).proven}`)
+        .toBe(`kindle on ${platform}: false`);
+    }
+    for (const kind of send.KINDS.filter((k) => k !== 'kindle')) {
+      expect(`${kind} on a Mac: ${send.readerStatus(kind, 'MacIntel').proven}`)
+        .toBe(`${kind} on a Mac: false`);
+    }
+    // And the two statuses are not the same words, or the column says nothing.
+    expect(send.readerStatus('kindle', 'MacIntel').text)
+      .not.toBe(send.readerStatus('kobo', 'MacIntel').text);
+  });
+
+  test('the unproven sentence names the reader and never appears on the proven one', () => {
+    expect(send.caveatFor(kindle, 'MacIntel')).toBe(null);
+    for (const [device, platform] of [
+      [kindle, 'Linux aarch64'], [kindle, 'Win32'],
+      [kobo, 'MacIntel'], [rm, 'MacIntel'],
+      [{ id: 'x', kind: 'pocketbook', name: 'PocketBook', volume: '/m/x' }, 'MacIntel'],
+    ] as [Device, string][]) {
+      const said = send.caveatFor(device, platform);
+      expect(`${device.kind}/${platform}: ${said === null}`)
+        .toBe(`${device.kind}/${platform}: false`);
+      expect(said).toContain(send.UNPROVEN);
+    }
+    // A vendor's own name, not "this device": a reader has to know which row
+    // the warning is about when three are connected.
+    expect(send.caveatFor(kobo, 'MacIntel')).toContain('Kobo');
+    expect(send.caveatFor(kobo, 'MacIntel')).not.toContain('Kindle');
+  });
+
+  test('the line under the standing list says where the one proven route was proven', () => {
+    // Four identical red statuses in a column read as a warning wall unless
+    // something says what they mean. It also carries the fact no status cell
+    // can: a Mac is where the Kindle was plugged in, so on Linux and Windows
+    // NOTHING has met hardware — including the Kindle whose row, keyed off
+    // kind alone, would otherwise look like the safe one.
+    const mac = send.provenNote('MacIntel');
+    expect(mac).toContain('Mac');
+    const linux = send.provenNote('Linux aarch64');
+    expect(linux).toContain(send.UNPROVEN);
+    expect(linux).toContain('Linux');
+    expect(send.provenNote('Win32')).toContain('Windows');
+    expect(send.provenNote('Win32')).not.toContain('Linux');
+    // The Mac line is a different sentence from the other two, or the note is
+    // saying the same thing everywhere and telling nobody anything.
+    expect(new Set([mac, linux, send.provenNote('Win32')]).size).toBe(3);
+  });
+
+  test('a tolino on Windows is called undetectable, not merely absent', () => {
+    // It is identified by the name of its volume and a Windows drive root
+    // carries none. Left unsaid, a missing row reads as a bad cable.
+    const said = send.undetectable('Win32');
+    expect(said).toContain('tolino');
+    expect(said).toContain('Windows');
+    for (const platform of ['MacIntel', 'Linux aarch64', undefined]) {
+      expect(`${platform}: ${send.undetectable(platform)}`).toBe(`${platform}: null`);
+    }
+  });
+
+  test('a device that cannot be addressed is not offered, and an unknown one still is', () => {
+    const answer = {
+      ok: true,
+      devices: [
+        kindle,
+        { kind: 'kobo', name: 'Kobo', volume: null },                 // no id to send to
+        { id: '/m/x', kind: 'tolino', name: '   ', volume: '/m/x' },  // nothing for the button
+        { id: '/m/y', name: 'Mystery', volume: '/m/y' },              // no kind
+        { id: '/m/z', kind: 'pocketbook', name: 'PocketBook', volume: '/m/z' },
+        'not a device',
+      ],
+    };
+    const devices = send.devicesFrom(answer);
+    // Named, so a filter that dropped everything and one that dropped nothing
+    // both fail.
+    expect(devices.map((d) => d.id)).toEqual(['/m/Kindle', '/m/z']);
+    expect(send.devicesFrom({ ok: true, devices: 'nope' })).toEqual([]);
+    expect(send.devicesFrom(null)).toEqual([]);
+    expect(send.deviceFrom(kindle)).toEqual(kindle);
+    // A volume that is not a string is null, never the string "undefined".
+    expect(send.deviceFrom({ id: 'r', kind: 'remarkable', name: 'reMarkable' })!.volume).toBe(null);
+  });
+
+  test('the list is rebuilt only when it really changed', () => {
+    // The poll ticks every two seconds; rebuilding on every tick steals the
+    // focus from anyone tabbing to a Send button. So this has to say "same"
+    // for a repeated answer — and it must not say "same" by agreeing on
+    // length alone, which is what the cheap implementation does.
+    expect(send.sameDevices([kindle, kobo], [{ ...kindle }, { ...kobo }])).toBe(true);
+    expect(send.sameDevices([kindle], [{ ...kindle, name: 'Kindle Oasis' }])).toBe(false);
+    expect(send.sameDevices([kindle], [{ ...kindle, kind: 'kobo' }])).toBe(false);
+    expect(send.sameDevices([kindle], [{ ...kindle, id: '/m/Kindle2' }])).toBe(false);
+    // Same two devices, opposite order: the rows would be drawn in the other
+    // order, so the screen is out of date either way.
+    expect(send.sameDevices([kindle, kobo], [kobo, kindle])).toBe(false);
+    expect(send.sameDevices([kindle], [])).toBe(false);
+    expect(send.sameDevices([kindle], 'nope')).toBe(false);
+  });
+
+  test('only a Kindle is sent up the ladder, and every other kind takes the EPUB', () => {
+    expect(send.forFormat(kindle)).toBe('kindle');
+    for (const kind of [...send.KINDS.filter((k) => k !== 'kindle'), 'pocketbook', '']) {
+      expect(`${kind}: ${send.forFormat({ kind })}`).toBe(`${kind}: epub`);
+    }
+    expect(send.forFormat(null)).toBe('epub');
+    // The long wait is the Kindle rung's alone; saying "building" for a rung
+    // that builds nothing would be theatre.
+    expect(send.preparingPhase(kindle)).toBe('building');
+    expect(send.preparingPhase(kobo)).toBe('preparing');
+  });
+
+  test('a reMarkable is not described as if it had a volume', () => {
+    expect(send.whereLine(kindle)).toBe('/m/Kindle');
+    const said = send.whereLine(rm);
+    expect(said).not.toBe('remarkable');
+    expect(said).toContain('USB');
+  });
+
+  test('a script with no book on disk is refused before a device is offered', () => {
+    expect(send.blockedReason({ epubPath: '/lib/s/s.epub' })).toBe(null);
+    for (const script of [null, undefined, {}, { epubPath: null }, { epubPath: '  ' }]) {
+      const said = send.blockedReason(script);
+      expect(`${JSON.stringify(script) ?? 'undefined'}: ${said === null}`)
+        .toBe(`${JSON.stringify(script) ?? 'undefined'}: false`);
+    }
+  });
+
+  test('the settings that go with the export are the script’s own', async () => {
+    const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+    expect(send.optionsJsonFor({ settings: null })).toBe(null);
+    expect(send.optionsJsonFor({ settings: {} })).toBe(null);
+    expect(send.optionsJsonFor({})).toBe(null);
+    const tuned = { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 27, fontFamily: 'serif' };
+    // Asserted against the value it was changed FROM: a function that quietly
+    // handed back the defaults would round-trip to something that is NOT this.
+    expect(tuned.dialogueSideMarginPct).not.toBe(DEFAULT_FORMAT_OPTIONS.dialogueSideMarginPct);
+    expect(JSON.parse(send.optionsJsonFor({ settings: tuned })!)).toEqual(tuned);
+  });
+
+  test('"Sent" is claimed in the shape the engine reported, and never invents a path', () => {
+    expect(send.sendLabel(kindle)).toBe('Send to Kindle');
+    const copied = send.sentLine(kindle, { ok: true, destination: '/m/Kindle/x.azw3' });
+    expect(copied.startsWith('Sent to Kindle')).toBe(true);
+    expect(copied).toContain('/m/Kindle/x.azw3');
+    expect(copied).toContain('Eject');
+    // A reMarkable never mounts, so there is nothing to eject and no path.
+    const uploaded = send.sentLine(rm, { ok: true, uploaded: true });
+    expect(uploaded).toBe('Sent to reMarkable.');
+    expect(uploaded).not.toContain('Eject');
+    // Neither field: still sent — the engine said ok — but no invented path.
+    expect(send.sentLine(kobo, { ok: true })).toBe('Sent to Kobo.');
+    expect(send.sentLine(kobo, { ok: true })).not.toContain('—');
+  });
+
+  test('the status line alarms on failure and on nothing else', () => {
+    for (const phase of ['idle', 'building', 'preparing', 'copying', 'sent']) {
+      const { bad } = send.statusFor(phase, { device: kindle, detail: 'Sent to Kindle.' });
+      expect(`${phase} is bad: ${bad}`).toBe(`${phase} is bad: false`);
+    }
+    // A second attempt after a failure must clear the alarm, not inherit it.
+    expect(send.statusFor('failed', { detail: 'no reader is connected' }).bad).toBe(true);
+    expect(send.statusFor('copying', { device: kindle }).bad).toBe(false);
+    // The engine's own sentence, verbatim.
+    expect(send.statusFor('failed', { detail: 'reMarkable accepts PDF and EPUB, not .mobi.' }).line)
+      .toBe('reMarkable accepts PDF and EPUB, not .mobi.');
+    // A contract-breaking failure still says something a person can read.
+    expect(send.statusFor('failed', { detail: '   ' }).line).toBe(send.NO_MESSAGE);
+    expect(send.statusFor('failed', {}).line).toBe(send.NO_MESSAGE);
+    // And a failure never says "Sent".
+    expect(send.statusFor('failed', { device: kindle, detail: 'it broke' }).line)
+      .not.toContain('Sent');
+    // Each working phase names the reader it is working on.
+    for (const phase of ['building', 'preparing', 'copying']) {
+      expect(send.statusFor(phase, { device: kindle }).line).toContain('Kindle');
+    }
+  });
+
+  test('what went across is named in the engine’s words, not guessed at', () => {
+    expect(send.artifactLine({ label: 'AZW3 — for USB sideload to Kindle', path: '/x.azw3' }))
+      .toBe('AZW3 — for USB sideload to Kindle');
+    expect(send.artifactLine({ path: '/x.azw3' })).toBe('/x.azw3');
+    expect(send.artifactLine({})).toBe('');
+    expect(send.artifactLine(null)).toBe('');
+  });
+
+  test('the standing list covers every kind the engine can report', () => {
+    // With nothing plugged in this list IS the surface, so a kind missing
+    // from it is a reader with no way to find out whether Screepub reaches it.
+    expect(send.READERS.map((r) => r.kind).sort()).toEqual([...send.KINDS].sort());
+    for (const reader of send.READERS) {
+      expect(`${reader.kind} route: ${reader.route.length > 40}`)
+        .toBe(`${reader.kind} route: true`);
+    }
+    // The Kindle row says WHY it is not the EPUB, because that is the one
+    // surprising thing on the surface.
+    const kindleRow = send.READERS.find((r) => r.kind === 'kindle')!;
+    expect(kindleRow.route).toContain('EPUB');
+    expect(kindleRow.route).toContain('MOBI');
+  });
+
+  test('every kind the engine can report is also in the standing list', async () => {
+    const { DEVICE_DISPLAY_NAMES } = await import('../src/device/types');
+    // The engine's own list, so a fifth vendor added to src/device/types.ts
+    // fails here rather than turning up on the surface with no row.
+    expect([...send.KINDS].sort()).toEqual(Object.keys(DEVICE_DISPLAY_NAMES).sort());
+  });
+});
+
+describe('the ladder the Send surface asks for, without a toolchain', () => {
+  // CI has no Calibre and no Kindle Previewer, and neither does most of this
+  // project's audience. So the argv the window builds is fed through the same
+  // injection seam src/cli-export.ts already provides, and the three rungs are
+  // driven by hand. What is under test is the WINDOW's half: that the argv it
+  // builds for a Kindle reaches the Kindle rung carrying this script's own
+  // settings, and that what it then prints is the rung that was actually hit.
+  let dir: string;
+  let epub: string;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'screepub-send-'));
+    epub = join(dir, 'script.epub');
+    writeFileSync(epub, 'not really an epub, but it is a file');
+  });
+
+  afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  /** cli.ts's own argv reading, in miniature: the window's array in, the
+   *  exportCommand options out. */
+  const asOptions = (args: string[]) => {
+    const after = (flag: string) => {
+      const i = args.indexOf(flag);
+      return i === -1 ? undefined : args[i + 1];
+    };
+    return {
+      epub: args[1],
+      for: after('--for'),
+      fountain: after('--fountain'),
+      optionsJson: after('--options-json'),
+    };
+  };
+
+  test('a Kindle’s argv reaches the Kindle rung with this script’s settings', async () => {
+    const { argv } = await import(join(UI, 'app.js'));
+    const sendUi = await import(join(UI, 'send.js'));
+    const { exportCommand } = await import('../src/cli-export');
+    const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+
+    const script = {
+      epubPath: epub,
+      fountainPath: join(dir, 'script.fountain'),
+      settings: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 27, justifyText: true },
+    };
+    const kindle = { id: '/m/Kindle', kind: 'kindle', name: 'Kindle', volume: '/m/Kindle' };
+    const args = argv.export(script.epubPath, {
+      forFormat: sendUi.forFormat(kindle),
+      fountain: script.fountainPath,
+      optionsJson: sendUi.optionsJsonFor(script),
+    });
+    // The argv really is the one the window would build, not one this test
+    // wrote for itself.
+    expect(args[0]).toBe('export');
+    expect(asOptions(args).epub).toBe(epub);
+    expect(asOptions(args).for).toBe('kindle');
+
+    let seen: Record<string, unknown> | null = null;
+    const result = await exportCommand(asOptions(args), {
+      calibreAvailable: () => true,
+      kfxStatus: async () => ({ ready: false }) as never,
+      freshKindleArtifact: async (opts) => {
+        seen = opts.format as unknown as Record<string, unknown>;
+        expect(opts.fountainPath).toBe(script.fountainPath);
+        return join(dir, 'script.azw3');
+      },
+    });
+
+    // The whole point: the engine rebuilt with 27%, not with the default.
+    expect(seen).not.toBe(null);
+    expect(seen!.dialogueSideMarginPct).toBe(27);
+    expect(seen!.dialogueSideMarginPct).not.toBe(DEFAULT_FORMAT_OPTIONS.dialogueSideMarginPct);
+    expect(seen!.justifyText).toBe(true);
+    // And the sentence the surface prints names the rung that was hit.
+    expect(sendUi.artifactLine(result)).toContain('AZW3');
+  });
+
+  test('each rung of the ladder produces a different sentence on the surface', async () => {
+    const sendUi = await import(join(UI, 'send.js'));
+    const { exportCommand } = await import('../src/cli-export');
+
+    const rung = async (calibre: boolean, kfx: boolean) => {
+      const result = await exportCommand(
+        { epub, for: 'kindle' },
+        {
+          calibreAvailable: () => calibre,
+          kfxStatus: async () => ({ ready: kfx }) as never,
+          freshKindleArtifact: async () => join(dir, 'script.out'),
+        },
+      );
+      return sendUi.artifactLine(result);
+    };
+
+    const best = await rung(true, true);
+    const middle = await rung(true, false);
+    const worst = await rung(false, false);
+    expect(best).toContain('KFX');
+    expect(middle).toContain('AZW3');
+    expect(worst).toContain('MOBI');
+    // Three rungs, three sentences: a surface that printed one constant
+    // would pass every "contains" check above on its own.
+    expect(new Set([best, middle, worst]).size).toBe(3);
+
+    // And the non-Kindle route does not walk the ladder at all: it hands over
+    // the EPUB the library already holds.
+    const plain = await exportCommand(
+      { epub, for: 'epub' },
+      { calibreAvailable: () => false, kfxStatus: async () => ({ ready: false }) as never },
+    );
+    expect(plain.path).toBe(epub);
+    expect(sendUi.artifactLine(plain)).toContain('EPUB');
   });
 });
