@@ -313,11 +313,15 @@ function tarOctal(bytes: Uint8Array): number {
   return text ? parseInt(text, 8) : 0;
 }
 
-/** Walk the tar ourselves. `tar -tzvf` answers in a listing format that
- *  differs between GNU tar and bsdtar; the header is 512 fixed bytes and
- *  gunzip is already in the runtime. */
-export function tarGzEntries(archivePath: string): ArchiveEntry[] {
-  const tar = Bun.gunzipSync(readFileSync(archivePath));
+/** Walk a tar we already hold in memory. Split out of tarGzEntries so a
+ *  caller holding decompressed bytes -- a .deb's data.tar.gz member, an
+ *  .rpm's payload -- does not need a temporary file to read them.
+ *
+ *  Regular files only, and only the 100-byte `name` field: the ustar
+ *  `prefix` field and GNU 'L' long-name records are not joined on, because
+ *  nothing we package reaches a 100-byte path. A path that did would come
+ *  back truncated rather than as an error. */
+export function tarEntries(tar: Uint8Array): ArchiveEntry[] {
   const entries: ArchiveEntry[] = [];
   let off = 0;
   while (off + 512 <= tar.length) {
@@ -334,6 +338,13 @@ export function tarGzEntries(archivePath: string): ArchiveEntry[] {
     off = start + Math.ceil(size / 512) * 512;
   }
   return entries;
+}
+
+/** Walk the tar ourselves. `tar -tzvf` answers in a listing format that
+ *  differs between GNU tar and bsdtar; the header is 512 fixed bytes and
+ *  gunzip is already in the runtime. */
+export function tarGzEntries(archivePath: string): ArchiveEntry[] {
+  return tarEntries(Bun.gunzipSync(readFileSync(archivePath)));
 }
 
 export async function zipEntries(archivePath: string): Promise<ArchiveEntry[]> {
