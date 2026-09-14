@@ -78,6 +78,32 @@ jobs:
           [ "$PKG" = "$VERSION" ] || {
             echo "::error file=package.json::package.json says $PKG but the tag says $VERSION"; exit 1; }
 
+          # The other two version files. package.json is what the ENGINE
+          # reports; Cargo.toml is the crate; tauri.conf.json names the
+          # bundle FILE, the Info.plist, the deb Version: field and the NSIS
+          # product version. They are deliberately allowed to disagree on a
+          # working branch -- that is why no `bun test` asserts this -- but a
+          # tag is the moment they must agree, or a 0.6.0 installer ships an
+          # engine that calls itself 0.5.4. That exact artifact was built on
+          # 2026-09-14; this is the check that would have stopped it.
+          #
+          # Read from the tagged commit, like everything else in this step.
+          # The FIRST version key AFTER [package] -- a dependency's
+          # `version = "2"` must not be mistaken for the crate's, and
+          # [dependencies] can appear first in the file. node, not awk: this
+          # is the same regex tools/build-app-bundle.ts's assertBundleVersions
+          # uses, so the two cannot drift into disagreeing about which
+          # version they are reading.
+          CARGO="$(git cat-file blob "$GITHUB_SHA:desktop/src-tauri/Cargo.toml" \
+            | node -p "(/^\s*\[package\][\s\S]*?^\s*version\s*=\s*\"([^\"]+)\"/m.exec(require('fs').readFileSync(0,'utf8'))||[])[1]||''")"
+          [ "$CARGO" = "$VERSION" ] || {
+            echo "::error file=desktop/src-tauri/Cargo.toml::desktop/src-tauri/Cargo.toml says '$CARGO' but the tag says $VERSION"; exit 1; }
+
+          CONF="$(git cat-file blob "$GITHUB_SHA:desktop/src-tauri/tauri.conf.json" \
+            | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")"
+          [ "$CONF" = "$VERSION" ] || {
+            echo "::error file=desktop/src-tauri/tauri.conf.json::desktop/src-tauri/tauri.conf.json says $CONF but the tag says $VERSION"; exit 1; }
+
           # The tagged commit must be ON main. Without this, tagging and then
           # amending ships a DMG built from an orphaned commit while every
           # other check passes.

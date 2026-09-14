@@ -130,6 +130,31 @@ describe('release.yml ships the cross-platform artifacts', () => {
     for (const t of TARGETS) expect(text).not.toContain(t.archiveName);
   });
 
+  test('the checks job fails a tag whose three version files disagree', () => {
+    const text = runText(rel.jobs['checks']!);
+    // package.json was already checked. These two are new, and between them
+    // they name the bundle filename, the Info.plist, the deb Version: field
+    // and the NSIS product version.
+    expect(text).toContain('desktop/src-tauri/Cargo.toml');
+    expect(text).toContain('desktop/src-tauri/tauri.conf.json');
+    // Read from the TAGGED COMMIT, like every other assertion in that step,
+    // not from the working tree: a checkout is not proof of what was tagged.
+    expect(text).toMatch(/git cat-file blob "\$GITHUB_SHA:desktop\/src-tauri\/tauri\.conf\.json"/);
+    expect(text).toMatch(/git cat-file blob "\$GITHUB_SHA:desktop\/src-tauri\/Cargo\.toml"/);
+  });
+
+  test('those two assertions run before any certificate is imported', () => {
+    // The whole value of putting them in `checks` is that a mismatched
+    // version costs twenty seconds instead of failing after notarization,
+    // with a DMG already built. `release` needs `checks`, so the ordering
+    // is structural rather than a matter of step order.
+    expect(needs('release')).toEqual(['checks']);
+    const release = runText(rel.jobs['release']!);
+    expect(release).toContain('app/release.sh');
+    // And the version check is NOT duplicated into the signing job.
+    expect(release).not.toContain('desktop/src-tauri/tauri.conf.json');
+  });
+
   test('cross-cli builds every artifact once, after the checks pass', () => {
     const job = rel.jobs['cross-cli'];
     expect(job).toBeDefined();
