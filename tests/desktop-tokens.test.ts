@@ -97,8 +97,15 @@ describe('the fonts are bundled, not assumed', () => {
   });
 
   test('THIRD-PARTY-NOTICES no longer says the app never uses them', () => {
+    // Whitespace-normalised before searching: the file HARD-WRAPS this
+    // sentence across two lines, so a raw substring search only catches
+    // someone who retypes it unwrapped -- not the regression that actually
+    // happens, which is the wrapped original coming back from version
+    // control or a copy-paste. Verified: restoring the real pre-task
+    // wording passed the raw search and fails this one.
     const notices = readFileSync(join(REPO, 'THIRD-PARTY-NOTICES.md'), 'utf8');
-    expect(notices).toContain('desktop/ui/fonts/');
-    expect(notices).not.toContain('Website only; the app has no running prose');
+    const flat = notices.replace(/\s+/g, ' ');
+    expect(flat).toContain('desktop/ui/fonts/');
+    expect(flat).not.toContain('Website only; the app has no running prose');
   });
 });
