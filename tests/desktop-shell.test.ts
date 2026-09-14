@@ -154,6 +154,10 @@ describe('Rust is a window, not a brain', () => {
       'kindle', 'kobo', 'tolino', 'remarkable', 'calibre',
       'epub', 'mobi', 'azw3', 'kfx', 'fountain',
       'scene', 'screenplay', 'slug', 'dialogue', 'character',
+      // Piece D: the shell forwards a diagnostic line without knowing that
+      // one of them is progress, or that progress has a percent, or that
+      // any of it is rendered. Those are the window's words, not Rust's.
+      'progress', 'percent', 'render',
     ];
     for (const { name, text } of rustSources) {
       // Comments explaining the rule (main.rs's ADR summary, sidecar.rs's
@@ -214,13 +218,115 @@ describe('Rust is a window, not a brain', () => {
     expect(registered.sort()).toEqual(['pick_file', 'run_engine']);
   });
 
-  test('the Rust ignores the exit code and reads stdout', () => {
+  test('the Rust ignores the exit code and answers with stdout', () => {
     // `--json` errors exit 1 while printing a valid error object. A shell
     // that failed on a non-zero status would turn every not-a-screenplay
     // into "the engine crashed", which is acceptance criterion 3 broken.
+    //
+    // Piece D replaced `.output()` with `.spawn()` so stderr could be
+    // forwarded live, which is why this no longer looks for the literal
+    // `output.stdout`. What it asserts instead is the RULE rather than the
+    // spelling: there is exactly ONE way out with an error and it is the
+    // empty-stdout case, the exit value is never compared to anything, and
+    // the value handed to the window is the accumulated stdout.
     const sidecar = rustSources.find((f) => basename(f.name) === 'sidecar.rs')!.text;
-    expect(sidecar).toContain('output.stdout');
+    const body = stripComments(sidecar);
+
+    // The literal the old assertion banned, still banned on RAW text so
+    // this replacement is nowhere weaker than what it replaces.
     expect(sidecar).not.toMatch(/status\s*\.\s*success\s*\(\)/);
+    // …and broadened: any `.success(` call at all, however it is spelled.
+    expect(body).not.toMatch(/\.\s*success\s*\(/);
+
+    // No equality or ordering test against the exit value, in either
+    // operand order. Catches `status.code() != Some(0)`, `exit_code == 0`
+    // and `Some(0) != exit` — each of which the narrower `\bcode\b`
+    // spelling would sail straight past.
+    expect(body).not.toMatch(/\b(status|code|exit)[\w.()]*\s*(==|!=|<=|>=)/i);
+    expect(body).not.toMatch(/(==|!=|<=|>=)\s*[\w:.]*\b(status|code|exit)\b/i);
+    // …and no branching on it by any other route.
+    expect(body).not.toMatch(/\bmatch\s+[\w.()]*\b(status|code|exit)\b/i);
+
+    // The structural half, which is what actually makes exit-code logic
+    // impossible rather than merely awkward to spell: one `if` in the
+    // file, testing stdout; one `Err(` construction, which is its body.
+    const conditions = [...body.matchAll(/\bif\s+([^{]+)\{/g)].map((m) => m[1].trim());
+    expect(conditions).toEqual(['stdout.is_empty()']);
+    expect(body.match(/\bErr\(/g) ?? []).toHaveLength(1);
+
+    // And the success path hands back the process's own stdout.
+    expect(body).toMatch(/Stdout\(/);
+    expect(body).toMatch(/Ok\(\s*stdout\s*\)/);
+
+    // The assertions above are NOT airtight on their own, and it would be
+    // worse than useless to pretend otherwise: a decision can be taken with
+    // no `if` and no `Err(` at all —
+    //
+    //     exit.unwrap_or(0).eq(&0).then_some(()).ok_or_else(…)?;   // B
+    //     assert_eq!(exit.unwrap_or(0), 0, "the engine failed");   // C
+    //     let stdout = exit.filter(|c| *c == 0).map(…).unwrap_or_default();  // D
+    //
+    // — the last of which blanks stdout and lets the ONE legitimate `if`
+    // report it, leaving both counts above untouched. Every such dodge was
+    // written, compiled and run against this file; each passed everything
+    // above.
+    //
+    // So the pin is a bare USE COUNT, because chasing method names
+    // (`.eq`, `.filter`, `assert_eq!`, the next one nobody has thought of)
+    // is a game the guard loses by construction. `exit` is allowed exactly
+    // three appearances, and they are the only three it legitimately has:
+    // it is BOUND, it is ASSIGNED from the terminated event, and it is
+    // PRINTED inside the empty-stdout message. There is no fourth use of an
+    // exit status that is not the Rust forming an opinion about it.
+    //
+    // If a refactor changes this number, that is the assertion doing its
+    // job — work out which of the three moved, do not raise the count.
+    expect(body.match(/\bexit\b/g) ?? []).toHaveLength(3);
+  });
+
+  test('a forwarded line is forwarded, not read', () => {
+    // The event carries a raw line. If the Rust ever learns what a line
+    // MEANS — that it is progress, that it has a percent, that a stage is
+    // named — the decision has moved out of TypeScript.
+    const sidecar = rustSources.find((f) => basename(f.name) === 'sidecar.rs')!.text;
+    const body = stripComments(sidecar);
+    const lower = body.toLowerCase();
+    for (const word of ['progress', 'percent', 'stage', 'ndjson', 'parse']) {
+      expect(`sidecar.rs mentions ${word}: ${lower.includes(word)}`).toBe(
+        `sidecar.rs mentions ${word}: false`,
+      );
+    }
+    // Vocabulary alone is cheap to dodge: `line.starts_with("{\"p")` names
+    // nothing on that list and is still the Rust deciding what a line is.
+    // So ban every way of looking inside one. (`trim` stays allowed: it is
+    // whitespace, and the stdout accumulator needs it.)
+    for (const method of [
+      'starts_with', 'ends_with', 'contains', 'split', 'strip_prefix',
+      'strip_suffix', 'find(', 'char', 'bytes(', 'len()', 'replace',
+    ]) {
+      expect(`sidecar.rs calls ${method}: ${lower.includes(`.${method}`)}`).toBe(
+        `sidecar.rs calls ${method}: false`,
+      );
+    }
+    // The payload is the whole line binding — not a slice of it, not a
+    // field picked out of it.
+    expect(body).toMatch(/emit\(\s*LINE_EVENT\s*,\s*line(\s*\.\s*clone\(\))?\s*\)/);
+
+    // …and, as above, the method-name list is a floor, not a fence:
+    //
+    //     let want = matches!(line.as_bytes().first(), Some(b'{'));  // F
+    //     let want = line.get(0..1) == Some("{");                    // G
+    //
+    // dodge every name on it (`.as_bytes` is not `.bytes(`; `.get` and
+    // index slicing are not named at all) and still decide what a line is.
+    // Both were compiled and run; both passed the list.
+    //
+    // The count is therefore the real assertion. `line` may appear exactly
+    // FOUR times, and all four are accounted for: once in the event-NAME
+    // literal `"engine-line"`, then bound from the bytes, emitted, and
+    // appended to the diagnostics buffer. A fifth is the Rust reading it.
+    // Do not raise this number to make a refactor pass.
+    expect(body.match(/(?<![A-Z_])\bline\b/g) ?? []).toHaveLength(4);
   });
 });
 

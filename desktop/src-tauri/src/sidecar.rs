@@ -11,18 +11,32 @@
 //!     exits 1 *and prints a perfectly good error object*. Stdout is the
 //!     contract; the exit code is not.
 //!
+//! It spawns rather than waits, for ONE reason: the engine writes a line to
+//! its diagnostic stream as it works, and a window that only gets the answer
+//! at the end cannot draw a moving bar. Each such line is forwarded verbatim
+//! under one name. This file never looks inside a line. If a change here
+//! needs to know what a line MEANS, the change belongs in `desktop/ui/`.
+//!
+//! This is deliberately NOT a third command: the two registered commands are
+//! unchanged, and the window is granted no new permission.
+//!
 //! The name below is resolved by Tauri against the bundled external binary;
 //! `desktop/README.md` records how that resolution was observed working.
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
+use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
 /// Must match `SIDECAR_BASENAME` in `tools/sidecar-targets.ts`.
 /// `tests/desktop-shell.test.ts` pins the two together.
 pub const SIDECAR: &str = "screepub-engine";
 
+/// Every line the engine writes to its diagnostic stream is forwarded under
+/// this name, uninspected. The window decides what a line is.
+pub const LINE_EVENT: &str = "engine-line";
+
 pub async fn run(app: &AppHandle, args: Vec<String>) -> Result<String, String> {
-    let output = app
+    let (mut rx, _child) = app
         .shell()
         .sidecar(SIDECAR)
         .map_err(|e| {
@@ -32,8 +46,7 @@ pub async fn run(app: &AppHandle, args: Vec<String>) -> Result<String, String> {
             )
         })?
         .args(args)
-        .output()
-        .await
+        .spawn()
         .map_err(|e| {
             format!(
                 "could not start the Screepub engine (sidecar {SIDECAR:?}): {e}. \
@@ -41,14 +54,35 @@ pub async fn run(app: &AppHandle, args: Vec<String>) -> Result<String, String> {
             )
         })?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let mut stdout = String::new();
+    let mut diagnostics = String::new();
+    let mut exit: Option<i32> = None;
+    // Each event carries ONE line, newline included (the shell plugin's
+    // reader keeps the delimiter — verified live, see desktop/README.md).
+    // So concatenation alone reassembles each stream byte for byte, and a
+    // multi-line answer arrives whole rather than run together.
+    while let Some(event) = rx.recv().await {
+        match event {
+            CommandEvent::Stdout(bytes) => stdout.push_str(&String::from_utf8_lossy(&bytes)),
+            CommandEvent::Stderr(bytes) => {
+                let line = String::from_utf8_lossy(&bytes).to_string();
+                // Ignoring the result on purpose: a window that has gone
+                // away must not turn into an engine failure.
+                let _ = app.emit(LINE_EVENT, line.clone());
+                diagnostics.push_str(&line);
+            }
+            CommandEvent::Terminated(status) => exit = status.code,
+            _ => {}
+        }
+    }
+
+    let stdout = stdout.trim().to_string();
     if stdout.is_empty() {
         // Nothing on stdout means the engine died before it could honour
-        // its own contract. Its stderr is the only thing left to show.
+        // its own contract. What it said on the way down is all that is left.
         return Err(format!(
-            "the Screepub engine exited with {:?} and printed nothing: {}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stderr).trim()
+            "the Screepub engine exited with {exit:?} and printed nothing: {}",
+            diagnostics.trim()
         ));
     }
     Ok(stdout)
