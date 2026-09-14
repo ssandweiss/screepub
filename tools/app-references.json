@@ -1,5 +1,5 @@
 {
-  "$comment": "The blast radius of deleting app/ — every tracked file OUTSIDE app/ that names the SwiftUI app, its directory, its build commands or the release artifacts only it produces. Enforced by tests/app-references.test.ts, which defines what counts as a reference and why. `refs` is a CEILING: it may fall (that is progress toward piece F3), never rise without a row being updated deliberately. `category` is what would break: build = a workflow or script that executes or packages app/; test = a bun test that reads app/ or asserts about its artifacts; artifact = names a release artifact or bundle only the Swift app produces; doc = user-facing prose that becomes false; note = a comment citing app/ as provenance, stale rather than broken; freeze = the F1 freeze machinery itself. See docs/superpowers/specs/2026-09-14-retire-swiftui-design.md (F3 acceptance criterion 11: this file is empty when the retirement is done).",
+  "$comment": "The blast radius of deleting app/ \u2014 every tracked file OUTSIDE app/ that names the SwiftUI app, its directory, its build commands or the release artifacts only it produces. Enforced by tests/app-references.test.ts, which defines what counts as a reference and why. `refs` is a CEILING: it may fall (that is progress toward piece F3), never rise without a row being updated deliberately. `category` is what would break: build = a workflow or script that executes or packages app/; test = a bun test that reads app/ or asserts about its artifacts; artifact = names a release artifact or bundle only the Swift app produces; doc = user-facing prose that becomes false; note = a comment citing app/ as provenance, stale rather than broken; freeze = the F1 freeze machinery itself. See docs/superpowers/specs/2026-09-14-retire-swiftui-design.md (F3 acceptance criterion 11: this file is empty when the retirement is done).",
   "files": {
     ".github/dependabot.yml": {
       "refs": 2,
@@ -24,7 +24,7 @@
     ".gitignore": {
       "refs": 3,
       "category": "build",
-      "breaks": "Ignores app/build/, app/dist/, app/.build/ — the SwiftPM and release output paths."
+      "breaks": "Ignores app/build/, app/dist/, app/.build/ \u2014 the SwiftPM and release output paths."
     },
     "CLAUDE.md": {
       "refs": 16,
@@ -69,7 +69,7 @@
     "desktop/README.md": {
       "refs": 1,
       "category": "artifact",
-      "breaks": "Names Screepub.app — the bundle name the Tauri app takes over at F2."
+      "breaks": "Names Screepub.app \u2014 the bundle name the Tauri app takes over at F2."
     },
     "desktop/ui/style.css": {
       "refs": 1,
@@ -94,12 +94,17 @@
     "docs/release-notes-template.md": {
       "refs": 5,
       "category": "doc",
-      "breaks": "A live instruction to the notes author: edit app/Sources/ScreepubApp/ReaderRail.swift when a bullet announces a UI change. Not a record — a procedure that would tell someone to edit a deleted file."
+      "breaks": "A live instruction to the notes author: edit app/Sources/ScreepubApp/ReaderRail.swift when a bullet announces a UI change. Not a record \u2014 a procedure that would tell someone to edit a deleted file."
     },
     "docs/release-secrets.md": {
       "refs": 2,
       "category": "doc",
       "breaks": "Says app/release.sh computes the three SHAs the tap bump needs, and names Screepub-macOS.dmg among the re-uploaded assets."
+    },
+    "docs/retired-coverage.md": {
+      "refs": 51,
+      "category": "note",
+      "breaks": "The decision record for the 171 kit-check assertions that have no bun test counterpart. It cites Swift sources and kit-check sections by name throughout, because naming what is lost is its whole job. It OUTLIVES app/: at F3 its rows stop describing code that exists and start describing what was given up, which is the record a later maintainer needs. Do not delete it with the directory."
     },
     "site/index.html": {
       "refs": 4,
@@ -114,7 +119,7 @@
     "src/device/remarkable.ts": {
       "refs": 4,
       "category": "note",
-      "breaks": "A comment that explicitly asks NOT to be reworded \"while app/ exists\", because KitCheck still runs against it. It becomes free to edit at F3 — and should be, or it will keep pointing readers at nothing."
+      "breaks": "A comment that explicitly asks NOT to be reworded \"while app/ exists\", because KitCheck still runs against it. It becomes free to edit at F3 \u2014 and should be, or it will keep pointing readers at nothing."
     },
     "src/device/volumes.ts": {
       "refs": 1,
@@ -254,12 +259,12 @@
     "tools/bump-tap.sh": {
       "refs": 2,
       "category": "artifact",
-      "breaks": "Hardcodes Screepub-macOS.dmg for the cask digest. TAP MACHINERY — belongs to gate 3 and must not be edited before F2 answers the per-arch question. Listed here so the blast radius is known, not so it is touched."
+      "breaks": "Hardcodes Screepub-macOS.dmg for the cask digest. TAP MACHINERY \u2014 belongs to gate 3 and must not be edited before F2 answers the per-arch question. Listed here so the blast radius is known, not so it is touched."
     },
     "tools/check-tap.sh": {
       "refs": 1,
       "category": "artifact",
-      "breaks": "Verifies the published cask still serves Screepub-macOS.dmg. TAP MACHINERY, gate 3. It is run weekly by .github/workflows/tap-freshness.yml, which carries no textual reference of its own and is therefore INVISIBLE to this sweep — the second-order reference this row exists to record."
+      "breaks": "Verifies the published cask still serves Screepub-macOS.dmg. TAP MACHINERY, gate 3. It is run weekly by .github/workflows/tap-freshness.yml, which carries no textual reference of its own and is therefore INVISIBLE to this sweep \u2014 the second-order reference this row exists to record."
     },
     "tools/frozen-app-manifest.json": {
       "refs": 67,
