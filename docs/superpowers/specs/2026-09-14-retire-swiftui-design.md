@@ -90,7 +90,13 @@ specific artifact. None is a judgement call.
     ticket, the hardened runtime and the sidecar's `posix_spawn` out of a
     quarantined bundle are four things that can each fail after a green CI
     run.
-1c. The same on Windows, at whatever fidelity is available. Windows is
+1c. **DEFERRED INDEFINITELY, 2026-09-14 by the owner.** He has a Windows
+    machine; the gate waits anyway. It does not gate the macOS retirement —
+    the spec already said so — and it is no longer treated as a thing
+    pending soon. It gates calling 0.6.0 cross-platform, so either that
+    claim waits with it or the release says macOS and Linux and means it.
+    The original wording, kept because the bar is still right when someone
+    picks it up: the same on Windows, at whatever fidelity is available. Windows is
     unsigned by decision (E2), so the bar here is "SmartScreen warned, the
     user clicked through, the app converted a script" — recorded, not
     assumed. Windows does not gate the *macOS* retirement on its own, but it
@@ -107,11 +113,24 @@ that went away, before the app that has them is withdrawn. Silently removing
 a feature by deleting its only implementation is the failure mode this gate
 exists to prevent.
 
-**SETTLED 2026-09-14 by the owner: all six are PORTED. Nothing is listed as
-gone.** Gate 2 is therefore a parity gate rather than a disclosure gate, and
-it is now the largest thing standing between here and F3. Two consequences
+**SETTLED 2026-09-14 by the owner: FIVE are ported, ONE is named as gone.**
+Ported: the updater (full self-update, not notify-only), Apple Books,
+Send-to-Kindle, email-to-Kindle, save-a-copy. **Cancel during conversion is
+OUT**, and the reason is a rule rather than a cost: Cancel needs a third
+Rust command, `desktop/README.md` records that having only `run_engine` and
+`pick_file` is deliberate, and the ADR's governing principle is that Rust is
+a window and not a brain. The owner's words: conversion is fast enough that
+Cancel is close to irrelevant, and he would rather keep the surface to as
+near one language as possible. So the shell stays at two commands, and
+Cancel goes in `docs/releases/<version>.md` as a thing that went away.
+
+Gate 2 is therefore a parity gate for five features plus one named loss, and
+it is the largest thing standing between here and F3. Two consequences
 the gate's original wording did not have to carry:
 
+- Cancel being out is the one place this gate now says "named" rather than
+  "ported", so the release notes owe it a line. A feature that disappears
+  because a rule held is still a feature that disappeared.
 - The updater is not just "notify"; it is the full self-update, which moves
   `self-update-installer`'s 26 checks from `accept-loss` to `port` in
   `docs/retired-coverage.md` on top of the 59 that hung on the product
