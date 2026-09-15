@@ -512,7 +512,7 @@ describe('finding and smoking whatever this runner just built', () => {
     // say where it looked -- not return an empty list, which would make a
     // CI step that checked nothing look green.
     expect(() =>
-      smokeBuiltBundles('windows', '0.6.0', fixture, OUT, () => ok(''), desktopTree([], 'nonsis')),
+      smokeBuiltBundles('windows', '0.6.0', fixture, OUT, () => ok(''), desktopTree([], 'nonsis'), 'win32'),
     ).toThrow(/bundle[/\\]nsis|nsis/);
   });
 
@@ -523,7 +523,7 @@ describe('finding and smoking whatever this runner just built', () => {
     expect(kindsForOs('linux').length).toBe(2);
     const root = desktopTree(['deb', 'rpm'], 'both');
     const calls: string[][] = [];
-    const smoked = smokeBuiltBundles('linux', '0.6.0', fixture, fresh('bothwork'), engineRun(calls), root);
+    const smoked = smokeBuiltBundles('linux', '0.6.0', fixture, fresh('bothwork'), engineRun(calls), root, 'linux');
     expect(smoked.length).toBe(2);
     expect(smoked.some((s) => s.endsWith('.deb'))).toBe(true);
     expect(smoked.some((s) => s.endsWith('.rpm'))).toBe(true);
@@ -540,7 +540,7 @@ describe('finding and smoking whatever this runner just built', () => {
     const root = desktopTree(['deb'], 'debonly');
     const calls: string[][] = [];
     expect(() =>
-      smokeBuiltBundles('linux', '0.6.0', fixture, fresh('debonlywork'), engineRun(calls), root),
+      smokeBuiltBundles('linux', '0.6.0', fixture, fresh('debonlywork'), engineRun(calls), root, 'linux'),
     ).toThrow(/rpm/);
     // The .deb WAS smoked first -- proof the throw is about the missing
     // second kind and not about failing to start.
@@ -556,7 +556,7 @@ describe('finding and smoking whatever this runner just built', () => {
     writeFileSync(join(dir, 'Screepub_0.6.0_arm64.deb'), randomBytes(11_000_000));
     const calls: string[][] = [];
     expect(() =>
-      smokeBuiltBundles('linux', '0.6.0', fixture, fresh('wmwork'), engineRun(calls), root),
+      smokeBuiltBundles('linux', '0.6.0', fixture, fresh('wmwork'), engineRun(calls), root, 'linux'),
     ).toThrow(/magic/);
     expect(calls.length).toBe(0);
   });
@@ -567,7 +567,7 @@ describe('finding and smoking whatever this runner just built', () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'Screepub_0.6.0_arm64.deb'), enc('!<arch>\n'));
     expect(() =>
-      smokeBuiltBundles('linux', '0.6.0', fixture, fresh('tinywork'), () => ok(''), root),
+      smokeBuiltBundles('linux', '0.6.0', fixture, fresh('tinywork'), () => ok(''), root, 'linux'),
     ).toThrow(/floor/);
   });
 
@@ -577,7 +577,7 @@ describe('finding and smoking whatever this runner just built', () => {
     const root = desktopTree(['deb', 'rpm'], 'badver');
     expect(() =>
       smokeBuiltBundles('linux', '0.6.0', fixture, fresh('badverwork'), () =>
-        ok('{"ok":true,"version":"0.5.4"}\n'), root),
+        ok('{"ok":true,"version":"0.5.4"}\n'), root, 'linux'),
     ).toThrow(/0\.5\.4/);
   });
 });
