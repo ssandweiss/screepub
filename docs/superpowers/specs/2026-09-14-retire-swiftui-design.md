@@ -69,7 +69,21 @@ specific artifact. None is a judgement call.
     pushed branch, with the bundle and smoke steps included. A run URL is
     recorded in this spec's follow-up or in `docs/releases/0.6.0.md`.
 1b. A human has mounted the resulting DMG on a real Mac, dragged the app to
-    `/Applications`, launched it, dropped a PDF on it, and got a book. Not
+    `/Applications`, launched it, dropped a PDF on it, and got a book.
+    **PASSED 2026-09-14.** `Screepub Desktop_0.6.0_universal.dmg` (the
+    universal build, both slices) mounted, dragged to `/Applications`,
+    launched from there, and used to convert TWO real feature scripts. The
+    library holds them in the new per-script layout beside the Swift app's
+    older flat files, so the coexistence §4 describes is observed, not
+    predicted. Evidence beyond "a window opened": the app's own `.fountain`
+    for one of those scripts is **byte-for-byte identical** to a fresh
+    `bun src/cli.ts` run over the same PDF, and its EPUB matches the CLI's on
+    scene headings (162) and mini-slugs (19). Since the `.fountain` is the
+    cache boundary, identical bytes there is a stronger answer to "do the
+    numbers agree" than reading four numbers off a screen. Its EPUB also
+    carries both of the day's renderer fixes (no `keep-together`, and the
+    multicol shadow rule), confirming the shipped bundle is the current
+    engine and not a stale sidecar. Not
     "the engine ran out of the bundle in CI" — that is `smoke-bundle.ts`'s
     job and it is gate 1a. A window opening is a separate fact from a binary
     executing, and on macOS specifically: Gatekeeper, the notarization
