@@ -29,7 +29,12 @@ import { parseArgs } from 'node:util';
 import { REPO_DIR, writeChecksums, type Spawn } from './build-cli';
 
 export type BundleOs = 'linux' | 'macos' | 'windows';
-export type BundleArch = 'x64' | 'arm64';
+// 'universal' is macOS-only and is not a CPU: it is a lipo of the other two.
+// It exists because the frozen Swift updater takes the first .dmg on a
+// release and has no architecture logic, so per-arch Mac bundles are what
+// make an automatic migration off that app impossible. See
+// docs/adr/2026-09-14-swift-app-update-path.md.
+export type BundleArch = 'x64' | 'arm64' | 'universal';
 
 export interface BundleKind {
   id: 'deb' | 'rpm' | 'dmg' | 'nsis';
@@ -303,7 +308,7 @@ export function osForPlatform(platform: string): BundleOs {
 export function parseBundleArgs(
   argv: string[],
   platform: string = process.platform,
-  arch: string = process.arch,
+  hostArch: string = process.arch,
 ): BundleArgs {
   const { values } = parseArgs({
     args: argv,
@@ -311,6 +316,10 @@ export function parseBundleArgs(
       version: { type: 'string' },
       out: { type: 'string' },
       target: { type: 'string' },
+      // process.arch can only ever say what THIS machine is, and a macOS
+      // runner is arm64 or x64 — never universal. So asking for a universal
+      // bundle needs a flag; there is no host to infer it from.
+      arch: { type: 'string' },
       config: { type: 'string' },
     },
     strict: true,
@@ -332,16 +341,31 @@ export function parseBundleArgs(
         '~44 MB and a Linux run writes two of them plus a checksums file.',
     );
   }
-  if (arch !== 'x64' && arch !== 'arm64') {
+  const arch = values.arch ?? hostArch;
+  if (arch !== 'x64' && arch !== 'arm64' && arch !== 'universal') {
     throw new Error(`build-app-bundle: no app bundle is defined for architecture "${arch}"`);
   }
+  const os = osForPlatform(platform);
+  if (arch === 'universal' && os !== 'macos') {
+    throw new Error(
+      `build-app-bundle: "universal" is a macOS-only architecture and this is ${os}. ` +
+        'There is no universal .deb, .rpm or .exe, and allowing it here would render a ' +
+        'filename naming an architecture that does not exist.',
+    );
+  }
+  // A universal ARCH with a per-arch TARGET would produce a thin bundle
+  // wearing a universal name -- the same failure the fat check in
+  // build-sidecar catches one layer down, arriving from the other side. So
+  // the arch implies the target, and an explicit --target still wins,
+  // because overriding it is how you debug one slice.
+  const target = values.target ?? (arch === 'universal' ? 'universal-apple-darwin' : undefined);
 
   return {
     version,
     outDir: resolve(values.out),
-    os: osForPlatform(platform),
+    os,
     arch,
-    target: values.target,
+    target,
     config: values.config,
   };
 }

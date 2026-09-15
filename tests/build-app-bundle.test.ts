@@ -109,6 +109,12 @@ describe('the bundle matrix', () => {
     // page and tools/bump-tap.sh hardcodes.
     expect(kind('dmg').releasedName('0.6.0', 'arm64')).toBe('Screepub-Desktop-macOS-arm64.dmg');
     expect(kind('dmg').releasedName('0.6.0', 'x64')).toBe('Screepub-Desktop-macOS-x64.dmg');
+    // The one a release should actually ship. The frozen Swift updater takes
+    // the first .dmg on a release and has no architecture logic, so per-arch
+    // Mac bundles are what make an automatic migration impossible (ADR
+    // 2026-09-14). This name is how the release stops being per-arch.
+    expect(kind('dmg').releasedName('0.6.0', 'universal'))
+      .toBe('Screepub-Desktop-macOS-universal.dmg');
     for (const arch of ['x64', 'arm64'] as const) {
       expect(kind('dmg').releasedName('0.6.0', arch)).not.toBe('Screepub-macOS.dmg');
     }
@@ -676,5 +682,40 @@ describe('a whole run, against a fake cargo', () => {
     // And it looked under the triple: nothing was written to the untargeted
     // directory, so finding an artifact at all proves the path.
     expect(made.map((p) => p.replace(/^.*[/\\]/, ''))).toEqual(['Screepub-Desktop-macOS-x64.dmg']);
+  });
+});
+
+// ── universal is a macOS-only architecture ───────────────────────────
+describe('the universal architecture', () => {
+  test('--arch universal on macOS implies the universal cargo target', () => {
+    // Otherwise the two can drift: a universal ARCH with a per-arch TARGET
+    // produces a thin bundle wearing a universal name, which is the exact
+    // failure the fat check in build-sidecar exists to catch one layer down.
+    const args = parseBundleArgs(['--version', '0.6.0', '--out', '/o'], 'darwin', 'arm64');
+    expect(args.arch).toBe('arm64');
+    const uni = parseBundleArgs(
+      ['--version', '0.6.0', '--out', '/o', '--arch', 'universal'], 'darwin', 'arm64',
+    );
+    expect(uni.arch).toBe('universal');
+    expect(uni.target).toBe('universal-apple-darwin');
+  });
+
+  test('an explicit --target still wins over the implied one', () => {
+    const a = parseBundleArgs(
+      ['--version', '0.6.0', '--out', '/o', '--arch', 'universal', '--target', 'x86_64-apple-darwin'],
+      'darwin', 'arm64',
+    );
+    expect(a.target).toBe('x86_64-apple-darwin');
+  });
+
+  test('universal is refused off macOS, by name', () => {
+    // There is no universal .deb or .rpm. Allowing it would have the Linux
+    // rows render `Screepub_0.6.0_universal.deb`, which is not a thing.
+    expect(() =>
+      parseBundleArgs(['--version', '0.6.0', '--out', '/o', '--arch', 'universal'], 'linux', 'x64'),
+    ).toThrow(/universal/i);
+    expect(() =>
+      parseBundleArgs(['--version', '0.6.0', '--out', '/o', '--arch', 'universal'], 'win32', 'x64'),
+    ).toThrow(/universal/i);
   });
 });
