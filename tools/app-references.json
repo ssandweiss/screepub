@@ -92,9 +92,9 @@
       "breaks": "The options registry names Swift files as the implementing code for three behaviours and kit-check as their guard. CLAUDE.md calls this file the app's options registry, so a stale entry here misleads by design."
     },
     "docs/mac-qa.md": {
-      "refs": 4,
+      "refs": 5,
       "category": "note",
-      "breaks": "The gate-1 QA checklist. It names Screepub.app and the flat ~/Documents/Screepub layout because its whole job is telling a tester how the shipping app and its replacement differ while BOTH are installed. At F2 the coexistence sections stop applying; at F3 the file should go, since the gate it describes will have been passed."
+      "breaks": "The gate-1 QA checklist. It names Screepub.app and the flat ~/Documents/Screepub layout because its whole job is telling a tester how the shipping app and its replacement differ while BOTH are installed. The fifth reference, added 2026-09-14, is UpdateInstall.swift: the checklist now records that the updater refusal is structural rather than predicted, because the identifier pin is an exact match, and points at the ADR that decides what F2 ships because of it. At F2 the coexistence sections stop applying; at F3 the file should go, since the gate it describes will have been passed, and this reference goes with it because the ADR it points to outlives the file."
     },
     "docs/release-notes-template.md": {
       "refs": 5,
