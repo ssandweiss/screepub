@@ -145,9 +145,35 @@ the gate's original wording did not have to carry:
 
 E2 deliberately deferred distribution channels and said the Tauri app "gets a
 cask when it becomes *the* Mac app, which is piece F's business." So F owns
-it. Until `ssandweiss/homebrew-tap`'s cask points at an artifact that exists
-and a human has installed *through brew* (not by downloading the DMG), the
-tap is still the Swift app's and cannot be touched.
+it.
+
+**SETTLED 2026-09-14 by the owner: the Tauri app gets NO cask. The cask is
+retired at F2 and the FORMULA stays.** The tap holds two different things and
+only one of them is going: `Casks/screepub.rb` is the .app, and
+`Formula/screepub.rb` is the CLI. The CLI's audience is exactly the people
+who type `brew install`; the app's audience is screenwriters. Nothing has
+been downloaded yet, so there is no installed base to strand.
+
+Gate 3 therefore reads: **a Mac user has somewhere to get the new app, and
+that somewhere is the releases page and the site.** Both already exist, so
+gate 3 collapses from "build a cask and have a human install through brew"
+to "point the two existing download references at the universal DMG." With
+the universal build there is one artifact to point at rather than two.
+
+This deletes what this spec called the single largest piece of real work in
+F: the per-arch `on_arm`/`on_intel` stanzas and the fourth and fifth digest
+lookups in `tools/bump-tap.sh`. Both are now moot rather than merely halved.
+
+**Sequencing, and it matters.** The cask today serves the SWIFT app, which
+still ships. Retiring it before F2 would strand anyone who installed that way
+for no gain. So: the decision is recorded now, executed at F2, and it is
+three things rather than one — deprecate the cask so `brew` tells people
+rather than silently serving a stale app, retire the cask half of
+`tap-freshness.yml` while the formula half stays, and drop the cask's digest
+lookups from `bump-tap.sh`. A tap that keeps serving an app which no longer
+ships is worse than no tap, and this project has already lived that once:
+five releases served 0.3.0 from an asset the workflow had stopped
+producing.
 
 ## What F designs
 
