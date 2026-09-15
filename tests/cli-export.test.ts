@@ -208,7 +208,16 @@ describe('exportCommand', () => {
       expect(existsSync(result.path)).toBe(true);
       expect(['kfx', 'azw3', 'mobi']).toContain(result.extension);
     }
-  });
+    // 2 minutes, not bun's default 5 seconds, and the difference is not
+    // slack: where the toolchain is ABSENT this refuses in about a second,
+    // but where it is PRESENT it really converts. Measured 2026-09-14 on an
+    // M-series Mac with Calibre + the KFX plugin + Kindle Previewer: 21s to
+    // a real .kfx, most of it Previewer's cold start, which Amazon ships
+    // x86_64-only so it comes up under Rosetta. CI has no Calibre and takes
+    // the fast refusal, so this budget costs nothing there -- it exists so
+    // the suite is green on a developer machine that has the tools, rather
+    // than punishing the only machines that can exercise this path at all.
+  }, 120_000);
 
   test('a missing EPUB is unreadable, not a ladder failure', async () => {
     let code = '';

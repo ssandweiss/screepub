@@ -292,6 +292,16 @@ export function smokeBuiltBundles(
   // clean checkout and in CI is empty -- so the multi-kind path would be
   // covered by nothing.
   desktopDir?: string,
+  // The HOST this is running on, as distinct from the OS whose bundles we
+  // were asked to smoke. A parameter for the same reason `run` and
+  // `desktopDir` are: in production the two always agree, because the only
+  // real caller derives the target from `process.platform` -- so hardcoding
+  // the host here made the discover/verify/version logic untestable
+  // anywhere except a Linux runner, and a suite that can only be green on
+  // one OS teaches people to stop reading it. The REFUSAL itself is still
+  // tested against real platform strings; this seam moves the host, never
+  // the rule.
+  hostPlatform: string = process.platform,
 ): string[] {
   const kinds = kindsForOs(os);
   // An OS with no kinds would smoke nothing and exit 0, which is the exact
@@ -310,7 +320,7 @@ export function smokeBuiltBundles(
     // binary inside one is for a single OS. Asked for another OS's bundles,
     // say which machine this had to run on rather than executing a foreign
     // binary and reporting whatever came back.
-    const refusal = platformRefusal(path, process.platform);
+    const refusal = platformRefusal(path, hostPlatform);
     if (refusal) throw new Error(refusal);
     const work = join(workRoot, kind.id);
     mkdirSync(work, { recursive: true });

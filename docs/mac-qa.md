@@ -33,6 +33,40 @@ ever been run on Linux, and a macOS-only failure is itself a finding.
 
 ---
 
+## Already answered, 2026-09-14 — do not redo these
+
+A session on a Mac got this far, so the checklist below is shorter than it
+looks. What is confirmed:
+
+- **A local build works.** `bun tools/build-sidecar.ts --host` then, from
+  `desktop/src-tauri`, `cargo run` builds and launches in ~82s (the Tauri CLI
+  is NOT needed for the dev loop). `cargo tauri build --bundles app,dmg
+  --config tauri.transition.conf.json` produced `Screepub Desktop.app` and a
+  28 MB `Screepub Desktop_0.6.0_aarch64.dmg`.
+- **It is adhoc/linker-signed, i.e. unsigned** — exactly as §1 predicts for a
+  non-tagged build. Not a defect.
+- **The window opens and shows `ENGINE 0.5.4`.** The sidecar-resolution
+  failure §2 calls the most likely macOS-specific problem did not occur.
+- **The numbers agree with the CLI.** The engine *inside the bundle* returns
+  byte-identical JSON to `bun src/cli.ts` on three real scripts (only
+  `epubPath`/`fountainPath` differ, by construction). And
+  `desktop/ui/convert.js` reads `answer.pages`/`scenes`/`characters` straight
+  off the engine JSON behind `Number.isFinite` guards, so the surface omits a
+  clause rather than inventing one. **What is still unanswered is §3's actual
+  ask**: a person dropping a PDF on the well and reading the result.
+- **§5's updater question is settled from source.** `UpdateInstall.swift`
+  pins `identifier "com.darkwell.screepub"` exactly and the Tauri app is
+  `com.darkwell.screepub.desktop`, so the refusal is structural, not
+  probable. But it is a *late, repeating* refusal, and the hazard is dormant
+  only because `release.yml` uploads the Swift DMG first. See
+  [ADR 2026-09-14](adr/2026-09-14-swift-app-update-path.md), which changes
+  what F2 should ship. Observing the refusal on the running app is still
+  worth doing; predicting it is no longer necessary.
+
+Note for whoever drives this: an unbundled `cargo run` binary claims no
+bundle identifier, so screenshot tooling cannot find its window. Build the
+`.app` if you need to capture it.
+
 ## 1. Get a DMG, and know whether it is signed
 
 Look at the newest `desktop` workflow run:
