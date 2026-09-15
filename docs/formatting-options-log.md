@@ -146,6 +146,12 @@ and the suite will say so if you forget.
   line beneath it? If `break-after: avoid` proves not to bind, the
   recorded fallback is a wrapper holding the heading + the first ELEMENT
   only — never the whole first block, which is the bug this replaced.
+- **Device verdict 2026-09-15, Apple Books: DOES NOT BIND there.** An
+  `h2.scene-heading` sat alone at the foot of a column with its action in
+  the next one, with all three spellings of the rule present. See #8b for
+  the full verdict and why the rule stays anyway. This does not disturb the
+  Kindle verdict below — it is a second engine answering differently, which
+  is the normal case, not a contradiction.
 - **Device verdict 2026-07-30: BINDS — the chain holds without the
   wrapper.** First isolated evidence (nothing prior could tell the two
   mechanisms apart: #8b's 2026-07-29 pass measured cues wearing both):
@@ -605,6 +611,41 @@ and the suite will say so if you forget.
   paragraphs, not a wrapper: the `keep-together` container form was tried
   from 2026-07-22 and deleted 2026-09-14 (see the top of this entry, and
   #5a, which made the same move for headings first).
+- **DEVICE VERDICT 2026-09-15, Apple Books, screenshot-confirmed: the
+  forward bind does NOT hold, in EITHER spelling.** The first Apple Books
+  evidence this project has ever had, and it is negative. Books paginates
+  two columns to a spread, so it is a multicol engine as assumed. But with
+  the torture fixture at +3 to +5 font sizes: a `p.character` (WREN) sat
+  alone at the foot of the right-hand column with its dialogue overleaf on
+  the next page, and an `h2.scene-heading` sat alone at the foot of a
+  left-hand column with its action in the next column. Both elements carry
+  `page-break-after: avoid` AND `break-after: avoid` AND
+  `-webkit-column-break-after: avoid`, in separate rules per the iBooks
+  shared-block bug. All three were ignored.
+  **What this retires:** the 2026-07-30 claim below that the column spelling
+  "extends this keep to Apple Books" was never verified and is now disproven
+  for the DIRECTIONAL binds. Whether Books honors the INSIDE spelling on a
+  wrapper is still untested, and we no longer have a wrapper to test it with.
+  **Severity is not uniform.** The right-column case is a real page turn and
+  is the defect #8b exists to prevent. The left-column case is a break
+  between two columns the reader can see at once, which is cosmetic. Both
+  come from the same ignored rule.
+  **The rule stays anyway, and this is the reason:** it is proven inert in
+  Books but UNTESTED in the Readium family (Thorium, Kobo's phone and tablet
+  apps), which is the other half of what it was aimed at. It re-spells links
+  that already exist rather than adding new ones, so it costs no pushed
+  chunk on any engine that already honors the modern spelling. If a Readium
+  pass also comes back negative, delete it as dead CSS rather than leaving
+  it to imply a coverage we do not have.
+  **The tension worth naming before anyone tries to fix this.** The KFX
+  converter ignores `break-after` on a `<div>` and honors it on a `<p>`;
+  Books ignores it on both. The only mechanism known to work in Books is
+  `break-inside` on a wrapper — which is precisely the shape that produced
+  blank-bottomed pages on Kindle and that #8b deleted on 2026-09-14. The two
+  engines want opposite structures, and a wrapper big enough to help Books
+  is a wrapper big enough to hurt Kindle. Kindle is the primary target, so
+  the cue stranding in Apple Books is ACCEPTED until someone finds a third
+  mechanism.
 - **The column spelling, and the hole it now leaves (2026-07-30, revised
   2026-09-14):** the wrapper used to carry `-webkit-column-break-inside:
   avoid` in a SEPARATE rule — separate because iBooks drops both spellings
