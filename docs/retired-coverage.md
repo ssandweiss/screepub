@@ -45,7 +45,7 @@ Where a decision is `port`, the ADR's rule holds: **the port lands in
 
 ## The decisions
 
-| Section | Checks | Decision (RECOMMENDED — not settled) | In one line |
+| Section | Checks | Decision (SETTLED 2026-09-14) | In one line |
 | --- | --- | --- | --- |
 | `send-menu` | 45 | `port` | The ordering, the remembered choice and the catalog are pure logic and the largest single block of unreplaced coverage. |
 | `mail-and-books` | 5 | `port` | Apple Books is the product's only route to an iPhone; it is one `open`. |
@@ -55,7 +55,7 @@ Where a decision is `port`, the ADR's rule holds: **the port lands in
 | `update-selection` | 17 | `port` | Same unit as the above: pure, no network, no keys. |
 | `update-decoding` | 14 | `port` | Same unit. |
 | `update-error-descriptions` | 11 | `port` | Same unit; the difference between a message and "The operation couldn't be completed." |
-| `self-update-installer` | 26 | `accept-loss` | macOS codesign pinning and in-place bundle swap. Its own piece, with its own secrets question. |
+| `self-update-installer` | 26 | **`port`** (was `accept-loss`) | macOS codesign pinning and in-place bundle swap. Its own piece, with its own secrets question. |
 | `release-notes-parsing` | 21 | `accept-loss` | Of the Swift assertions only. The feature is replaced in kind and nothing is lost. |
 | `kfx-install-plugin` | not a kit-check section | `accept-loss` | Detection ports; installation is a 485 KB GPL-3 binary and a packaging decision. |
 
@@ -63,8 +63,30 @@ The four update rows above the installer are deliberately one unit: they are
 `UpdateCheck`'s pure half, they only earn their keep together, and they are
 all worthless if the answer to **"does the app ever tell the user a newer
 version exists?"** is no. That single product question decides 59 of the 171
-checks. If the answer is no, all four flip to `accept-loss` and this file
-should say so rather than carry dead code in `src/`.
+checks.
+
+**ANSWERED 2026-09-14 by the owner: yes, and more than notify — the new app
+gets a FULL self-update, ported.** So all four update rows stay `port`, and
+`self-update-installer` moves from `accept-loss` to `port` with them, which
+is a change of 26 checks on top of the 59. That row was parked because it is
+"macOS codesign pinning and in-place bundle swap, its own piece, with its own
+secrets question", and all of that is still true: it is the largest single
+item in the retirement and it should be scoped as its own piece rather than
+folded into F. Tauri ships an updater plugin whose design differs from
+`UpdateInstall.swift`'s, so "ported" here means the BEHAVIOUR and its
+assertions, not a line-by-line translation — in particular the downgrade
+defence and the pinned designated requirement have to survive whatever
+mechanism replaces them, because those are the two things that make the
+update channel not need to be trusted.
+
+Consequence worth stating plainly: with an updater in the new app,
+[ADR 2026-09-14](adr/2026-09-14-swift-app-update-path.md) does not change its
+decision, but it loses one of its four supporting reasons. Its objection that
+"the payload would remove the updater" no longer applies. The disqualifying
+reason, architecture-blindness in the frozen updater, is being removed
+separately by the universal bundle work. **Once both land, the case for
+taking the `com.darkwell.screepub` identifier and migrating people
+automatically should be re-opened rather than assumed closed.**
 
 ---
 

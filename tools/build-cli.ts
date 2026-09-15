@@ -34,6 +34,7 @@ export type BinaryFormat =
   | 'pe-x86-64'
   | 'macho-arm64'
   | 'macho-x86-64'
+  | 'macho-universal'
   | 'unknown';
 
 /** How many leading bytes are enough to name every format below. A real
@@ -50,6 +51,9 @@ export function detectBinaryFormat(head: Uint8Array): BinaryFormat {
   const view = new DataView(head.buffer, head.byteOffset, head.byteLength);
   const u16 = (o: number): number => (o >= 0 && o + 2 <= head.length ? view.getUint16(o, true) : -1);
   const u32 = (o: number): number => (o >= 0 && o + 4 <= head.length ? view.getUint32(o, true) : -1);
+  // Fat Mach-O headers are big-endian regardless of the slices inside them.
+  const u32be = (o: number): number =>
+    o >= 0 && o + 4 <= head.length ? view.getUint32(o, false) : -1;
 
   // ELF: 7f 'E' 'L' 'F', EI_CLASS=2 (64-bit), EI_DATA=1 (little endian),
   // then e_machine as a u16 at 0x12.
@@ -76,6 +80,35 @@ export function detectBinaryFormat(head: Uint8Array): BinaryFormat {
     const cpu = u32(4);
     if (cpu === 0x0100000c) return 'macho-arm64';
     if (cpu === 0x01000007) return 'macho-x86-64';
+  }
+
+  // Universal (fat) Mach-O. The header is big-endian ALWAYS, whatever the
+  // slices inside are, which is why this needs its own reader. FAT_MAGIC
+  // carries 20-byte fat_arch records; FAT_MAGIC_64 carries 32-byte
+  // fat_arch_64, whose offset and size fields are 64-bit.
+  //
+  // Both arches are REQUIRED to answer 'macho-universal'. A one-slice fat
+  // file is a thin binary wearing a universal wrapper, and the whole reason
+  // this format exists here is that the frozen Swift updater has no
+  // architecture logic (ADR 2026-09-14): shipping it a fat DMG that is
+  // secretly arm64-only would strand exactly the Intel users it is meant to
+  // reach, and it would do it silently.
+  const beMagic = u32be(0);
+  if (beMagic === 0xcafebabe || beMagic === 0xcafebabf) {
+    const stride = beMagic === 0xcafebabf ? 32 : 20;
+    const count = u32be(4);
+    // A sane bound: a real fat binary has a handful of slices, and this also
+    // stops a Java class file (same 0xcafebabe magic, different meaning)
+    // from being read as a thousand arches.
+    if (count < 1 || count > 16) return 'unknown';
+    const cpus = new Set<number>();
+    for (let i = 0; i < count; i++) {
+      const cpu = u32be(8 + i * stride);
+      if (cpu < 0) return 'unknown';
+      cpus.add(cpu);
+    }
+    if (cpus.has(0x01000007) && cpus.has(0x0100000c)) return 'macho-universal';
+    return 'unknown';
   }
 
   return 'unknown';

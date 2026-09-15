@@ -10,6 +10,8 @@ import {
   compileSidecarArgv,
   buildSidecar,
   verifySidecar,
+  lipoArgv,
+  lipoUniversalSidecar,
 } from '../tools/build-sidecar';
 import { SIDECAR_TARGETS, sidecarTargetFor, sidecarFileName } from '../tools/sidecar-targets';
 import type { Spawn } from '../tools/build-cli';
@@ -225,6 +227,115 @@ describe('nothing large can be committed', () => {
       expect(proc.exitCode).toBe(0); // 0 = ignored
     } finally {
       rmSync(probe, { force: true });
+    }
+  });
+});
+
+// ── the universal macOS sidecar ──────────────────────────────────────
+//
+// The frozen Swift updater has no architecture logic: it takes the first
+// .dmg asset it finds, because it was written when there was exactly one
+// universal DMG to find (ADR 2026-09-14). Per-arch bundles are therefore
+// not only a Homebrew cask inconvenience, they are what makes an automatic
+// migration impossible. This is the other half of fixing that: bun compiles
+// one arch at a time, so the universal sidecar is a lipo of two builds
+// rather than a target bun knows about.
+describe('the universal macOS sidecar', () => {
+  /** A fat Mach-O header with both slices, enough for readBinaryFormat. */
+  function fatBytes(cputypes = [0x01000007, 0x0100000c]): Uint8Array {
+    const b = new Uint8Array(256);
+    const v = new DataView(b.buffer);
+    v.setUint32(0, 0xcafebabe, false);
+    v.setUint32(4, cputypes.length, false);
+    cputypes.forEach((cpu, i) => v.setUint32(8 + i * 20, cpu, false));
+    return b;
+  }
+  /** A thin arm64 Mach-O: what a lipo that silently did nothing leaves. */
+  function thinArm64(): Uint8Array {
+    const b = new Uint8Array(256);
+    const v = new DataView(b.buffer);
+    v.setUint32(0, 0xfeedfacf, true);
+    v.setUint32(4, 0x0100000c, true);
+    return b;
+  }
+
+  test('--universal asks for exactly the two darwin slices, and says so', () => {
+    const parsed = parseSidecarArgs(['--universal'], 'darwin', 'arm64');
+    expect(parsed.targets).toEqual(['bun-darwin-x64', 'bun-darwin-arm64']);
+    expect(parsed.universal).toBe(true);
+    // NOT the host shortcut: --host would give one slice and a universal
+    // bundle built from it is thin, which is the failure this guards.
+    expect(parsed.hostTriple).toBeUndefined();
+  });
+
+  test('without --universal nothing claims to be universal', () => {
+    expect(parseSidecarArgs(['--host'], 'darwin', 'arm64').universal).toBeFalsy();
+    expect(
+      parseSidecarArgs(['--target', 'bun-darwin-arm64'], 'darwin', 'arm64').universal,
+    ).toBeFalsy();
+  });
+
+  test('the lipo invocation names both slices and the universal output', () => {
+    const argv = lipoArgv('/out');
+    expect(argv).toEqual([
+      'lipo',
+      '-create',
+      '-output',
+      '/out/screepub-engine-universal-apple-darwin',
+      '/out/screepub-engine-x86_64-apple-darwin',
+      '/out/screepub-engine-aarch64-apple-darwin',
+    ]);
+  });
+
+  test('a lipo that exits non-zero fails loudly, carrying its stderr', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-lipo-'));
+    try {
+      expect(() =>
+        lipoUniversalSidecar(dir, () => ({ exitCode: 1, stdout: '', stderr: 'lipo: no such file' })),
+      ).toThrow(/lipo: no such file/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a lipo that exits 0 having produced a THIN binary is refused', () => {
+    // The failure this check exists for. Shipping it would hand every Intel
+    // user an arm64 app inside something labelled universal, and the old
+    // updater would install it without complaint.
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-lipo-'));
+    try {
+      expect(() =>
+        lipoUniversalSidecar(dir, () => {
+          writeFileSync(join(dir, 'screepub-engine-universal-apple-darwin'), thinArm64());
+          return { exitCode: 0, stdout: '', stderr: '' };
+        }),
+      ).toThrow(/macho-universal|universal/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a real fat binary is accepted and its path returned', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-lipo-'));
+    try {
+      const out = lipoUniversalSidecar(dir, () => {
+        writeFileSync(join(dir, 'screepub-engine-universal-apple-darwin'), fatBytes());
+        return { exitCode: 0, stdout: '', stderr: '' };
+      });
+      expect(out).toBe(join(dir, 'screepub-engine-universal-apple-darwin'));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('lipo exiting 0 while writing nothing is refused, not returned', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-lipo-'));
+    try {
+      expect(() =>
+        lipoUniversalSidecar(dir, () => ({ exitCode: 0, stdout: '', stderr: '' })),
+      ).toThrow(/wrote nothing|not found|no such/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

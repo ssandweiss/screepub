@@ -12,6 +12,28 @@ the CLI and the app share one implementation and one test suite. See
     bun tools/build-sidecar.ts --host    # ~30s: compiles the engine for THIS machine
     cd desktop/src-tauri && cargo run
 
+A **universal macOS** build, which is a different thing and is what a release
+should ship:
+
+    rustup target add x86_64-apple-darwin        # once
+    bun tools/build-sidecar.ts --universal       # both slices, then lipo
+    cd desktop/src-tauri
+    cargo tauri build --target universal-apple-darwin \
+      --bundles app,dmg --config tauri.transition.conf.json
+
+bun compiles one architecture at a time, so the universal sidecar is a lipo
+of two real builds rather than a target bun knows about. `--universal` builds
+both and fuses them, and it CHECKS the result is genuinely fat: lipo exits 0
+when handed a single input, and a thin binary inside a universal bundle would
+hand every Intel user an app that cannot open.
+
+Why bother, when per-arch DMGs already work: the frozen Swift app's updater
+takes the first `.dmg` asset on a release and has no architecture logic,
+because it was written when there was exactly one universal DMG to take. See
+[ADR 2026-09-14](../docs/adr/2026-09-14-swift-app-update-path.md). Measured
+here 2026-09-14: 25s for the Rust half once both targets are warm, a 57 MB
+DMG, shell and sidecar each `x86_64 arm64`.
+
 `cargo run` is the whole dev loop. The frontend is three static files that
 `tauri-build` embeds at compile time, so there is no dev server, no bundler
 and no npm dependency. The Tauri CLI is not used by `cargo run` at all; the
