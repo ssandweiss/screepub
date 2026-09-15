@@ -71,7 +71,12 @@
 html, body { height: 100%; }
 body {
   margin: 0;
-  background: var(--ground);
+  /* The paper, not the desk. The sheet's own width is still capped at
+   * --page-max so the measure, the binding margin and the brads keep the
+   * proportions they were drawn at — but the colour behind it runs to the
+   * window edge, because a desk wide enough to swallow the page reads as a
+   * background that failed to load rather than as furniture. */
+  background: var(--paper);
   color: var(--ink-soft);
   font-family: var(--font-prose);
   -webkit-font-smoothing: antialiased;
@@ -97,7 +102,6 @@ body {
   position: relative;
   flex: 1;
   background: var(--paper);
-  box-shadow: var(--page-shadow);
   box-sizing: border-box;
   padding: var(--space-7) var(--page-right) var(--space-10) var(--binding-margin);
 }
