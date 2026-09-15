@@ -81,6 +81,14 @@ export function screenplayCss(o: FormatOptions): string {
   // Apple Books, which honors only that spelling.
   const columnKeeps = ['table.dual-dialogue'];
   if (o.keepSpeechesWhole) columnKeeps.push('.dialogue-block');
+  // The same derivation for the two directional binds. These had no column
+  // spelling at all until 2026-09-14, so every keep-with-next rule in the
+  // book was inert on Apple Books and the Readium family while the INSIDE
+  // keeps worked — the identical silent-inertness the derived-list
+  // correction was written to prevent, hiding one property along.
+  const columnAfter = o.keepSceneHeadingWithScene ? ['h2.scene-heading'] : [];
+  columnAfter.push('p.mini-slug', 'p.character', 'p.parenthetical');
+  const columnBefore = ['p.transition'];
   // The heading keep is a CHAIN, not a wrapper: break-after on the h2
   // holds it to whatever follows, without making the whole first block
   // unbreakable (the old wrapper pushed half-page chunks; registry #5a).
@@ -214,16 +222,6 @@ table.dual-dialogue {
   break-inside: avoid;
 }
 
-/* Apple Books honors ONLY this older spelling; the Readium family
-   (Thorium, Kobo's mobile apps) honors it too. SEPARATE rule on purpose:
-   iBooks drops BOTH forms when they share one declaration block. Unguarded
-   on purpose: the engines that need it largely predate @supports.
-
-   It sits AFTER the rule it shadows, not before. Once the cue keep stopped
-   being a wrapper this list lost its first member and its selector became
-   a duplicate of the rule above; leading with the shadow would make
-   ruleFor() answer with the spelling nothing else reads. */
-${columnKeeps.join(', ')} { -webkit-column-break-inside: avoid; }
 
 table.dual-dialogue td {
   width: 50%;
@@ -302,6 +300,29 @@ section.titlepage p.author {
 .fmt-plus2 {
   font-size: 1.5em;
 }
+
+/* ── the multicol spelling of every break rule above ──────────────────
+
+   Some engines paginate by laying the book out in CSS multi-column and
+   showing one column per screen, and they read ONLY the multicol
+   vocabulary for fragmentation: Apple Books, whose WebKit honors nothing
+   else, and the Readium family (Thorium, Kobo's phone and tablet apps).
+
+   SEPARATE rules on purpose, and last on purpose. Separate because iBooks
+   drops BOTH spellings when they share one declaration block. Last because
+   these selectors repeat ones used above, and a shadow placed first would
+   make ruleFor() in the tests answer with the spelling nothing else reads
+   (the incident 3abeba3 is named for). Unguarded by @supports on purpose:
+   the engines that need this largely predate it.
+
+   Derived from the same gating that emits the real rules, never a second
+   list kept by hand. A hand-kept copy once left the whole-speech keep
+   silently inert in Apple Books while the cue keep worked. */
+${columnKeeps.join(', ')} { -webkit-column-break-inside: avoid; }
+
+${columnAfter.join(', ')} { -webkit-column-break-after: avoid; }
+
+${columnBefore.join(', ')} { -webkit-column-break-before: avoid; }
 `.trimStart();
 }
 

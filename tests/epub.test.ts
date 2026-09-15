@@ -245,13 +245,13 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
   // text-bearing elements (#5a, proved on h2.scene-heading) but not on a
   // structural div, so cues stranded on device.
   //
-  // `table.dual-dialogue` appears TWICE and that is not a duplicate entry:
-  // the first is the real keep, the second the column-spelling shadow rule
-  // (-webkit-column-break-inside) that re-lists it for multicol-paginating
-  // engines. The shadow matches neither `page-break-inside` nor
-  // `break-inside`, so it adds a selector without adding to the count. It
-  // now sits after the rule it shadows rather than before, so ruleFor()
-  // answers with the spelling every other engine reads.
+  // The last three selectors are the multicol SHADOW rules, which re-spell
+  // the six real ones for engines that read only that vocabulary. They match
+  // neither `page-break-*` nor bare `break-*`, so they add selectors without
+  // adding to the count, and they are emitted last so ruleFor() answers with
+  // the spelling every other engine reads (the incident 3abeba3 is named
+  // for). That is why `table.dual-dialogue` and `p.transition` each appear
+  // twice: once real, once shadowed.
   //
   // Default options, so the two gated-off entries (`.dialogue-block`,
   // `section.scene`) are absent by design.
@@ -266,7 +266,9 @@ describe('screenplay CSS (Kindle-safe geometry)', () => {
       'p.character',
       'p.parenthetical',
       'table.dual-dialogue',
+      'p.transition',
       'table.dual-dialogue',
+      'h2.scene-heading, p.mini-slug, p.character, p.parenthetical',
       'p.transition',
     ]);
   });
@@ -802,5 +804,51 @@ describe('the cue chain (no wrapper)', () => {
     const c = ruleFor(SCREENPLAY_CSS, 'p.character');
     expect(c).toContain('page-break-after: avoid');
     expect(c).toContain('break-after: avoid');
+  });
+});
+
+// ── the column spelling of the FORWARD binds ─────────────────────────
+//
+// Some engines paginate by CSS multi-column and read only the multicol
+// vocabulary for fragmentation. The stylesheet has always shadowed the
+// INSIDE keeps that way (`-webkit-column-break-inside`) and never the
+// forward ones, so on Apple Books and the Readium family (Thorium, Kobo's
+// phone and tablet apps) EVERY keep-with-next rule we have was inert:
+// heading, cue, parenthetical, mini-slug, and the transition's backward
+// bind. Headings and cues could strand there exactly as they did on the
+// Kindle, for the same reason wearing a different spelling.
+//
+// Not a regression — the gap predates the cue chain — but it is the same
+// defect, so it is fixed the same way and the list is DERIVED from the
+// gating that emits the binds, per the correction recorded in #8b: a
+// hand-kept copy of this list once left the whole-speech keep silently
+// inert in Apple Books while the cue keep worked.
+describe('the column spelling of the forward binds', () => {
+  const shadows = (css: string, prop: string) =>
+    eachRule(css).filter((r) => r.body.includes(prop)).map((r) => r.selector);
+
+  test('every forward bind is shadowed in the multicol spelling', () => {
+    expect(shadows(SCREENPLAY_CSS, '-webkit-column-break-after')).toEqual([
+      'h2.scene-heading, p.mini-slug, p.character, p.parenthetical',
+    ]);
+  });
+
+  test('the backward bind on transitions is shadowed too', () => {
+    expect(shadows(SCREENPLAY_CSS, '-webkit-column-break-before')).toEqual(['p.transition']);
+  });
+
+  test('the shadows never share a declaration block with the page spelling', () => {
+    // iBooks drops BOTH forms when they share one block. This is the whole
+    // reason the shadows are separate rules rather than extra declarations.
+    for (const r of eachRule(SCREENPLAY_CSS)) {
+      if (/-webkit-column-break/.test(r.body)) expect(r.body).not.toMatch(/(^|[^-])break-/);
+    }
+  });
+
+  test('the heading shadow follows the heading gate', () => {
+    const off = screenplayCss(resolveFormatOptions({ keepSceneHeadingWithScene: false }));
+    expect(shadows(off, '-webkit-column-break-after')).toEqual([
+      'p.mini-slug, p.character, p.parenthetical',
+    ]);
   });
 });
