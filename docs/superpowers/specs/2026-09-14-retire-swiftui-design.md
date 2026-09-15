@@ -93,6 +93,21 @@ that went away, before the app that has them is withdrawn. Silently removing
 a feature by deleting its only implementation is the failure mode this gate
 exists to prevent.
 
+**SETTLED 2026-09-14 by the owner: all six are PORTED. Nothing is listed as
+gone.** Gate 2 is therefore a parity gate rather than a disclosure gate, and
+it is now the largest thing standing between here and F3. Two consequences
+the gate's original wording did not have to carry:
+
+- The updater is not just "notify"; it is the full self-update, which moves
+  `self-update-installer`'s 26 checks from `accept-loss` to `port` in
+  `docs/retired-coverage.md` on top of the 59 that hung on the product
+  question. That is codesign pinning and an in-place bundle swap on three
+  platforms, and it deserves its own piece rather than a bullet here.
+- Apple Books is macOS-only by nature. Porting it means the cross-platform
+  app has a route that exists on one platform, which is a thing the ADR's
+  governing principle has an opinion about; worth a line in the piece that
+  builds it rather than discovering it at review.
+
 **Gate 3 — a Mac user has somewhere to get the new app.**
 
 E2 deliberately deferred distribution channels and said the Tauri app "gets a

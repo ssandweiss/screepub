@@ -61,6 +61,25 @@ function machoHeader(cputype: number): Uint8Array {
   return b;
 }
 
+/** A fat (universal) Mach-O header: FAT_MAGIC big-endian, a count, then one
+ *  fat_arch record per slice. Hand-built for the same reason the others are:
+ *  a real universal binary is 200 MB and this is twenty bytes of ABI. */
+function fatHeader(cputypes: number[], magic = 0xcafebabe): Uint8Array {
+  const b = new Uint8Array(256);
+  const v = new DataView(b.buffer);
+  v.setUint32(0, magic, false); // big endian, always, in a fat header
+  v.setUint32(4, cputypes.length, false);
+  // FAT_MAGIC carries 20-byte fat_arch records; FAT_MAGIC_64 carries 32-byte
+  // fat_arch_64, whose offset and size are 64-bit. Getting this stride wrong
+  // would make the fixture agree with a reader that was also wrong.
+  const stride = magic === 0xcafebabf ? 32 : 20;
+  cputypes.forEach((cpu, i) => {
+    const off = 8 + i * stride;
+    v.setUint32(off, cpu, false);
+  });
+  return b;
+}
+
 describe('detectBinaryFormat', () => {
   test('names each format this project can produce', () => {
     expect(detectBinaryFormat(elfHeader(0x3e))).toBe('elf-x86-64');
@@ -68,6 +87,26 @@ describe('detectBinaryFormat', () => {
     expect(detectBinaryFormat(peHeader(0x8664))).toBe('pe-x86-64');
     expect(detectBinaryFormat(machoHeader(0x0100000c))).toBe('macho-arm64');
     expect(detectBinaryFormat(machoHeader(0x01000007))).toBe('macho-x86-64');
+  });
+
+
+  test('a universal binary is named as such, not mistaken for one slice', () => {
+    // lipo output is what a universal macOS bundle ships, and the verify
+    // step compares against an EXPECTED format. Answering 'unknown' would
+    // make every universal artifact fail verification; answering
+    // 'macho-arm64' would let an Intel-only binary ship inside something
+    // labelled universal.
+    expect(detectBinaryFormat(fatHeader([0x01000007, 0x0100000c]))).toBe('macho-universal');
+    expect(detectBinaryFormat(fatHeader([0x01000007, 0x0100000c], 0xcafebabf)))
+      .toBe('macho-universal');
+  });
+
+  test('a fat binary missing one of the two arches is NOT universal', () => {
+    // The whole reason the old updater cannot be handed per-arch DMGs. A
+    // one-slice fat file is a thin binary wearing a universal wrapper, and
+    // shipping it would strand exactly the users this is meant to reach.
+    expect(detectBinaryFormat(fatHeader([0x0100000c]))).toBe('unknown');
+    expect(detectBinaryFormat(fatHeader([0x01000007]))).toBe('unknown');
   });
 
   test('the two ELF architectures are never confused for each other', () => {
