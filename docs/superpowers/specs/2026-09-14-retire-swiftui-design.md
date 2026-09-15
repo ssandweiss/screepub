@@ -148,10 +148,27 @@ codesign designated requirements (Apple anchor, our Team ID, our bundle
 identifier) and swaps the bundle in place. The Tauri DMG carries identifier
 `com.darkwell.screepub.desktop`, not `com.darkwell.screepub`, so the pin
 should *refuse* it — which surfaces to the user as a failed update rather
-than a wrong one. F2 must verify that refusal on a real Mac before F2 ships,
-and the final Swift release's notes must tell users to install the new app by
-hand. If the refusal cannot be verified, F2 instead ships a final Swift
-release whose only change is to disable the update check.
+than a wrong one.
+
+**SETTLED 2026-09-14 by [ADR: how an installed Swift app gets off the Swift
+app](../../adr/2026-09-14-swift-app-update-path.md).** Read it before
+building F2; it changes this paragraph's conclusion in three ways. The
+refusal is structural rather than probable (`identifier` is an exact match,
+so the pin cannot pass). The refusal is also *late and repeating* — the DMG
+requirement pins no identifier, so the user downloads and mounts the whole
+image before the app inside fails, on every check, forever. So **the final
+Swift release that disables the update check is the PRIMARY path, not the
+fallback for an unverifiable refusal.** And the hazard is dormant until F2
+itself wakes it: while both DMGs are published the updater takes the Swift
+one, because `release.yml` uploads it first. That ordering is incidental, not
+designed, and should not be read as the plan already working.
+
+The ADR also records why taking the `com.darkwell.screepub` identifier — the
+only automatic migration — is rejected, and what would flip that. The short
+version, and the part this spec had not connected: the old updater is
+architecture-blind, so the per-arch DMG problem below is not only a cask
+packaging inconvenience. On the updater path it would hand half of all users
+an app that cannot run on their Mac.
 
 ### F3 — Delete (after gates 1, 2 and 3, and after F2 has been live through at least one release cycle)
 
