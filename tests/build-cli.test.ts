@@ -403,7 +403,13 @@ describe('reading an archive back', () => {
     writeFileSync(join(stage, 'NOTES'), 'plain\n');
     chmodSync(join(stage, 'NOTES'), 0o644);
     const archive = join(dir, 'a.tar.gz');
-    const proc = Bun.spawnSync(['tar', '-czf', archive, '-C', stage, 'screepub', 'NOTES']);
+    // Same COPYFILE_DISABLE as packageTarget, and for the same reason: on
+    // macOS bsdtar would add a hidden `._screepub` / `._NOTES` beside each
+    // real member and this fixture would stop being the two-file archive the
+    // assertions below describe.
+    const proc = Bun.spawnSync(['tar', '-czf', archive, '-C', stage, 'screepub', 'NOTES'], {
+      env: { ...process.env, COPYFILE_DISABLE: '1' },
+    });
     if (proc.exitCode !== 0) throw new Error(`test setup: tar failed: ${proc.stderr.toString()}`);
     return { dir, archive, big };
   }

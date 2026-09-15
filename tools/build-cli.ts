@@ -382,9 +382,15 @@ export async function packageTarget(target: Target, outDir: string): Promise<str
   rmSync(out, { force: true }); // tar -czf appends into an existing file
 
   if (target.packaging === 'tar.gz') {
+    // COPYFILE_DISABLE: macOS ships bsdtar, which preserves a file's extended
+    // attributes by writing a SECOND, hidden member beside it named `._name`.
+    // A tarball built on a Mac therefore hands the user a stray `._screepub`
+    // next to the binary. GNU tar ignores this variable entirely, so setting
+    // it is safe on the Linux runner that actually cuts releases — this is
+    // about the archive being the same artifact wherever it was built.
     const proc = Bun.spawnSync(
       ['tar', '-czf', out, '-C', buildDir(target, outDir), target.binaryName],
-      { stdout: 'pipe', stderr: 'pipe' },
+      { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, COPYFILE_DISABLE: '1' } },
     );
     if ((proc.exitCode ?? 1) !== 0) {
       throw new Error(`build-cli: tar failed for ${target.id}: ${proc.stderr.toString().trim()}`);
