@@ -33,6 +33,14 @@ ever been run on Linux, and a macOS-only failure is itself a finding.
 
 ---
 
+## Gate 1b is PASSED as of 2026-09-14
+
+The universal DMG was mounted, dragged to `/Applications`, launched from
+there, and used to convert two real feature scripts. §2 and §3 below are
+answered. What is still open on this page is §4 (check nothing landed beside
+the PDF), §5 (both apps installed, and the updater), and §6 (send to a
+reader) — plus gate 1c, which needs a Windows machine.
+
 ## Already answered, 2026-09-14 — do not redo these
 
 A session on a Mac got this far, so the checklist below is shorter than it
@@ -52,8 +60,9 @@ looks. What is confirmed:
   `epubPath`/`fountainPath` differ, by construction). And
   `desktop/ui/convert.js` reads `answer.pages`/`scenes`/`characters` straight
   off the engine JSON behind `Number.isFinite` guards, so the surface omits a
-  clause rather than inventing one. **What is still unanswered is §3's actual
-  ask**: a person dropping a PDF on the well and reading the result.
+  clause rather than inventing one. **§3 is now answered too**: two real scripts were converted through the app
+  on 2026-09-14, and the app's `.fountain` for one of them is byte-for-byte
+  identical to a fresh CLI run over the same PDF.
 - **§5's updater question is settled from source.** `UpdateInstall.swift`
   pins `identifier "com.darkwell.screepub"` exactly and the Tauri app is
   `com.darkwell.screepub.desktop`, so the refusal is structural, not
