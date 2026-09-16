@@ -23,6 +23,15 @@ epubcheck <out.epub>        # validate output (brew-installed)
   table-read parser by the same author and heavily extended here; this is
   now the only copy, so no cross-repo mirroring. Parser stays
   FORMAT-OPTION-FREE.
+- `src/parser/cue.ts` — the ONE definition of what a character cue looks
+  like as TEXT, imported by classify.ts and by extract.ts's dual-dialogue
+  detector. Third module of the shared-discriminator kind, and the one that
+  proved why the pattern exists: there used to be two definitions and they
+  disagreed, so a script whose lead was named "Q" rendered ordinary cues
+  fine and collapsed a whole dual-dialogue scene into interleaved action.
+  **Geometry stays with the caller** — classify owns the indent band,
+  clusterSplit owns the column test — because forcing the dual path to
+  invent an indent is how the second copy got written.
 - `src/fountain/serialize.ts` — elements → Fountain. The `.fountain` is a
   durable artifact and the app's cache boundary. Beside it,
   `src/fountain/slug.ts` owns the stage-2 `PRIMARY_SLUG`/`isMiniSlug`

@@ -1,6 +1,7 @@
 // Adapted from an earlier table-read parser by the same author, reworked for
 // headless Bun/Node: modern pdf.js build + DOM shims, no browser worker.
 import './pdfjs-shims';
+import { isCueText } from './cue';
 import type { FamilyBucket, FontRun, RawLine, SizeStep } from './types';
 import { getDocument, OPS } from 'pdfjs-dist/build/pdf.mjs';
 
@@ -706,32 +707,6 @@ function clusterSplit(items: TextItem[], pageWidth: number): ClusterSplit | null
   return { leftText, rightText, leftItems: left, rightItems: right };
 }
 
-/** A short, overwhelmingly-uppercase run — the shape of a character cue.
- * Excludes title-page furniture (emails, dates, phone numbers).
- *
- * ONE letter is enough, and that is deliberate (2026-09-16). This used to
- * demand two characters and two letters, which is fine for a cue read on its
- * own and wrong here: a real script's lead was named "Q", so an "ALANI  Q"
- * row failed the dual test, the region was never entered, and both columns
- * were Y-joined. The damage was not a missing cue — it was every speech
- * fusing with the other speaker's and the rest of the scene reading as
- * action, because interleaved lines carry no cue to attach to.
- *
- * Admitting a single letter costs no safety, because the geometry upstream
- * is the real guard: clusterSplit already demands a left cluster inside 42%
- * of the page, a right cluster past 48%, and a clear gap between them. The
- * thing this length floor was protecting against — a scene number printed in
- * both margins — has no letters at all and is still rejected on the line
- * below. */
-function isCueShaped(text: string): boolean {
-  const t = text.trim();
-  if (t.length < 1 || t.length > 35) return false;
-  const letters = t.match(/\p{L}/gu) ?? [];
-  if (letters.length < 1) return false;
-  const uppers = t.match(/[A-Z]/g) ?? [];
-  return uppers.length / letters.length >= 0.8;
-}
-
 // Synthetic indents for de-interleaved dual-dialogue lines: standard cue
 // and dialogue zones so the classifier treats each column as an ordinary
 // sequential speech.
@@ -754,7 +729,7 @@ function deinterleaveDualDialogue(
 
   while (i < lines.length) {
     const split = clusterSplit(lines[i].items, pageWidth);
-    const isDualCue = split !== null && isCueShaped(split.leftText) && isCueShaped(split.rightText);
+    const isDualCue = split !== null && isCueText(split.leftText) && isCueText(split.rightText);
 
     if (!isDualCue) {
       // Shooting scripts print the scene number in BOTH margins on the
@@ -822,10 +797,10 @@ function deinterleaveDualDialogue(
       const leftText = joinItems(leftItems);
       const rightText = joinItems(rightItems);
 
-      if (leftText && rightText && isCueShaped(leftText) && isCueShaped(rightText)) {
+      if (leftText && rightText && isCueText(leftText) && isCueText(rightText)) {
         break; // next simultaneous exchange — new region anchors here
       }
-      if (leftText && !rightText && isCueShaped(leftText)) {
+      if (leftText && !rightText && isCueText(leftText)) {
         break; // a normal cue or slugline — back to single-column flow
       }
       if (leftText && leftBodyMinX !== null && leftItems[0].transform[4] < leftBodyMinX - 24) {
