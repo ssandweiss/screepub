@@ -6,6 +6,7 @@ import {
   familyBucket,
   groupItemsIntoLines,
   markUnderlinesItem,
+  repairPhantomSpaces,
   stampLineFmt,
 } from '../src/parser/extract';
 import type { FontRun, RawLine } from '../src/parser/types';
@@ -745,5 +746,155 @@ describe('dual dialogue body lines', () => {
     const lines = dual();
     expect(lines.find((l) => l.text === 'SYD')?.dualRight).toBe(true);
     expect(lines.find((l) => l.text === 'LOU')?.dualRight).toBeUndefined();
+  });
+});
+
+// ── phantom spaces invented by pdf.js ────────────────────────────────
+//
+// Found 2026-09-16 in a Final Draft script that had been re-saved through
+// Quartz. The re-encode left one anomalous kerning adjustment roughly once
+// a page: every glyph pair on a line carries +17, and one carries about
+// -110, which widens that single gap by ~1.5pt. pdf.js reads a gap that
+// size as a word space and puts one in the string it hands us, so "these"
+// arrives as "thes e". The PDF contains no space there at all.
+//
+// The repair reads the glyph run, where a REAL space is a glyph of its own
+// and an invented one is not present at all. That is what makes this safe
+// against a writer who spaced a word out deliberately: their spaces are
+// characters and survive untouched.
+describe('repairPhantomSpaces', () => {
+  const SHOW_TEXT = 44; // OPS.showText
+  const g = (s: string) => [...s].map((c) => ({ unicode: c, width: 600 }));
+  const opsFor = (...runs: string[]) => ({
+    fnArray: runs.map(() => SHOW_TEXT),
+    argsArray: runs.map((r) => [g(r)]),
+  });
+  // 7.0 per cell, the tracked Courier this bug appears in.
+  const it = (str: string, cells: number) => ({
+    str,
+    transform: [1, 0, 0, 1, 100, 700],
+    width: cells * 7,
+  });
+
+  test('a space with no glyph behind it is removed', () => {
+    // "these men." is 10 glyphs of ink but 11 characters of string.
+    // Three clean lines alongside, because the cell width is a median over
+    // the page and a page with almost nothing on it should not produce one.
+    const items = [
+      it('sit well with thes e men.', 24),
+      it('a normal line of dialogue here', 30),
+      it('another perfectly ordinary line', 31),
+      it('and a third one for the median', 30),
+    ];
+    const fixed = repairPhantomSpaces(
+      items,
+      opsFor(
+        'sit well with these men.',
+        'a normal line of dialogue here',
+        'another perfectly ordinary line',
+        'and a third one for the median',
+      ),
+    );
+    expect(fixed).toBe(1);
+    expect(items[0].str).toBe('sit well with these men.');
+    expect(items[1].str).toBe('a normal line of dialogue here');
+  });
+
+  test('a glyph run with a trailing space still repairs the item', () => {
+    // The defect in the first cut of this, found on the real script: the
+    // glyph run for a line usually ends with a trailing space, so it is the
+    // SAME LENGTH as the damaged item even though it has one less space in
+    // the middle. A raw length comparison then reads "no improvement" and
+    // skips the repair. Three of the four known cases were skipped this way
+    // and only the one run without a trailing space was fixed.
+    const items = [
+      it('as we sl owly PAN AWAY.', 22),
+      it('a normal line of dialogue here', 30),
+      it('another perfectly ordinary line', 31),
+      it('and a third one for the median', 30),
+    ];
+    const fixed = repairPhantomSpaces(
+      items,
+      opsFor(
+        'as we slowly PAN AWAY. ',
+        'a normal line of dialogue here',
+        'another perfectly ordinary line',
+        'and a third one for the median',
+      ),
+    );
+    expect(fixed).toBe(1);
+    expect(items[0].str).toBe('as we slowly PAN AWAY.');
+  });
+
+  test('a deliberately spaced-out word is left alone', () => {
+    // The writer typed "s l o w l y". Every space is a real glyph, so the
+    // ink matches the string and nothing is flagged. This is the assurance
+    // that the repair cannot second-guess an author.
+    const items = [
+      it('we go s l o w l y now', 21),
+      it('a normal line of dialogue here', 30),
+      it('another perfectly ordinary line', 31),
+      it('and a third one for the median', 30),
+    ];
+    const fixed = repairPhantomSpaces(
+      items,
+      opsFor(
+        'we go s l o w l y now',
+        'a normal line of dialogue here',
+        'another perfectly ordinary line',
+        'and a third one for the median',
+      ),
+    );
+    expect(fixed).toBe(0);
+    expect(items[0].str).toBe('we go s l o w l y now');
+  });
+
+  test('an ambiguous match is refused rather than guessed', () => {
+    // Two runs on the page collapse to the same key. Picking one would be
+    // a coin flip, so neither is applied.
+    const items = [
+      it('thes e men.', 10),
+      it('a normal line of dialogue here', 30),
+      it('another perfectly ordinary line', 31),
+      it('and a third one for the median', 30),
+    ];
+    const fixed = repairPhantomSpaces(
+      items,
+      opsFor(
+        'these men.',
+        'these men.',
+        'a normal line of dialogue here',
+        'another perfectly ordinary line',
+        'and a third one for the median',
+      ),
+    );
+    expect(fixed).toBe(0);
+    expect(items[0].str).toBe('thes e men.');
+  });
+
+  test('an item whose ink matches its string is never touched', () => {
+    const items = [
+      it('these men.', 10),
+      it('a normal line of dialogue here', 30),
+      it('another perfectly ordinary line', 31),
+      it('and a third one for the median', 30),
+    ];
+    expect(
+      repairPhantomSpaces(
+        items,
+        opsFor(
+          'these men.',
+          'a normal line of dialogue here',
+          'another perfectly ordinary line',
+          'and a third one for the median',
+        ),
+      ),
+    ).toBe(0);
+  });
+
+  test('no operator list means no repair, not a crash', () => {
+    const items = [it('thes e men.', 10)];
+    expect(repairPhantomSpaces(items, null)).toBe(0);
+    expect(items[0].str).toBe('thes e men.');
   });
 });
