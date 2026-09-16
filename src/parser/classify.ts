@@ -1,3 +1,4 @@
+import { isCueText } from './cue';
 import type { ScreenplayElement } from './types';
 import type { TextBlock } from './types';
 import { INDENT_RANGES } from './types';
@@ -28,17 +29,7 @@ const PAGE_NUMBER_LABELED = /^(?:page|p\.)\s*\d+\.?$/i;
 const SCENE_NUMBER = /^\d+[A-Z]?(?:[.\-](?:\d+[A-Z]?|[A-Z]))*\.?$/;
 const PARENTHETICAL = /^\([^)]+\)$/;
 const PARENTHETICAL_TRUNCATED = /^\([^)]+\)\.{3}$/;
-// Allows shared cues (MARGO/DEV), numbered (COP #2), and paired (MOM & DAD).
-const CHARACTER_NAME = /^[A-Z][A-Z0-9\s'’\/&#.-]*(\s*\([^)]+\))*\.{0,3}$/;
-const COMPANY_NAME = /\b(LLC|LLP|INC|CORP|CO|LTD)\.?$/i;
-const PUNCTUATION_EXCLUDE = /[!?;,]/;
-// The closing period is optional: writers routinely type "(O.S)" for
-// "(O.S.)", and a script can spell the SAME speaker both ways. Without the
-// `\.?` the unpunctuated form misses this pattern, then trips the
-// "periods only in ellipsis" guard in isLikelyCharacterName — so the cue
-// and the speech under it both fall through to action.
-const DIALOGUE_EXTENSIONS =
-  /\((?:V\.O\.?|O\.S\.?|O\.C\.?|CONT'D|CONT\.|INTO PHONE|FILTERED|PRE-LAP)\)/i;
+// Cue SHAPE lives in cue.ts, imported above; these moved there with it.
 const CHARACTER_EXTENSIONS = /(\s*\([^)]+\))+\s*$/g;
 
 // Mini-slug shape (see isMiniSlugShaped). A slugline ends bare or on a
@@ -219,53 +210,13 @@ function getActiveCharacter(prevElement: ScreenplayElement | null): string | nul
   return null;
 }
 
-function isLikelyCharacterName(text: string, indent: number): boolean {
+export function isLikelyCharacterName(text: string, indent: number): boolean {
+  // Geometry here, shape in cue.ts. The indent band is this caller's own
+  // concern: the dual-dialogue detector has no indent to check because
+  // clusterSplit settles its geometry upstream, and forcing it to invent one
+  // is how a second definition of "cue" got written and drifted.
   if (indent < INDENT_RANGES.CHARACTER_MIN || indent > INDENT_RANGES.CHARACTER_MAX) return false;
-  if (text.length > 50) return false;
-  if (PUNCTUATION_EXCLUDE.test(text)) return false;
-
-  // Check for dialogue extensions
-  if (DIALOGUE_EXTENSIONS.test(text)) {
-    const nameOnly = text.replace(CHARACTER_EXTENSIONS, '').trim();
-    const upperCount = (nameOnly.match(/[A-Z]/g) || []).length;
-    const letterCount = (nameOnly.match(/[A-Za-z]/g) || []).length;
-    return letterCount > 0 && upperCount / letterCount > 0.7;
-  }
-
-  // Uppercase ratio check (>=80%)
-  const upperCount = (text.match(/[A-Z]/g) || []).length;
-  const letterCount = (text.match(/[A-Za-z]/g) || []).length;
-  if (letterCount === 0 || upperCount / letterCount < 0.8) return false;
-
-  // Periods: legitimate only in abbreviation position. Mid-name, a
-  // period may cap a 1-4 letter run ("MR. SMITH", "E.B. WHITE",
-  // "CAPT. MILLER"); at the END of the name only single-letter initials
-  // qualify ("ANNA B.", "J.J.") — a period closing a longer final word
-  // is sentence punctuation, i.e. all-caps action prose drifting into
-  // the cue band, which is what this guard exists to stop. Terminal
-  // discrimination matters at the dialogue/cue band overlap: a shouted
-  // "STOP." must not become a phantom speaker that swallows the next
-  // line as its speech (registry §9e).
-  const undotted = text.replace(/\.{3}/g, ' ');
-  if (undotted.includes('.')) {
-    const tokens = undotted.trim().split(/\s+/);
-    const abbrevChain = /^(?:[A-Z0-9]{1,4}\.)+$/;
-    const initialsOnly = /^(?:[A-Z0-9]\.)+$/;
-    for (let i = 0; i < tokens.length; i++) {
-      if (!tokens[i].includes('.')) continue;
-      const shape = i === tokens.length - 1 ? initialsOnly : abbrevChain;
-      if (!shape.test(tokens[i])) return false;
-    }
-  }
-
-  if (!CHARACTER_NAME.test(text)) return false;
-  if (COMPANY_NAME.test(text)) return false;
-
-  // Length without extensions
-  const nameOnly = text.replace(CHARACTER_EXTENSIONS, '').trim();
-  if (nameOnly.length > 30) return false;
-
-  return true;
+  return isCueText(text);
 }
 
 function extractCharacterInfo(text: string): {
