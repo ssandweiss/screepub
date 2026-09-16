@@ -607,12 +607,27 @@ function clusterSplit(items: TextItem[], pageWidth: number): ClusterSplit | null
 }
 
 /** A short, overwhelmingly-uppercase run — the shape of a character cue.
- * Excludes title-page furniture (emails, dates, phone numbers). */
+ * Excludes title-page furniture (emails, dates, phone numbers).
+ *
+ * ONE letter is enough, and that is deliberate (2026-09-16). This used to
+ * demand two characters and two letters, which is fine for a cue read on its
+ * own and wrong here: a real script's lead was named "Q", so an "ALANI  Q"
+ * row failed the dual test, the region was never entered, and both columns
+ * were Y-joined. The damage was not a missing cue — it was every speech
+ * fusing with the other speaker's and the rest of the scene reading as
+ * action, because interleaved lines carry no cue to attach to.
+ *
+ * Admitting a single letter costs no safety, because the geometry upstream
+ * is the real guard: clusterSplit already demands a left cluster inside 42%
+ * of the page, a right cluster past 48%, and a clear gap between them. The
+ * thing this length floor was protecting against — a scene number printed in
+ * both margins — has no letters at all and is still rejected on the line
+ * below. */
 function isCueShaped(text: string): boolean {
   const t = text.trim();
-  if (t.length < 2 || t.length > 35) return false;
+  if (t.length < 1 || t.length > 35) return false;
   const letters = t.match(/\p{L}/gu) ?? [];
-  if (letters.length < 2) return false;
+  if (letters.length < 1) return false;
   const uppers = t.match(/[A-Z]/g) ?? [];
   return uppers.length / letters.length >= 0.8;
 }

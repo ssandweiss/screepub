@@ -112,6 +112,48 @@ describe('groupItemsIntoLines', () => {
     expect(lines[4].indent).toBe(30);
   });
 
+  test('a ONE-LETTER character name still anchors a dual region', () => {
+    // Found in the wild 2026-09-16: a Final Draft script whose lead is named
+    // "Q". isCueShaped required two characters AND two letters, so a
+    // "ALANI  Q" cue row failed the dual test, the region was never entered,
+    // and the two columns were Y-joined into one line each. The visible
+    // damage was not a missing cue: it was every following speech fusing
+    // with the other speaker's, and the rest of the scene reading as action,
+    // because the interleaved lines carry no cue to attach to.
+    //
+    // The geometry is the real guard here — left of 42%, right of 48%, a
+    // clear gap — so admitting a single letter costs no safety. A page
+    // number cannot reach this: it has no letters at all.
+    const lines = groupItemsIntoLines(
+      [
+        item('ALANI', 194, 700), item('Q', 432, 700),
+        item('Hang on--', 150, 688), item('We talked about this.', 400, 688),
+        item('She turns away.', 108, 640),
+      ],
+      612,
+      1,
+    );
+    expect(lines.map((l) => l.text)).toEqual([
+      'ALANI',
+      'Hang on--',
+      'Q',
+      'We talked about this.',
+      'She turns away.',
+    ]);
+  });
+
+  test('a lone letter does NOT make any two-cluster row a dual cue', () => {
+    // The pair of digits a shooting script prints in both margins, and a
+    // scene number row, must not be read as two cues now that one letter is
+    // allowed. Neither has a letter in it.
+    const lines = groupItemsIntoLines(
+      [item('2', 100, 700), item('2', 500, 700)],
+      612,
+      1,
+    );
+    expect(lines.map((l) => l.text)).toEqual(['2']);
+  });
+
   test('dual body lines with narrow gaps still split at the cue-anchored boundary', () => {
     // The real p48 failure in The Last Video Store: long dialogue lines
     // close the inter-column gap, so splitting must use the boundary fixed
