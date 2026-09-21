@@ -81,6 +81,59 @@ export function codesignDisplayArgv(target: string): string[] {
   return ['codesign', '-dv', '--verbose=4', target];
 }
 
+// ── notarization ─────────────────────────────────────────────────────
+//
+// A SEPARATE axis from everything above, and the reason this section
+// exists: v0.6.0 shipped a DMG that passed every check in this file and
+// was still wrong. tauri-bundler notarizes the .app (app.rs, right after
+// signing it) and the DMG path only SIGNS (dmg/mod.rs, which links
+// tauri-apps/tauri#12288 about not self-signing images). Nothing in the
+// bundler ever submits the container, so the ticket ends up stapled to
+// the app inside an image that carries none.
+//
+// The frozen updater does not care: dmgRequirement pins the anchor, the
+// chain and the team, not notarization, which is exactly why this got
+// through. A PERSON cares, because a browser download carries the
+// quarantine attribute and Gatekeeper assesses the image when they
+// double-click it. Measured on the published v0.6.0 artifacts:
+//
+//   Screepub-macOS.dmg                     accepted, Notarized Developer ID
+//   Screepub-Desktop-macOS-universal.dmg   rejected, Unnotarized Developer ID
+//   the .app inside the latter              accepted, Notarized Developer ID
+//
+// So this is a regression against the DMG that ships today, and
+// app/release.sh is the reference: sign, notarize, staple, validate.
+
+/** `-t open`, not `-t exec`: the thing being assessed is a disk image a
+ *  person double-clicks. The primary-signature context is app/release.sh's
+ *  too, and its comment records why: without it an unsigned-but-stapled
+ *  image reports "no usable signature", a red flag that is not real. */
+export function spctlAssessArgv(target: string): string[] {
+  return ['spctl', '-a', '-t', 'open', '--context', 'context:primary-signature', '-v', target];
+}
+
+/** validate, never staple. This tool only reads; a verifier that repaired
+ *  what it was checking could never fail. */
+export function staplerValidateArgv(target: string): string[] {
+  return ['xcrun', 'stapler', 'validate', target];
+}
+
+export type Notarization = 'notarized' | 'unnotarized' | 'unknown';
+
+/** spctl's own word, read off `source=`.
+ *
+ *  Anchored, because the whole difference is one word: a contains-check
+ *  for "Notarized" matches "Unnotarized" too and would report the broken
+ *  artifact as fine, silently. Anything unrecognised is `unknown` rather
+ *  than either answer, so a future spctl wording fails closed. */
+export function parseNotarization(result: RunResult): Notarization {
+  const text = `${result.stderr}\n${result.stdout}`;
+  const source = /^source=(.+)$/m.exec(text)?.[1]?.trim();
+  if (source === 'Notarized Developer ID') return 'notarized';
+  if (source === 'Unnotarized Developer ID') return 'unnotarized';
+  return 'unknown';
+}
+
 /** codesign -dv writes to STDERR. Reading only stdout reports "unsigned"
  *  for a perfectly signed bundle, so both are searched. */
 export function parseIdentifier(result: RunResult): string | undefined {
@@ -90,6 +143,13 @@ export function parseIdentifier(result: RunResult): string | undefined {
 export interface SigningVerdict {
   /** The container satisfies the requirement the installer checks first. */
   dmgSigned: boolean;
+  /** A notarization ticket is attached to the IMAGE. Read off the file,
+   *  so it answers the same offline as online. */
+  dmgStapled: boolean;
+  /** What the system says it would do with the image, which is a
+   *  different question from whether a ticket is present. Both are kept
+   *  because they can disagree, and a disagreement is not a pass. */
+  dmgAssessment: Notarization;
   /** The .app satisfies the Developer ID chain and team, ignoring which
    *  identifier it carries. Separated from the identifier so a signing
    *  failure and a deliberate identifier difference cannot be confused. */
@@ -107,6 +167,8 @@ export function judgeSigning(dmgPath: string, appPath: string, run: Runner): Sig
   const appIdentifier = parseIdentifier(run(codesignDisplayArgv(appPath)));
   return {
     dmgSigned: passes(dmgPath, DMG_REQUIREMENT),
+    dmgStapled: run(staplerValidateArgv(dmgPath)).exitCode === 0,
+    dmgAssessment: parseNotarization(run(spctlAssessArgv(dmgPath))),
     // Asked about the app's OWN identifier, so this isolates the chain.
     appChainSigned: appIdentifier ? passes(appPath, appRequirement(appIdentifier)) : false,
     appIdentifier,
@@ -150,6 +212,34 @@ export function describeVerdict(
     );
 
   lines.push(`      the .app's identifier is ${v.appIdentifier ?? '<none>'}`);
+
+  // Deliberately NOT scoped to an expectation. The frozen updater does
+  // not check notarization, so an unnotarized image can satisfy every
+  // line above and still stop a person who downloads it. There is no
+  // release at which shipping that is right.
+  //
+  // Both signals must agree. stapler reads a ticket off the file; spctl
+  // asks the system what it would do. They answer different questions
+  // and normally agree, and if they ever do not, the image is in a state
+  // nobody designed: guessing which to believe is how a bad DMG ships.
+  if (v.dmgStapled && v.dmgAssessment === 'notarized') {
+    pass('the DMG is notarized and carries its stapled ticket');
+  } else if (!v.dmgStapled && v.dmgAssessment === 'unnotarized') {
+    fail(
+      `the DMG is NOT notarized: no stapled ticket, and Gatekeeper says ` +
+        `"Unnotarized Developer ID". Signing is fine and the updater does not care, ` +
+        `but a person who downloads this and double-clicks it meets Gatekeeper, and ` +
+        `Screepub-macOS.dmg does not do this to them. tauri-bundler notarizes the .app ` +
+        `and never the image; app/release.sh notarizes and staples the image too.`,
+    );
+  } else {
+    fail(
+      `the DMG's two notarization signals DISAGREE: stapler ${
+        v.dmgStapled ? 'found a ticket' : 'found no ticket'
+      }, Gatekeeper said "${v.dmgAssessment}". That is a state nobody designed, so it is ` +
+        `not being read as a pass.`,
+    );
+  }
 
   if (expectation === 'coexist') {
     if (!v.updaterWouldInstall) {

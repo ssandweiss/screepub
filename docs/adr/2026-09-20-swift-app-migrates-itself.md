@@ -109,8 +109,16 @@ there was never a Swift app.
    test encodes the coexistence rule and has to be inverted, with its comment
    rewritten to say why — it is the tripwire that stops this happening by
    accident, so it must fail loudly and be changed deliberately.
-3. The universal DMG must be the first `.dmg` asset on the release. Upload
-   order decides this today; make it explicit.
+3. The universal DMG must be the first `.dmg` asset on the release.
+   **Corrected 2026-09-21:** this said "upload order decides this today",
+   and it does not. `UpdateCheck.swift` takes the first `.dmg` in the array
+   GitHub's API returns, and that array is ordered by NAME. Measured on
+   v0.6.0, whose asset `created_at` values are not monotonic. By name
+   `Screepub-Desktop-macOS-universal.dmg` sorts before `Screepub-macOS.dmg`,
+   so the Tauri image was already being chosen while both shipped. At F2
+   the Swift DMG stops being published, so the point is moot: one artifact
+   makes "the first" unambiguous whatever the ordering rule is, which is
+   the only durable version of this requirement.
 4. Signing: the app must be Developer ID signed with team `XSRB3D643J`, since
    the frozen updater pins Apple's anchor, the Developer ID chain, that team,
    and now a matching identifier. All four already hold for the release path;
@@ -123,9 +131,13 @@ there was never a Swift app.
 
 - The previous ADR's "final Swift release disables the update check" is
   **withdrawn**. The update check is now the delivery mechanism, not a hazard.
-  Its other recommendation stands and grows in importance: pin
-  `UpdateCheck.swift`'s asset picker to an exact filename so the frozen app's
-  choice is intentional rather than dependent on upload ordering.
+  Its other recommendation cannot be acted on and should not be carried
+  forward as though it can: `UpdateCheck.swift` is inside the FROZEN app,
+  already signed and on people's disks, so "pin its asset picker to an
+  exact filename" is advice to an app that can no longer be changed for
+  anyone who has it. What actually controls the outcome is the release's
+  asset list, which this repository does control. Publishing exactly one
+  `.dmg` is therefore the mechanism, not a tidiness preference.
 - TCC grants and the preferences domain are keyed to the bundle identifier,
   which now matches, but the code-signing designated requirement changes.
   Removable-volume access for USB transfer is the one to test before shipping
