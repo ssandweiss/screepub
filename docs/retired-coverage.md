@@ -64,9 +64,37 @@ gear's three settings.
 | `update-selection` | 17 | `port` | **no** | Same unit as the above: pure, no network, no keys. |
 | `update-decoding` | 14 | `port` | **no** | Same unit. |
 | `update-error-descriptions` | 11 | `port` | **no** | Same unit; the difference between a message and "The operation couldn't be completed." |
-| `self-update-installer` | 26 | **`port`** (was `accept-loss`) | **no** | macOS codesign pinning and in-place bundle swap. Its own piece, with its own secrets question. |
+| `self-update-installer` | 26 | **`replaced`** (was `port`), 2026-09-21 | n/a | Tauri's updater plugin does the swap and verifies its own signature. Install-time codesign pinning is the accepted loss: see below. |
 | `release-notes-parsing` | 21 | `accept-loss` | yes, in kind | Of the Swift assertions only. The feature is replaced in kind and nothing is lost. |
 | `kfx-install-plugin` | not a kit-check section | **`replaced`** (was `accept-loss`) | engine yes, **UNREACHABLE** | Detection ports; installation is a 485 KB GPL-3 binary and a packaging decision. |
+
+**2026-09-21, owner-approved: install-time codesign pinning is given up.**
+This table said the pinning "has to survive whatever shape" the updater
+takes. It does not survive, and the decision is to accept that rather
+than to pretend otherwise.
+
+`UpdateInstall.swift` verifies a downloaded DMG and the app inside it
+against Apple's anchor, the Developer ID chain, team `XSRB3D643J` and the
+bundle identifier, so an attacker needs this project's Apple certificate.
+Tauri's updater verifies its own minisign signature instead, so the chain
+of trust becomes one private key and Apple's certificate is not consulted
+at install time.
+
+Why it was accepted: both secrets live in the same GitHub account, so the
+practical blast radius is similar, and the artifact is still Developer ID
+signed and notarized either way. What is lost is the check that it is
+OURS *at the moment of installing*. Recovering it would mean verifying
+between `download()` and `install()`, and the plugin does not expose the
+downloaded path to JavaScript, so that check would have to be Rust, which
+means a command, which [the doors ADR](../adr/2026-09-21-doors-not-commands.md)
+refused. The remaining alternative is a bespoke updater maintained on
+three platforms, which is the largest and least differentiated item in
+the whole retirement.
+
+**The downgrade defence is NOT given up**, and the four rows above this
+one stay `port` for that reason. See
+[the updater design](superpowers/specs/2026-09-21-updater-design.md):
+the plugin does transport, the engine keeps the judgement.
 
 The four update rows above the installer are deliberately one unit: they are
 `UpdateCheck`'s pure half, they only earn their keep together, and they are
