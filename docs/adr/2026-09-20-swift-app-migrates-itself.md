@@ -63,23 +63,28 @@ folder. A sidecar sitting FLAT in the library root is checked by neither.
 Old books sitting flat beside new per-script folders is cosmetic. Nothing
 reads them, nothing breaks, nothing is lost.
 
-## So the migration is much smaller than first specified
+## No migration at all: a hard break, chosen deliberately
 
-Not "move every artifact into a per-script folder". Just: **find the old
-sidecar.** On a conversion whose library folder has no sidecar, look for
-`<library>/<stem>.screepub.json` — the Swift app's flat location — and adopt
-it the way `adoptSidecar` already adopts one sitting beside the input.
+The correction above shrank the migration to one thing, adopting a flat
+sidecar. **The owner then dropped even that: a hard break is accepted, and
+F2 ships no migration.**
 
-- **Copy, never move.** `adoptSidecar` already works this way and says why:
-  the old file is the user's, and a copy means an older build reading the old
-  location still finds what it expects.
-- **A sidecar already in the library always wins.** Also already true of
-  `adoptSidecar`; this must never overwrite tuning.
-- Report it, the way `spacingRepairs` reports.
+The cost, stated plainly so nobody has to rediscover it: **anyone who tuned a
+script in the Swift app loses that tuning, once.** Their books are untouched
+and still on disk; the next conversion of a tuned script comes out at the
+defaults and they re-tune it if they care. Nothing else changes, because
+nothing else read the flat layout.
 
-That is an extension of a function that exists, not a new subsystem, and it
-leaves the user's files where they are. Moving books would be motion for
-tidiness alone, with real risk and no functional gain, so F2 does not do it.
+That is a real cost and it is small, and the thing it buys is real too. The
+alternative was a compatibility path in `src/library.ts` that would exist
+solely to serve installs of an app being deleted, would need its own tests,
+and would have to be carried until someone was brave enough to delete it. A
+one-time loss of a handful of knob settings is cheaper than a permanent
+branch in the library logic.
+
+This decision is only available because the blast radius is this small. It is
+NOT a precedent for breaking the library layout again later: a hard break is
+affordable when what breaks is tuning, and would not be if it were books.
 
 ## What the migration is NOT allowed to do
 
@@ -87,8 +92,10 @@ Not delete anything, ever, including the Swift app itself. An installed
 `Screepub.app` that has been replaced in place is gone by the updater's own
 swap, and that is the updater's business, not ours.
 
-Not touch files outside `~/Documents/Screepub` (or `$SCREEPUB_LIBRARY`), and
-not move or delete a book. It copies one small JSON file and nothing else.
+Nothing at all, now that the hard break is accepted. This section is kept
+because it is the boundary any FUTURE migration inherits: never outside
+`~/Documents/Screepub` (or `$SCREEPUB_LIBRARY`), never move or delete a book,
+and copy rather than move so an older build still finds what it expects.
 
 Not run on Linux or Windows. There is no flat library there to adopt, because
 there was never a Swift app.
@@ -108,8 +115,7 @@ there was never a Swift app.
    the frozen updater pins Apple's anchor, the Developer ID chain, that team,
    and now a matching identifier. All four already hold for the release path;
    only the identifier changes.
-5. The flat-sidecar adoption above, in `src/library.ts` beside the existing
-   `adoptSidecar`.
+5. Nothing. There is no migration — see the hard-break section above.
 6. `docs/mac-qa.md` §4 and §5 describe two apps coexisting. After F2 they
    describe one app replacing another, which is a different test.
 
