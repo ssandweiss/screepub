@@ -265,6 +265,19 @@ function icon() {
   return svg;
 }
 
+/** Back to the empty state, which is this window's home: the drop well is
+ *  the one screen that says what Screepub wants from you.
+ *
+ *  It does NOT close the script that is open. The book stays behind the well,
+ *  so Read, Settings and Send stay reachable and a reader who pressed this by
+ *  mistake has lost nothing. "Convert another" is an invitation, not a
+ *  discard — and the engine has already done the work, so throwing it away
+ *  here would be throwing away the only copy in memory. */
+export function reset() {
+  if (busy) return;
+  drawWell();
+}
+
 function drawWell() {
   clear(pane);
   chooseButton = el('button', { type: 'button', class: 'well-btn', onclick: choose },
@@ -387,7 +400,7 @@ function drawResult(path, answer) {
           'Read it'),
         el('button', { type: 'button', class: 'btn-quiet', onclick: () => ctx.goTo('tune') },
           'Tune it'),
-        el('button', { type: 'button', class: 'btn-quiet', onclick: choose },
+        el('button', { type: 'button', class: 'btn-quiet', onclick: reset },
           'Convert another'),
       ),
     ),

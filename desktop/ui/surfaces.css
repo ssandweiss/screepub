@@ -11,6 +11,37 @@
   color: var(--ink);
   margin: 0 0 var(--space-3);
 }
+/* The reach table, folded. The summary wears the same clothes as a .subslug
+ * so the page does not gain a new kind of heading just because this one can
+ * be opened. The default marker is replaced with a brass one that points the
+ * way it will move, which is the only part of a <details> worth restyling. */
+.reach { margin-top: var(--space-7); }
+.reach-summary {
+  font-family: var(--font-structure);
+  font-weight: 700;
+  font-size: var(--text-caption);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  cursor: pointer;
+  list-style: none;
+  transition: color var(--motion-state) var(--ease);
+}
+.reach-summary::-webkit-details-marker { display: none; }
+.reach-summary::before {
+  content: "\25B8";           /* a right-pointing triangle, rotated when open */
+  display: inline-block;
+  margin-right: var(--space-2);
+  color: var(--brass);
+  transition: transform var(--motion-state) var(--ease);
+}
+.reach[open] > .reach-summary::before { transform: rotate(90deg); }
+.reach-summary:hover { color: var(--ink); }
+.reach-summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .reach-summary, .reach-summary::before { transition: none; }
+}
+
 .subslug {
   font-family: var(--font-structure);
   font-weight: 700;

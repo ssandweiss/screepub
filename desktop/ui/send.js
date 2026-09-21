@@ -470,13 +470,24 @@ function drawEmpty() {
   // el() drops a null child and Node.append() renders it as the word "null".
   // That is not hypothetical: this state shipped a stray "null" under the
   // list on every platform but Windows until it was seen on screen.
+  // The reach table folds away. It is four readers, four honesty labels and
+  // two caveats, and it was the bulk of this page — good information, and not
+  // what someone with nothing plugged in came here to find out. A <details>
+  // rather than a hand-rolled toggle: the open/shut state, the keyboard and
+  // the announcement come from the platform.
+  //
+  // Folded, never dropped. Everything that made the table honest travels with
+  // it, including provenNote(), which carries the one fact the four statuses
+  // cannot: WHERE the single proven route was proven.
   list.append(el('div', { class: 'reader-list' },
     el('p', { class: 'state-label' }, 'Nothing plugged in'),
     el('p', { class: 'prose' }, EMPTY.line),
-    el('h3', { class: 'subslug' }, EMPTY.heading),
-    ...READERS.map((reader) => readerRow(reader, platform)),
-    el('p', { class: 'caption reader-note' }, provenNote(platform)),
-    cannot === null ? null : el('p', { class: 'caption device-caveat' }, cannot),
+    el('details', { class: 'reach' },
+      el('summary', { class: 'reach-summary' }, EMPTY.heading),
+      ...READERS.map((reader) => readerRow(reader, platform)),
+      el('p', { class: 'caption reader-note' }, provenNote(platform)),
+      cannot === null ? null : el('p', { class: 'caption device-caveat' }, cannot),
+    ),
   ));
 }
 

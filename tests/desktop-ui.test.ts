@@ -2910,6 +2910,61 @@ describe('the window does not title its own screens as script furniture', () => 
   });
 });
 
+describe('the reach table is available, not announced', () => {
+  // "What Screepub can reach" is four readers, four honesty labels and two
+  // caveats, and it was the bulk of the empty Send page. It is good
+  // information and it is not what someone with nothing plugged in came to
+  // find out. Folded away, not deleted: hiding a capability is how a
+  // capability stops existing.
+  const send = read('send.js');
+
+  test('it is a disclosure the reader opens, not a wall they scroll past', () => {
+    const at = send.indexOf('EMPTY.heading');
+    expect(at).toBeGreaterThan(-1);
+    const around = send.slice(Math.max(0, at - 500), at + 200);
+    expect(around).toContain("'details'");
+    expect(around).toContain("'summary'");
+  });
+
+  test('it starts shut', () => {
+    // <details> is open only if the attribute is present at all, so the test
+    // is that nobody sets it. Written as a scan of the whole file because the
+    // attribute could be set anywhere, including later by a well-meaning
+    // "remember it was open" that would quietly undo this.
+    expect(send).not.toMatch(/\bopen:\s*(true|''|"")/);
+  });
+
+  test('the honesty about untested routes is inside it, not lost with it', () => {
+    // provenNote() carries the one fact the statuses cannot: WHERE the single
+    // proven route was proven. It moves with the table rather than being cut.
+    expect(send).toContain('provenNote');
+  });
+});
+
+describe('Convert another goes home, not to a file dialog', () => {
+  test('the result screen offers a way back to the drop well', () => {
+    // It called choose() directly, so the button jumped straight to a native
+    // picker. Cancelling that left you back on the previous result with no
+    // obvious way to reach the empty state at all — the one screen that
+    // explains what this window wants from you.
+    const convert = read('convert.js');
+    const at = convert.indexOf("'Convert another'");
+    expect(at).toBeGreaterThan(-1);
+    const wiring = convert.slice(convert.lastIndexOf('onclick', at), at);
+    expect(wiring).not.toContain('choose');
+    expect(wiring).toContain('reset');
+  });
+
+  test('going home does not close the script that is open', () => {
+    // Deliberate: the book stays open behind the drop well, so Read, Settings
+    // and Send stay reachable. "Convert another" is an invitation, not a
+    // discard — and a reader who changes their mind has lost nothing.
+    const convert = read('convert.js');
+    const reset = convert.slice(convert.indexOf('export function reset'));
+    expect(reset.slice(0, reset.indexOf('\n}'))).not.toContain('scriptChanged');
+  });
+});
+
 describe('the scene index is a drawer in the binding margin', () => {
   // It sat to the RIGHT of the script and took a grid column from it. Moved
   // left, per the maintainer, and the constraint turned out to be arithmetic:
