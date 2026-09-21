@@ -217,8 +217,31 @@ describe('installKfxPlugin', () => {
   const okLine = (v: string) =>
     `some calibre chatter\nSCREEPUB_RESULT ${JSON.stringify({ ok: true, version: v })}\n`;
 
+  // Every test here injects `run`, so none of them wants Calibre to be
+  // FOUND. But installKfxPlugin's second parameter defaults to
+  // `calibreTool('calibre-debug')`, real discovery against real paths, and
+  // when that answers null the function returns before the injected runner
+  // is ever called. So these passed on a machine with Calibre installed and
+  // failed on every runner without it, which is what left ci.yml red on
+  // main from 2026-09-18 onward: six failures that were entirely about the
+  // author's /Applications folder.
+  //
+  // Worse than the six, and the reason this is a fake PATH rather than a
+  // self-skip: 'output with no result line is refused' asserts only that
+  // ok is false, which a missing Calibre also produces. It passed on CI
+  // while testing nothing at all. A test that cannot tell the difference
+  // between the thing working and the thing being absent is the failure
+  // mode a skip would have preserved.
+  //
+  // Not null either. null takes the no-Calibre branch, which is exactly
+  // what the 'no Calibre is a named reason' test below is for.
+  const TOOL = '/nowhere/calibre-debug';
+
   test('reports the version Calibre actually installed', async () => {
-    const r = await installKfxPlugin(async () => ({ code: 0, stdout: okLine('2.20.1'), stderr: '' }));
+    const r = await installKfxPlugin(
+      async () => ({ code: 0, stdout: okLine('2.20.1'), stderr: '' }),
+      TOOL,
+    );
     expect(r.ok).toBe(true);
     expect(r.version).toBe('2.20.1');
   });
@@ -243,7 +266,7 @@ describe('installKfxPlugin', () => {
         removed: ['KFX Output (Fix Traditional Chinese)'],
       })}\n`,
       stderr: '',
-    }));
+    }), TOOL);
     expect(r.ok).toBe(true);
     expect(r.removed).toEqual(['KFX Output (Fix Traditional Chinese)']);
   });
@@ -260,7 +283,7 @@ describe('installKfxPlugin', () => {
       code: 0,
       stdout: `SCREEPUB_RESULT ${JSON.stringify({ ok: true, version: '2.20.1', removed: [] })}\n`,
       stderr: '',
-    }));
+    }), TOOL);
     expect(r.removed).not.toContain('Set KFX metadata (from KFX Output)');
   });
 
@@ -271,7 +294,7 @@ describe('installKfxPlugin', () => {
       code: 0,
       stdout: `SCREEPUB_RESULT ${JSON.stringify({ ok: true, version: '2.20.1', removed: [] })}\n`,
       stderr: '',
-    }));
+    }), TOOL);
     expect(r.ok).toBe(true);
     expect(r.removed).toEqual([]);
   });
@@ -287,14 +310,17 @@ describe('installKfxPlugin', () => {
   test('a failed install carries Calibre’s own words', async () => {
     const r = await installKfxPlugin(async () => ({
       code: 1, stdout: '', stderr: 'urlopen error timed out',
-    }));
+    }), TOOL);
     expect(r.ok).toBe(false);
     expect(r.reason).toMatch(/timed out/);
   });
 
   test('output with no result line is refused rather than read as success', async () => {
     // exit 0 proves calibre-debug ran, not that the plugin landed.
-    const r = await installKfxPlugin(async () => ({ code: 0, stdout: 'hello\n', stderr: '' }));
+    const r = await installKfxPlugin(
+      async () => ({ code: 0, stdout: 'hello\n', stderr: '' }),
+      TOOL,
+    );
     expect(r.ok).toBe(false);
   });
 
@@ -303,7 +329,7 @@ describe('installKfxPlugin', () => {
       code: 0,
       stdout: `SCREEPUB_RESULT ${JSON.stringify({ ok: false, error: 'size mismatch' })}\n`,
       stderr: '',
-    }));
+    }), TOOL);
     expect(r.ok).toBe(false);
     expect(r.reason).toMatch(/size mismatch/);
   });
