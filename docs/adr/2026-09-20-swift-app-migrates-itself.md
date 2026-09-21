@@ -35,50 +35,51 @@ moved `self-update-installer`'s 26 checks from `accept-loss` to `port` in
 `docs/retired-coverage.md`. The new app will have an updater, so the upgrade
 no longer ends the user's ability to receive upgrades.
 
-**3. "Their library would appear to empty itself." NOT resolved, and this ADR
-owns it.** See the next section.
+**3. "Their library would appear to empty itself." WRONG AS STATED, and the
+real thing is smaller.** See below.
 
-**4. "Six features would disappear under them." RESOLVED by decision.** Gate 2
-is now a parity gate: the updater, Apple Books, Send-to-Kindle,
-email-to-Kindle and save-a-copy are all ported, and Cancel during conversion
-is named in the release notes as a thing that went away because it would need
-a third Rust command and the ADR's rule is that Rust is a window, not a brain.
+So the only surviving objection is per-script tuning, and the owner's
+instruction was explicit: people should not have to install by hand.
 
-So the only surviving objection is the library, and the owner's instruction
-was explicit: people should not have to install by hand, so build the
-migration.
+## Correction, 2026-09-20: there is no library view
 
-## The one real blocker, and what closes it
+This ADR's first draft, and its predecessor, both said an automatic upgrade
+would show the user an empty library. **The owner asked whether there is a
+book library at all. There is not.** The app's surfaces are Convert, Read,
+Tune, Send and Notes; nothing in `desktop/ui` lists books. `--library` only
+tells the engine where to WRITE, so that converting stops littering the folder
+the PDF was dragged from. There is no view to be empty, and the claim was
+written from an assumption rather than from the code.
 
-The Swift app writes **flat**: `~/Documents/Screepub/Draft.epub`. The new app
-writes **per script**: `~/Documents/Screepub/Draft/Draft.epub`. The new app
-does not list, adopt or inherit tuning from flat files. So a user who upgrades
-automatically opens the app and sees an empty library, with every book still
-on disk and every per-script setting silently back at defaults. That is a
-worse first impression than being asked to reinstall, which is exactly why the
-previous ADR refused.
+**What actually happens is one thing, and it is verified rather than
+reasoned.** A script the user had tuned loses its tuning. Measured: a flat
+`screenplay.screepub.json` asking for `fontFamily: serif` and
+`showSceneNumbers: true`, placed in a library root the way the Swift app
+writes them, then converted — the book came out Courier with no scene
+numbers, and no settings file was reported. The engine looks beside the input
+PDF (`adoptSidecar` in `src/library.ts`) and inside the script's library
+folder. A sidecar sitting FLAT in the library root is checked by neither.
 
-**F2 therefore ships a first-run adoption pass.** For each flat artifact in
-the library root, move it into the per-script folder the new layout expects:
+Old books sitting flat beside new per-script folders is cosmetic. Nothing
+reads them, nothing breaks, nothing is lost.
 
-- Recognised artifacts only: `.epub`, `.mobi`, `.kfx`, `.azw3`, `.fountain`,
-  and `<stem>.screepub.json`. Anything else in that folder is the user's and
-  is left alone.
-- Group by stem. `Draft.epub`, `Draft.mobi` and `Draft.screepub.json` all move
-  into `Draft/`, which is what `libraryOutput()` in `src/library.ts` already
-  computes from `scriptFolder(source, root)` plus `stemOf(source)`.
-- **Never write into a folder that already exists.** If `Draft/` is there, the
-  new app made it and its copy wins; the flat files stay where they are rather
-  than being merged or overwritten.
-- No `source.json` is invented. The new app writes one when it converts; an
-  adopted book simply lacks it until then, which is the honest state and not
-  an error.
-- Report what moved, the same way `spacingRepairs` reports: a count the app
-  can show, because moving a user's files silently is the sibling of rewriting
-  their text silently.
+## So the migration is much smaller than first specified
 
-Reversibility matters more than tidiness here. A move within one folder is
-recoverable by hand; a merge or an overwrite is not.
+Not "move every artifact into a per-script folder". Just: **find the old
+sidecar.** On a conversion whose library folder has no sidecar, look for
+`<library>/<stem>.screepub.json` — the Swift app's flat location — and adopt
+it the way `adoptSidecar` already adopts one sitting beside the input.
+
+- **Copy, never move.** `adoptSidecar` already works this way and says why:
+  the old file is the user's, and a copy means an older build reading the old
+  location still finds what it expects.
+- **A sidecar already in the library always wins.** Also already true of
+  `adoptSidecar`; this must never overwrite tuning.
+- Report it, the way `spacingRepairs` reports.
+
+That is an extension of a function that exists, not a new subsystem, and it
+leaves the user's files where they are. Moving books would be motion for
+tidiness alone, with real risk and no functional gain, so F2 does not do it.
 
 ## What the migration is NOT allowed to do
 
@@ -86,7 +87,8 @@ Not delete anything, ever, including the Swift app itself. An installed
 `Screepub.app` that has been replaced in place is gone by the updater's own
 swap, and that is the updater's business, not ours.
 
-Not touch files outside `~/Documents/Screepub` (or `$SCREEPUB_LIBRARY`).
+Not touch files outside `~/Documents/Screepub` (or `$SCREEPUB_LIBRARY`), and
+not move or delete a book. It copies one small JSON file and nothing else.
 
 Not run on Linux or Windows. There is no flat library there to adopt, because
 there was never a Swift app.
@@ -106,7 +108,8 @@ there was never a Swift app.
    the frozen updater pins Apple's anchor, the Developer ID chain, that team,
    and now a matching identifier. All four already hold for the release path;
    only the identifier changes.
-5. The first-run adoption pass above.
+5. The flat-sidecar adoption above, in `src/library.ts` beside the existing
+   `adoptSidecar`.
 6. `docs/mac-qa.md` §4 and §5 describe two apps coexisting. After F2 they
    describe one app replacing another, which is a different test.
 
