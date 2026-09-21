@@ -167,15 +167,42 @@ dropped. Everything should be in the library.
 
 ## 5. Both apps installed at once
 
-This is the transition case and nobody has tried it.
+**OBSERVED 2026-09-21, and it behaved.** This section used to say "nobody
+has tried it" and "the refusal has only been reasoned about, never
+observed". Both are now false, so here is what happened, on a real Mac
+against the real published v0.6.0 release.
 
-- Confirm `Screepub.app` and `Screepub Desktop.app` are both in Applications
-  and both launch.
-- **Watch the old app's updater.** It checks the releases page, which will now
-  have Tauri DMGs on it. Its code-signing identifier pin *should* refuse them.
-  If the old app ever offers to update you to a Tauri build, **stop and tell
-  me** — that is the one genuinely dangerous interaction in this transition,
-  and the refusal has only been reasoned about, never observed.
+`Screepub.app` 0.5.4 (`com.darkwell.screepub`) and `Screepub Desktop.app`
+0.6.0 (`com.darkwell.screepub.desktop`) were both in `/Applications` and
+both launched. The old app had `updateOptIn = 1` already. Check for
+Updates found 0.6.0, downloaded, and then showed, in the window's footer:
+
+> the update failed signature verification and was not installed. Get it
+> from the release page instead
+
+The app stayed at rev 0.5.4. Nothing was replaced.
+
+Three things worth keeping from that:
+
+- **It picked the TAURI image, not the Swift one.** The spec predicted the
+  opposite, on the theory that upload order put `Screepub-macOS.dmg`
+  first. GitHub returns release assets ordered by NAME, and
+  `Screepub-Desktop-macOS-universal.dmg` sorts first. So the refusal path
+  was exercised for real rather than skipped.
+- **The refusal is LATE, as designed.** `dmgRequirement` pins no
+  identifier, so the whole image downloads and mounts before the app
+  inside fails the pin. Expect a pause, not an instant rejection.
+- **The message is legible and names a way forward.** It comes from
+  exactly one branch, `UpdateInstallError.verificationFailed`, which only
+  `UpdateInstaller.verify` throws. A download failure, a mount failure, a
+  missing app and a version mismatch each have their own separate
+  wording, so this message cannot be produced by any of them.
+
+Still true, and still the thing to watch at v0.6.1: **if the old app ever
+OFFERS to update you to a Tauri build before the identifier is taken
+deliberately, stop and tell me.** `bun tools/verify-signing.ts --dmg <dmg>
+--expect coexist` asks that question of a downloaded file and fails if the
+answer is yes, so it can be checked without installing anything.
 
 ---
 

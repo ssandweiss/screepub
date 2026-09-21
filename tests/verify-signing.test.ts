@@ -27,10 +27,14 @@ import {
   appRequirement,
   codesignVerifyArgv,
   codesignDisplayArgv,
+  spctlAssessArgv,
+  staplerValidateArgv,
   parseIdentifier,
+  parseNotarization,
   judgeSigning,
   describeVerdict,
   type Expectation,
+  type SigningVerdict,
 } from '../tools/verify-signing';
 import type { RunResult, Runner } from '../tools/smoke-cli';
 
@@ -122,6 +126,33 @@ describe('the codesign invocations, asserted element by element', () => {
       '/V/Screepub.app',
     ]);
   });
+
+  test('spctl is asked the OPEN question, with the primary-signature context', () => {
+    // -t open, not -t exec: the thing being assessed is a disk image a
+    // person double-clicks, not an executable. app/release.sh has used
+    // exactly this invocation on the Swift DMG since it was written, and
+    // its comment records why the context matters -- without it an
+    // unsigned-but-stapled image reports "no usable signature", which
+    // reads as a red flag that is not real.
+    expect(spctlAssessArgv('/tmp/x.dmg')).toEqual([
+      'spctl',
+      '-a',
+      '-t',
+      'open',
+      '--context',
+      'context:primary-signature',
+      '-v',
+      '/tmp/x.dmg',
+    ]);
+  });
+
+  test('stapler is asked to VALIDATE, never to staple', () => {
+    // This tool only ever reads. Stapling is the release workflow's job;
+    // a verifier that repaired what it was checking could never fail.
+    const argv = staplerValidateArgv('/tmp/x.dmg');
+    expect(argv).toEqual(['xcrun', 'stapler', 'validate', '/tmp/x.dmg']);
+    expect(argv).not.toContain('staple');
+  });
 });
 
 describe('reading the identifier back off codesign', () => {
@@ -147,6 +178,44 @@ describe('reading the identifier back off codesign', () => {
   });
 });
 
+describe('reading notarization back off spctl', () => {
+  // Real output, captured from the v0.6.0 artifacts on 2026-09-21. Both
+  // are on STDERR, like codesign's.
+  const NOTARIZED = [
+    '/tmp/Screepub-macOS.dmg: accepted',
+    'source=Notarized Developer ID',
+    'origin=Developer ID Application: Clockwork Post Production, LLC (XSRB3D643J)',
+  ].join('\n');
+  const UNNOTARIZED = [
+    '/tmp/Screepub-Desktop-macOS-universal.dmg: rejected',
+    'source=Unnotarized Developer ID',
+  ].join('\n');
+
+  test('a notarized image is read as notarized', () => {
+    expect(parseNotarization(ok('', NOTARIZED))).toBe('notarized');
+  });
+
+  test('the v0.6.0 Tauri DMG’s actual output is read as unnotarized', () => {
+    // Not a hypothetical: this is what shipped, and the string this
+    // function has to recognise is the one that shipped with it.
+    expect(parseNotarization({ exitCode: 3, stdout: '', stderr: UNNOTARIZED })).toBe('unnotarized');
+  });
+
+  test('"Notarized" is not matched by a loose search for "otarized"', () => {
+    // The whole failure is one word long. A contains-check for
+    // "Notarized" matches "Unnotarized" too, which would report the
+    // broken artifact as fine, silently, forever.
+    expect(parseNotarization(ok('', UNNOTARIZED))).not.toBe('notarized');
+  });
+
+  test('anything else answers unknown rather than guessing either way', () => {
+    // A future spctl wording must not be read as a pass. Failing closed
+    // here is the difference between a guard and a decoration.
+    expect(parseNotarization(ok('', 'some future phrasing'))).toBe('unknown');
+    expect(parseNotarization(bad(''))).toBe('unknown');
+  });
+});
+
 describe('the verdict: what the frozen updater would do with this artifact', () => {
   /** A runner that answers by what is being asked, so a test states the
    *  artifact's real properties once and every codesign call agrees. */
@@ -154,10 +223,25 @@ describe('the verdict: what the frozen updater would do with this artifact', () 
     dmgSigned: boolean;
     appSigned: boolean;
     identifier: string;
+    /** Defaults to true, so every pre-existing case describes a CORRECT
+     *  artifact and the notarization tests below are the ones that opt
+     *  into the defect. */
+    dmgNotarized?: boolean;
   }): Runner {
+    const notarized = opts.dmgNotarized ?? true;
     return (argv) => {
       const target = argv[argv.length - 1]!;
       const isDmg = target.endsWith('.dmg');
+      if (argv[0] === 'spctl') {
+        return notarized
+          ? ok('', `${target}: accepted\nsource=Notarized Developer ID\n`)
+          : { exitCode: 3, stdout: '', stderr: `${target}: rejected\nsource=Unnotarized Developer ID\n` };
+      }
+      if (argv[0] === 'xcrun') {
+        return notarized
+          ? ok('The validate action worked!\n')
+          : bad(`${target} does not have a ticket stapled to it.`);
+      }
       if (argv[1] === '-dv') {
         return opts.appSigned || isDmg
           ? ok('', `Identifier=${isDmg ? 'Screepub-Desktop-macOS-universal' : opts.identifier}\n`)
@@ -219,17 +303,50 @@ describe('the verdict: what the frozen updater would do with this artifact', () 
     expect(v.updaterWouldInstall).toBe(true);
     // ... and the expectation below is what turns that into a failure.
   });
+
+  test('the v0.6.0 defect: signed and stapled app, unnotarized IMAGE', () => {
+    // The exact shape that shipped. Everything the frozen updater checks
+    // passes, because dmgRequirement pins the chain and the team and not
+    // notarization, so the artifact is simultaneously correct for the
+    // updater and wrong for a person who downloads it in a browser.
+    // Those are two different questions and the verdict answers both.
+    const v = judgeSigning(
+      '/tmp/Screepub-Desktop-macOS-universal.dmg',
+      '/V/Screepub Desktop.app',
+      artifact({
+        dmgSigned: true,
+        appSigned: true,
+        identifier: 'com.darkwell.screepub.desktop',
+        dmgNotarized: false,
+      }),
+    );
+    expect(v.dmgSigned).toBe(true);
+    expect(v.updaterWouldInstall).toBe(false);
+    expect(v.dmgStapled).toBe(false);
+    expect(v.dmgAssessment).toBe('unnotarized');
+  });
+
+  test('a correct artifact reports both notarization signals agreeing', () => {
+    const v = v060();
+    expect(v.dmgStapled).toBe(true);
+    expect(v.dmgAssessment).toBe('notarized');
+  });
 });
 
 describe('the expectation each release is held to', () => {
-  const signed060 = {
+  // Typed as the interface, not inferred: inference narrows
+  // dmgAssessment to the literal 'notarized' and every spread below that
+  // overrides it then fails to typecheck.
+  const signed060: SigningVerdict = {
     dmgSigned: true,
+    dmgStapled: true,
+    dmgAssessment: 'notarized',
     appChainSigned: true,
     appIdentifier: 'com.darkwell.screepub.desktop',
     updaterWouldInstall: false,
   };
 
-  const judge = (v: typeof signed060, e: Expectation) => describeVerdict(v, e);
+  const judge = (v: SigningVerdict, e: Expectation) => describeVerdict(v, e);
 
   test('coexist passes when signing works and the identifier still differs', () => {
     const r = judge(signed060, 'coexist');
@@ -257,14 +374,47 @@ describe('the expectation each release is held to', () => {
   });
 
   test('handover passes only when the updater would actually install it', () => {
-    const taken = {
-      dmgSigned: true,
-      appChainSigned: true,
-      appIdentifier: SWIFT_BUNDLE_ID,
-      updaterWouldInstall: true,
-    };
+    const taken = { ...signed060, appIdentifier: SWIFT_BUNDLE_ID, updaterWouldInstall: true };
     expect(judge(taken, 'handover').ok).toBe(true);
     expect(judge(signed060, 'handover').ok).toBe(false);
+  });
+
+  test('an unnotarized image FAILS, in BOTH modes', () => {
+    // Not scoped to one release. The frozen updater does not check
+    // notarization, so an unnotarized image can satisfy every other line
+    // here and still make Gatekeeper object when a person double-clicks
+    // the download. There is no release at which shipping that is right,
+    // so there is no mode in which this passes.
+    const broken = { ...signed060, dmgStapled: false, dmgAssessment: 'unnotarized' as const };
+    expect(judge(broken, 'coexist').ok).toBe(false);
+    expect(
+      judge({ ...broken, appIdentifier: SWIFT_BUNDLE_ID, updaterWouldInstall: true }, 'handover').ok,
+    ).toBe(false);
+  });
+
+  test('the notarization failure says it is about the PERSON, not the updater', () => {
+    // A reader who sees "signature" twice will assume signing broke and
+    // go looking in the wrong place. The message has to name the actual
+    // consequence: Gatekeeper, a download, a double-click.
+    const broken = { ...signed060, dmgStapled: false, dmgAssessment: 'unnotarized' as const };
+    const text = judge(broken, 'coexist').lines.join('\n');
+    expect(text).toMatch(/notariz/i);
+    expect(text).toMatch(/Gatekeeper|download|double-click/i);
+    // And it must not claim the updater is affected, because it is not.
+    expect(judge(broken, 'coexist').lines.some((l) => l.startsWith('ok') && /refuse/.test(l))).toBe(
+      true,
+    );
+  });
+
+  test('a disagreement between the two signals fails rather than picking one', () => {
+    // stapler reads a ticket off the file; spctl asks the system what it
+    // would do. They answer different questions and normally agree. If
+    // they ever do not, the artifact is in a state nobody designed and
+    // guessing which one to believe is how a bad DMG ships.
+    const staplerOnly = { ...signed060, dmgAssessment: 'unknown' as const };
+    expect(judge(staplerOnly, 'coexist').ok).toBe(false);
+    const spctlOnly = { ...signed060, dmgStapled: false };
+    expect(judge(spctlOnly, 'coexist').ok).toBe(false);
   });
 
   test('every failure says which artifact and which requirement, never just "failed"', () => {

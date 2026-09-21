@@ -53,6 +53,7 @@ function stepNamed(job: string, name: string): string {
 
 const SIDECAR_STEP = stepNamed('app-bundles', 'Build the engine sidecar');
 const BUILD_STEP = stepNamed('app-bundles', "Build and verify this platform's bundles");
+const NOTARIZE_STEP = stepNamed('app-bundles', 'Notarize and staple the disk image');
 const SMOKE_STEP = stepNamed('app-bundles', 'Run the engine out of each bundle');
 const SUMS_STEP = stepNamed('app-upload', 'Rebuild the checksums from what arrived, then verify them');
 
@@ -175,6 +176,80 @@ describe("release.yml's bundle step, executed as bash", () => {
     expect(runStep(BUILD_STEP, dir, { TAG: 'v0.6.0-rc1', ARCH: 'x64' }).status).toBe(0);
     expect(lines('bun')[0]).toContain('0.6.0-rc1');
     expect(lines('bun')[0]).not.toContain('v0.6.0');
+  });
+});
+
+describe("release.yml's notarization step, executed as bash", () => {
+  // The step that did not exist when v0.6.0 shipped, which is why v0.6.0
+  // published an image Gatekeeper rejects. tauri-bundler notarizes the
+  // .app and never the container: app.rs submits the bundle right after
+  // signing it, and dmg/mod.rs only signs. So the ticket ended up
+  // stapled to the app inside an image carrying none.
+  const withDmgs = (tag: string, names: string[]) => {
+    const { dir, lines } = stubDir(`notarize-${tag}`, ['xcrun', 'spctl']);
+    mkdirSync(join(dir, 'bundles'), { recursive: true });
+    for (const n of names) writeFileSync(join(dir, 'bundles', n), 'x');
+    return { dir, lines };
+  };
+  const env = {
+    APPLE_API_KEY_PATH: '/tmp/ac.p8',
+    APPLE_API_KEY: 'KEYID',
+    APPLE_API_ISSUER: 'ISSUER',
+  };
+
+  test('submit, staple, then VALIDATE, in that order, on the image', () => {
+    // The validate is not decoration. `stapler staple` can exit 0 on
+    // paths that leave no ticket, and an image without one is the exact
+    // defect this step exists to prevent, so the result is asserted
+    // rather than trusted. app/release.sh does the same three, plus the
+    // spctl, and it is the reference.
+    const { dir, lines } = withDmgs('one', ['Screepub-Desktop-macOS-universal.dmg']);
+    const r = runStep(NOTARIZE_STEP, dir, env);
+    expect(r.status).toBe(0);
+    expect(lines('xcrun')).toEqual([
+      'notarytool\tsubmit\tbundles/Screepub-Desktop-macOS-universal.dmg\t--key\t/tmp/ac.p8' +
+        '\t--key-id\tKEYID\t--issuer\tISSUER\t--wait',
+      'stapler\tstaple\tbundles/Screepub-Desktop-macOS-universal.dmg',
+      'stapler\tvalidate\tbundles/Screepub-Desktop-macOS-universal.dmg',
+    ]);
+    // And Gatekeeper's own opinion, which is the thing a person meets.
+    expect(lines('spctl')).toEqual([
+      '-a\t-t\topen\t--context\tcontext:primary-signature\t-v\t' +
+        'bundles/Screepub-Desktop-macOS-universal.dmg',
+    ]);
+  });
+
+  test('no .dmg at all fails loudly rather than exiting 0 having notarized nothing', () => {
+    // Same property the smoke step defends: a glob that matched nothing
+    // must not read as success. If the bundle step ever stops producing
+    // a DMG, this is where it is noticed.
+    const { dir, lines } = withDmgs('none', ['Screepub_0.6.0_amd64.deb']);
+    const r = runStep(NOTARIZE_STEP, dir, env);
+    expect(r.status).not.toBe(0);
+    expect(r.stdout + r.stderr).toContain('NOTHING WAS NOTARIZED');
+    expect(lines('xcrun')).toEqual([]);
+  });
+
+  test('a failing notarytool stops the step instead of stapling nothing', () => {
+    const { dir } = withDmgs('submitfail', ['Screepub-Desktop-macOS-universal.dmg']);
+    writeFileSync(join(dir, 'xcrun'), '#!/bin/sh\nexit 1\n');
+    chmodSync(join(dir, 'xcrun'), 0o755);
+    const r = runStep(NOTARIZE_STEP, dir, env);
+    expect(r.status).not.toBe(0);
+  });
+
+  test('a failing stapler validate fails the release', () => {
+    // The case that matters most: submit and staple both "worked" and
+    // the image still has no ticket. Exactly what shipped in v0.6.0,
+    // arriving one step earlier.
+    const { dir } = withDmgs('validatefail', ['Screepub-Desktop-macOS-universal.dmg']);
+    writeFileSync(
+      join(dir, 'xcrun'),
+      '#!/bin/sh\ncase "$2" in validate) exit 1 ;; *) exit 0 ;; esac\n',
+    );
+    chmodSync(join(dir, 'xcrun'), 0o755);
+    const r = runStep(NOTARIZE_STEP, dir, env);
+    expect(r.status).not.toBe(0);
   });
 });
 

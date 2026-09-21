@@ -256,6 +256,24 @@ itself wakes it: while both DMGs are published the updater takes the Swift
 one, because `release.yml` uploads it first. That ordering is incidental, not
 designed, and should not be read as the plan already working.
 
+**WRONG, corrected 2026-09-21 by measuring it.** The hazard was never
+dormant, and the reasoning above is wrong twice over. `UpdateCheck.swift`
+takes `assets.first(where: { $0.name.hasSuffix(".dmg") })` over the array
+GitHub's API returns, and that array is ordered by NAME, not by upload
+time: on the real v0.6.0 release the `created_at` timestamps run
+19:34, 19:34, 19:25, 19:25, 19:24, which is not upload order in any
+reading. And by name, `Screepub-Desktop-macOS-universal.dmg` sorts BEFORE
+`Screepub-macOS.dmg`. So the updater took the TAURI image the moment both
+were published, and an installed 0.5.4 app checking for updates against
+v0.6.0 downloaded it, mounted it, and refused it on the identifier pin.
+
+That is the behaviour v0.6.0 wanted, so nothing was harmed: the refusal is
+the design. What was wrong was believing the ordering protected anything.
+Anyone reasoning from "the Swift one is first" about a future release would
+have reached the opposite conclusion from the truth. Observed on a real Mac
+2026-09-21: "the update failed signature verification and was not
+installed", app still at rev 0.5.4.
+
 The ADR also records why taking the `com.darkwell.screepub` identifier — the
 only automatic migration — is rejected, and what would flip that. The short
 version, and the part this spec had not connected: the old updater is

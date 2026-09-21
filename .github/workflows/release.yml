@@ -670,6 +670,56 @@ jobs:
             ARGS+=(--arch universal --config tauri.transition.conf.json)
           fi
           bun tools/build-app-bundle.ts ${ARGS[@]+"${ARGS[@]}"}
+      # tauri-bundler notarizes the .app and NEVER the image. app.rs
+      # submits the bundle immediately after signing it; dmg/mod.rs only
+      # signs, linking tauri-apps/tauri#12288 about not self-signing
+      # DMGs. So without this step the ticket is stapled to the app
+      # inside a container that carries none, which is exactly what
+      # v0.6.0 shipped: spctl said "rejected, source=Unnotarized
+      # Developer ID" for the image while the app inside it said
+      # "accepted, source=Notarized Developer ID".
+      #
+      # The frozen updater does not care, because dmgRequirement pins the
+      # anchor, the chain and the team and not notarization, which is how
+      # it got through the v0.6.0 gate. A PERSON cares: a browser
+      # download carries the quarantine attribute and Gatekeeper assesses
+      # the image when they double-click it. Screepub-macOS.dmg has never
+      # done that to anyone, because app/release.sh notarizes and staples
+      # the container, and this is that same sequence.
+      #
+      # BEFORE the smoke step on purpose, so the bytes that get mounted
+      # and executed below are the bytes that ship. The per-leg
+      # SHA256SUMS-app written by the bundle step is stale after this,
+      # and that is harmless: app-upload rebuilds the checksums from what
+      # actually arrives.
+      - name: Notarize and staple the disk image
+        if: matrix.arch == 'universal'
+        shell: bash
+        env:
+          APPLE_API_KEY: ${{ secrets.AC_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.AC_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          N=0
+          for DMG in bundles/*.dmg; do
+            [ -e "$DMG" ] || continue
+            xcrun notarytool submit "$DMG" \
+              --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
+            xcrun stapler staple "$DMG"
+            # Not decoration: `stapler staple` can exit 0 on paths that
+            # leave no ticket, and an image without one is the whole
+            # defect. Assert the result rather than trusting the verb.
+            xcrun stapler validate "$DMG"
+            spctl -a -t open --context context:primary-signature -v "$DMG"
+            N=$((N + 1))
+          done
+          # Same property the smoke step defends one below: a glob that
+          # matched nothing must not read as success.
+          if [ "$N" -eq 0 ]; then
+            echo "::error::bundles/ held no .dmg. NOTHING WAS NOTARIZED."
+            exit 1
+          fi
+          echo "$N image(s) notarized and stapled."
       # Cross-compiling is not cross-testing, and bundling is not running.
       # Every bundle is opened and its engine executed here, on the machine
       # that built it. Nothing skips the loop any more: the x86_64 DMG used
