@@ -1372,10 +1372,16 @@ describe('the Read surface', () => {
     // offset is measured from the page and the rail scrolls to a number that
     // means nothing — visible at narrow widths, where the rail is a short
     // strip and the mark simply never comes into view.
+    //
+    // Any POSITIONED value satisfies that, not `relative` specifically. This
+    // asserted the literal until 2026-09-21, when the rail became an absolute
+    // drawer in the binding margin and the test failed for a change that
+    // never threatened what it was protecting.
     expect(reader).toContain('rail.scrollTop = button.offsetTop');
     const css = read('surfaces.css');
     const rule = css.slice(css.indexOf('.scene-rail {'));
-    expect(rule.slice(0, rule.indexOf('}'))).toContain('position: relative');
+    expect(rule.slice(0, rule.indexOf('}')))
+      .toMatch(/position:\s*(relative|absolute|fixed|sticky)/);
   });
 
   test('the parser the window uses is the real one', () => {
@@ -2901,6 +2907,62 @@ describe('the window does not title its own screens as script furniture', () => 
     // And it does not fire on the window's ordinary prose.
     expect(SLUGLINE.test('Needs selectable text, not a scan.')).toBe(false);
     expect(SLUGLINE.test('Send to a reader')).toBe(false);
+  });
+});
+
+describe('the scene index is a drawer in the binding margin', () => {
+  // It sat to the RIGHT of the script and took a grid column from it. Moved
+  // left, per the maintainer, and the constraint turned out to be arithmetic:
+  // the binding margin is 17.6% of the sheet and the brads sit at 5.9%, which
+  // leaves about 96px clear, while the rail wants 150-218px. It cannot sit
+  // BESIDE the fasteners, so it parks over them — and over the margin, never
+  // over the page, which is what a plain overlay got wrong. See the
+  // interface-pass design, decision 16.
+
+  /** The first declaration block for a selector, so a test can read one rule
+   *  instead of the whole stylesheet. */
+  function ruleBlock(css: string, selector: string): string {
+    const at = css.indexOf(`${selector} {`);
+    expect(`${selector} found`).toBe(at === -1 ? `${selector} missing` : `${selector} found`);
+    return css.slice(at, css.indexOf('}', at) + 1);
+  }
+
+  test('the control says what it will do, not what is showing', async () => {
+    const reader = (await import(join(UI, 'read.js'))) as {
+      indexToggle?: (open: boolean) => { label: string; expanded: string };
+    };
+    expect(reader.indexToggle?.(true)).toEqual({ label: 'Hide scenes', expanded: 'true' });
+    expect(reader.indexToggle?.(false)).toEqual({ label: 'Show scenes', expanded: 'false' });
+  });
+
+  test('the panel is capped so it cannot hang off the window', () => {
+    // Its own 218px is wider than the margin it parks in on a narrow window,
+    // and the margin is a PERCENTAGE, so a fixed width is wrong at some size
+    // no matter which size you pick. Measured against the content box: the
+    // sheet gives the margin 17.6% and the content 70.6%, so the margin is
+    // 17.6/70.6 = 24.9% of the box this element is positioned inside.
+    const block = ruleBlock(read('surfaces.css'), '.scene-rail');
+    expect(block).toMatch(/width:\s*min\(/);
+  });
+
+  test('the panel stays positioned, because read.js measures against it', () => {
+    // A regression guard on an existing coupling rather than new behaviour:
+    // read.js keeps the marked scene in view by its button's offsetTop, and
+    // an unpositioned rail would hand it an offset measured from the page
+    // instead. The drawer changes `position` from relative to absolute, which
+    // is still positioned — this is here so the NEXT change cannot quietly
+    // make it static.
+    const block = ruleBlock(read('surfaces.css'), '.scene-rail');
+    expect(block).toMatch(/position:\s*(relative|absolute|fixed|sticky)/);
+  });
+
+  test('hiding it does not rely on moving it', () => {
+    // A translate alone cannot be trusted to clear the window: the margin
+    // GROWS with the window, so on a wide display a panel shifted by its own
+    // width is still sitting on the paper in plain sight.
+    const block = ruleBlock(read('surfaces.css'), '.scene-rail');
+    expect(block).toMatch(/opacity:\s*0\b/);
+    expect(block).toMatch(/visibility:\s*hidden/);
   });
 });
 

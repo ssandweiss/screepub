@@ -216,6 +216,17 @@ export function scrollStep(key, frameHeight) {
 /** The rail, from the engine's own scene sections in the engine's own order.
  *  Not from a second parse of the fountain: two parsers is two answers about
  *  what a scene is. */
+/** The scene index's control. It names what the CLICK will do rather than
+ *  what is on screen, because that is how someone decides whether to press
+ *  it; `aria-expanded` carries the current state, which is the half a screen
+ *  reader needs. Splitting those two apart is the whole reason this is a
+ *  function and not two string literals at the call site. */
+export function indexToggle(open) {
+  return open
+    ? { label: 'Hide scenes', expanded: 'true' }
+    : { label: 'Show scenes', expanded: 'false' };
+}
+
 export function railEntries(scenes) {
   if (!Array.isArray(scenes)) return [];
   return scenes
@@ -270,6 +281,8 @@ let ctx = null;
 let pane = null;
 let frame = null;
 let rail = null;
+let readerBox = null;
+let indexButton = null;
 let railButtons = new Map();
 let marks = [];
 let place = null;
@@ -372,10 +385,16 @@ function draw() {
   }
 
   const script = ctx.state.script;
+  indexButton = el('button', {
+    type: 'button',
+    class: 'btn-quiet index-toggle',
+    onclick: () => setIndexOpen(!readerBox.classList.contains('index-open')),
+  });
   pane.append(
     el('div', { class: 'read-head' },
       el('h2', { class: 'read-title' }, script.title),
-      script.author ? el('p', { class: 'read-by' }, `by ${script.author}`) : null),
+      script.author ? el('p', { class: 'read-by' }, `by ${script.author}`) : null,
+      indexButton),
   );
 
   rail = el('nav', { class: 'scene-rail', 'aria-label': 'Scenes' });
@@ -401,8 +420,24 @@ function draw() {
     onkeydown: onStageKey,
   }, frame);
 
-  pane.append(el('div', { class: 'reader' }, stage, rail));
+  readerBox = el('div', { class: 'reader' }, stage, rail);
+  pane.append(readerBox);
+  // Open by default: the index is what the maintainer asked to see on the
+  // left, and the drawer costs the script nothing either way — it parks in
+  // the binding margin rather than taking a column from the page.
+  setIndexOpen(true);
   render(script.previewHtml);
+}
+
+/** Show or hide the scene index. The class is the whole state: the
+ *  stylesheet owns where the panel sits and what hiding looks like, and
+ *  nothing here measures or positions anything. */
+function setIndexOpen(open) {
+  if (readerBox === null || indexButton === null) return;
+  readerBox.classList.toggle('index-open', open);
+  const { label, expanded } = indexToggle(open);
+  indexButton.textContent = label;
+  indexButton.setAttribute('aria-expanded', expanded);
 }
 
 function drawNotice(notice) {

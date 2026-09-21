@@ -283,10 +283,15 @@
   color: var(--ink-muted); margin: 2px 0 0;
 }
 
+/* One column, not two. The index used to take a grid column from the script,
+ * which left it about 460px at the 1000px cap: it wrapped near 48 characters
+ * where a screenplay's action column is near 60. The index is a drawer over
+ * the binding margin now, so the script keeps the full measure whether the
+ * index is open or shut. Positioned, because the drawer is absolute to it. */
 .reader {
+  position: relative;
   display: grid;
-  grid-template-columns: 1fr minmax(150px, 218px);
-  gap: var(--space-6);
+  grid-template-columns: 1fr;
   align-items: start;
 }
 /* The paper the book is read on. The ink inside is set from the same two
@@ -319,16 +324,57 @@
 .scene-rail {
   /* Positioned so it is the offsetParent of its own buttons: read.js keeps
    * the marked scene inside this strip by its offsetTop, and an unpositioned
-   * rail would hand it an offset measured from the page instead. */
-  position: relative;
+   * rail would hand it an offset measured from the page instead. `absolute`
+   * satisfies that as `relative` did. */
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  /* Never wider than the binding margin it parks in, or it hangs off the
+   * window. The sheet gives the margin 17.6% and the content 70.6%, so the
+   * margin is 17.6/70.6 = 24.9% of this element's containing block. Capped at
+   * the rail's own 218px so a wide window does not inflate it. A fixed width
+   * is wrong at SOME size no matter which size you pick, because the margin
+   * is a percentage and the window is not. */
+  width: min(218px, 24.9%);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 1px;
   max-height: 68vh;
   overflow-y: auto;
-  border-left: 1px solid var(--hole);
-  padding-left: var(--space-4);
+  background: var(--paper);
+  /* The hairline reads as the edge of the binding the panel came out of. */
+  border-right: 1px solid var(--hole);
+  padding: 0 var(--space-4) var(--space-3) var(--space-3);
+  /* Shut. Opacity is what actually hides it; the translate is only the
+   * motion. A translate alone cannot be trusted to clear the window, because
+   * the margin GROWS with the window: on a wide display a panel shifted by
+   * its own width is still sitting on the paper in plain sight. `visibility`
+   * takes it out of the tab order while it is gone. */
+  transform: translateX(calc(-100% - 20px));
+  opacity: 0;
+  visibility: hidden;
+  transition: transform var(--motion-state) var(--ease),
+              opacity var(--motion-state) var(--ease),
+              visibility 0s linear var(--motion-state);
+}
+/* Open: the panel's RIGHT edge meets the script's left edge, so it comes to
+ * rest in the margin rather than over the text. The script never moves and is
+ * never covered — which a drawer anchored to the content edge got wrong, by
+ * lying across the scene headings the index exists to reach. */
+.reader.index-open .scene-rail {
+  transform: translateX(-100%);
+  opacity: 1;
+  visibility: visible;
+  box-shadow: 6px 0 20px rgba(0, 0, 0, 0.10);
+  transition: transform var(--motion-state) var(--ease),
+              opacity var(--motion-state) var(--ease),
+              visibility 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scene-rail, .reader.index-open .scene-rail { transition: none; }
 }
 .rail-count {
   font-family: var(--font-structure); font-size: var(--text-fine);
