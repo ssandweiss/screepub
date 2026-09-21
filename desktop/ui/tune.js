@@ -470,7 +470,10 @@ function draw(status) {
   if (ctx.state.script === null) return;
 
   if (settings === null) {
-    pane.append(
+    // Through el(), which drops a null child, rather than straight onto the
+    // pane, which renders one as the word "null". The status line is absent
+    // whenever nothing has failed yet, so that is the ordinary path.
+    pane.append(el('div', { class: 'fault-body-block' },
       el('h2', { class: 'slug' }, FAULT.slug),
       el('p', { class: 'prose' }, FAULT.line),
       status?.bad ? el('p', { class: 'caption bad' }, status.line) : null,
@@ -478,7 +481,7 @@ function draw(status) {
         el('button', {
           type: 'button', class: 'btn btn-outline', onclick: () => ctx.goTo('convert'),
         }, FAULT.way)),
-    );
+    ));
     return;
   }
 

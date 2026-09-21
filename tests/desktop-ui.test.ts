@@ -2921,6 +2921,112 @@ describe('the window does not title its own screens as script furniture', () => 
   });
 });
 
+describe('a refused file is no longer a dead end', () => {
+  // The Swift app could report a bug from the failure screen, and the report
+  // carried the refusal's code with it. The Tauri window could not report
+  // anything, so a file the engine rejected ended the conversation: the one
+  // moment someone most wants to tell you what happened was the moment the
+  // app gave them nowhere to say it.
+  //
+  // Ported from app/Sources/ScreepubKit/Feedback.swift rather than reinvented.
+  let feedback: any;
+  beforeAll(async () => { feedback = await import(join(UI, 'feedback.js')); });
+
+  const parse = (url: string) => new URL(url);
+
+  test('it opens a new issue on this project, not a generic page', () => {
+    const url = parse(feedback.newIssueUrl({ appVersion: '0.6.0', osVersion: 'macOS 15.0' }));
+    expect(`${url.origin}${url.pathname}`)
+      .toBe('https://github.com/ssandweiss/screepub/issues/new');
+  });
+
+  test('the report arrives stamped with both versions', () => {
+    // So a report never begins with two rounds of "which version?".
+    const body = parse(feedback.newIssueUrl({
+      appVersion: '0.6.0', osVersion: 'macOS 15.0',
+    })).searchParams.get('body') ?? '';
+    expect(body).toContain('0.6.0');
+    expect(body).toContain('macOS 15.0');
+  });
+
+  test('a refusal seeds the "what happened" block; nothing else does', () => {
+    const withContext = parse(feedback.newIssueUrl({
+      appVersion: '0.6.0', osVersion: 'x', context: 'password: this PDF is locked',
+    })).searchParams.get('body') ?? '';
+    expect(withContext).toContain('What happened');
+    expect(withContext).toContain('password: this PDF is locked');
+
+    const without = parse(feedback.newIssueUrl({
+      appVersion: '0.6.0', osVersion: 'x',
+    })).searchParams.get('body') ?? '';
+    expect(without).not.toContain('What happened');
+  });
+
+  test('a plus in the context survives the round trip', () => {
+    // Feedback.swift's hard-won detail, carried over: a query parser reads a
+    // literal "+" as a space, so a context containing one arrives corrupted
+    // unless it is percent-encoded. URLSearchParams gets this right where
+    // hand-built query strings do not, which is why this is built with it.
+    const body = parse(feedback.newIssueUrl({
+      appVersion: '0.6.0', osVersion: 'x', context: 'C++ crashed on page 3+4',
+    })).searchParams.get('body') ?? '';
+    expect(body).toContain('C++ crashed on page 3+4');
+  });
+
+  test('no surface appends a bare null to a node', () => {
+    // el() drops a null child; Node.append() renders it as the literal word
+    // "null". send.js's drawEmpty records shipping that once. drawFailure was
+    // doing it too, and on the COMMON path: the "still open" line is absent
+    // whenever no script is loaded, which on a refusal is most of the time.
+    //
+    // The shape is the test, because the mistake is a shape: a conditional
+    // yielding null, sitting directly in a `.append(` argument list.
+    // Depth-aware on purpose. A null nested inside an el() call is CORRECT —
+    // that is the fix — so a flat regex over the argument text flags the very
+    // pattern it should be recommending. Only arguments at depth 0 of the
+    // .append( list are the dangerous ones.
+    // Keeps ONLY the characters sitting directly inside the .append( parens.
+    // Everything a nested call contains is dropped, so `el('p', …, null)` —
+    // the correct pattern — contributes nothing, while a ternary resolving to
+    // null in the argument list itself survives into the skeleton.
+    function topLevelArgs(source: string, at: number): string[] {
+      let depth = 0;
+      let current = '';
+      const args: string[] = [];
+      for (let i = at; i < source.length; i += 1) {
+        const ch = source[i];
+        if (ch === '(') { depth += 1; if (depth === 1) continue; }
+        else if (ch === ')') { depth -= 1; if (depth === 0) { args.push(current); break; } }
+        else if (ch === ',' && depth === 1) { args.push(current); current = ''; continue; }
+        if (depth === 1) current += ch;
+      }
+      return args;
+    }
+
+    const offenders: string[] = [];
+    for (const name of jsFiles()) {
+      const source = read(name);
+      for (const match of source.matchAll(/\.append\(/g)) {
+        const at = (match.index ?? 0) + '.append'.length;
+        for (const arg of topLevelArgs(source, at)) {
+          if (/\bnull\b/.test(arg.replace(/\/\/[^\n]*/g, ''))) {
+            offenders.push(`${name}: ${arg.trim().slice(0, 70).replace(/\s+/g, ' ')}`);
+          }
+        }
+      }
+    }
+    expect(offenders.join('\n')).toBe('');
+  });
+
+  test('the failure screen offers it, carrying the code', () => {
+    const convert = read('convert.js');
+    expect(convert).toContain('Report a bug');
+    // The code is the point. A report that says only "it did not work" costs
+    // a round trip to learn what the engine already knew.
+    expect(convert).toMatch(/newIssueUrl|reportBug/);
+  });
+});
+
 describe('the settings preview is the reader, not a second copy of it', () => {
   // Settings gets a live script beside the knobs. The tempting way to build
   // it is a second iframe with its own styling code, and that is the one

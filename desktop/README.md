@@ -128,8 +128,14 @@ newline included. It parses nothing: `desktop/ui/app.js` is where a line is
 recognised as progress, and piece D's UI work is what will draw it.
 
 This deliberately did **not** become a third Rust command. The two registered
-commands are unchanged, the capability is still `core:default`, and the
-non-comment Rust went from 59 to 74 lines against a ceiling of 200.
+commands are unchanged and the non-comment Rust went from 59 to 74 lines
+against a ceiling of 200.
+
+> Written when the capability was exactly `core:default`. Since 2026-09-21 it
+> also carries one **scoped** `opener:allow-open-url` for the project's issue
+> tracker, so Report a Bug can open it. That is a door, not a command: the
+> count of registered commands is still two. See
+> [ADR 2026-09-21](../docs/adr/2026-09-21-doors-not-commands.md).
 
 **There is no Cancel.** `brand/components/progress.html` draws one, and the
 SwiftUI app has one, but killing a running sidecar needs a kill handle the
@@ -155,8 +161,10 @@ a thing to slip in.
   * a deliberately multi-line stdout (`['--help']`, 36 lines, 1833
     characters trimmed) came back whole and unmangled, which is the case
     `.output()` used to get for free and spawning could have broken;
-  * `listen()` itself needed **no new permission**: the capability is still
-    `['core:default']`, which already carries the event API.
+  * `listen()` itself needed **no new permission**: `core:default` already
+    carries the event API. (The capability was exactly `['core:default']`
+    when this was measured; it gained one scoped opener grant on 2026-09-21,
+    which changes nothing about `listen()`.)
 
 ## Why a big answer used to arrive cut in half (piece D, measured 2026-09-13)
 

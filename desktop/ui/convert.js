@@ -7,8 +7,10 @@
 // pure exported function above the line, tested directly by
 // tests/desktop-ui.test.ts. Below the line is drawing: it holds no rule of
 // its own, so a live run is enough to check it.
-import { runEngine, pickScreenplay, onProgress, argv, FORCE_FLAG } from './app.js';
+import { runEngine, pickScreenplay, onProgress, argv, FORCE_FLAG, openUrl } from './app.js';
 import { el, clear, text } from './dom.js';
+import { newIssueUrl, osLabel } from './feedback.js';
+import { RELEASE } from './notes.js';
 
 // ---------------------------------------------------------------- decisions
 
@@ -428,6 +430,19 @@ function drawFailure(error, path) {
     class: 'btn btn-outline',
     onclick: () => { drawWell(); ctx.restoreFocus(); },
   }, 'Back to one'));
+  // The refusal is the moment someone most wants to tell you what happened,
+  // and until now it was the moment the window gave them nowhere to say it.
+  // The report carries the code and the engine's own sentence, so it arrives
+  // already saying what the window knew.
+  ways.append(el('button', {
+    type: 'button',
+    class: 'btn-quiet',
+    onclick: () => openUrl(newIssueUrl({
+      appVersion: RELEASE.version,
+      osVersion: osLabel(navigator.userAgentData?.platform ?? navigator.platform),
+      context: `${refusal.code}: ${refusal.message}`,
+    })),
+  }, 'Report a bug'));
 
   // The script that was already open stays open: see stillOpenNote. The
   // refusal is news about the file that was just refused, not about the book
@@ -435,7 +450,14 @@ function drawFailure(error, path) {
   // Tune and Send away from a book that was still perfectly good.
   const kept = stillOpenNote(ctx.state.script);
 
-  pane.append(
+  // Built through el() rather than appended straight to the pane, because
+  // el() drops a null child and Node.append() renders it as the literal word
+  // "null". The `kept` line is absent whenever no script is open, which is
+  // the COMMON case on a refusal, so this screen has been printing a stray
+  // "null" under its buttons. Exactly the defect send.js's drawEmpty records
+  // having shipped once already, on the same mistake, which is why it is
+  // worth fixing in the same shape rather than with a conditional here.
+  pane.append(el('div', { class: 'fault-body-block' },
     el('p', { class: 'smash' }, 'Smash cut to:'),
     el('h2', { class: 'fault' }, refusal.heading),
     // The engine's own sentence. The only thing the window takes out of it is
@@ -451,7 +473,7 @@ function drawFailure(error, path) {
     el('p', { class: 'code-note' },
       el('span', { class: 'code-note-label' }, 'Error code'),
       el('code', { class: 'code code-chip' }, refusal.code)),
-  );
+  ));
   // Also on the pane, for a bug report pasted out of the DOM and for anyone
   // reading the window with a tool rather than eyes.
   pane.dataset.errorCode = refusal.code;
