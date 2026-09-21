@@ -704,6 +704,10 @@ async function main() {
         characters: sp?.characters.length,
         topCharacters: sp?.characters.slice(0, 5).map((c) => c.name) ?? [],
         warnings: result.warnings,
+        // Word spaces pdf.js invented and we removed against the glyph
+        // stream. Reported rather than hidden because it edits the author's
+        // text; normally 0, and a number that jumps is how a misfire shows.
+        spacingRepairs: result.spacingRepairs,
         epubPath,
         mobiPath,
         fountainPath,

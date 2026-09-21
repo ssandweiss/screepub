@@ -1,5 +1,6 @@
 import '../src/parser/pdfjs-shims';
 import { describe, test, expect } from 'bun:test';
+import { existsSync } from 'node:fs';
 import {
   collectUnderlineMarks,
   extractDocument,
@@ -896,5 +897,40 @@ describe('repairPhantomSpaces', () => {
     const items = [it('thes e men.', 10)];
     expect(repairPhantomSpaces(items, null)).toBe(0);
     expect(items[0].str).toBe('thes e men.');
+  });
+});
+
+// ── the repair is counted, never silent ──────────────────────────────
+//
+// repairPhantomSpaces changes an author's text. The owner's first instinct
+// was to make it opt-in, and the concern behind that is right: we should
+// not quietly rewrite someone's script. But a toggle answers it badly,
+// because it defaults to something — off, and people see broken words and
+// never find the setting; on, and the switch exists for a case nobody can
+// name — and because this is a correctness repair, not a preference: the
+// PDF says "these", we were writing "thes e".
+//
+// So it reports instead of asking. The count rides out with the result, the
+// app can say "repaired 94 spacing artifacts", and a number that suddenly
+// jumps is how anyone would notice it misfiring on a script.
+describe('extractDocument reports what it repaired', () => {
+  test('the count is part of the extraction result', async () => {
+    const pdf = new Uint8Array(await Bun.file('tests/fixtures/screenplay.pdf').arrayBuffer());
+    const out = await extractDocument(pdf);
+    // The committed fixture is clean, so the honest answer here is zero —
+    // and zero has to be REPORTED rather than absent, or a caller cannot
+    // tell "nothing to repair" from "this engine does not count".
+    expect(out.spacingRepairs).toBe(0);
+    expect(out.pageCount).toBeGreaterThan(0);
+  });
+
+  test('a PDF that needs repairs reports a non-zero count', async () => {
+    // The committed fixtures are all clean, so the only honest source for
+    // this is a real file. Skips rather than lies when the corpus is absent
+    // (it is gitignored and does not exist in CI).
+    const real = `${process.env.HOME}/Downloads/One Day This Could All Be Yours by Perry Janes.pdf`;
+    if (!existsSync(real)) return;
+    const out = await extractDocument(new Uint8Array(await Bun.file(real).arrayBuffer()));
+    expect(out.spacingRepairs).toBeGreaterThan(50);
   });
 });
