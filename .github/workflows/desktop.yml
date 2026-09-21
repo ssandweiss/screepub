@@ -60,12 +60,18 @@ jobs:
             desktop/src-tauri/target
           key: cargo-${{ matrix.os }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
       - run: bun install --frozen-lockfile
-      # desktop/ui/tokens.css and desktop/ui/notes.js are GENERATED and
-      # committed, so both can go stale between a brand/tokens.json edit (or a
-      # release-notes edit) and anyone noticing. Regenerating and diffing is
-      # what turns "committed" back into "current". Before the sidecar build
-      # so it fails in seconds rather than after a cargo compile, and on every
-      # platform because the generators are the same everywhere.
+      # desktop/ui/tokens.css, notes.js and update-compare.js are GENERATED
+      # and committed, so all three can go stale between a brand/tokens.json
+      # edit, a release-notes edit or a src/update/compare.ts edit and anyone
+      # noticing. Regenerating and diffing is what turns "committed" back into
+      # "current". Before the sidecar build so it fails in seconds rather than
+      # after a cargo compile, and on every platform because the generators
+      # are the same everywhere.
+      #
+      # update-compare.js is the one where staleness is worst. It carries the
+      # rule that stops the updater offering a DOWNGRADE to a build past a
+      # tag, so a stale copy means the window quietly applies last week's
+      # rule to this week's release.
       #
       # It must also stay BEFORE the bundle step, on purpose and not by
       # accident: `cargo tauri build` rewrites desktop/src-tauri/Cargo.toml,
@@ -75,7 +81,8 @@ jobs:
         run: |
           bun tools/build-desktop-tokens.ts
           bun tools/build-desktop-notes.ts
-          git diff --exit-code desktop/ui/tokens.css desktop/ui/notes.js
+          bun tools/build-update-compare.ts
+          git diff --exit-code desktop/ui/tokens.css desktop/ui/notes.js desktop/ui/update-compare.js desktop/ui/update-compare.d.ts
       # tauri-build needs the sidecar present, under the host's own triple.
       # --host is the fast path: one target, not every target in the table.
       - name: Build the engine sidecar for this runner
