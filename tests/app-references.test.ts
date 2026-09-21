@@ -127,8 +127,29 @@ const inventory = JSON.parse(readFileSync(INVENTORY_PATH, 'utf8')) as {
 
 const CATEGORIES = ['build', 'test', 'artifact', 'doc', 'note', 'freeze'];
 
+/** Every file the repository is about to be responsible for: tracked, PLUS
+ *  untracked-and-not-ignored.
+ *
+ *  `--others --exclude-standard` is not tidiness, it closes a hole that let a
+ *  file through on 2026-09-21. A bare `git ls-files` lists only TRACKED
+ *  files, so a brand-new one is invisible to this sweep until it is staged —
+ *  and a brand-new file is the single likeliest kind to need an inventory
+ *  row. desktop/ui/feedback.js, a port of Feedback.swift, passed a full green
+ *  suite and then failed the moment it was committed, because `git add` is
+ *  what made it visible here. The author read the green run as the answer,
+ *  which it honestly was for the tree as git then knew it.
+ *
+ *  Demonstrated rather than assumed: one file, identical contents, nothing
+ *  else changed — untracked it is not flagged, staged it is.
+ *
+ *  `--exclude-standard` keeps .gitignore honoured, so build output, the
+ *  2.5 GB target/ and the gitignored real-script fixtures stay out. What is
+ *  added is exactly the set someone is about to commit. */
 function tracked(): string[] {
-  const proc = Bun.spawnSync(['git', 'ls-files', '-z'], { cwd: REPO });
+  const proc = Bun.spawnSync(
+    ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+    { cwd: REPO },
+  );
   if (!proc.success) throw new Error('git ls-files failed: ' + proc.stderr.toString());
   return proc.stdout.toString().split('\0').filter(Boolean);
 }
@@ -242,6 +263,24 @@ describe('the reference sweep: everything outside app/ that names it', () => {
 });
 
 describe('the sweep is not vacuous', () => {
+  test('a file that is not committed yet is still swept', () => {
+    // The hole that let desktop/ui/feedback.js through on 2026-09-21. A bare
+    // `git ls-files` lists only TRACKED files, so a brand-new file — the
+    // likeliest kind to need a row — was invisible here until `git add` made
+    // it visible, which meant a genuinely green suite went red at the commit
+    // and not before.
+    //
+    // Asserted against the flags rather than by writing a file into the
+    // repository mid-suite, because a test that creates one and crashes
+    // leaves it behind for the next run to trip over.
+    const source = readFileSync(join(REPO, 'tests', 'app-references.test.ts'), 'utf8');
+    expect(source).toContain("'--others'");
+    expect(source).toContain("'--exclude-standard'");
+    // And the sweep must still see the ordinary case, or the flags above
+    // could be satisfied by a list that is somehow empty.
+    expect(tracked()).toContain('tools/app-references.json');
+  });
+
   test('the patterns actually match the forms that a naive grep misses', () => {
     // If someone weakens PATTERNS, set equality against a regenerated
     // inventory would still be green. These are the forms that motivated
