@@ -6,14 +6,32 @@
 // not resolve, so the symbols are defined once here, at the window's root,
 // and every <use> points inside this document.
 import { el } from './dom.js';
+import { RELEASE } from './notes.js';
 
-const SURFACES = [
+/** The surfaces the bar switches between. Notes is NOT one: it is the release
+ *  notes for the version you are running, which is a thing you glance at
+ *  rather than a place you go, and it is reached from the version stamp that
+ *  names it. Exported so a test can read the bar without mounting it. */
+export const SURFACES = [
   { id: 'convert', label: 'Convert' },
   { id: 'read', label: 'Read' },
   { id: 'tune', label: 'Tune' },
   { id: 'send', label: 'Send' },
-  { id: 'notes', label: 'Notes' },
 ];
+
+/** The revision stamp's words. "rev" is what a script's own revision mark
+ *  says, and what the Mac app said here.
+ *
+ *  The number is the RELEASE's, taken from the generated notes module, not
+ *  the engine's self-reported one. Two reasons. The engine's version and the
+ *  app's are different numbers during the transition, so labelling the
+ *  engine's "rev" would misname the build in the one place people paste into
+ *  a bug report. And the stamp opens the notes for a version: taking both
+ *  from `notes.js` makes the stamp and the sheet agree by construction rather
+ *  than by two people remembering to change both. */
+export function revLabel(version) {
+  return `rev ${version}`;
+}
 
 // This window's own constant, character for character from brad.html's
 // <defs>. It is the one piece of markup in the window that is not built from
@@ -116,6 +134,24 @@ export function mountFrame(root) {
   const rail = el('div', { class: 'rail', 'aria-hidden': 'true' },
     svgUse('a', 'brad'), svgUse('b', 'punch'), svgUse('c', 'brad'));
 
+  // A printer's mark at the foot of the paper, not a status bar: it belongs
+  // to the page, so it is legible on it. It is a button because it opens the
+  // notes for the version it names.
+  const revHandlers = [];
+  const stamp = el('button', {
+    type: 'button',
+    class: 'rev-stamp',
+    onclick: () => { for (const handler of revHandlers) handler(); },
+  }, revLabel(RELEASE.version));
+
+  // A dead engine gets its own line rather than overwriting the stamp. The
+  // stamp answers "which build is this?", which stays worth answering when
+  // the engine is missing — arguably it is worth MORE then, since that is
+  // exactly the moment someone files a report.
+  const fault = el('p', { class: 'engine-fault' }, '');
+  fault.hidden = true;
+
+  sheet.append(fault, stamp);
   root.append(defs, page, rail);
 
   /** `disabled` is where a tab's availability is kept, so presence is derived
@@ -168,6 +204,14 @@ export function mountFrame(root) {
     sheet,
     setSurface,
     onSurface: (handler) => handlers.push(handler),
+    /** Called when the reader asks what changed in this version. */
+    onRev: (handler) => revHandlers.push(handler),
+    /** The engine could not be started. Says so without taking the version
+     *  off the page. */
+    engineFailed: (message) => {
+      fault.textContent = message;
+      fault.hidden = false;
+    },
     enable: (id, on) => {
       const tab = tabFor(id);
       const arriving = on && tab.hidden;

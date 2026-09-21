@@ -112,8 +112,11 @@ describe('the window respects the quality floor', () => {
     expect(css).toContain(':focus-visible');
   });
 
-  test('the surface switcher is a real tablist, reachable by keyboard', () => {
+  test('the surface switcher is a real tablist, reachable by keyboard', async () => {
     const frame = read('frame.js');
+    const { SURFACES } = (await import(join(UI, 'frame.js'))) as {
+      SURFACES: Array<{ id: string; label: string }>;
+    };
     // Not a div with a click handler: a test that only looked for the five
     // names would pass against exactly that.
     expect(frame).toContain("'button'");
@@ -125,9 +128,11 @@ describe('the window respects the quality floor', () => {
     // A dimmed surface is not a keyboard stop. Without this the arrow keys
     // land on a tab whose panel says nothing.
     expect(frame).toMatch(/disabled\)?\s*\)?\s*continue|if\s*\(.*disabled.*\)\s*continue/);
-    for (const name of ['convert', 'read', 'tune', 'send', 'notes']) {
-      expect(frame).toContain(name);
-    }
+    // The bar's four. Notes is deliberately absent: it is reached from the
+    // rev stamp, not from a tab. Asserted against the exported SURFACES
+    // rather than the file text, because frame.js imports ./notes.js for the
+    // version and a `toContain('notes')` would pass on the import alone.
+    expect(SURFACES.map((s) => s.id)).toEqual(['convert', 'read', 'tune', 'send']);
   });
 });
 
@@ -835,7 +840,10 @@ describe('where the keyboard stands when a dialog closes', () => {
     stopAfterDialog: (surface: string, queryAll: (s: string) => Iterable<unknown>) => unknown;
   };
   let focus: FocusModule;
-  const SURFACES = ['convert', 'read', 'tune', 'send', 'notes'];
+  // The four the bar switches between. Notes left the bar on 2026-09-20: it
+  // is a <dialog> opened from the rev stamp now, so the platform owns its
+  // focus and there is no #tab-notes for a plan to point at.
+  const SURFACES = ['convert', 'read', 'tune', 'send'];
 
   beforeAll(async () => {
     focus = (await import(join(UI, 'focus.js'))) as FocusModule;
@@ -2896,6 +2904,41 @@ describe('the window does not title its own screens as script furniture', () => 
   });
 });
 
+describe('the foot of the page names the release', () => {
+  // It used to print the ENGINE's self-reported version, labelled "engine".
+  // Two things were wrong with that. The number was the engine's while the
+  // app's own version is different, so it misnamed the build in the one place
+  // people paste into bug reports. And on a failed engine the error REPLACED
+  // it, so the app could be running with no version on screen at all.
+  const frameMod = async () =>
+    (await import(join(UI, 'frame.js'))) as {
+      revLabel?: (version: string) => string;
+      SURFACES?: Array<{ id: string; label: string }>;
+    };
+
+  test('it reads "rev" and the version it was built from', async () => {
+    const { revLabel } = await frameMod();
+    expect(revLabel?.('0.6.0')).toBe('rev 0.6.0');
+  });
+
+  test('the version comes from the notes module, so the stamp and the sheet agree', () => {
+    // desktop/ui/notes.js is generated from docs/releases/<version>.md. Taking
+    // the number from there makes the stamp and the notes it opens agree by
+    // construction rather than by two people remembering to change both.
+    const frame = read('frame.js');
+    expect(frame).toContain('RELEASE');
+    expect(frame).toContain('revLabel');
+  });
+
+  test('the bar holds four surfaces, and Notes is not one of them', async () => {
+    // Notes is the release notes for the version you are running. It is a
+    // thing you glance at, not a place you go, and it is reached from the
+    // version it describes.
+    const { SURFACES } = await frameMod();
+    expect(SURFACES?.map((s) => s.id)).toEqual(['convert', 'read', 'tune', 'send']);
+  });
+});
+
 describe('a surface with nothing behind it is absent, not dimmed', () => {
   // Read, Tune and Send were DISABLED before a conversion, which drew three
   // greyed words in the bar advertising doors that do not open. Worse for a
@@ -2968,9 +3011,11 @@ describe('the drop well states one guard, not two', () => {
     const { WELL } = await wellCopy();
     const brand = readFileSync(join(ROOT, 'brand', 'components', 'drop-well.html'), 'utf8');
     const limits = [...brand.matchAll(/<span class="well-limits">([^<]*)<\/span>/g)]
-      .map((m) => m[1]);
+      .map((m) => m[1] ?? '');
+    const expected = WELL?.limits ?? '';
+    expect(expected).not.toBe(''); // the window must actually have copy to compare
     expect(limits.length).toBeGreaterThan(0); // the scan must actually find them
-    for (const line of limits) expect(line).toBe(WELL?.limits);
+    for (const line of limits) expect(line).toBe(expected);
   });
 
   test('the window names itself where the paragraph used to be', async () => {
