@@ -987,7 +987,7 @@ and the suite will say so if you forget.
 - **App option:** "Show scene numbers in headings" — small change in
   `src/epub/html.ts` (`scene_heading` case, `t.scene_number`).
 
-### 13a. Original page-number markers (option, default off)
+### 13a. Original page-number markers (option, default ON; 2026-09-21)
 - **What:** `showPageMarkers` emits the PDF's printed pagination as small
   right-flush dimmed markers ("47.") at page boundaries — page count is how
   scripts are evaluated (1 page ≈ 1 minute), and reflow otherwise erases
@@ -1011,6 +1011,20 @@ and the suite will say so if you forget.
   sepia as well as white. Engines with no opacity support render it at
   full strength — a harmless degrade — and Enhanced Typesetting lists
   opacity as supported (Guidelines 2026.2 §18.1).
+- **Default flipped ON (2026-09-21):** it shipped off. The argument for off
+  was that the markers are furniture and a clean book should not carry the
+  source's page breaks; the argument that won is that page numbers are how
+  a script is *discussed*. Notes come back against printed pages ("the beat
+  on 42 is late"), and a book that dropped the pagination made every one of
+  those notes unfindable, with nothing else in it carrying the printed
+  numbering. Anyone who wants the clean book still has the knob.
+  **`showSceneNumbers` was deliberately NOT flipped with it** (see 13): a
+  scene number is an intentional property of a draft, present or absent
+  because a writer decided, so adding one is inventing content. A page
+  number is navigation, and the PDF already had it.
+  This is a stage-2 knob, so it is written into the `.fountain` when the PDF
+  is read: existing scripts keep whatever they were converted with, and only
+  a fresh conversion picks the new default up.
 - **Code:** `src/fountain/serialize.ts` (`printedPageOffset`),
   `src/epub/html.ts` + `src/mobi/html.ts` (synopsis case),
   `src/epub/css.ts` (`span.page-marker`), `src/epub/build.ts` (page-list).
