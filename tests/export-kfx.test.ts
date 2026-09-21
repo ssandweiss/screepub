@@ -1,9 +1,10 @@
-import { test, expect } from 'bun:test';
+import { describe, test, expect } from 'bun:test';
 import { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { platform } from 'node:process';
 import {
+  installKfxPlugin,
   previewerPath,
   kfxStatus,
   toKfx,
@@ -195,3 +196,62 @@ test(
     expect(status.pluginInstalled).toBe(false);
   }),
 );
+
+// ── installing jhowell's plugin without shipping a copy of it ────────
+//
+// The old Swift app carried a 485 KB GPL-3 zip of the KFX Output plugin and
+// installed it with `calibre-customize -a`. That copy was pinned at 2.12.0
+// AND was a fork, so the thing we shipped was already eight minor versions
+// behind the plugin it claimed to be. Vendoring it also meant redistributing
+// someone else's GPL-3 binary and keeping THIRD-PARTY-NOTICES honest about
+// it.
+//
+// We do not ship it now. Calibre's own plugin index is the upstream, and
+// Calibre's own `add_plugin` is the installer, so the newest version is
+// whatever Calibre says it is on the day the user asks. Our part is one
+// `calibre-debug -c` call and reading one JSON line back.
+//
+// This is a WRITE to the user's Calibre and it fetches third-party code over
+// the network, so it is never automatic: something has to ask for it.
+describe('installKfxPlugin', () => {
+  const okLine = (v: string) =>
+    `some calibre chatter\nSCREEPUB_RESULT ${JSON.stringify({ ok: true, version: v })}\n`;
+
+  test('reports the version Calibre actually installed', async () => {
+    const r = await installKfxPlugin(async () => ({ code: 0, stdout: okLine('2.20.1'), stderr: '' }));
+    expect(r.ok).toBe(true);
+    expect(r.version).toBe('2.20.1');
+  });
+
+  test('no Calibre is a named reason, not a throw', async () => {
+    // The ladder still works without KFX — it degrades to AZW3 then MOBI —
+    // so a missing toolchain must never take the caller down with it.
+    const r = await installKfxPlugin(async () => ({ code: 127, stdout: '', stderr: '' }), null);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/calibre/i);
+  });
+
+  test('a failed install carries Calibre’s own words', async () => {
+    const r = await installKfxPlugin(async () => ({
+      code: 1, stdout: '', stderr: 'urlopen error timed out',
+    }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/timed out/);
+  });
+
+  test('output with no result line is refused rather than read as success', async () => {
+    // exit 0 proves calibre-debug ran, not that the plugin landed.
+    const r = await installKfxPlugin(async () => ({ code: 0, stdout: 'hello\n', stderr: '' }));
+    expect(r.ok).toBe(false);
+  });
+
+  test('a result line saying failure is honoured over the exit code', async () => {
+    const r = await installKfxPlugin(async () => ({
+      code: 0,
+      stdout: `SCREEPUB_RESULT ${JSON.stringify({ ok: false, error: 'size mismatch' })}\n`,
+      stderr: '',
+    }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/size mismatch/);
+  });
+});

@@ -57,7 +57,7 @@ Where a decision is `port`, the ADR's rule holds: **the port lands in
 | `update-error-descriptions` | 11 | `port` | Same unit; the difference between a message and "The operation couldn't be completed." |
 | `self-update-installer` | 26 | **`port`** (was `accept-loss`) | macOS codesign pinning and in-place bundle swap. Its own piece, with its own secrets question. |
 | `release-notes-parsing` | 21 | `accept-loss` | Of the Swift assertions only. The feature is replaced in kind and nothing is lost. |
-| `kfx-install-plugin` | not a kit-check section | `accept-loss` | Detection ports; installation is a 485 KB GPL-3 binary and a packaging decision. |
+| `kfx-install-plugin` | not a kit-check section | **`replaced`** (was `accept-loss`) | Detection ports; installation is a 485 KB GPL-3 binary and a packaging decision. |
 
 The four update rows above the installer are deliberately one unit: they are
 `UpdateCheck`'s pure half, they only earn their keep together, and they are
@@ -322,10 +322,35 @@ anywhere, so it belongs in the same decision. `src/export/kfx.ts` ports
 and nothing else, so after F3 the KFX ladder can still *detect* jhowell's KFX
 Output plugin but Screepub can no longer *install* it.
 
-**Cost to port.** The blocker is not the code — it is deciding how a
-`bun build --compile` binary embeds a 485 KB binary asset, which piece A
-deferred by name. Add a GPL-3 vendored binary moving into the repository
-proper, and this is a packaging and licensing task, not an afternoon.
+**RESOLVED 2026-09-20: replaced, and the replacement is better than the
+thing it replaces.** The question was framed as "how does a
+`bun build --compile` binary embed a 485 KB asset", which made it a
+packaging and licensing task. The right answer was to stop carrying the
+asset. `installKfxPlugin` in `src/export/kfx.ts` drives Calibre's OWN plugin
+index and Calibre's OWN `add_plugin`, through one `calibre-debug -c` call,
+so the user gets whatever version is current the day they ask.
+
+That is strictly better than the port would have been. The vendored copy was
+pinned at **2.12.0 and was a FORK** (lcandy2's Traditional-Chinese patch,
+see the old PROVENANCE.md); the index offered **2.20.1** on the day this was
+written. We were shipping something eight minor versions stale and calling
+it jhowell's plugin.
+
+It also drops the GPL-3 redistribution obligation entirely, which removes
+the reason `THIRD-PARTY-NOTICES.md` cited two paths inside
+`app/Packages/KFXKit` — F3 acceptance criterion 13 gets simpler rather than
+harder.
+
+Integrity is the honest limit: the index declares the zip's exact byte size
+and the download is refused unless it matches. There is no signature for
+this plugin to check against. The index fetch uses Calibre's pinned CA; the
+zip download cannot, because the mirror's certificate does not validate
+under that pinning.
+
+**Never automatic.** It writes to the user's Calibre and fetches
+third-party code over a network, so it sits behind an explicit request. It
+is also the only thing in the engine that needs a network at all, which the
+USB-first context in CLAUDE.md otherwise rules out.
 
 **What a user loses.** One step of setup. KFX is the best Kindle format
 Screepub can produce, and today the app can put the plugin into the user's
