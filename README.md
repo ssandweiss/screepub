@@ -236,9 +236,11 @@ app name and version and nothing else. **Install and Relaunch** verifies the
 DMG's Apple signature against this project's Developer ID *and* checks it is the
 exact version offered before swapping anything.
 
-The cross-platform window has fewer: no update check, no external links, and
-no Send-to-Kindle page. Its only network touchpoint is the first one on that
-list, the upload to a docked reMarkable over USB.
+The cross-platform window has fewer, and each one needs your click: the upload
+to a docked reMarkable over USB, and GitHub when you choose **Report a bug**,
+which opens a pre-filled issue in your browser. It has no update check and no
+Send-to-Kindle page yet. Showing a book in your file manager is local and
+reaches nothing.
 
 The one thing worth being clear about: **you** can choose to send a script
 somewhere. If you email it to your `@kindle.com` address, Amazon receives it and
