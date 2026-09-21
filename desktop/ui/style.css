@@ -208,7 +208,12 @@ body {
 
 /* Notes, as a sheet laid over the page. A real <dialog>, so Esc, the focus
  * trap and the restored focus come from the platform rather than from us. */
-.sheet-over {
+/* `display` is on [open] ONLY. A closed <dialog> is hidden by the browser's
+ * own `dialog:not([open]) { display: none }`, and a bare `.sheet-over` rule
+ * outranks it, which left the release notes sitting permanently at the foot
+ * of every surface. It is invisible in a short window and obvious the moment
+ * anyone scrolls, which is exactly the kind of bug that ships. */
+.sheet-over[open] {
   display: flex;
   flex-direction: column;
   align-items: flex-end;

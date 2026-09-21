@@ -512,9 +512,23 @@ function drawPresets() {
     el('p', { class: 'caption presets-note' }, PRESET_NOTE));
 }
 
-function drawGroup(group) {
-  return el('section', { class: 'knob-group' },
-    el('h3', { class: 'subslug knob-group-title' }, group.title),
+/** Which groups arrive open. Only the first: five shut boxes is a surface
+ *  with nothing on it, and eighteen open controls is the wall this replaced.
+ *
+ *  Exported so the rule is a fact rather than an inline literal, and so a
+ *  later "remember what was open" can be added without hunting for where the
+ *  decision was made. */
+export function groupStartsOpen(index) {
+  return index === 0;
+}
+
+function drawGroup(group, index) {
+  // <details> rather than a toggle of our own: the open state, the keyboard
+  // and the announcement all come from the platform. Folding, never
+  // dropping — all five groups and all eighteen knobs are still here, because
+  // a setting that cannot be found still applies to every conversion.
+  return el('details', { class: 'knob-group', open: groupStartsOpen(index) ? '' : null },
+    el('summary', { class: 'subslug knob-group-title' }, group.title),
     group.note ? el('p', { class: 'caption knob-group-note' }, group.note) : null,
     ...group.knobs.map((knob) => drawKnob(knobFor(knob.key))));
 }

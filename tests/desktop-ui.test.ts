@@ -2915,6 +2915,29 @@ describe('the window does not title its own screens as script furniture', () => 
   });
 });
 
+describe('eighteen settings stop arriving as one wall', () => {
+  // All eighteen were open at once, under five headings, which is a long
+  // scroll of controls most of which nobody is looking for. Each group folds
+  // now, and the first is open so the surface never opens as a list of five
+  // shut boxes with nothing to read.
+  let tune: any;
+  beforeAll(async () => { tune = await import(join(UI, 'tune.js')); });
+
+  test('the first group is open and the rest are folded', () => {
+    expect(tune.groupStartsOpen(0)).toBe(true);
+    expect(tune.groupStartsOpen(1)).toBe(false);
+    expect(tune.groupStartsOpen(4)).toBe(false);
+  });
+
+  test('every group is still reachable, none is dropped', () => {
+    // Folding is not hiding: all five headings remain, and all eighteen knobs
+    // remain under them. A "compact" that quietly retired a setting would
+    // leave it applying to every conversion with no way to find it.
+    expect(tune.GROUPS.length).toBe(5);
+    expect(tune.GROUPS.flatMap((g: any) => g.knobs).length).toBe(18);
+  });
+});
+
 describe('the settings explain themselves in the reader\'s words', () => {
   // The copy was carried over from the SwiftUI reader rail rather than
   // written fresh, and it explained MECHANISM to a screenwriter in a
@@ -3132,6 +3155,20 @@ describe('the foot of the page names the release', () => {
     const frame = read('frame.js');
     expect(frame).toContain('RELEASE');
     expect(frame).toContain('revLabel');
+  });
+
+  test('the notes sheet is not on the page while it is shut', () => {
+    // A closed <dialog> is hidden by the browser's own
+    // `dialog:not([open]) { display: none }`, and ANY class selector outranks
+    // that. Giving .sheet-over a display unqualified therefore does not style
+    // the sheet, it un-hides it: the release notes sat permanently at the
+    // foot of every surface, invisible in a short window and obvious the
+    // moment anyone scrolled. Shipped and unnoticed for six commits.
+    const css = read('style.css');
+    const unqualified = css.match(/\.sheet-over\s*\{[^}]*\}/g) ?? [];
+    for (const rule of unqualified) {
+      expect(`unqualified .sheet-over: ${rule}`).not.toContain('display:');
+    }
   });
 
   test('the bar holds four surfaces, and Notes is not one of them', async () => {

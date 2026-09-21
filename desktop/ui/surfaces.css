@@ -488,8 +488,29 @@
 .btn-small { font-size: var(--text-label); padding: 6px 18px; letter-spacing: 0.07em; }
 .btn-small { font-size: var(--text-label); padding: 6px 18px; letter-spacing: 0.07em; }
 
-.knob-group { margin: 0 0 var(--space-8); max-width: var(--measure); }
-.knob-group-title { margin-top: 0; }
+/* Each group folds. Same disclosure vocabulary as the reach table on Send,
+ * so the window has one way of saying "there is more here" rather than two. */
+.knob-group { margin: 0 0 var(--space-6); max-width: var(--measure); }
+.knob-group-title {
+  margin-top: 0;
+  cursor: pointer;
+  list-style: none;
+  transition: color var(--motion-state) var(--ease);
+}
+.knob-group-title::-webkit-details-marker { display: none; }
+.knob-group-title::before {
+  content: "\25B8";
+  display: inline-block;
+  margin-right: var(--space-2);
+  color: var(--brass);
+  transition: transform var(--motion-state) var(--ease);
+}
+.knob-group[open] > .knob-group-title::before { transform: rotate(90deg); }
+.knob-group-title:hover { color: var(--ink); }
+.knob-group-title:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .knob-group-title, .knob-group-title::before { transition: none; }
+}
 .knob-group-note { margin: 0 0 var(--space-3); }
 
 .knob {
