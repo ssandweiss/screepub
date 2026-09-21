@@ -20,6 +20,7 @@ import { adoptSidecar, existingLibraryOutput, libraryOutput } from './library';
 import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from './options';
 import { readScriptSettings } from './settings/sidecar';
 import { resolveCommand, devicesCommand, sendCommand, VERBS, type Verb } from './cli-devices';
+import { updateDecisionCommand, updateShouldCheckCommand } from './cli-update';
 import { settingsCommand } from './cli-settings';
 import { exportCommand } from './cli-export';
 import type { ListDevicesOptions } from './device/list';
@@ -73,6 +74,10 @@ Commands:
                                             read/write a script's own settings
   screepub export <file.epub> [--for kindle|epub] [--json]
                                             the file you would put on a reader
+  screepub update-decision --offered <v> --current <v> [--json]
+                                            should this update be offered? (offline)
+  screepub update-should-check [--opted-in] [--last-checked <ms>] [--json]
+                                            may a check be made now? (offline)
 
 A verb is only a verb when no file of that name exists: a script saved as
 "devices" still converts, and "./devices" always means the file.
@@ -144,10 +149,50 @@ Options:
   -h, --help             show this help
 `;
 
+const UPDATE_DECISION_USAGE = `screepub update-decision — should this update be offered?
+
+Usage:
+  screepub update-decision --offered <version> --current <version> [--json]
+
+Judges; never fetches. You supply the release that was found and the
+build that is running, and get back whether to offer it. Works offline.
+
+Not plain semver, on purpose: a build past a tag calls itself
+0.6.0-1-g965cb10, which semver reads as OLDER than 0.6.0, so a semver
+updater offers the tag and installs a downgrade. This does not.
+
+A refusal is an ANSWER and exits 0 with its reason. Only bad usage
+exits non-zero.
+
+Options:
+  --offered <version>  the release an update check found
+  --current <version>  the build that is running
+  --json               machine-readable result on stdout (for the app)
+  -h, --help           show this help
+`;
+
+const UPDATE_SHOULD_CHECK_USAGE = `screepub update-should-check — may a check be made right now?
+
+Usage:
+  screepub update-should-check [--opted-in] [--last-checked <epoch-ms>] [--json]
+
+Decides; never fetches. Without --opted-in the answer is always no:
+update checks are off by default. With it, at most once a day, and a
+clock set backwards reads as "checked recently", never as overdue.
+
+Options:
+  --opted-in               the user has switched update checks on
+  --last-checked <ms>      when a check last ran, in epoch milliseconds
+  --json                   machine-readable result on stdout (for the app)
+  -h, --help               show this help
+`;
+
 function verbUsage(verb: Verb): string {
   if (verb === 'devices') return DEVICES_USAGE;
   if (verb === 'settings') return SETTINGS_USAGE;
   if (verb === 'export') return EXPORT_USAGE;
+  if (verb === 'update-decision') return UPDATE_DECISION_USAGE;
+  if (verb === 'update-should-check') return UPDATE_SHOULD_CHECK_USAGE;
   return SEND_USAGE;
 }
 
@@ -297,6 +342,10 @@ function parseVerbArgs(args: string[]) {
       for: { type: 'string' },
       fountain: { type: 'string' },
       'options-json': { type: 'string' },
+      offered: { type: 'string' },
+      current: { type: 'string' },
+      'opted-in': { type: 'boolean', default: false },
+      'last-checked': { type: 'string' },
       json: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -318,6 +367,25 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
   }
 
   try {
+    // The update verbs' flags live in the schema every verb shares, so
+    // every OTHER verb has to refuse them. Without this,
+    // `screepub devices --offered 1.0` quietly succeeds, which is the
+    // failure the per-verb rejections below exist to prevent, arriving
+    // through a flag they were written before.
+    if (verb !== 'update-decision' && verb !== 'update-should-check') {
+      const updateFlags: [unknown, string, string][] = [
+        [values.offered, '--offered', 'update-decision'],
+        [values.current, '--current', 'update-decision'],
+        [values['last-checked'], '--last-checked', 'update-should-check'],
+        [values['opted-in'] ? true : undefined, '--opted-in', 'update-should-check'],
+      ];
+      for (const [value, flag, owner] of updateFlags) {
+        if (value !== undefined) {
+          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
+        }
+      }
+    }
+
     if (verb === 'devices') {
       // Rejected rather than ignored, for the same reason `devices extra` is:
       // silently accepting a flag the command cannot act on teaches the user
@@ -350,6 +418,66 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
         return;
       }
       for (const d of devices) console.log(`${d.name} (${d.kind}) — ${d.id}`);
+      return;
+    }
+
+    if (verb === 'update-decision' || verb === 'update-should-check') {
+      // Rejected rather than ignored, the same rule `devices` follows: a
+      // flag this verb cannot act on must not look like it did something.
+      const foreign: [unknown, string, string][] = [
+        [values.device, '--device', 'send'],
+        [values.set, '--set', 'settings'],
+        [values.for, '--for', 'export'],
+        [values.fountain, '--fountain', 'export'],
+        [values['options-json'], '--options-json', 'export'],
+      ];
+      if (verb === 'update-decision') {
+        foreign.push([values['last-checked'], '--last-checked', 'update-should-check']);
+        if (values['opted-in']) foreign.push([true, '--opted-in', 'update-should-check']);
+      } else {
+        foreign.push([values.offered, '--offered', 'update-decision']);
+        foreign.push([values.current, '--current', 'update-decision']);
+      }
+      for (const [value, flag, owner] of foreign) {
+        if (value !== undefined) {
+          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
+        }
+      }
+      if (positionals.length > 0) {
+        fail({ code: 'usage', message: `${verb} takes no arguments (got "${positionals[0]}")` });
+      }
+
+      if (verb === 'update-decision') {
+        let decision: ReturnType<typeof updateDecisionCommand>;
+        try {
+          decision = updateDecisionCommand({ offered: values.offered, current: values.current });
+        } catch (err) {
+          fail({ code: 'usage', message: errorMessage(err) });
+        }
+        if (jsonMode) {
+          console.log(JSON.stringify({ ok: true, ...decision }));
+          return;
+        }
+        // A refusal is an answer, not an error: exit 0 either way.
+        console.log(decision.offer ? `offer ${decision.version}` : `no: ${decision.reason}`);
+        return;
+      }
+
+      let answer: ReturnType<typeof updateShouldCheckCommand>;
+      try {
+        answer = updateShouldCheckCommand({
+          optedIn: values['opted-in'],
+          lastChecked: values['last-checked'],
+          now: Date.now(),
+        });
+      } catch (err) {
+        fail({ code: 'usage', message: errorMessage(err) });
+      }
+      if (jsonMode) {
+        console.log(JSON.stringify({ ok: true, ...answer }));
+        return;
+      }
+      console.log(answer.check ? 'check' : 'do not check');
       return;
     }
 

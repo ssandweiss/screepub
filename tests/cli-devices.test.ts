@@ -69,7 +69,19 @@ test('unknown words and an empty argv are the default path', () => {
 });
 
 test('VERBS is the single list of known verbs', () => {
-  expect([...VERBS]).toEqual(['devices', 'send', 'settings', 'export']);
+  // A pin, so that adding a verb is deliberate. Every name here is a name
+  // a user can no longer give a file without writing ./ in front of it.
+  // The two update verbs joined on 2026-09-21; both are hyphenated on
+  // purpose, since a file called `update-decision` is far less likely to
+  // exist than one called `update`.
+  expect([...VERBS]).toEqual([
+    'devices',
+    'send',
+    'settings',
+    'export',
+    'update-decision',
+    'update-should-check',
+  ]);
 });
 
 import { devicesCommand } from '../src/cli-devices';

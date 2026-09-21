@@ -71,6 +71,11 @@
       "category": "artifact",
       "breaks": "Names Screepub.app — the bundle name the Tauri app takes over at F2."
     },
+    "desktop/ui/feedback.js": {
+      "refs": 4,
+      "category": "note",
+      "breaks": "Comments only. The file is a PORT of app/Sources/ScreepubKit/Feedback.swift and says so, including why it builds the URL with URLSearchParams where the Swift could not. Nothing executes against app/. Same treatment at F3 as the test that cites it: rewrite the provenance to name the commit that ported it rather than deleting the fact that it was ported. This row was missing when the interface pass merged at 4e74939, where the sweep failed on the branch's own tip; added on main with the merge."
+    },
     "desktop/ui/notes.js": {
       "refs": 1,
       "category": "artifact",

@@ -10,7 +10,14 @@ import { deviceId, type ConnectedDevice, type DeviceKind } from './device/types'
 import { copyToDevice } from './device/transfer';
 import { remarkableAccepts, uploadToRemarkable } from './device/remarkable';
 
-export const VERBS = ['devices', 'send', 'settings', 'export'] as const;
+export const VERBS = [
+  'devices',
+  'send',
+  'settings',
+  'export',
+  'update-decision',
+  'update-should-check',
+] as const;
 export type Verb = (typeof VERBS)[number];
 
 export type Command = { kind: 'verb'; verb: Verb; args: string[] } | { kind: 'convert' };
