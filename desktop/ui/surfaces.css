@@ -232,7 +232,23 @@
   font-variant-numeric: tabular-nums; color: var(--ink-muted);
 }
 
-.announce { text-align: center; display: flex; flex-direction: column; gap: 5px; }
+/* The result block sits down the page rather than up against the tabs. It
+ * used to start immediately under them and stop a third of the way down,
+ * leaving the bottom two thirds of the sheet empty — which reads as a page
+ * that failed to finish loading rather than one that has finished its work.
+ * Same treatment the drop well's wordmark gets, for the same reason: this is
+ * the moment the conversion succeeded and it should feel like an arrival. */
+.announce {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: var(--space-9);
+}
+/* A short window has no whitespace to spend on ceremony. */
+@media (max-height: 620px) {
+  .announce { margin-top: var(--space-5); }
+}
 .book-title {
   font-family: var(--font-structure); font-weight: 700; font-size: var(--text-code);
   letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink); margin: 0;
@@ -242,7 +258,7 @@
   font-family: var(--font-structure); font-size: var(--text-ui); line-height: 1.55;
   color: var(--ink); margin: var(--space-1) 0 0; white-space: pre-line;
 }
-.send { display: flex; flex-direction: column; align-items: center; gap: var(--space-4); margin-top: var(--space-7); }
+.send { display: flex; flex-direction: column; align-items: center; gap: var(--space-5); margin-top: var(--space-8); }
 .asides { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-6); }
 .path-note {
   font-family: var(--font-structure); font-size: var(--text-fine);
