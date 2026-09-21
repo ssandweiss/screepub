@@ -532,20 +532,32 @@ jobs:
   # hand-runnable; this job is a thin caller, for the same reason cross-cli
   # is one -- workflow YAML can only be run by cutting a release.
   #
-  # Per-arch DMGs and never a universal one: externalBin resolves
-  # {name}-{target_triple} verbatim, so a universal bundle would need a
-  # third, lipo'd sidecar that tools/build-sidecar.ts cannot make and that
-  # nothing here could verify.
+  # ONE universal macOS DMG, not a per-arch pair. Changed 2026-09-20; this
+  # comment used to say the opposite and explain why, and the reason has
+  # been removed rather than overruled. externalBin still resolves
+  # {name}-{target_triple} verbatim, and `build-sidecar.ts --universal` now
+  # produces exactly that file: it compiles both darwin slices, lipos them
+  # into the name cargo asks for under --target universal-apple-darwin, and
+  # REFUSES the result if it came out thin.
+  #
+  # Why it is worth a workflow change: the frozen Swift updater takes the
+  # FIRST .dmg asset on a release and has no architecture logic. Two DMGs
+  # is an ambiguity it cannot resolve, and per-arch bundles would hand
+  # roughly half of all Mac users an app that cannot open. One artifact is
+  # what makes the handover in docs/adr/2026-09-20-swift-app-migrates-itself.md
+  # possible at all.
   #
   # No AppImage. linuxdeploy runs its own patchelf over the Bun-compiled
   # engine, moves the dynamic section past the 102 MB appended payload, and
   # the extracted engine segfaults. Measured; see the design doc.
   #
-  # `target` and `sidecar` are spelled out as empty strings on the Linux and
-  # Windows rows rather than left off: an absent matrix key is null, and
-  # `null != ''` is FALSE under GitHub's numeric coercion, so the two forms
-  # agree today only by an accident of type casting. Writing them down makes
-  # the step conditions below read as what they are.
+  # `arch` is the only axis now, and every step below reads it. The cargo
+  # triple is NOT restated here: `--arch universal` derives
+  # universal-apple-darwin inside tools/build-app-bundle.ts, which is also
+  # where the rule lives that a universal arch must not carry a per-arch
+  # target. Naming the triple in YAML as well would be a second place for
+  # it to drift, and the drift would be silent -- a thin bundle wearing a
+  # universal name.
   app-bundles:
     needs: checks
     strategy:
@@ -554,20 +566,10 @@ jobs:
         include:
           - os: ubuntu-latest
             arch: x64
-            target: ''
-            sidecar: ''
           - os: macos-15
-            arch: arm64
-            target: aarch64-apple-darwin
-            sidecar: bun-darwin-arm64
-          - os: macos-15
-            arch: x64
-            target: x86_64-apple-darwin
-            sidecar: bun-darwin-x64
+            arch: universal
           - os: windows-latest
             arch: x64
-            target: ''
-            sidecar: ''
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -587,22 +589,38 @@ jobs:
       # which is the same decision cross-cli's own comment records.
       - name: Install the Tauri CLI
         run: cargo install tauri-cli --version 2.11.4 --locked
-      # The macOS legs cross-compile: each needs the Rust target, and a
-      # sidecar named for THAT triple rather than the runner's own.
-      - name: Add the Rust target
-        if: matrix.target != ''
-        run: rustup target add ${{ matrix.target }}
+      # The universal build is TWO real cargo builds fused by lipo, so both
+      # darwin targets must be installed. Naming both rather than only the
+      # one the runner lacks costs nothing -- rustup is a no-op on a target
+      # it already has -- and keeps this correct whichever architecture
+      # GitHub's macos-15 image is on the day it runs.
+      #
+      # `universal-apple-darwin` is tauri's name for the FUSED output and
+      # is not a rustup target. Asking rustup for it by name fails.
+      - name: Add the Rust targets for the universal macOS build
+        if: matrix.arch == 'universal'
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+      # Two shapes, because the matrix has two. There is no per-arch
+      # --target branch any more: the two macOS rows became one universal
+      # row, and a branch no row reaches is a branch no run proves. The
+      # unknown case is an ERROR rather than a silent fall-through to
+      # --host, because a leg that meant to cross-compile and quietly built
+      # for the runner is how a foreign engine gets inside a download with
+      # nothing failing until someone opens the window.
       - name: Build the engine sidecar
         shell: bash
         env:
-          SIDECAR: ${{ matrix.sidecar }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          if [ -n "$SIDECAR" ]; then
-            bun tools/build-sidecar.ts --target "$SIDECAR"
-          else
-            bun tools/build-sidecar.ts --host
-          fi
+          case "$ARCH" in
+            universal) bun tools/build-sidecar.ts --universal ;;
+            x64)       bun tools/build-sidecar.ts --host ;;
+            *)
+              echo "::error::matrix arch '$ARCH' is not a shape this step builds. Use 'universal' (macOS) or 'x64' (build for the runner)."
+              exit 1
+              ;;
+          esac
       # Signing and notarization are tauri-bundler's own, read from the
       # secrets docs/release-secrets.md already documents under different
       # names. macos/sign.rs builds its own keychain and imports the
@@ -626,7 +644,7 @@ jobs:
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
-          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
           # Read by tauri-bundler's macos/sign.rs, which reads its OWN
           # variable names. Empty on Linux and Windows, where the bundler
           # skips signing entirely. APPLE_SIGNING_IDENTITY is a SUBSTRING
@@ -644,26 +662,28 @@ jobs:
           # The TAG, never package.json: a version mismatch must fail the
           # build rather than ship a bundle that misreports itself.
           ARGS=(--version "${TAG#v}" --out bundles)
-          if [ -n "$TARGET" ]; then
-            ARGS+=(--target "$TARGET" --config tauri.transition.conf.json)
+          if [ "$ARCH" = universal ]; then
+            # --arch and never --target: build-app-bundle.ts derives
+            # universal-apple-darwin from the arch, precisely so the two
+            # cannot disagree. A universal arch carrying a per-arch target
+            # would produce a thin bundle wearing a universal name.
+            ARGS+=(--arch universal --config tauri.transition.conf.json)
           fi
           bun tools/build-app-bundle.ts ${ARGS[@]+"${ARGS[@]}"}
       # Cross-compiling is not cross-testing, and bundling is not running.
-      # Each bundle is opened and its engine executed here, on the machine
-      # that built it. The x86_64 DMG built on an arm64 runner is the one
-      # exception, and this step says so out loud rather than exiting 0 and
-      # letting a green tick imply otherwise.
+      # Every bundle is opened and its engine executed here, on the machine
+      # that built it. Nothing skips the loop any more: the x86_64 DMG used
+      # to exit 0 having run nothing, and the universal DMG that replaced
+      # it carries a slice this runner CAN execute. What a green tick still
+      # must not imply is that BOTH slices were exercised, so the notice
+      # survives, now describing half an artifact rather than a whole one.
       - name: Run the engine out of each bundle
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
-          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          if [ "$TARGET" = "x86_64-apple-darwin" ]; then
-            echo "::notice::The x86_64 DMG was cross-compiled on an arm64 runner, so its engine is an Intel binary this machine cannot execute. It ships built, verified, signed and notarized, and its engine is NOT smoke-tested anywhere."
-            exit 0
-          fi
           N=0
           for B in bundles/*.deb bundles/*.rpm bundles/*.dmg bundles/*.exe; do
             [ -e "$B" ] || continue
@@ -678,6 +698,11 @@ jobs:
             exit 1
           fi
           echo "$N bundle(s) smoke-tested on this runner."
+          # Read off the runner rather than hardcoded, so the sentence stays
+          # true if GitHub's macos image changes architecture.
+          if [ "$ARCH" = universal ]; then
+            echo "::notice::The macOS DMG is universal. The smoke test above ran its $(uname -m) slice out of the mounted image; the OTHER slice ships built, verified, signed and notarized with its engine executed nowhere."
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: app-bundles-${{ matrix.os }}-${{ matrix.arch }}
@@ -723,13 +748,20 @@ jobs:
           cd app
           rm -f SHA256SUMS-app
           sha256sum *.deb *.rpm *.dmg *.exe > SHA256SUMS-app
-          # Exactly what the four legs produce between them: one .deb, one
-          # .rpm, two per-arch .dmg and one .exe. fail-fast is false, so a
+          # Exactly what the three legs produce between them: one .deb, one
+          # .rpm, ONE universal .dmg and one .exe. fail-fast is false, so a
           # leg that died would otherwise publish a shorter checksums file
           # that verified perfectly against itself.
+          #
+          # It also catches the opposite, which is now the more dangerous
+          # direction: a SECOND .dmg reaching this release. Every glob would
+          # still match and sha256sum would still succeed, but the frozen
+          # Swift updater takes the FIRST .dmg asset and has no way to
+          # choose between two. One artifact is what makes that choice
+          # unambiguous, and this count is what keeps it at one.
           LINES="$(wc -l < SHA256SUMS-app)"
-          if [ "$LINES" -ne 5 ]; then
-            echo "::error::expected 5 app bundles from the four legs, got $LINES:"
+          if [ "$LINES" -ne 4 ]; then
+            echo "::error::expected 4 app bundles from the three legs, got $LINES:"
             cat SHA256SUMS-app
             exit 1
           fi

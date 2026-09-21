@@ -746,8 +746,9 @@ The honest version of this app's status, kept here so that the next person
 does not have to infer it from a green checkmark. Three lists, and an item
 only moves up one when somebody does the thing.
 
-**Verified on a real machine, by a person** (2026-09-14, one machine:
-aarch64-unknown-linux-gnu, Arch/Asahi, live Hyprland session):
+**Verified on a real machine, by a person** (2026-09-14 on
+aarch64-unknown-linux-gnu, Arch/Asahi, live Hyprland session; 2026-09-20 on
+an Apple Silicon Mac):
 
 - `Screepub_0.6.0_arm64.deb` and `Screepub-0.6.0-1.aarch64.rpm` build, and
   both contain the engine, `LICENSE`, `THIRD-PARTY-NOTICES.md`, four icon
@@ -769,6 +770,19 @@ aarch64-unknown-linux-gnu, Arch/Asahi, live Hyprland session):
 - `cargo tauri build --config tauri.transition.conf.json` is accepted by
   `tauri-cli 2.11.4` and reaches `productName`, producing a throwaway
   `Screepub Desktop_0.6.0_arm64.deb`.
+- **Gate 1b, 2026-09-20: the macOS app was installed and used.** A
+  universal `.dmg` built here (`bun tools/build-sidecar.ts --universal`,
+  then `--arch universal`) was mounted, dragged to `/Applications`,
+  launched from there past Gatekeeper, and used to convert TWO real feature
+  scripts. Evidence beyond "a window opened": the app's own `.fountain` for
+  one of those scripts is byte-for-byte identical to a fresh
+  `bun src/cli.ts` run over the same PDF, and its EPUB matches the CLI's on
+  scene headings (162) and mini-slugs (19). Note the architecture here too:
+  the DMG is universal and holds both slices, but the machine that ran it
+  is Apple Silicon, so it is the ARM slice that executed. The Intel slice
+  has been built and never run, by anyone.
+- The DMG was built HERE, not downloaded from a release. `release.yml` has
+  still never produced one; see the CI section below.
 
 **Verified only by CI, and only as far as CI can reach.** `desktop.yml` ran
 for the first time on 2026-09-14 (run 34876329117), and **all three legs
@@ -797,22 +811,28 @@ on reading `tauri-bundler`'s source and on unit tests driven by fakes.
 
 **Verified by nobody:**
 
-- Installing any of these. No `.deb`, `.rpm`, `.dmg` or `.exe` has been
-  installed on a real machine.
-- The window, on macOS or on Windows. No runner has a display, so the GUI
-  half of the app has never been exercised off Linux, and the workflows that
-  would at least compile it have never run.
-- Any `.dmg` or NSIS installer at all. Neither has been produced on any
-  machine, by CI or by hand.
-- The `x86_64-apple-darwin` `.dmg` specifically. It is cross-compiled on an
-  Apple Silicon runner, so even when CI does run, its engine is executed
-  nowhere: it is built, verified as a container, signed and published. The
-  release job prints a `::notice::` saying exactly that instead of exiting 0
-  quietly.
-- Gatekeeper actually accepting the notarized bundle, and SmartScreen
-  actually showing the screen `README.md` describes.
+- Installing the `.deb`, the `.rpm` or the `.exe`. None has been installed
+  on a real machine. (The macOS `.dmg` moved off this list on 2026-09-20;
+  see gate 1b above.)
+- The window on Windows. No runner has a display, so the GUI half of the
+  app has never been exercised there, and gate 1c is deferred indefinitely.
+- Any NSIS installer, opened by a person. CI produces one and runs the
+  engine out of it; nobody has run the installer itself.
+- The Intel SLICE of the universal macOS `.dmg`. This used to be a whole
+  separate download, cross-compiled and executed nowhere. It is now half of
+  one artifact: CI opens the universal DMG and runs its ARM slice, and the
+  x86-64 slice is built, verified as a container, signed and published
+  without ever executing. The release job prints a `::notice::` naming the
+  slice that ran, rather than exiting 0 quietly.
+- Any bundle that came off `release.yml`. Everything installed or opened so
+  far was built by hand or by `desktop.yml`; no tag has ever produced one,
+  which is also why nothing in this repository has ever been SIGNED by the
+  release path.
+- Gatekeeper accepting a NOTARIZED bundle, and SmartScreen actually showing
+  the screen `README.md` describes. The DMG gate 1b installed was signed
+  locally, not notarized by the release path.
 - The launcher entry, exercised by a desktop environment. The app has only
-  ever been started from a shell.
+  ever been started from a shell or from `/Applications`.
 
 No sentence in `README.md`, `site/index.html` or the release notes may move
 an item up this list without someone doing the thing.

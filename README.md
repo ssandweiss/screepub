@@ -150,8 +150,7 @@ tune its formatting, send it to a reader, and the release notes.
 | --- | --- |
 | Linux, Debian or Ubuntu, Intel or AMD | `Screepub_0.6.0_amd64.deb` |
 | Linux, Fedora or openSUSE, Intel or AMD | `Screepub-0.6.0-1.x86_64.rpm` |
-| macOS, Apple Silicon | `Screepub-Desktop-macOS-arm64.dmg` |
-| macOS, Intel | `Screepub-Desktop-macOS-x64.dmg` |
+| macOS, Apple Silicon or Intel | `Screepub-Desktop-macOS-universal.dmg` |
 | Windows, 64-bit | `Screepub-0.6.0-setup.exe` |
 
 ```bash
@@ -160,7 +159,7 @@ sudo dnf install ./Screepub-0.6.0-1.x86_64.rpm     # Fedora
 sudo zypper install ./Screepub-0.6.0-1.x86_64.rpm  # openSUSE
 ```
 
-`SHA256SUMS-app` on the release page covers these five files. (`SHA256SUMS`,
+`SHA256SUMS-app` on the release page covers these four files. (`SHA256SUMS`,
 beside it, covers the three command-line downloads.) There is no Linux ARM
 package: no ARM runner builds one, and shipping a filename nothing produces
 is worse than shipping nothing. `tools/build-app-bundle.ts` makes one by
@@ -168,10 +167,10 @@ hand on an ARM machine if you want it.
 
 **On a Mac, `Screepub-macOS.dmg` is still the supported download.** It
 installs `Screepub.app` and it is the one this project has been shipping.
-The two `Screepub-Desktop-macOS-*.dmg` files are the new cross-platform app;
-they install `Screepub Desktop.app`, a different name and a different bundle
-identifier from the Mac app's, so installing one is not installing over the
-other. Both write into `~/Documents/Screepub/` by default, in different
+`Screepub-Desktop-macOS-universal.dmg` is the new cross-platform app, one
+download that runs on Apple Silicon and Intel alike; it installs
+`Screepub Desktop.app`, a different name and a different bundle identifier
+from the Mac app's, so installing it is not installing over the other. Both write into `~/Documents/Screepub/` by default, in different
 shapes — see [the library](#the-library) below. When the new app replaces the
 old one, that name goes back to `Screepub.app`.
 
@@ -186,18 +185,21 @@ WebView2 runtime if the machine has none — Windows 11 ships it, Windows 10
 may not — and fetches it from Microsoft at install time. Converting itself
 never touches the network, on any platform, and never has.
 
-**Nobody has installed these yet.** The release path is built to open four of
-the five bundles and run the engine out of each before anything is published
-— that catches a broken payload, and catches nothing a person would notice
-about the window. It has not run yet either: 0.6.0 is the first release that
-will exercise it. These have
-never been installed on a real machine: not the `.deb`, not the `.rpm`, not
-a `.dmg`, not the installer, by anyone. The window itself has only ever been
-started on Linux: no build runner has a display, so on macOS and Windows
-nobody has started, clicked or looked at it. The Intel Mac DMG is the fifth
-and the least proven — it is cross-compiled on an Apple Silicon runner, so
-not even its engine has been executed anywhere. Treat 0.6.0's app downloads
-as a first release that wants your bug reports.
+**What has been installed, and by whom.** On a Mac, one person has mounted
+the universal `.dmg`, dragged the app to `/Applications`, launched it past
+Gatekeeper and converted two real feature scripts with it. That is one
+person on one machine, and it is the most anyone has done with any of these.
+The `.deb`, the `.rpm` and the Windows installer have never been installed
+on a real machine by anyone. The release path opens all four bundles and
+runs the engine out of each before anything is published: that catches a
+broken payload, and catches nothing a person would notice about the window.
+It has not run yet either, because 0.6.0 is the first release that will
+exercise it. The window itself has been opened on Linux and on macOS, never
+on Windows: no build runner has a display, so nobody has started, clicked or
+looked at it there. And half of the Mac download is unexercised. It is a
+universal build, and only its Apple Silicon slice has ever been run: the
+Intel slice ships built, signed, and executed nowhere. Treat 0.6.0's app
+downloads as a first release that wants your bug reports.
 
 Build instructions, and a ledger of exactly who has verified what:
 [`desktop/README.md`](desktop/README.md).
