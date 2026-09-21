@@ -35,6 +35,33 @@ So the rule survives literally: the shell still registers two commands,
 and "Rust is a window" stays true in the strongest available sense, which
 is that there is almost no Rust.
 
+**Corrected 2026-09-21, before this was acted on.** A first draft said the
+grant gives the window "access to plugins that exist, not new plugins".
+True of `dialog`, which is already a dependency and already initialised in
+`main.rs`. NOT true of the reveal: `tauri-plugin-opener` is a separate
+crate and is the only one that "reveals" a file in the system file
+explorer, where `tauri-plugin-shell`'s open would open the containing
+folder without selecting the file.
+
+So Show in Finder costs one new dependency, and this ADR says so rather
+than hiding it behind "a line in a manifest". The decision does not
+change; one word of the argument does. The shims cost **one new crate and
+some scoped permissions**, not zero crates. Still no new commands, still
+no new logic in Rust, and the crate is a first-party Tauri plugin whose
+whole job is handing a path or a URL to the OS, which is the definition
+of a door.
+
+Raised by the interface-pass session, which checked `Cargo.toml` and
+found two plugin dependencies where this ADR implied three. Verified here
+against the plugin's own documentation before the wording changed.
+
+**The grants are SCOPED, which is what keeps this cheap.** The opener
+plugin takes allow-lists: `opener:allow-open-url` can name the hosts it
+may reach and `opener:allow-open-path` the paths. The window is not
+granted "open anything"; it is granted the bug tracker, Amazon's two
+pages, and the library. Write the scopes with the permissions, not
+afterwards.
+
 What this buys, and it is six of the nine gaps the audit found: Apple
 Books, Send-to-Kindle, email-to-Kindle, save-a-copy, Report a Bug, and
 Show in Finder.
