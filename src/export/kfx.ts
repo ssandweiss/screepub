@@ -181,7 +181,28 @@ import bz2, io, json, os, tempfile, urllib.request, zipfile
 try:
     from calibre.utils.https import get_https_resource_securely
     from calibre.gui2.dialogs.plugin_updater import INDEX_URL
-    from calibre.customize.ui import add_plugin
+    from calibre.customize.ui import (
+        add_plugin, initialized_plugins, output_format_plugins, remove_plugin)
+    # Clear FORKS first. A variant registers the same internal package
+    # (calibre_plugins.kfx_output) under a different plugin NAME, so calibre
+    # happily holds both and the new plugin's code then imports the fork's
+    # kfxlib -- KFX conversion dies with ImportError and the toolchain still
+    # reports ready. Adding without clearing is worse than not installing.
+    #
+    # Only CONVERSION OUTPUT plugins can collide for the .kfx slot, and
+    # calibre is asked which those are rather than guessed at by name. A
+    # name-only test also matched "Set KFX metadata (from KFX Output)",
+    # which is the companion metadata writer shipping in the same zip, and
+    # deleted it; it survived only because add_plugin put it back.
+    outs = set()
+    for p in output_format_plugins():
+        outs.add(getattr(p, 'name', ''))
+    removed = []
+    for p in list(initialized_plugins()):
+        n = getattr(p, 'name', '')
+        if n in outs and 'KFX Output' in n and n != 'KFX Output':
+            remove_plugin(p)
+            removed.append(n)
     idx = json.loads(bz2.decompress(get_https_resource_securely(INDEX_URL)).decode('utf-8'))
     meta = idx.get('KFX Output')
     if meta is None:
@@ -199,7 +220,7 @@ try:
     finally:
         os.unlink(path)
     print('SCREEPUB_RESULT ' + json.dumps(
-        {'ok': True, 'version': '.'.join(map(str, meta['version']))}))
+        {'ok': True, 'version': '.'.join(map(str, meta['version'])), 'removed': removed}))
 except Exception as e:
     print('SCREEPUB_RESULT ' + json.dumps({'ok': False, 'error': str(e)}))
 `;
@@ -210,6 +231,11 @@ export interface KfxInstallResult {
   version?: string;
   /** Why not, in words a user can act on. */
   reason?: string;
+  /** Conflicting KFX forks cleared to make room. Usually empty; non-empty
+   *  for anyone upgrading from the Swift app's vendored copy, which
+   *  installs under a different NAME and would otherwise break conversion
+   *  outright. Worth surfacing: we removed something they installed. */
+  removed?: string[];
 }
 
 type DebugRunner = (argv: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
@@ -248,9 +274,11 @@ export async function installKfxPlugin(
   }
   try {
     const parsed = JSON.parse(line.slice('SCREEPUB_RESULT '.length)) as {
-      ok?: boolean; version?: string; error?: string;
+      ok?: boolean; version?: string; error?: string; removed?: string[];
     };
-    if (parsed.ok && parsed.version) return { ok: true, version: parsed.version };
+    if (parsed.ok && parsed.version) {
+      return { ok: true, version: parsed.version, removed: parsed.removed ?? [] };
+    }
     return { ok: false, reason: parsed.error ?? 'calibre reported a failure with no reason' };
   } catch {
     return { ok: false, reason: `could not read calibre's answer: ${line.slice(0, 200)}` };
