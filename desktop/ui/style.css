@@ -150,8 +150,23 @@ body {
 }
 .tab:hover:not(:disabled) { color: var(--ink); }
 .tab-on { color: var(--ink); border-bottom-color: var(--brass); }
-.tab:disabled { opacity: 0.35; cursor: default; }
 .tab:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+
+/* The bar grows when a script lands. Three tabs appearing in the same frame
+ * reads as a flicker; in sequence it reads as the bar being built, which is
+ * what actually happened. The stagger is by position so the order is the
+ * bar's, not the order enable() was called in.
+ *
+ * There is no rule for a disabled tab any more. A surface with nothing behind
+ * it is absent, not dimmed — see tabPresence() in frame.js. */
+@keyframes tab-arrive {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: none; }
+}
+.tab-arriving { animation: tab-arrive var(--motion-state) var(--ease) both; }
+.tab:nth-child(3).tab-arriving { animation-delay: 70ms; }
+.tab:nth-child(4).tab-arriving { animation-delay: 140ms; }
+.tab:nth-child(5).tab-arriving { animation-delay: 210ms; }
 
 /* The engine's own name for itself, at the foot of the page the way a
  * revision stamp sits on a script. Quiet, and on the paper rather than on
@@ -195,4 +210,8 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .tab { transition: none; }
+  /* The tabs still arrive, they just arrive at once. `animation: none` rather
+   * than a zero duration so the `both` fill mode cannot leave one holding its
+   * opening frame at opacity 0. */
+  .tab-arriving { animation: none; }
 }

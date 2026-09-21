@@ -2896,6 +2896,43 @@ describe('the window does not title its own screens as script furniture', () => 
   });
 });
 
+describe('a surface with nothing behind it is absent, not dimmed', () => {
+  // Read, Tune and Send were DISABLED before a conversion, which drew three
+  // greyed words in the bar advertising doors that do not open. Worse for a
+  // screen reader, which reads a disabled control out and then refuses it.
+  // The rule lives in a pure function so it can be tested without a DOM, the
+  // same split convert.js, read.js and tune.js already use.
+  const presence = async () =>
+    (await import(join(UI, 'frame.js'))) as {
+      tabPresence?: (available: boolean, selected: boolean) => { hidden: boolean; tabIndex: number };
+    };
+
+  test('an unreachable surface is off the bar and off the keyboard', async () => {
+    const { tabPresence } = await presence();
+    expect(tabPresence?.(false, false)).toEqual({ hidden: true, tabIndex: -1 });
+  });
+
+  test('an unreachable surface stays off the keyboard even if it was the one showing', async () => {
+    // enable() moves away from a surface it is switching off, but the two
+    // facts arrive separately, and a tab that kept tabIndex 0 while hidden is
+    // a focus stop pointing at nothing.
+    const { tabPresence } = await presence();
+    expect(tabPresence?.(false, true)).toEqual({ hidden: true, tabIndex: -1 });
+  });
+
+  test('the open surface is the bar\'s single tab stop', async () => {
+    const { tabPresence } = await presence();
+    expect(tabPresence?.(true, true)).toEqual({ hidden: false, tabIndex: 0 });
+  });
+
+  test('a reachable surface that is not open is visible but not a tab stop', async () => {
+    // Roving tabindex: one stop for Tab, then the arrows move inside. Five
+    // stops would put every surface five presses further away than the last.
+    const { tabPresence } = await presence();
+    expect(tabPresence?.(true, false)).toEqual({ hidden: false, tabIndex: -1 });
+  });
+});
+
 describe('the drop well states one guard, not two', () => {
   // The engine guards four failures and two were checkable at a glance, so
   // the well named both: a scan, and a password-locked file. The maintainer

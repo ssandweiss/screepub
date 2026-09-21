@@ -54,6 +54,24 @@ const DEFS = `<defs>
   </symbol>
 </defs>`;
 
+/** Whether a surface's tab is on the bar at all, and whether it is the
+ *  keyboard's one stop there. Pure, so the rule can be read and tested
+ *  without a DOM.
+ *
+ *  A surface with nothing behind it is ABSENT rather than dimmed. Three
+ *  greyed words advertise doors that do not open, and a disabled control is
+ *  worse than useless to a screen reader: it is announced, and then refused.
+ *
+ *  The tabIndex half is the roving-tabindex rule the tablist already had:
+ *  one stop for Tab, then the arrows move inside. It is answered here too
+ *  because the two facts arrive separately — enable() and setSurface() are
+ *  different calls — and a tab left at 0 while hidden is a focus stop
+ *  pointing at nothing. */
+export function tabPresence(available, selected) {
+  if (!available) return { hidden: true, tabIndex: -1 };
+  return { hidden: false, tabIndex: selected ? 0 : -1 };
+}
+
 function svgUse(cls, symbol) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', cls);
@@ -100,6 +118,14 @@ export function mountFrame(root) {
 
   root.append(defs, page, rail);
 
+  /** `disabled` is where a tab's availability is kept, so presence is derived
+   *  from it rather than tracked twice. */
+  function applyPresence(tab, selected) {
+    const { hidden, tabIndex } = tabPresence(!tab.disabled, selected);
+    tab.hidden = hidden;
+    tab.tabIndex = tabIndex;
+  }
+
   function setSurface(id) {
     if (id === current) return;
     current = id;
@@ -107,10 +133,7 @@ export function mountFrame(root) {
       const mine = tab.id === `tab-${id}`;
       tab.setAttribute('aria-selected', mine ? 'true' : 'false');
       tab.classList.toggle('tab-on', mine);
-      // Roving tabindex: one stop for Tab, then the arrows move inside.
-      // Five tabs in the Tab order would make every surface five presses
-      // further away than the one before it.
-      tab.tabIndex = mine ? 0 : -1;
+      applyPresence(tab, mine);
     }
     for (const handler of handlers) handler(id);
   }
@@ -146,10 +169,21 @@ export function mountFrame(root) {
     setSurface,
     onSurface: (handler) => handlers.push(handler),
     enable: (id, on) => {
-      tabFor(id).disabled = !on;
+      const tab = tabFor(id);
+      const arriving = on && tab.hidden;
+      tab.disabled = !on;
+      applyPresence(tab, tab.id === `tab-${current}`);
       // Never leave the reader standing on a surface that has just gone
       // dark: the panel would be there with nothing in it.
       if (!on && current === id) setSurface('convert');
+      // Only on the way IN, and only from actually absent. Re-running it on
+      // every scriptChanged would replay the arrival each time a setting
+      // moved, which is how a nice moment becomes a twitch.
+      if (arriving) {
+        tab.classList.remove('tab-arriving');
+        void tab.offsetWidth; // restart the animation for a second script
+        tab.classList.add('tab-arriving');
+      }
     },
   };
 }
