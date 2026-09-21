@@ -45,19 +45,28 @@ Where a decision is `port`, the ADR's rule holds: **the port lands in
 
 ## The decisions
 
-| Section | Checks | Decision (SETTLED 2026-09-14) | In one line |
-| --- | --- | --- | --- |
-| `send-menu` | 45 | `port` | The ordering, the remembered choice and the catalog are pure logic and the largest single block of unreplaced coverage. |
-| `mail-and-books` | 5 | `port` | Apple Books is the product's only route to an iPhone; it is one `open`. |
-| `feedback-url` | 5 | `port` | ~20 lines of pure URL building, and the only bug-report path the product has. |
-| `engine-cancellation` | 10 (part) | `port` | A long conversion that cannot be stopped is a regression a user meets on day one. |
-| `updater-version-compare` | 17 | `port` | Pure; carries a downgrade defence that was found the hard way once already. |
-| `update-selection` | 17 | `port` | Same unit as the above: pure, no network, no keys. |
-| `update-decoding` | 14 | `port` | Same unit. |
-| `update-error-descriptions` | 11 | `port` | Same unit; the difference between a message and "The operation couldn't be completed." |
-| `self-update-installer` | 26 | **`port`** (was `accept-loss`) | macOS codesign pinning and in-place bundle swap. Its own piece, with its own secrets question. |
-| `release-notes-parsing` | 21 | `accept-loss` | Of the Swift assertions only. The feature is replaced in kind and nothing is lost. |
-| `kfx-install-plugin` | not a kit-check section | **`replaced`** (was `accept-loss`) | Detection ports; installation is a 485 KB GPL-3 binary and a packaging decision. |
+**AS BUILT, 2026-09-21: none of the `port` rows below have been built.**
+A parity audit against the code found every one of them at zero lines in
+the Tauri app, and no test covering any of them. `Decision` is what was
+SETTLED on 2026-09-14; `Built` is what exists. They were being read as the
+same thing for a week. See [the parity audit](parity-audit.md), which also
+names four features this table does not: the feedback and Report-a-Bug
+links, Show in Finder, the unreachable KFX plugin installer, and the
+gear's three settings.
+
+| Section | Checks | Decision (SETTLED 2026-09-14) | Built? | In one line |
+| --- | --- | --- | --- | --- |
+| `send-menu` | 45 | `port` | **no** | The ordering, the remembered choice and the catalog are pure logic and the largest single block of unreplaced coverage. |
+| `mail-and-books` | 5 | `port` | **no** | Apple Books is the product's only route to an iPhone; it is one `open`. |
+| `feedback-url` | 5 | `port` | **no** | ~20 lines of pure URL building, and the only bug-report path the product has. |
+| `engine-cancellation` | 10 (part) | **`out`**, owner, 2026-09-21 | n/a | Was `port`. Put back to the owner after gate 2, with desktop/README.md's note that a kill handle means a third Rust command; the answer was no. Not open. |
+| `updater-version-compare` | 17 | `port` | **no** | Pure; carries a downgrade defence that was found the hard way once already. |
+| `update-selection` | 17 | `port` | **no** | Same unit as the above: pure, no network, no keys. |
+| `update-decoding` | 14 | `port` | **no** | Same unit. |
+| `update-error-descriptions` | 11 | `port` | **no** | Same unit; the difference between a message and "The operation couldn't be completed." |
+| `self-update-installer` | 26 | **`port`** (was `accept-loss`) | **no** | macOS codesign pinning and in-place bundle swap. Its own piece, with its own secrets question. |
+| `release-notes-parsing` | 21 | `accept-loss` | yes, in kind | Of the Swift assertions only. The feature is replaced in kind and nothing is lost. |
+| `kfx-install-plugin` | not a kit-check section | **`replaced`** (was `accept-loss`) | engine yes, **UNREACHABLE** | Detection ports; installation is a 485 KB GPL-3 binary and a packaging decision. |
 
 The four update rows above the installer are deliberately one unit: they are
 `UpdateCheck`'s pure half, they only earn their keep together, and they are
