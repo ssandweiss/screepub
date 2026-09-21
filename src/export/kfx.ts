@@ -4,10 +4,9 @@
 // macOS and Windows only: on Linux this rung is simply never ready, and
 // formats.ts's ladder degrades to AZW3 without any special-casing.
 //
-// Plugin INSTALLATION is deferred to piece C — it needs the vendored 485 KB
-// zip, and how a `bun build --compile` binary embeds a binary asset is a
-// packaging decision that belongs with app packaging. This module reads
-// (discovery, status) and performs one write (conversion).
+// Plugin INSTALLATION lives at the bottom of this file. It used to be
+// deferred because it "needs the vendored 485 KB zip"; there is no zip now,
+// and that is the point — see the comment above installKfxPlugin.
 import { existsSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { platform } from 'node:process';
@@ -149,4 +148,111 @@ export async function toKfx(
     throw error;
   }
   return kfx;
+}
+
+// ── installing jhowell's plugin, without shipping a copy of it ───────
+//
+// The header above says installation was deferred because it "needs the
+// vendored 485 KB zip". That premise is gone: there is no zip. Calibre's
+// own plugin index is the upstream and Calibre's own add_plugin is the
+// installer, so the user gets whatever version is current on the day they
+// ask rather than whatever we last vendored. The Swift app's copy was
+// pinned at 2.12.0 and was a FORK; the index currently offers 2.20.1.
+//
+// Not shipping it also drops a GPL-3 redistribution obligation and the
+// THIRD-PARTY-NOTICES entries that went with it.
+//
+// This runs inside Calibre's Python (`calibre-debug -c`) because everything
+// it needs lives there: bz2 for the index, Calibre's cert-pinned fetch for
+// the index itself, and add_plugin. Our side is one spawn and one JSON line.
+//
+// Integrity: the index declares the zip's exact byte size and the download
+// is refused unless it matches. That is weaker than a signature, which does
+// not exist for this plugin, and it is the honest limit of what can be
+// checked. The index fetch uses Calibre's pinned CA; the zip download
+// cannot, because the mirror's cert does not validate under that pinning.
+//
+// NEVER call this on its own initiative. It writes to the user's Calibre
+// and fetches third-party code over the network, so it belongs behind an
+// explicit request. It is also the one thing in this module that needs a
+// network at all (registry: everything else works offline).
+const INSTALL_SNIPPET = `
+import bz2, io, json, os, tempfile, urllib.request, zipfile
+try:
+    from calibre.utils.https import get_https_resource_securely
+    from calibre.gui2.dialogs.plugin_updater import INDEX_URL
+    from calibre.customize.ui import add_plugin
+    idx = json.loads(bz2.decompress(get_https_resource_securely(INDEX_URL)).decode('utf-8'))
+    meta = idx.get('KFX Output')
+    if meta is None:
+        raise RuntimeError('KFX Output is not in calibre\\'s plugin index')
+    data = urllib.request.urlopen(
+        'https://plugins.calibre-ebook.com/' + meta['file'], timeout=120).read()
+    if len(data) != meta['size']:
+        raise RuntimeError('downloaded %d bytes, index says %d' % (len(data), meta['size']))
+    if '__init__.py' not in zipfile.ZipFile(io.BytesIO(data)).namelist():
+        raise RuntimeError('downloaded file is not a calibre plugin')
+    fd, path = tempfile.mkstemp(suffix='.zip')
+    try:
+        os.write(fd, data); os.close(fd)
+        add_plugin(path)
+    finally:
+        os.unlink(path)
+    print('SCREEPUB_RESULT ' + json.dumps(
+        {'ok': True, 'version': '.'.join(map(str, meta['version']))}))
+except Exception as e:
+    print('SCREEPUB_RESULT ' + json.dumps({'ok': False, 'error': str(e)}))
+`;
+
+export interface KfxInstallResult {
+  ok: boolean;
+  /** The version Calibre installed, when it succeeded. */
+  version?: string;
+  /** Why not, in words a user can act on. */
+  reason?: string;
+}
+
+type DebugRunner = (argv: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
+
+const realDebugRun: DebugRunner = async (argv) => {
+  const proc = Bun.spawn(argv, { stdout: 'pipe', stderr: 'pipe' });
+  const [code, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  return { code, stdout, stderr };
+};
+
+/**
+ * Install (or update to) the current KFX Output plugin, using Calibre's own
+ * index and installer. Never throws: the KFX rung is the top of a ladder
+ * that degrades to AZW3 then MOBI, so a failure here must not take the
+ * caller down with it.
+ */
+export async function installKfxPlugin(
+  run: DebugRunner = realDebugRun,
+  debugTool: string | null = calibreTool('calibre-debug'),
+): Promise<KfxInstallResult> {
+  if (!debugTool) {
+    return { ok: false, reason: "Calibre was not found, and the plugin lives inside it." };
+  }
+  const { code, stdout, stderr } = await run([debugTool, '-c', INSTALL_SNIPPET]);
+  // The result LINE decides, not the exit code: calibre-debug exits 0 for a
+  // snippet that caught its own exception, so a bare exit code would read a
+  // reported failure as success.
+  const line = stdout.split('\n').find((l) => l.startsWith('SCREEPUB_RESULT '));
+  if (!line) {
+    const detail = (stderr.trim() || stdout.trim() || `calibre-debug exited ${code}`).slice(0, 400);
+    return { ok: false, reason: detail };
+  }
+  try {
+    const parsed = JSON.parse(line.slice('SCREEPUB_RESULT '.length)) as {
+      ok?: boolean; version?: string; error?: string;
+    };
+    if (parsed.ok && parsed.version) return { ok: true, version: parsed.version };
+    return { ok: false, reason: parsed.error ?? 'calibre reported a failure with no reason' };
+  } catch {
+    return { ok: false, reason: `could not read calibre's answer: ${line.slice(0, 200)}` };
+  }
 }
