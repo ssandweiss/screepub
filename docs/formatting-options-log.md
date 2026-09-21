@@ -541,9 +541,20 @@ and the suite will say so if you forget.
   PROPERTY does not transfer across a change in DOM shape. 2026-08-11
   recorded that lesson and then the repair committed the same error in the
   other direction, carrying #5a's `h2` verdict onto a `div`.
-  **Still pending:** re-read on device, same route, and confirm a long
-  speech splits across a page break with its cue attached. The chain's
-  links are each proved on this renderer; this combination is not.
+  **DEVICE VERDICT 2026-09-20: the chain HOLDS. No stranded cues.**
+  Owner-observed on a real 112-page script, rebuilt with the chain and sent
+  by the same route that produced the failure (Send-to-Kindle web, Amazon
+  server conversion to KFX, Enhanced Typesetting), read on the same device.
+  This closes the pending item above: the combination is now confirmed, not
+  just its individual links, and it is the same route and grade of evidence
+  that condemned the wrapper on 2026-09-14.
+  **Evidence grade and what it does NOT cover.** One script, one route,
+  owner-observed, same grade as #5a's 2026-07-30 pass. The reader was
+  looking for cues stranded at page bottoms and found none. He was not
+  asked to check scene headings specifically, and no font size was
+  stipulated, so "a long speech at max font size" remains unmeasured even
+  though the defect it was meant to catch did not appear. A stranded cue on
+  any future script reopens this.
 - **SUPERSEDED 2026-09-14 (kept for the trail) — the narrowing STRANDED
   CUES, and why.**
 - **NARROWED 2026-08-11 — the keep no longer contains the speech.** The
