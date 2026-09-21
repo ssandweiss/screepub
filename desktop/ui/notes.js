@@ -3,29 +3,28 @@
 // Regenerate with: bun tools/build-desktop-notes.ts
 export const RELEASE = {
   version: "0.6.0",
-  headline: "Screepub now runs on Linux and Windows, in a window as well as a terminal.",
+  headline: "Screepub runs on Linux and Windows now, and the page problem the last release asked you to watch for turned out to be real.",
   sections: [
     {
       title: "Screepub runs where you work",
       items: [
-        { lead: "Linux and Windows downloads.", body: "The converter ships as one file for Linux, on Intel and ARM, and for Windows. Unpack it and run it." },
-        { lead: "There is a window now, not just a command line.", body: "Install Screepub_0.6.0_amd64.deb or Screepub-0.6.0-1.x86_64.rpm on Linux, Screepub-0.6.0-setup.exe on Windows, or Screepub-Desktop-macOS-universal.dmg on a Mac: one file for both Apple Silicon and Intel." },
-        { lead: "The Mac app has not changed.", body: "Screepub-macOS.dmg is the same download, the same signing by Apple, and still the one we support on a Mac. The new window is a separate download." },
+        { lead: "There is a window now, not just a command line.", body: "Install Screepub_0.6.0_amd64.deb or Screepub-0.6.0-1.x86_64.rpm on Linux, Screepub-0.6.0-setup.exe on Windows, or Screepub-Desktop-macOS-universal.dmg on a Mac, one file for both Apple Silicon and Intel. The converter alone still ships for both: unpack and run it." },
+        { lead: "The Mac app has not changed.", body: "Screepub-macOS.dmg is the same download, signed by Apple as before, and still the one we support on a Mac. The new window is a separate download." },
+        { lead: "Two new commands, and a script that remembers.", body: "screepub devices lists the readers it can see and screepub send copies a finished file onto one. screepub settings saves how you want one script laid out." },
       ],
     },
     {
-      title: "Getting a script onto a reader",
+      title: "Fixed on Kindle",
       items: [
-        { lead: "Two commands on the command line.", body: "screepub devices lists the readers it can see, and screepub send copies a finished file onto one." },
-        { lead: "A script can keep its own formatting.", body: "screepub settings saves the way you want one script laid out, in a small file beside it. Later conversions of that script use those settings." },
+        { lead: "Character names no longer strand at page turns.", body: "0.5.4 asked you to report exactly this, and it was real: the name sat alone at the bottom with its speech overleaf. Confirmed fixed on a Kindle, on the script and the route that produced it." },
       ],
     },
     {
       title: "Good to know",
       items: [
-        { lead: "Windows will warn you the first time you run it.", body: "The command-line download and the installer are both unsigned, so SmartScreen shows a \"publisher unknown\" screen. Choose More info, then Run anyway. The installer also fetches Microsoft's WebView2 runtime if your machine has none, the one moment Screepub needs the network. Converting never does." },
-        { lead: "Sending to a reader has only been tried on a Mac, with a Kindle.", body: "Everything else is built and code-tested but has never met real hardware. On Windows a tolino cannot be found at all: it is recognised by the name of its drive, and a Windows drive root has none." },
-        { lead: "One person has installed the new window, on one Mac.", body: "They opened the .dmg, dragged it across and converted two real scripts. Nothing else has: the .deb, the .rpm and the Windows installer have never been installed, and only the Apple Silicon half of the Mac download has ever been run. Nobody has opened the window on Windows." },
+        { lead: "Windows will warn you the first time you run it.", body: "Both Windows downloads are unsigned, so SmartScreen shows a \"publisher unknown\" screen. Choose More info, then Run anyway. The installer also fetches Microsoft's WebView2 runtime if your machine has none. Converting itself never touches the network." },
+        { lead: "Sending to a reader has only been tried on a Mac, with a Kindle.", body: "Everything else is code-tested but has never met real hardware. On Windows a tolino cannot be found at all: it is known by its drive's name, and a Windows drive root has none." },
+        { lead: "", body: "One person has installed the new window, on one Mac. The .deb, the .rpm and the Windows installer have never been installed by anyone." },
       ],
     },
   ],
