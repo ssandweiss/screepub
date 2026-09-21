@@ -26,9 +26,13 @@ export async function extractDocument(
   pdfBytes: Uint8Array,
   maxPages?: number,
   onProgress?: PageProgress,
-): Promise<{ lines: RawLine[]; pageCount: number }> {
+): Promise<{ lines: RawLine[]; pageCount: number; spacingRepairs: number }> {
   const pdf = await getDocument({ data: pdfBytes }).promise;
   const allLines: RawLine[] = [];
+  // Counted, not silent. repairPhantomSpaces edits an author's words, so the
+  // number rides out with the result and the app can say so. A count that
+  // suddenly jumps on a script is how anyone would notice it misfiring.
+  let spacingRepairs = 0;
 
   const lastPage = maxPages ? Math.min(pdf.numPages, maxPages) : pdf.numPages;
   for (let pageNum = 1; pageNum <= lastPage; pageNum++) {
@@ -40,7 +44,7 @@ export async function extractDocument(
     if (ops) stampUnderlines(textContent.items, ops, viewport.width);
     // Before grouping, because every stage downstream reads `str` and a
     // phantom space fragments a word into two tokens for all of them.
-    repairPhantomSpaces(textContent.items, ops);
+    spacingRepairs += repairPhantomSpaces(textContent.items, ops);
 
     const pageLines = groupItemsIntoLines(textContent.items, viewport.width, pageNum);
     allLines.push(...pageLines);
@@ -54,7 +58,7 @@ export async function extractDocument(
   // Courier script (registry #18).
   stampLineFmt(allLines);
 
-  return { lines: allLines, pageCount: pdf.numPages };
+  return { lines: allLines, pageCount: pdf.numPages, spacingRepairs };
 }
 
 interface TextItem {
