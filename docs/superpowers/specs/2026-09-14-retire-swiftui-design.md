@@ -236,8 +236,11 @@ nothing appears to empty itself. The one real consequence is that per-script
 TUNING is lost, because the Swift app writes `<stem>.screepub.json` flat in
 the library root and the engine looks beside the input PDF and inside the
 script's library folder, neither of which is that. Verified, not reasoned: a
-flat sidecar asking for serif produced a Courier book. F2 therefore extends
-`adoptSidecar` to also look in the flat library root, and moves no books. The paragraph below is the superseded reasoning,
+flat sidecar asking for serif produced a Courier book. The owner then accepted a HARD
+BREAK rather than carry a compatibility path: **F2 ships no migration at
+all.** Anyone who tuned a script in the Swift app loses that tuning once,
+their books are untouched, and the alternative was a branch in
+`src/library.ts` existing solely to serve installs of an app being deleted. The paragraph below is the superseded reasoning,
 kept because it is still an accurate account of the hazard.
 
 **SETTLED 2026-09-14 by [ADR: how an installed Swift app gets off the Swift

@@ -42,6 +42,13 @@ annoys you is more useful than anything on this page.
 
 ## Later
 
+**A library — seeing the books you have made.** The app writes every
+conversion into `~/Documents/Screepub` and then offers no way to look at what
+is in there: the surfaces are Convert, Read, Tune, Send and Notes. You find
+your books in Finder. A library view would list them, reopen one without
+reconverting its PDF, and be the obvious home for per-script tuning that
+today you can only reach by converting the script again.
+
 **Sides — reading one character's script.** Extract only the scenes a given
 character appears in, or emphasise their lines throughout. Screepub already
 identifies every scene and every character cue while converting; this puts
