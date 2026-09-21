@@ -230,9 +230,14 @@ itself](../../adr/2026-09-20-swift-app-migrates-itself.md).** F2 now TAKES the
 through the updater they already have. The universal build removed the
 architecture-blindness that disqualified it, the decision to port a full
 self-update removed the "payload deletes the updater" objection, and gate 2
-becoming a parity gate removed the "features vanish" one. What remains, and
-what F2 now owns, is a first-run pass that adopts the Swift app's FLAT library
-into the per-script layout. The paragraph below is the superseded reasoning,
+becoming a parity gate removed the "features vanish" one. What remains, and what F2 now owns, is
+SMALLER than first written: there is no library view in the new app, so
+nothing appears to empty itself. The one real consequence is that per-script
+TUNING is lost, because the Swift app writes `<stem>.screepub.json` flat in
+the library root and the engine looks beside the input PDF and inside the
+script's library folder, neither of which is that. Verified, not reasoned: a
+flat sidecar asking for serif produced a Courier book. F2 therefore extends
+`adoptSidecar` to also look in the flat library root, and moves no books. The paragraph below is the superseded reasoning,
 kept because it is still an accurate account of the hazard.
 
 **SETTLED 2026-09-14 by [ADR: how an installed Swift app gets off the Swift
