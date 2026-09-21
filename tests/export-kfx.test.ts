@@ -223,6 +223,59 @@ describe('installKfxPlugin', () => {
     expect(r.version).toBe('2.20.1');
   });
 
+  test('a conflicting KFX fork is removed, and named in the result', async () => {
+    // Found the hard way on a real machine. The old Swift app's vendored
+    // copy installs under the name "KFX Output (Fix Traditional Chinese)",
+    // a fork. Installing the official plugin ALONGSIDE it does not
+    // supersede it: both register the same internal Python package
+    // (calibre_plugins.kfx_output), so the new plugin's code imports the
+    // OLD fork's kfxlib and KFX conversion dies outright with
+    // "cannot import name 'JobLog'". Every unit test passed and the
+    // toolchain still reported ready; only converting a real book showed it.
+    //
+    // So the install has to clear variants, not just add. Leaving the
+    // conflict is strictly worse than not installing at all.
+    const r = await installKfxPlugin(async () => ({
+      code: 0,
+      stdout: `SCREEPUB_RESULT ${JSON.stringify({
+        ok: true,
+        version: '2.20.1',
+        removed: ['KFX Output (Fix Traditional Chinese)'],
+      })}\n`,
+      stderr: '',
+    }));
+    expect(r.ok).toBe(true);
+    expect(r.removed).toEqual(['KFX Output (Fix Traditional Chinese)']);
+  });
+
+  test('the companion metadata writer is never removed', async () => {
+    // The bug in my first cut of the guard, caught by running it for real.
+    // "Set KFX metadata (from KFX Output)" ships INSIDE the same zip and is
+    // a metadata writer, not a conversion output, so it cannot collide for
+    // the .kfx slot. A name-only test matched it and deleted it; it only
+    // survived because add_plugin put it straight back. The snippet now
+    // asks calibre which plugins are conversion outputs rather than
+    // guessing from the name.
+    const r = await installKfxPlugin(async () => ({
+      code: 0,
+      stdout: `SCREEPUB_RESULT ${JSON.stringify({ ok: true, version: '2.20.1', removed: [] })}\n`,
+      stderr: '',
+    }));
+    expect(r.removed).not.toContain('Set KFX metadata (from KFX Output)');
+  });
+
+  test('a plain upgrade removes nothing', async () => {
+    // "KFX Output" replacing "KFX Output" is calibre's own upgrade path and
+    // must not be mistaken for a conflict.
+    const r = await installKfxPlugin(async () => ({
+      code: 0,
+      stdout: `SCREEPUB_RESULT ${JSON.stringify({ ok: true, version: '2.20.1', removed: [] })}\n`,
+      stderr: '',
+    }));
+    expect(r.ok).toBe(true);
+    expect(r.removed).toEqual([]);
+  });
+
   test('no Calibre is a named reason, not a throw', async () => {
     // The ladder still works without KFX — it degrades to AZW3 then MOBI —
     // so a missing toolchain must never take the caller down with it.
