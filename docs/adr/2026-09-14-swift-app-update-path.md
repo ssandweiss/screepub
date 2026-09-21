@@ -1,6 +1,14 @@
 # ADR: how an installed Swift app gets off the Swift app
 
-Date: 2026-09-14 · Status: accepted (user-approved)
+Date: 2026-09-14 · Status: **SUPERSEDED 2026-09-20** by
+[2026-09-20-swift-app-migrates-itself.md](2026-09-20-swift-app-migrates-itself.md)
+
+> Kept because the reasoning is still the record of what was true on the day,
+> and because three of its four objections were removed by later work rather
+> than by being wrong. The one that survived — the library appearing to empty
+> itself — is the thing the new ADR had to solve before it could reverse this
+> one. Read this first if you want to know why the automatic path was refused;
+> read the successor for why it is now the plan.
 Refines: [2026-09-12-cross-platform-tauri.md](2026-09-12-cross-platform-tauri.md),
 piece F stage F2 in
 [specs/2026-09-14-retire-swiftui-design.md](../superpowers/specs/2026-09-14-retire-swiftui-design.md)
