@@ -1399,10 +1399,16 @@ describe('the Read surface', () => {
     // What the VALUES do once read is checked below, against the CSS.
     expect(reader).toContain('getPropertyValue');
     expect(reader).toContain('prefers-color-scheme');
-    // adopt() must hand the sheet the tokens it read and nothing else: this
-    // is the seam the value test below cannot see across.
+    // dressFrame() must hand the sheet the tokens it just read and nothing
+    // else: this is the seam the value test below cannot see across.
+    //
+    // The css argument was named `sheetCss` until 2026-09-21, when these
+    // eight lines were lifted out of adopt() so the Settings preview could
+    // share them rather than own a second copy of the CSP dance. The seam is
+    // the same; only the parameter's name moved, so the assertion no longer
+    // pins that name.
     expect(reader).toMatch(/paperFrom\(\(name\) => root\.getPropertyValue\(name\)\)/);
-    expect(reader).toMatch(/sheetText\(sheetCss, tokens\)/);
+    expect(reader).toMatch(/sheetText\(\w+, tokens\)/);
   });
 
   test('a resized window re-measures, because a reflow moves every scene', () => {
@@ -2912,6 +2918,33 @@ describe('the window does not title its own screens as script furniture', () => 
     // And it does not fire on the window's ordinary prose.
     expect(SLUGLINE.test('Needs selectable text, not a scan.')).toBe(false);
     expect(SLUGLINE.test('Send to a reader')).toBe(false);
+  });
+});
+
+describe('the settings preview is the reader, not a second copy of it', () => {
+  // Settings gets a live script beside the knobs. The tempting way to build
+  // it is a second iframe with its own styling code, and that is the one
+  // thing this window cannot afford twice: the engine ships its stylesheet
+  // INSIDE the preview document, the CSP forbids inline <style> there, and
+  // the fix is to lift it out and adopt it as a constructed stylesheet.
+  // read.js's own header records what happens when that goes wrong — an
+  // unstyled script renders with NO error anywhere. Two copies of that dance
+  // would drift, and the drift would be invisible until someone looked.
+  const reader = read('read.js');
+  const settings = read('tune.js');
+
+  test('the reader exports the dresser rather than keeping it private', () => {
+    expect(reader).toContain('export function dressFrame');
+  });
+
+  test('settings imports it instead of writing its own', () => {
+    expect(settings).toMatch(/import\s*\{[^}]*dressFrame[^}]*\}\s*from\s*'\.\/read\.js'/);
+  });
+
+  test('settings builds no constructed stylesheet of its own', () => {
+    // The specific shape of the duplication this is here to prevent.
+    expect(settings).not.toContain('CSSStyleSheet');
+    expect(settings).not.toContain('adoptedStyleSheets');
   });
 });
 

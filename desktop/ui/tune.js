@@ -13,7 +13,7 @@
 // its own and rides on the live run.
 import { runEngine, argv } from './app.js';
 import { el, clear, text } from './dom.js';
-import { render as renderReader } from './read.js';
+import { render as renderReader, splitPreview, dressFrame } from './read.js';
 
 // ---------------------------------------------------------------- decisions
 
@@ -392,6 +392,8 @@ let settings = null;
 let presets = [];
 let onPreset = null;
 let presetsBox = null;
+let previewFrame = null;
+let previewCss = '';
 let loaded = false;
 let timer = null;
 let running = Promise.resolve();
@@ -484,11 +486,56 @@ function draw(status) {
   pane.append(
     el('h2', { class: 'slug' }, 'This script’s settings'),
     el('p', { class: 'prose' }, LEDE),
-    (presetsBox = drawPresets()),
-    ...GROUPS.map(drawGroup),
-    statusLine,
+    el('div', { class: 'tune-split' },
+      el('div', { class: 'tune-knobs' },
+        (presetsBox = drawPresets()),
+        ...GROUPS.map(drawGroup),
+        statusLine,
+      ),
+      drawPreview(),
+    ),
   );
   say(status ?? statusFor(isPending(pending) ? 'pending' : 'idle'));
+  renderPreview(ctx.state.script?.previewHtml);
+}
+
+/** The script, beside the knobs that change it.
+ *
+ *  Only the `live` knobs can move this — the effect classification above says
+ *  which, and it was measured rather than guessed. The `book` and `reconvert`
+ *  ones cannot, and they say so themselves rather than being hidden: a knob
+ *  that silently does nothing here is worse than one that explains why.
+ *
+ *  A plain frame, not the reader. It carries no scene rail, keeps no reading
+ *  place and takes no keyboard: this is a swatch, not somewhere you read. The
+ *  one thing it shares with the reader is dressFrame(), because the CSP dance
+ *  that gets the engine's stylesheet into the document is the piece that must
+ *  never exist twice. */
+function drawPreview() {
+  previewFrame = el('iframe', {
+    class: 'tune-preview-frame',
+    title: 'Preview',
+    // Same grant the reader's frame gets, and no more: same-origin so the
+    // parent can adopt a stylesheet into it, nothing that lets the document
+    // run anything.
+    sandbox: 'allow-same-origin',
+    // Not a Tab stop. There is nothing to do inside it.
+    tabindex: '-1',
+    'aria-hidden': 'true',
+  });
+  previewFrame.addEventListener('load', () => dressFrame(previewFrame, previewCss));
+  return el('div', { class: 'tune-preview' },
+    el('p', { class: 'state-label' }, 'Preview'),
+    previewFrame);
+}
+
+/** Show a document in the preview. Safe to call before the frame exists and
+ *  safe to call with nothing, which is what happens on the fault screen. */
+function renderPreview(previewHtml) {
+  if (previewFrame === null || previewHtml === undefined || previewHtml === null) return;
+  const parts = splitPreview(previewHtml, new DOMParser());
+  previewCss = parts.css;
+  previewFrame.setAttribute('srcdoc', parts.html);
 }
 
 function drawPresets() {
@@ -725,7 +772,11 @@ async function flush() {
       return;
     }
     script.previewHtml = answer.previewHtml ?? script.previewHtml;
+    // Both frames, because the reader is a surface the reader may come back
+    // to and this one is on screen right now. They render the same document;
+    // neither is a copy of the other's rendering.
     renderReader(script.previewHtml);
+    renderPreview(script.previewHtml);
     say(statusFor(isPending(pending) ? 'pending' : 'saved'));
   } catch (err) {
     if (stale()) return;

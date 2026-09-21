@@ -532,15 +532,32 @@ function onStageKey(event) {
   else win.scrollBy(0, step);
 }
 
-function adopt() {
-  const doc = frame.contentDocument;
-  const win = frame.contentWindow;
-  if (!doc || !win) return;
+/** Put the engine's own stylesheet into a preview frame, as a CONSTRUCTED
+ *  stylesheet rather than a <style> element.
+ *
+ *  This is the file's most load-bearing eight lines and the reason it is
+ *  exported rather than kept private: the CSP forbids inline style, INCLUDING
+ *  a <style> inside an iframe srcdoc, and the failure is silent — an unstyled
+ *  script renders with no error anywhere. CSSOM is not blocked, so the sheet
+ *  is adopted instead. The Settings preview needs exactly this and must not
+ *  own a second copy of it, because a second copy would drift and the drift
+ *  would be invisible until somebody looked at the preview.
+ *
+ *  Takes its frame and css as arguments so it belongs to no one surface. */
+export function dressFrame(frame, engineCss) {
+  const doc = frame?.contentDocument;
+  const win = frame?.contentWindow;
+  if (!doc || !win) return false;
   const root = getComputedStyle(document.documentElement);
   const tokens = paperFrom((name) => root.getPropertyValue(name));
   const sheet = new win.CSSStyleSheet();
-  sheet.replaceSync(sheetText(sheetCss, tokens));
+  sheet.replaceSync(sheetText(engineCss, tokens));
   doc.adoptedStyleSheets = [sheet];
+  return true;
+}
+
+function adopt() {
+  dressFrame(frame, sheetCss);
 }
 
 /** The sections, where they are now. Re-measured rather than remembered:

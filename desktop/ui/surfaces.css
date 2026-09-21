@@ -504,6 +504,42 @@
 .btn-small { font-size: var(--text-label); padding: 6px 18px; letter-spacing: 0.07em; }
 .btn-small { font-size: var(--text-label); padding: 6px 18px; letter-spacing: 0.07em; }
 
+/* Knobs on the left, the script on the right. The preview is the argument
+ * for the whole surface: most of these eighteen change what the page looks
+ * like, and a setting you have to leave the screen to evaluate is a setting
+ * you adjust by guessing.
+ *
+ * It sticks, because the knob you are reaching for may be four groups down
+ * and the point is to watch the page while you move it.
+ *
+ * One column below 900px. Two columns on a narrow window would give the
+ * script a measure narrower than the thing it is previewing, which is worse
+ * than no preview: it would misrepresent the book. */
+.tune-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
+  gap: var(--space-7);
+  align-items: start;
+}
+.tune-knobs { min-width: 0; }
+.tune-preview { position: sticky; top: var(--space-5); min-width: 0; }
+.tune-preview-frame {
+  display: block;
+  width: 100%;
+  height: 62vh;
+  min-height: 260px;
+  border: 1px solid var(--hole);
+  border-radius: var(--radius-well);
+  background: var(--paper);
+}
+@media (max-width: 900px) {
+  .tune-split { grid-template-columns: 1fr; }
+  /* Unstuck as well as unsplit: a sticky panel in a single column would
+   * follow the reader down the page and sit on top of the knobs. */
+  .tune-preview { position: static; }
+  .tune-preview-frame { height: 44vh; }
+}
+
 /* Each group folds. Same disclosure vocabulary as the reach table on Send,
  * so the window has one way of saying "there is more here" rather than two. */
 .knob-group { margin: 0 0 var(--space-6); max-width: var(--measure); }
