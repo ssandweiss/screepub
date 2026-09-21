@@ -461,9 +461,31 @@
  * that says why the knob exists below both, in the column the label starts.
  * The value read-out is tabular so a dragged slider cannot jitter the row
  * it sits in. */
-.presets { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3);
-  margin: var(--space-6) 0 var(--space-8); }
-.presets-label { margin: 0; }
+/* A column now, not a row of loose buttons: a label, the choices, and the
+ * warning that they overwrite everything below. The warning is the point —
+ * pressing one of these replaces all eighteen settings, and the row never
+ * said so. */
+.presets { margin: var(--space-6) 0 var(--space-8); }
+.presets-label { margin: 0 0 var(--space-2); }
+.preset-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.presets-note { margin: var(--space-2) 0 0; }
+/* The preset the script is already on. Marked and inert, which is what turns
+ * the Kindle button — whose settings ARE the defaults, so pressing it changes
+ * nothing visible — from a dead control into a statement about where you
+ * stand. Brass because this is the accent's job: the one thing on the row
+ * that is true right now.
+ *
+ * Written as .btn.preset-on:disabled on purpose. `.btn:disabled` above dims
+ * to 0.35, and it outranks a lone `.preset-on` no matter which comes later,
+ * so the marked preset would have rendered as the FAINTEST thing on the row
+ * rather than the clearest. It is disabled and it is not unavailable. */
+.btn.preset-on:disabled {
+  box-shadow: inset 0 0 0 1.5px var(--brass);
+  color: var(--ink);
+  cursor: default;
+  opacity: 1;
+}
+.btn-small { font-size: var(--text-label); padding: 6px 18px; letter-spacing: 0.07em; }
 .btn-small { font-size: var(--text-label); padding: 6px 18px; letter-spacing: 0.07em; }
 
 .knob-group { margin: 0 0 var(--space-8); max-width: var(--measure); }

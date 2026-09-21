@@ -399,7 +399,7 @@ function drawResult(path, answer) {
         el('button', { type: 'button', class: 'btn-quiet', onclick: () => ctx.goTo('read') },
           'Read it'),
         el('button', { type: 'button', class: 'btn-quiet', onclick: () => ctx.goTo('tune') },
-          'Tune it'),
+          'Settings'),
         el('button', { type: 'button', class: 'btn-quiet', onclick: reset },
           'Convert another'),
       ),

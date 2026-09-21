@@ -290,10 +290,31 @@ export function presetsFrom(answer) {
   if (!Array.isArray(presets)) return [];
   return presets
     .map((preset) => ({
+      // Carried so the surface can mark the one the script is actually on.
+      // Without it the two presets are just two buttons, and the one that
+      // equals the defaults looks like a button that does nothing.
+      id: typeof preset?.id === 'string' ? preset.id : '',
       displayName: typeof preset?.displayName === 'string' ? preset.displayName : '',
       settings: settingsFrom(preset),
     }))
     .filter((preset) => preset.displayName !== '' && preset.settings !== null);
+}
+
+/** Which preset this script's settings currently equal, or null when they
+ *  have been tuned away from every one of them.
+ *
+ *  The engine answers this by comparing values, not by remembering a name it
+ *  was handed — `src/settings/presets.ts` says why: applying a preset stores
+ *  no identity, so equality is the only honest answer, and a remembered name
+ *  would go on claiming "Kindle e-ink" after the first knob moved.
+ *
+ *  The window ignored this field entirely until 2026-09-21. That is what made
+ *  the row read as arbitrary: one of the two presets is identical to the
+ *  defaults, so on a fresh script it appears to do nothing, and without
+ *  "you are here" there was no way to tell a no-op from a confirmation. */
+export function currentPreset(answer) {
+  const id = answer?.preset;
+  return typeof id === 'string' && id !== '' ? id : null;
 }
 
 export function sameSettings(a, b) {
@@ -337,7 +358,11 @@ export const LEDE = 'These settings belong to this script alone. They are kept w
   + 'your library, never beside the PDF you dropped, and the book on disk is rebuilt to '
   + 'match, so what you send is what you see.';
 
-export const PRESET_LABEL = 'Start from';
+/** "Start from" said nothing about what pressing one does. It does not nudge
+ *  a setting or set a baseline to build on: it REPLACES all eighteen. The
+ *  SwiftUI version said so on screen and this one did not. */
+export const PRESET_LABEL = 'Load a preset';
+export const PRESET_NOTE = 'Overwrites every setting below.';
 
 // ------------------------------------------------------------------ drawing
 
@@ -345,6 +370,8 @@ let ctx = null;
 let pane = null;
 let settings = null;
 let presets = [];
+let onPreset = null;
+let presetsBox = null;
 let loaded = false;
 let timer = null;
 let running = Promise.resolve();
@@ -395,6 +422,7 @@ async function load() {
     const answer = await runEngine(argv.settings(script.fountainPath));
     settings = settingsFrom(answer);
     presets = presetsFrom(answer);
+    onPreset = currentPreset(answer);
   } catch (err) {
     settings = null;
     // Openable again: a sidecar that could not be read once — a disk that
@@ -436,7 +464,7 @@ function draw(status) {
   pane.append(
     el('h2', { class: 'slug' }, 'This script’s settings'),
     el('p', { class: 'prose' }, LEDE),
-    drawPresets(),
+    (presetsBox = drawPresets()),
     ...GROUPS.map(drawGroup),
     statusLine,
   );
@@ -447,10 +475,21 @@ function drawPresets() {
   if (presets.length === 0) return null;
   return el('div', { class: 'presets' },
     el('p', { class: 'state-label presets-label' }, PRESET_LABEL),
-    ...presets.map((preset) => el('button', {
-      type: 'button', class: 'btn btn-outline btn-small',
-      onclick: () => applyAll(preset.settings),
-    }, preset.displayName)));
+    el('div', { class: 'preset-row' },
+      ...presets.map((preset) => {
+        // The one the script is already on is marked and inert. It is what
+        // turns a button that appears to do nothing — the Kindle preset IS
+        // the defaults — into a statement about where you are.
+        const on = preset.id !== '' && preset.id === onPreset;
+        return el('button', {
+          type: 'button',
+          class: `btn btn-outline btn-small${on ? ' preset-on' : ''}`,
+          disabled: on,
+          'aria-current': on ? 'true' : null,
+          onclick: () => applyAll(preset.settings),
+        }, preset.displayName);
+      })),
+    el('p', { class: 'caption presets-note' }, PRESET_NOTE));
 }
 
 function drawGroup(group) {
@@ -533,6 +572,11 @@ function applyAll(next) {
     if (settings[key] !== next[key]) changed[key] = next[key];
   }
   if (Object.keys(changed).length === 0) return;
+  // The script is now on whichever preset these settings are, by equality —
+  // the same rule the engine uses. Matched on the values rather than on the
+  // button that was pressed, so applying a preset that happens to equal
+  // another one cannot leave the wrong one marked.
+  onPreset = presets.find((p) => OPTION_KEYS.every((k) => p.settings[k] === next[k]))?.id ?? null;
   settings = { ...settings, ...changed };
   ctx.state.script.settings = settings;
   pending = { ...pending, ...changed };
@@ -543,6 +587,13 @@ function applyAll(next) {
 function change(knob, raw) {
   const value = coerceValue(knob, raw);
   if (value === null || settings[knob.key] === value) return;
+  // One moved knob takes the script off whatever preset it was on. The mark
+  // has to go with it or the surface keeps claiming a name that stopped
+  // being true, which is the exact failure src/settings/presets.ts refuses
+  // to commit by storing equality instead of an identity.
+  const wasOn = onPreset;
+  onPreset = null;
+  if (wasOn !== null) refreshPresets();
   settings = { ...settings, [knob.key]: value };
   ctx.state.script.settings = settings;
   pending = mergePending(pending, knob.key, value);
@@ -551,6 +602,18 @@ function change(knob, raw) {
   if (knob.key === 'cueAlignment') refreshIdle();
   say(statusFor('pending'));
   schedule();
+}
+
+/** Swap the preset row for a fresh one, so the "you are here" mark can move
+ *  when a knob does. Only this row is rebuilt, for the same reason
+ *  refreshIdle() exists: a full redraw under the reader's pointer would drop
+ *  the control they are currently holding. */
+function refreshPresets() {
+  if (presetsBox === null) return;
+  const next = drawPresets();
+  if (next === null) return;
+  presetsBox.replaceWith(next);
+  presetsBox = next;
 }
 
 /** Re-state the knobs whose meaning depends on another setting, without

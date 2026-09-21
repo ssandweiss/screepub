@@ -2910,6 +2910,47 @@ describe('the window does not title its own screens as script furniture', () => 
   });
 });
 
+describe('"Start from" stops reading as a row of arbitrary buttons', () => {
+  // It was three faults wearing one coat, and only the third is invisible:
+  //   1. it offers exactly two presets, and one of them, "Kindle e-ink (6\")",
+  //      is IDENTICAL to the defaults, so on a fresh script that button
+  //      visibly does nothing;
+  //   2. the label never said it OVERWRITES every setting below it, which the
+  //      SwiftUI version stated out loud;
+  //   3. the engine already answers "which preset am I on" in `answer.preset`
+  //      and the window never read it, so it could not show you where you
+  //      stood — which is exactly what makes a no-op button look arbitrary
+  //      rather than reassuring.
+  let tune: any;
+  beforeAll(async () => { tune = await import(join(UI, 'tune.js')); });
+
+  test('the window can say which preset the script is on', () => {
+    expect(tune.currentPreset({ preset: 'phone' })).toBe('phone');
+    expect(tune.currentPreset({ preset: 'kindleEink' })).toBe('kindleEink');
+  });
+
+  test('a script tuned away from every preset is on none of them', () => {
+    // The engine answers null rather than keeping a remembered name, because
+    // equality is the only honest answer: a stored name would go on claiming
+    // "Kindle e-ink" after the first knob moved.
+    expect(tune.currentPreset({ preset: null })).toBe(null);
+    expect(tune.currentPreset({})).toBe(null);
+    expect(tune.currentPreset(undefined)).toBe(null);
+  });
+
+  test('presets carry their id, so the current one can be marked', async () => {
+    const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+    const presets = tune.presetsFrom({
+      presets: [{ id: 'kindleEink', displayName: 'Kindle e-ink (6")', settings: { ...DEFAULT_FORMAT_OPTIONS } }],
+    });
+    expect(presets[0].id).toBe('kindleEink');
+  });
+
+  test('the control warns that it overwrites', () => {
+    expect(tune.PRESET_NOTE.toLowerCase()).toContain('overwrite');
+  });
+});
+
 describe('the reach table is available, not announced', () => {
   // "What Screepub can reach" is four readers, four honesty labels and two
   // caveats, and it was the bulk of the empty Send page. It is good

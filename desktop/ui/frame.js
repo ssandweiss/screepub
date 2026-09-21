@@ -15,7 +15,11 @@ import { RELEASE } from './notes.js';
 export const SURFACES = [
   { id: 'convert', label: 'Convert' },
   { id: 'read', label: 'Read' },
-  { id: 'tune', label: 'Tune' },
+  // The id stays `tune` and the label does not. The id is the module's name
+  // and reaches nothing a reader sees; "Tune" was a metaphor for what is
+  // plainly a settings screen. Renaming the module and the surface id would
+  // churn focus plans, panel ids and a dozen test references to buy nothing.
+  { id: 'tune', label: 'Settings' },
   { id: 'send', label: 'Send' },
 ];
 
