@@ -2973,6 +2973,19 @@ describe('a refused file is no longer a dead end', () => {
     expect(body).toContain('C++ crashed on page 3+4');
   });
 
+  test('the file manager is called what it is called, per platform', async () => {
+    // The Swift app said "SHOW IN FINDER" because it only ran on a Mac. This
+    // one runs on three, and "Finder" on Windows names a thing that is not
+    // there. An unknown platform gets the generic phrasing rather than a
+    // guess, on the same rule send.js's platformOf already follows:
+    // under-claiming beats naming the wrong system.
+    const convert: any = await import(join(UI, 'convert.js'));
+    expect(convert.revealLabel('MacIntel')).toBe('Show in Finder');
+    expect(convert.revealLabel('Win32')).toBe('Show in File Explorer');
+    expect(convert.revealLabel('Linux x86_64')).toBe('Show in folder');
+    expect(convert.revealLabel(undefined)).toBe('Show in folder');
+  });
+
   test('no surface appends a bare null to a node', () => {
     // el() drops a null child; Node.append() renders it as the literal word
     // "null". send.js's drawEmpty records shipping that once. drawFailure was

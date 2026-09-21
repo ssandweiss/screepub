@@ -132,9 +132,11 @@ commands are unchanged and the non-comment Rust went from 59 to 74 lines
 against a ceiling of 200.
 
 > Written when the capability was exactly `core:default`. Since 2026-09-21 it
-> also carries one **scoped** `opener:allow-open-url` for the project's issue
-> tracker, so Report a Bug can open it. That is a door, not a command: the
-> count of registered commands is still two. See
+> also carries two **scoped** opener grants: `allow-open-url` for the
+> project's issue tracker, so Report a Bug can open it, and
+> `allow-reveal-item-in-dir` for `$DOCUMENT/Screepub/**`, so Show in Finder
+> can point at a book. Both are doors, not commands: the count of registered
+> commands is still two. See
 > [ADR 2026-09-21](../docs/adr/2026-09-21-doors-not-commands.md).
 
 **There is no Cancel.** `brand/components/progress.html` draws one, and the

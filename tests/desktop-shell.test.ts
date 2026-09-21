@@ -399,6 +399,26 @@ describe('the window is granted no more than it needs', () => {
     }
   });
 
+  test('reveal is scoped to the library, not to the disk', () => {
+    // "Show in Finder" needs a path, and a path grant is the widest kind of
+    // door this window has. It is pinned to the library subtree so a bug that
+    // handed it any other path reveals nothing instead of revealing anything.
+    //
+    // $DOCUMENT resolves per-platform, which is the point: the same line is
+    // correct on all three. The consequence, accepted and recorded in
+    // app.js: a library MOVED with $SCREEPUB_LIBRARY falls outside this and
+    // reveal quietly fails there until the settings gear can move the scope
+    // with the folder.
+    const reveal = capability().permissions.find(
+      (p: unknown) => typeof p === 'object' && p !== null
+        && (p as { identifier: string }).identifier === 'opener:allow-reveal-item-in-dir',
+    );
+    expect(reveal).toBeDefined();
+    for (const entry of reveal.allow) {
+      expect(entry.path.startsWith('$DOCUMENT/Screepub/')).toBe(true);
+    }
+  });
+
   test('the opener may reach this project’s issue tracker and nothing else', () => {
     const opener = capability().permissions.find(
       (p: unknown) => typeof p === 'object' && p !== null

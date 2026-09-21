@@ -7,7 +7,9 @@
 // pure exported function above the line, tested directly by
 // tests/desktop-ui.test.ts. Below the line is drawing: it holds no rule of
 // its own, so a live run is enough to check it.
-import { runEngine, pickScreenplay, onProgress, argv, FORCE_FLAG, openUrl } from './app.js';
+import {
+  runEngine, pickScreenplay, onProgress, argv, FORCE_FLAG, openUrl, revealItem,
+} from './app.js';
 import { el, clear, text } from './dom.js';
 import { newIssueUrl, osLabel } from './feedback.js';
 import { RELEASE } from './notes.js';
@@ -66,6 +68,20 @@ export const PROGRESS_START = { percent: 0, stage: null, label: 'starting up' };
 
 export function shortcutLabel(platform) {
   return /mac/i.test(String(platform ?? '')) ? '⌘O' : 'Ctrl+O';
+}
+
+/** What the file manager is called where this window is running.
+ *
+ *  The Swift app said "SHOW IN FINDER" because it only ever ran on a Mac.
+ *  This one runs on three platforms, and "Finder" on Windows is not a
+ *  shorter way of saying File Explorer, it is the name of a thing that is
+ *  not there. An unknown platform gets the generic phrasing rather than a
+ *  guess: naming the wrong file manager is worse than naming none. */
+export function revealLabel(platform) {
+  const said = String(platform ?? '');
+  if (/mac/i.test(said)) return 'Show in Finder';
+  if (/win/i.test(said)) return 'Show in File Explorer';
+  return 'Show in folder';
 }
 
 /** The engine writes one refusal for both of its faces, and for the CLI it
@@ -402,6 +418,14 @@ function drawResult(path, answer) {
           'Read it'),
         el('button', { type: 'button', class: 'btn-quiet', onclick: () => ctx.goTo('tune') },
           'Settings'),
+        // Where the book actually is. The path is printed below, but a path
+        // is something you read and then have to act on yourself; this is
+        // the acting. Scoped to the library, which is where epubPath points.
+        el('button', {
+          type: 'button',
+          class: 'btn-quiet',
+          onclick: () => revealItem(script.epubPath),
+        }, revealLabel(navigator.userAgentData?.platform ?? navigator.platform)),
         el('button', { type: 'button', class: 'btn-quiet', onclick: reset },
           'Convert another'),
       ),

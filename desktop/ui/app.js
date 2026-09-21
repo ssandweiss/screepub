@@ -173,6 +173,25 @@ export async function openUrl(url) {
   }
 }
 
+/** Show a file where it lives, selected, in the OS file manager.
+ *
+ *  Scoped to the library in capabilities/default.json, so a path outside it
+ *  is refused by Tauri rather than revealed. That scope uses `$DOCUMENT`,
+ *  which means a library MOVED with $SCREEPUB_LIBRARY is outside it and this
+ *  returns false. Honest and narrow beats broad and convenient: the day the
+ *  settings gear can set the folder, the scope follows it there.
+ *
+ *  Resolves either way, like openUrl. A reveal that will not open is a
+ *  disappointment, not a reason to throw inside a click handler. */
+export async function revealItem(path) {
+  try {
+    await tauri().opener.revealItemInDir(String(path));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function onProgress(handler) {
   return onEngineLine((payload) => {
     for (const line of payload.split('\n')) {
