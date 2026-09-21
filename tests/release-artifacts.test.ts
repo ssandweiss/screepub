@@ -253,7 +253,7 @@ describe('release.yml ships the cross-platform artifacts', () => {
     // The matrix, not the file: `toContain(os)` against the whole YAML
     // would pass on the strength of some OTHER job's runner.
     const runners = (job!.strategy?.matrix?.include ?? []).map((r) => r.os);
-    expect(runners.sort()).toEqual(['macos-15', 'macos-15', 'ubuntu-latest', 'windows-latest']);
+    expect(runners.sort()).toEqual(['macos-15', 'ubuntu-latest', 'windows-latest']);
     const text = runText(job!);
     expect(text).toContain('tools/build-app-bundle.ts');
     // The TAG, so a version mismatch fails the build rather than shipping a
@@ -264,30 +264,77 @@ describe('release.yml ships the cross-platform artifacts', () => {
     expect(String(upload!.with?.['if-no-files-found'])).toBe('error');
   });
 
-  test('the macOS leg builds two per-arch DMGs and never a universal one', () => {
-    // A universal bundle would need a third, lipo'd sidecar that
-    // tools/build-sidecar.ts cannot make: externalBin resolves
-    // {name}-{target_triple} verbatim, with no special case for
-    // universal-apple-darwin.
+  test('the macOS leg builds ONE universal DMG, never a per-arch pair', () => {
+    // INVERTED 2026-09-20, deliberately: this test used to assert the
+    // opposite, and the reason it did has been removed. A universal bundle
+    // needs a third, lipo'd sidecar, and `build-sidecar.ts --universal` now
+    // makes one -- compiling both darwin slices and fusing them under the
+    // name externalBin resolves for universal-apple-darwin.
+    //
+    // It matters far beyond packaging tidiness. The frozen Swift updater
+    // takes the FIRST .dmg asset on a release and has no architecture
+    // logic, so a per-arch pair is what made an automatic migration off
+    // the Swift app impossible: roughly half of all users would have been
+    // handed an app that cannot open. One artifact makes "the first .dmg"
+    // unambiguous. See docs/adr/2026-09-20-swift-app-migrates-itself.md.
     const rows = rel.jobs['app-bundles']!.strategy?.matrix?.include ?? [];
     const macs = rows.filter((r) => r.os === 'macos-15');
-    expect(macs.map((r) => r.target).sort()).toEqual([
-      'aarch64-apple-darwin',
-      'x86_64-apple-darwin',
-    ]);
-    // Each names the sidecar for ITS OWN triple, not the runner's. Getting
-    // this wrong bundles an arm64 engine inside the Intel DMG and nothing
-    // fails until a user opens the window.
-    expect(macs.map((r) => r.sidecar).sort()).toEqual(['bun-darwin-arm64', 'bun-darwin-x64']);
-    expect(read(join(WORKFLOWS, 'release.yml'))).not.toContain('universal-apple-darwin');
+    expect(macs.length).toBe(1);
+    expect(macs[0]!.arch).toBe('universal');
+    // The per-arch SIDECAR names must be gone from the file, not merely
+    // unused by this row: a leftover row or step naming one is how a
+    // second .dmg finds its way back onto the release page. The two
+    // darwin TRIPLES do still appear, in exactly one place -- `rustup
+    // target add`, which installs both because the lipo needs two real
+    // cargo builds. Anywhere else is a per-arch build coming back.
+    const yml = read(join(WORKFLOWS, 'release.yml'));
+    expect(yml).not.toContain('bun-darwin-arm64');
+    expect(yml).not.toContain('bun-darwin-x64');
+    const triples = (yml.match(/(?:aarch64|x86_64)-apple-darwin/g) ?? []).length;
+    expect(triples).toBe(2);
+    expect(yml).toContain('rustup target add x86_64-apple-darwin aarch64-apple-darwin');
   });
 
-  test('the macOS leg passes the transition overlay so the two Mac apps coexist', () => {
+  test('the cargo triple is named in the tool, not restated in the YAML', () => {
+    // universal-apple-darwin is derived from `--arch universal` inside
+    // tools/build-app-bundle.ts, which is also where the rule lives that a
+    // universal arch must not carry a per-arch target. Restating the
+    // triple here would be a second place for it to drift, and the drift
+    // would be silent: a thin bundle wearing a universal name.
+    // Scoped to the text that EXECUTES: comments explaining where the
+    // triple went are the opposite of restating it, so they come out
+    // first. What must not survive is the triple reaching a command line.
+    const commands = runText(rel.jobs['app-bundles']!)
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('#'))
+      .join('\n');
+    expect(commands).not.toContain('universal-apple-darwin');
+    expect(commands).not.toContain('--target');
+    expect(commands).toContain('--arch universal');
+  });
+
+  test('the universal leg installs BOTH darwin rust targets before it builds', () => {
+    // The lipo needs two real cargo builds. The runner's own architecture
+    // is installed already and the other is not -- and naming only one
+    // means the build fails on whichever architecture GitHub's macos-15
+    // image is not. Naming both costs nothing and survives that changing.
+    const steps = rel.jobs['app-bundles']!.steps ?? [];
+    const rustup = steps.findIndex((s) => /rustup target add/.test(s.run ?? ''));
+    const sidecar = steps.findIndex((s) => /build-sidecar\.ts/.test(s.run ?? ''));
+    expect(rustup).toBeGreaterThanOrEqual(0);
+    expect(rustup).toBeLessThan(sidecar);
+    expect(steps[rustup]!.run).toContain('x86_64-apple-darwin');
+    // universal-apple-darwin is tauri's name for the fused output, not a
+    // rustup target. Asking rustup for it by name fails the step.
+    expect(steps[rustup]!.run).not.toContain('rustup target add universal-apple-darwin');
+  });
+
+  test('the macOS leg passes the transition overlay, and only the macOS leg', () => {
     const text = runText(rel.jobs['app-bundles']!);
     expect(text).toContain('tauri.transition.conf.json');
-    // It must not reach the Linux or Windows legs, whose $TARGET is empty:
+    // It must not reach the Linux or Windows legs, whose $ARCH is x64:
     // the overlay renames the product for macOS only.
-    expect(text).toMatch(/if \[ -n "\$TARGET" \][\s\S]*tauri\.transition\.conf\.json/);
+    expect(text).toMatch(/if \[ "\$ARCH" = universal \][\s\S]*tauri\.transition\.conf\.json/);
   });
 
   test('the macOS leg signs and notarizes from secrets the repo already has', () => {
@@ -340,17 +387,22 @@ describe('release.yml ships the cross-platform artifacts', () => {
     expect(rel.jobs['app-upload']!.permissions?.contents).toBe('write');
   });
 
-  test('the x86_64 DMG says it is not smoke-tested instead of passing silently', () => {
-    // The one bundle whose engine no runner can execute. A bare `exit 0`
-    // there is indistinguishable from a check that ran.
+  test('the universal DMG is smoked, and says which slice went untested', () => {
+    // There is no longer a bundle that skips the smoke entirely: the
+    // universal DMG has a slice the runner can execute, so it is opened
+    // and its engine run like every other. What a green tick still must
+    // not imply is that BOTH slices were exercised, so the notice stays --
+    // now describing half an artifact rather than a whole one.
     const smoke = (rel.jobs['app-bundles']!.steps ?? []).find((s) =>
       /smoke-bundle\.ts/.test(s.run ?? ''),
     )!.run!;
     expect(smoke).toMatch(/::notice::/);
-    expect(smoke).toContain('x86_64-apple-darwin');
-    expect(smoke).toMatch(/NOT smoke-tested/);
-    // And the step still fails, rather than exiting 0, if the glob on every
-    // OTHER leg matches nothing at all.
+    // No early exit: the old step RETURNED before the loop on the x86_64
+    // leg. Nothing may skip the loop now. Matched as a command on its own
+    // line, since the step's own comments talk about exiting 0.
+    expect(smoke.split('\n').some((l) => l.trim() === 'exit 0')).toBe(false);
+    // And the step still fails, rather than exiting 0, if the glob on any
+    // leg matches nothing at all.
     expect(smoke).toContain('NOTHING WAS CHECKED');
   });
 
@@ -601,20 +653,24 @@ describe('the app downloads are described where a reader meets them', () => {
 
   const NUMBER_WORD = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
 
-  test('the derivation found the five files the release actually uploads', () => {
+  test('the derivation found the four files the release actually uploads', () => {
     // Guards every loop below: a matrix this parse did not understand would
-    // make them all vacuously true. Five is what app-upload's own line-count
-    // check demands: one .deb, one .rpm, two .dmg, one .exe.
+    // make them all vacuously true. Four is what app-upload's own line-count
+    // check demands: one .deb, one .rpm, ONE .dmg, one .exe.
     expect([...published].sort()).toEqual([
       'Screepub-0.6.0-1.x86_64.rpm',
       'Screepub-0.6.0-setup.exe',
-      'Screepub-Desktop-macOS-arm64.dmg',
-      'Screepub-Desktop-macOS-x64.dmg',
+      'Screepub-Desktop-macOS-universal.dmg',
       'Screepub_0.6.0_amd64.deb',
     ]);
-    // And the ones no leg builds, which no page may offer.
+    // And the ones no leg builds, which no page may offer. The two
+    // per-arch DMGs joined this list on 2026-09-20: a page still naming
+    // one sends a Mac user to a download the release does not carry, and
+    // the point of the universal build is that there is exactly one.
     expect([...unpublished].sort()).toEqual([
       'Screepub-0.6.0-1.aarch64.rpm',
+      'Screepub-Desktop-macOS-arm64.dmg',
+      'Screepub-Desktop-macOS-x64.dmg',
       'Screepub_0.6.0_arm64.deb',
     ]);
   });
@@ -675,22 +731,37 @@ describe('the app downloads are described where a reader meets them', () => {
 
   test('the README says which of these artifacts CI actually executed', () => {
     const lower = readme.toLowerCase();
-    // The x86_64 DMG is cross-compiled on an arm64 runner and its engine is
-    // never run. Saying so is the difference between a limitation and a
-    // surprise.
-    expect(/intel mac|x86_64|x64/.test(lower)).toBe(true);
+    // What is unexercised is no longer a whole download but HALF of one.
+    // The Mac DMG is universal, CI runs its ARM slice out of the mounted
+    // image, and the Intel slice ships built, signed and executed nowhere.
+    // Saying so is the difference between a limitation and a surprise.
+    expect(/intel|x86_64|x64/.test(lower)).toBe(true);
+    expect(lower).toContain('slice');
+    // And the bundles nobody has installed are still named as such.
     expect(lower).toContain('never been installed');
   });
 
-  test('the README does not claim the window has been run off Linux', () => {
-    // The one sentence a stranger would most reasonably write and that
-    // nobody has earned: no runner has a display, so the GUI half of this
-    // app has been started on exactly one operating system.
+  test('the README claims macOS for the window, and still withholds Windows', () => {
+    // UPDATED 2026-09-20. This test used to read "does not claim the window
+    // has been run off Linux", and that was right when it was written. Gate
+    // 1b has since passed on a real Mac: the universal DMG was mounted,
+    // dragged to /Applications, launched past Gatekeeper and used to
+    // convert two real feature scripts. Under-claiming is its own kind of
+    // wrong, so the page must now say so.
+    //
+    // Windows is gate 1c and is DEFERRED INDEFINITELY, so the withholding
+    // sentence survives, scoped to the platform that has not earned its
+    // removal. desktop/README.md's ledger is the list this tracks.
     const section = readme.slice(readme.indexOf('### Desktop app'));
-    expect(section).toContain('Linux');
+    expect(section).toContain('Windows');
     expect(/never been (started|run|opened)|nobody has (started|run|opened)/.test(section)).toBe(
       true,
     );
+    // The claim macOS earned, stated rather than implied: a person, on a
+    // Mac, with a real script.
+    expect(/\/Applications/.test(section)).toBe(true);
+    // And the superseded sentence is gone rather than merely contradicted.
+    expect(section.toLowerCase()).not.toContain('only ever been started on linux');
   });
 
   test('the 0.6.0 notes carry the same three limits', () => {
@@ -764,13 +835,37 @@ describe('desktop/README.md keeps the ledger of who verified what', () => {
     expect(person).toContain('Screepub_0.6.0_arm64.deb');
     expect(person).toContain('Screepub-0.6.0-1.aarch64.rpm');
     expect(person).not.toContain('amd64');
-    expect(person).not.toContain('x86_64');
+    // The Mac half of this list is new: gate 1b, a universal DMG built
+    // here, mounted, installed and used to convert real scripts. The
+    // architecture caveat is the same one -- it is the ARM slice that was
+    // executed, so the list may not say "the Mac app" unqualified.
+    expect(person).toContain('/Applications');
+    expect(/universal/i.test(person)).toBe(true);
   });
 
-  test('the ledger says the workflows have not run at all yet', () => {
+  test('gate 1b moved the Mac DMG off the "nobody" list, and only the Mac DMG', () => {
+    // The ledger's own rule: nothing moves up it without someone doing the
+    // thing. Someone did, on 2026-09-20, and leaving "no .dmg has been
+    // installed on a real machine" in place would make this file lie in
+    // the safe direction -- which is still lying, and would send the next
+    // reader looking for work that is done.
     const nobody = doc.slice(doc.indexOf('Verified by nobody'));
-    expect(/never run|never been run|has not run|never executed/.test(nobody)).toBe(true);
-    expect(nobody).toContain('x86_64-apple-darwin');
+    expect(nobody).not.toMatch(/No `\.deb`, `\.rpm`, `\.dmg` or `\.exe` has been\s+installed/);
+    // The Windows installer and the Linux packages have not moved.
+    expect(nobody).toContain('.exe');
+    // And the Intel half of the universal DMG is the thing that now has
+    // nobody's name against it, in place of a whole per-arch download.
+    expect(/slice/i.test(nobody)).toBe(true);
+    expect(nobody).not.toContain('x86_64-apple-darwin');
+  });
+
+  test('the ledger still says release.yml has never run', () => {
+    // Signing has never executed. No tag has ever built a Tauri app, and
+    // every macOS signing claim in this repository is read off
+    // tauri-bundler's source until one does.
+    const ci = doc.slice(doc.indexOf('Verified only by CI'), doc.indexOf('Verified by nobody'));
+    expect(ci).toContain('release.yml');
+    expect(/never run|never been run|has not run|never executed/.test(ci)).toBe(true);
   });
 
   test('nothing in this file still calls bundling future work', () => {

@@ -59,35 +59,60 @@ describe('the notes the window shows are the notes that were written', () => {
     }
   });
 
-  test('the Good to know caveat is not dropped', () => {
+  test('a plain Good to know caveat is not dropped', () => {
     // The bug this whole fix round is about: a plain caveat bullet parsed
     // to zero items and the window showed nothing where the caveat used to
-    // be, with no error anywhere. This reconstructs the caveat's text a
-    // SECOND way — by slicing the raw lines under the heading, not by
-    // reusing the source's bullet regex or its open/continuation state —
-    // so this test cannot agree with the parser just because it shares its
-    // bug.
-    const notes = parseReleaseNotes(VERSION, MARKDOWN);
-    const goodToKnow = notes.sections.find((s) => s.title === 'Good to know');
+    // be, with no error anywhere.
+    //
+    // Driven by a LITERAL fixture since 2026-09-20, not by the current
+    // release file. This used to read whichever docs/releases/<version>.md
+    // package.json pointed at, and 0.5.4's Good to know happened to be a
+    // single plain caveat, so the assertions could be exact. 0.6.0's is
+    // three bold bullets, and the version bump alone would have forced
+    // this test to be rewritten to match -- quietly ending the coverage
+    // rather than failing. A fixture keeps the property checked whatever
+    // the next release's notes look like, which is the point: the plain
+    // form is RARE, and rare is exactly when a parser drops something.
+    const caveat =
+      'That last change has been read on a Kindle, but not yet with a very long ' +
+      'speech at a large font size. If a character name ever ends up alone at the ' +
+      'foot of a page, that is the case worth reporting.';
+    const markdown = [
+      '# Screepub 9.9.9',
+      '',
+      'A headline paragraph, because the template has one.',
+      '',
+      '## Good to know',
+      '',
+      '- That last change has been read on a Kindle, but not yet with a very long',
+      '  speech at a large font size. If a character name ever ends up alone at',
+      '  the foot of a page, that is the case worth reporting. <!-- caveat: registry-8b -->',
+      '',
+    ].join('\n');
+
+    const section = parseReleaseNotes('9.9.9', markdown).sections.find(
+      (s) => s.title === 'Good to know',
+    );
+    expect(section).toBeDefined();
+    expect(section!.items).toHaveLength(1);
+    // No lead, because there was no bold claim: an empty lead, never a
+    // dropped item.
+    expect(section!.items[0].lead).toBe('');
+    // Continuation lines rejoined, and the bookkeeping marker stripped,
+    // because the template says it never renders.
+    expect(section!.items[0].body).toBe(caveat);
+  });
+
+  test('the live release file keeps a Good to know section with bullets in it', () => {
+    // The half the fixture cannot check: that the CURRENT notes still
+    // parse, and that the section a reader looks for is not empty. The
+    // bullet-by-bullet count across the whole file is asserted above.
+    const goodToKnow = parseReleaseNotes(VERSION, MARKDOWN).sections.find(
+      (s) => s.title === 'Good to know',
+    );
     expect(goodToKnow).toBeDefined();
-
-    const lines = MARKDOWN.split('\n');
-    const start = lines.indexOf('## Good to know') + 1;
-    expect(start).toBeGreaterThan(0);
-    const rest = lines.slice(start);
-    const end = rest.findIndex((l) => l.startsWith('## '));
-    const section = (end === -1 ? rest : rest.slice(0, end)).filter((l) => l.trim() !== '');
-    const reference = section
-      .join(' ')
-      .replace(/<!--.*?-->/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .replace(/^-\s*/, '');
-
-    expect(reference.length).toBeGreaterThan(20);
-    expect(goodToKnow!.items).toHaveLength(1);
-    expect(goodToKnow!.items[0].lead).toBe('');
-    expect(goodToKnow!.items[0].body).toBe(reference);
+    expect(goodToKnow!.items.length).toBeGreaterThan(0);
+    for (const item of goodToKnow!.items) expect(item.body.length).toBeGreaterThan(20);
   });
 
   test('a line under a heading that is neither a bullet nor a continuation ' +
