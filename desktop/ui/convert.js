@@ -28,6 +28,28 @@ export const HEADINGS = {
   'internal': 'The engine did not answer',
 };
 
+/** The window's own name. On the idle screen this is the ONLY place the app
+ *  says what it is: the macOS title bar is gone, and the paragraph that used
+ *  to carry the name went with it. */
+export const WORDMARK = 'Screepub';
+
+/** The drop well's words, exported the way send.js and tune.js export theirs,
+ *  so a test can read the copy without mounting a surface.
+ *
+ *  `limits` used to name TWO of the engine's four guards, a scan and a
+ *  password-locked file, on the argument that both are properties a reader
+ *  can check at a glance, which moved both from after the wait to before the
+ *  drop. The password half was cut deliberately (2026-09-20). It is a real
+ *  trade, not a tidy-up: a locked PDF is now met AFTER the conversion wait
+ *  rather than before it. What makes it survivable is that the refusal still
+ *  names the cause — HEADINGS above maps `password` to "Locked PDF" and
+ *  prints the engine's own sentence under it. */
+export const WELL = {
+  call: 'Drop a screenplay PDF',
+  or: 'or',
+  limits: 'Needs selectable text, not a scan.',
+};
+
 /** The one guard a reader can meaningfully overrule. The others describe a
  *  file the engine genuinely cannot read, and offering an override on them
  *  would be a lie dressed as a button. */
@@ -250,19 +272,16 @@ function drawWell() {
 
   const well = el('div', { class: 'well' },
     el('span', { class: 'well-mark', 'aria-hidden': 'true' }, icon()),
-    el('span', { class: 'well-call' }, 'Drop a screenplay PDF'),
-    el('span', { class: 'well-or' }, 'or'),
+    el('span', { class: 'well-call' }, WELL.call),
+    el('span', { class: 'well-or' }, WELL.or),
     chooseButton,
-    // The important line. Two of the engine's four guards are properties a
-    // reader can check at a glance, so saying them here moves both from
-    // after the wait to before the drop.
-    el('span', { class: 'well-limits' }, 'Needs selectable text, not a scan. No password.'),
+    el('span', { class: 'well-limits' }, WELL.limits),
   );
 
+  // The wordmark stands where the paragraph did. An h1 because on this screen
+  // it IS the page's title: nothing above it names the app any more.
   pane.append(
-    el('p', { class: 'prose' },
-      'Drop a script and it becomes a real e-book, built entirely on this ' +
-      'computer. Nothing you drop here is ever uploaded.'),
+    el('h1', { class: 'wordmark' }, WORDMARK),
     well,
   );
   pane.dataset.state = 'idle';

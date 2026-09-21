@@ -335,10 +335,13 @@ describe('the Convert surface', () => {
   const convert = read('convert.js');
 
   test('it tells you what the engine cannot take, before you drop', () => {
-    // brand/components/drop-well.html's own argument: two of the four guards
-    // are properties a reader can check at a glance, so saying them here
-    // moves both from after the wait to before the drop.
-    expect(convert).toContain('Needs selectable text, not a scan. No password.');
+    // brand/components/drop-well.html's own argument: a scanned PDF with no
+    // text layer is a property a reader can check at a glance, so saying it
+    // here moves it from after the wait to before the drop.
+    //
+    // It named a second guard, a password-locked file, until 2026-09-20. See
+    // WELL in convert.js for why that half went and what it cost.
+    expect(convert).toContain('Needs selectable text, not a scan.');
   });
 
   test('it offers "Convert anyway" only for the one guard a reader can overrule', () => {
@@ -2890,5 +2893,53 @@ describe('the window does not title its own screens as script furniture', () => 
     // And it does not fire on the window's ordinary prose.
     expect(SLUGLINE.test('Needs selectable text, not a scan.')).toBe(false);
     expect(SLUGLINE.test('Send to a reader')).toBe(false);
+  });
+});
+
+describe('the drop well states one guard, not two', () => {
+  // The engine guards four failures and two were checkable at a glance, so
+  // the well named both: a scan, and a password-locked file. The maintainer
+  // cut the password half on 2026-09-20 — see the interface-pass design,
+  // decision 10. That is a real trade and it is recorded there: a locked PDF
+  // is now discovered AFTER the wait instead of before it. It is survivable
+  // only because the refusal still names the cause, which the HEADINGS table
+  // and its own tests already guarantee.
+  const ROOT = new URL('..', import.meta.url).pathname;
+  const wellCopy = async () =>
+    (await import(join(UI, 'convert.js'))) as { WELL?: { limits?: string }; WORDMARK?: string };
+
+  test('it still warns about a scan before the drop', async () => {
+    const { WELL } = await wellCopy();
+    expect(WELL?.limits ?? '').toContain('not a scan');
+  });
+
+  test('it no longer warns about a password', async () => {
+    const { WELL } = await wellCopy();
+    expect((WELL?.limits ?? '').toLowerCase()).not.toContain('password');
+  });
+
+  test('the brand component says the same thing the window says', async () => {
+    // These two carried identical copy and NOTHING tied them together, so the
+    // window could be changed and the design system left saying the old line.
+    // The component is what the next surface gets built from, so that drift
+    // does not stay theoretical: it re-adds the sentence by hand later.
+    //
+    // Compared as the rendered COPY rather than by scanning the file, because
+    // the component's caption is documentation and has to stay free to
+    // explain what the line used to say and why that half went. A file-wide
+    // ban on the word forbids the component from recording its own history.
+    const { WELL } = await wellCopy();
+    const brand = readFileSync(join(ROOT, 'brand', 'components', 'drop-well.html'), 'utf8');
+    const limits = [...brand.matchAll(/<span class="well-limits">([^<]*)<\/span>/g)]
+      .map((m) => m[1]);
+    expect(limits.length).toBeGreaterThan(0); // the scan must actually find them
+    for (const line of limits) expect(line).toBe(WELL?.limits);
+  });
+
+  test('the window names itself where the paragraph used to be', async () => {
+    // With the title bar gone and the prose cut, this is the only place the
+    // app says what it is.
+    const { WORDMARK } = await wellCopy();
+    expect(WORDMARK).toBe('Screepub');
   });
 });

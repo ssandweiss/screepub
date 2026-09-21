@@ -119,6 +119,34 @@
 
 /* Convert — brand/components/drop-well.html, progress.html,
  * result-card.html, failure-notice.html. */
+
+/* The app's name, centred in the whitespace above the well, with the brass
+ * rule doing the underline the Mac app drew by hand. It carries the vertical
+ * space too: the idle screen used to start at the top of the sheet and stop a
+ * third of the way down, which read as a page that had failed to finish
+ * loading rather than one waiting for a file. */
+.wordmark {
+  font-family: var(--font-structure);
+  font-weight: 700;
+  font-size: var(--text-title);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink);
+  text-align: center;
+  width: fit-content;
+  margin: var(--space-9) auto var(--space-8);
+  padding-bottom: var(--space-3);
+  border-bottom: 2px solid var(--brass);
+}
+/* A short window has no whitespace to spend on ceremony. */
+@media (max-height: 620px) {
+  .wordmark {
+    font-size: var(--text-lede);
+    margin-top: var(--space-5);
+    margin-bottom: var(--space-6);
+  }
+}
+
 .well {
   border: 1.5px dashed var(--ink-muted);
   border-radius: var(--radius-well);
