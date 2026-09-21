@@ -1,6 +1,7 @@
 # Design: the desktop interface pass
 
-Date: 2026-09-20 · Status: accepted (maintainer, in session)
+Date: 2026-09-20 · Status: accepted (maintainer, in session); pieces 1 and 2
+shipped 2026-09-21, 3 and 4 part-shipped — see "What has shipped" below
 Program: [ADR 2026-09-12 — cross-platform rewrite](../../adr/2026-09-12-cross-platform-tauri.md)
 Follows: [piece D — the Tauri interface](2026-09-13-tauri-ui-design.md)
 Target version: 0.6.0
@@ -298,15 +299,63 @@ Too large for one plan. Four pieces, in dependency order. Pieces 1 and 2 are
 pure front end and unblocked today. Piece 4 cannot finish without engine work
 that does not exist yet.
 
-| | Piece | Covers | Depends on |
-|---|---|---|---|
-| **1** | The frame and the empty state | 1, 4, 5, 7, 8, 9, 10, 12, 14 | nothing |
-| **2** | Read | 16, 17 | nothing (17 touches the engine's defaults, not its code) |
-| **3** | Settings | 18, 20, 21, 22 | an engine surface for app-wide settings and the output folder |
-| **4** | Send and the result screen | 11, 23, 24, 25 | `ResultActions` ported, the OS-launch shims, a save dialog |
+| | Piece | Covers | Depends on | State (2026-09-21) |
+|---|---|---|---|---|
+| **1** | The frame and the empty state | 1, 4, 5, 7, 8, 9, 10, 12, 14 | nothing | **shipped** |
+| **2** | Read | 16, 17 | nothing (17 touches the engine's defaults, not its code) | **shipped** |
+| **3** | Settings | 18, 20, 21, 22 | an engine surface for app-wide settings and the output folder | 20, 21, 22 shipped; 18's rename shipped, **its gear is blocked** |
+| **4** | Send and the result screen | 11, 23, 24, 25 | `ResultActions` ported, the OS-launch shims, a save dialog | 11 and 23 shipped; **24 and 25 blocked** |
 
 Each piece gets its own implementation plan. This document is the shared
 record of *why*; the plans are the *how*.
+
+## What has shipped, and what changed on the way
+
+Recorded here because the decisions above are dated 2026-09-20 and the code
+moved past several of them the next day. A design document that still
+describes shipped work in the future tense is the thing CLAUDE.md's own
+working style warns about.
+
+**Shipped** (fifteen commits on `worktree-desktop-ui-pass`, rebased onto
+v0.6.0): all of piece 1 and piece 2, plus decisions 11, 20, 21, 22, 23 and
+the rename half of 18.
+
+**Three decisions changed after they were written.**
+
+- **13, Cancel, hardened from "deferred" to "decided."** Gate 2 in the
+  retire-SwiftUI spec had listed Cancel among six features settled on
+  2026-09-14. The maintainer overruled it explicitly on 2026-09-21, after
+  being shown `desktop/README.md`'s own note that a kill handle means a third
+  Rust command. The shell stays at two. That makes "Rust is a window, not a
+  brain" literally true, which is now load-bearing for the doors-not-commands
+  ADR as well.
+- **4, the rev stamp, was proven right by accident.** The decision to take
+  the version from the generated notes module rather than from the engine was
+  argued on the grounds that the two numbers differ during the transition.
+  Three days later `package.json` went to 0.6.0 and the notes were
+  regenerated; the stamp followed to `rev 0.6.0` with no edit, and would
+  still have been reading 0.5.4 under the alternative.
+- **17 narrowed to page markers only.** The maintainer's reasoning, worth
+  keeping because it generalises: a scene number is an intentional property
+  of a draft and the app must not invent one; a page number is navigation and
+  the PDF already had it.
+
+**One defect this pass introduced and fixed.** The release-notes `<dialog>`
+was given a `display` on its bare class, which does not style a closed dialog
+— it un-hides it, because any class selector outranks the browser's own
+`dialog:not([open])` rule. The notes sat at the foot of every surface for six
+commits, invisible in a short window. There is now a test for the shape of
+that mistake, not just the instance.
+
+**Two things the blocked pieces learned.** Decision 25's route contract was
+adopted by the engine session as written, so the shape it specifies (a route
+list of `{id, title, detail, button, available}` plus a perform-route call,
+with ranking and remembered choice on the engine side) is now the agreed
+boundary rather than this document's proposal. And the parity audit found
+four gaps this spec did not name: feedback/report-a-bug, reveal-in-Finder,
+the gear being three separate things, and `installKfxPlugin` being fully
+implemented in the engine with no caller anywhere — a capability that exists
+and cannot be reached.
 
 ## Testing
 
