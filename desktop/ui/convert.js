@@ -17,15 +17,15 @@ import { el, clear, text } from './dom.js';
  *  src/cli-errors.ts can return on the conversion path has an entry, so a
  *  real failure never renders with a blank heading. */
 export const HEADINGS = {
-  'scanned': 'Int. scanned pdf, no text - day',
-  'not-screenplay': 'Int. not a screenplay - day',
-  'password': 'Int. locked pdf - day',
-  'unreadable': 'Int. unreadable file - day',
-  'unsupported-type': 'Int. wrong kind of file - day',
-  'bad-options': 'Int. bad settings - day',
-  'usage': 'Int. bad settings - day',
-  'library': 'Int. no way into the library - day',
-  'internal': 'Int. the engine did not answer - day',
+  'scanned': 'Scanned PDF, no text',
+  'not-screenplay': 'Not a screenplay',
+  'password': 'Locked PDF',
+  'unreadable': 'Unreadable file',
+  'unsupported-type': 'Wrong kind of file',
+  'bad-options': 'Bad settings',
+  'usage': 'Bad settings',
+  'library': 'No way into the library',
+  'internal': 'The engine did not answer',
 };
 
 /** The one guard a reader can meaningfully overrule. The others describe a
@@ -260,7 +260,6 @@ function drawWell() {
   );
 
   pane.append(
-    el('h2', { class: 'slug' }, 'Fade in:'),
     el('p', { class: 'prose' },
       'Drop a script and it becomes a real e-book, built entirely on this ' +
       'computer. Nothing you drop here is ever uploaded.'),
@@ -333,7 +332,7 @@ function drawProgress(path) {
   });
 
   pane.append(
-    el('h2', { class: 'slug' }, 'Int. conversion bay - continuous'),
+    el('h2', { class: 'slug' }, 'Converting'),
     el('p', { class: 'work-line' },
       `The pages of ${fileName(path)} reflow themselves, one scene at a time.`),
     el('div', { class: 'meter' },
@@ -355,7 +354,6 @@ function drawResult(path, answer) {
   const script = ctx.state.script;
 
   pane.append(
-    el('h2', { class: 'slug' }, 'Int. your library - night'),
     el('div', { class: 'announce' },
       el('p', { class: 'book-title' }, script.title),
       script.author ? el('p', { class: 'book-by' }, `(by ${script.author})`) : null,

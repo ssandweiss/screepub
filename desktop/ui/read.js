@@ -144,7 +144,7 @@ export function readerState(script) {
  *  to the next person who maintains it, which is worse than none. */
 export const NOTICES = {
   blank: {
-    slug: 'Int. the reader - no pages came back',
+    slug: 'No pages came back',
     line: 'The engine converted this script but sent no pages to read. The book '
       + 'itself is fine and can still be sent; converting again is the way to '
       + 'get the pages back.',

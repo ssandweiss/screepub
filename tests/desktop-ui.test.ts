@@ -2839,3 +2839,56 @@ describe('the ladder the Send surface asks for, without a toolchain', () => {
     expect(sendUi.artifactLine(plain)).toContain('EPUB');
   });
 });
+
+describe('the window does not title its own screens as script furniture', () => {
+  // Cut 2026-09-20; see docs/superpowers/specs/2026-09-20-desktop-ui-pass-design.md.
+  //
+  // This needs a guard rather than a one-off edit because the conceit was not
+  // one string, it was NINETEEN across four files, and it spread the way a
+  // house style does: each new surface copied the last one. A heading like
+  // "Int. the tuning bench - day" tells a reader nothing about the tuning
+  // bench, and nine of the nineteen were ERROR headings, where the cost is
+  // real: a person whose file was refused was reading set dressing instead of
+  // the reason.
+  //
+  // Deliberately a source scan and not a DOM check. The strings are what
+  // spread, and a surface can print one without ever mounting in a test.
+
+  /** Every single- or double-quoted literal in a source file. Good enough for
+   *  this window, which has no bundler, no template literals carrying headings
+   *  and no quotes inside these strings. */
+  function stringLiterals(source: string): string[] {
+    return [...source.matchAll(/'([^'\\\n]*)'|"([^"\\\n]*)"/g)]
+      .map((m) => m[1] ?? m[2])
+      .filter((s) => s !== undefined);
+  }
+
+  /** A slugline shape: INT./EXT., something, a dash, a time of day. */
+  const SLUGLINE = /^(int|ext)\.\s.+\s-\s.+$/i;
+  /** The transitions the window used the same way. */
+  const TRANSITION = /^(fade in:|fade out\.|cut to:|dissolve to:)$/i;
+
+  test('no surface is headed with a slugline or a transition', () => {
+    const offenders: string[] = [];
+    for (const name of jsFiles()) {
+      for (const literal of stringLiterals(read(name))) {
+        if (SLUGLINE.test(literal) || TRANSITION.test(literal)) {
+          offenders.push(`${name}: "${literal}"`);
+        }
+      }
+    }
+    expect(offenders.join('\n')).toBe('');
+  });
+
+  test('the scan can actually see a slugline, so a pass means something', () => {
+    // Guards the test above: a literal-extractor that silently matched
+    // nothing would let every heading back in while staying green.
+    const seen = stringLiterals(`const a = 'Int. the tuning bench - day';`);
+    expect(seen).toContain('Int. the tuning bench - day');
+    expect(SLUGLINE.test('Int. the tuning bench - day')).toBe(true);
+    expect(TRANSITION.test('Fade in:')).toBe(true);
+    // And it does not fire on the window's ordinary prose.
+    expect(SLUGLINE.test('Needs selectable text, not a scan.')).toBe(false);
+    expect(SLUGLINE.test('Send to a reader')).toBe(false);
+  });
+});

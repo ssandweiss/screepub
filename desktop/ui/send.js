@@ -317,7 +317,7 @@ export function preparingPhase(device) {
 }
 
 export const EMPTY = {
-  slug: 'Int. your desk - nothing plugged in',
+  slug: 'No reader connected',
   // The empty state is what most people meet first, so it is an invitation
   // and an explanation rather than a blank panel. It says what is true now,
   // what will happen when that changes, and what Screepub can reach at all.
@@ -330,7 +330,7 @@ export const LEDE = 'The book in your library, on the reader on your desk. Scree
   + 'file each reader can actually open, then copies it across — nothing leaves this computer.';
 
 export const NO_SCRIPT = {
-  slug: 'Int. nothing to send - day',
+  slug: 'Nothing to send yet',
   line: 'Convert a script and it can go to a reader from here.',
 };
 
@@ -406,7 +406,7 @@ function draw() {
   const blocked = blockedReason(ctx.state.script);
   if (blocked !== null) {
     pane.append(
-      el('h2', { class: 'fault' }, 'Int. no book to send - day'),
+      el('h2', { class: 'fault' }, 'No book to send'),
       el('p', { class: 'fault-body' }, blocked),
       el('div', { class: 'read-ways' },
         el('button', {
@@ -423,7 +423,7 @@ function draw() {
   artifactNote.hidden = true;
 
   pane.append(
-    el('h2', { class: 'slug' }, 'Int. your desk - night'),
+    el('h2', { class: 'slug' }, 'Send to a reader'),
     el('p', { class: 'prose' }, LEDE),
     list,
     statusLine,

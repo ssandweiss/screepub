@@ -327,7 +327,7 @@ export function statusFor(phase, message) {
  *  reachable and is not the knobs is a script whose settings could not be
  *  read — a sidecar on a disk that went away. */
 export const FAULT = {
-  slug: 'Int. the tuning bench - settings out of reach',
+  slug: 'Settings out of reach',
   line: 'Screepub could not read this script’s settings. The book itself is fine and can '
     + 'still be sent; converting the PDF again is the way to get the knobs back.',
   way: 'Convert it again',
@@ -434,7 +434,7 @@ function draw(status) {
 
   statusLine = el('p', { class: 'caption tune-status', role: 'status' }, '');
   pane.append(
-    el('h2', { class: 'slug' }, 'Int. the tuning bench - day'),
+    el('h2', { class: 'slug' }, 'This script’s settings'),
     el('p', { class: 'prose' }, LEDE),
     drawPresets(),
     ...GROUPS.map(drawGroup),
