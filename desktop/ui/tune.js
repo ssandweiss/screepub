@@ -49,17 +49,27 @@ export const GROUPS = [
         key: 'elementSpacingEm', label: 'Space between elements',
         kind: 'range', min: 0.4, max: 2, step: 0.1, unit: ' em',
       },
-      { key: 'scenePageBreaks', label: 'Start each scene on a new page', kind: 'toggle' },
-      { key: 'keepSceneHeadingWithScene', label: 'Keep headings with their scene', kind: 'toggle' },
       {
-        key: 'keepSpeechesWhole', label: 'Keep each speech on one page', kind: 'toggle',
-        help: 'Avoids mid-speech page turns; long speeches may leave white space at page '
-          + 'bottoms. Speeches taller than a full page still break.',
+        key: 'scenePageBreaks', label: 'Start each scene on a new page', kind: 'toggle',
+        help: 'Makes every scene easy to find, and makes the book considerably longer.',
       },
       {
-        key: 'printSplitMinimums', label: 'Print-style split minimums', kind: 'toggle',
-        help: 'Never leaves a single line of a speech or paragraph alone at a page edge. '
-          + 'Off packs pages tighter. Applies on new-format Kindle (KFX) and Kobo/tolino.',
+        key: 'keepSceneHeadingWithScene',
+        label: 'Never end a page on a scene heading', kind: 'toggle',
+        help: 'A heading alone at the foot of a page announces a scene and then makes you '
+          + 'turn over to find it.',
+      },
+      {
+        key: 'keepSpeechesWhole', label: 'Keep each speech on one page', kind: 'toggle',
+        help: 'Stops a page turn landing in the middle of what someone is saying. The cost '
+          + 'is a gap at the bottom of some pages. A speech longer than a whole page still '
+          + 'has to break somewhere.',
+      },
+      {
+        key: 'printSplitMinimums', label: 'Avoid stranded lines', kind: 'toggle',
+        help: 'Stops a single line of a speech or a paragraph being left behind at the top '
+          + 'or bottom of a page. Turning it off fits a little more onto each page. Not '
+          + 'every e-reader obeys this one.',
       },
     ],
   },
@@ -72,13 +82,17 @@ export const GROUPS = [
         kind: 'range', min: 0, max: 30, step: 1, unit: '%',
       },
       {
-        key: 'cueAlignment', label: 'Character cues', kind: 'choice',
+        // A plural noun phrase, not a question. idleReason() composes this
+        // label into "Only when <label> are indented.", so a label that reads
+        // well alone but not in a sentence breaks the explanation beside two
+        // OTHER knobs. "Where character names sit" did exactly that.
+        key: 'cueAlignment', label: 'Character names', kind: 'choice',
         choices: [['centered', 'Centered'], ['indented', 'Indented']],
-        help: 'Centered reads naturally at any screen width. Indented reproduces the '
-          + 'fixed offsets of a printed script.',
+        help: 'Centred looks right at any screen size. Indented copies where they sit on a '
+          + 'printed page, which only lines up at one width.',
       },
       {
-        key: 'cueIndentPct', label: 'Cue indent',
+        key: 'cueIndentPct', label: 'Character name indent',
         kind: 'range', min: 0, max: 60, step: 1, unit: '%',
         needs: { cueAlignment: 'indented' },
       },
@@ -98,14 +112,15 @@ export const GROUPS = [
         choices: [['courier', 'Courier'], ['serif', 'Serif'], ['sans', 'Sans']],
       },
       {
-        key: 'justifyText', label: 'Justify body text', kind: 'toggle',
-        help: 'Screenplays are traditionally ragged-right. Justifying opens stretchy word '
-          + 'gaps in a narrow column.',
+        key: 'justifyText', label: 'Straighten the right edge', kind: 'toggle',
+        help: 'Screenplays normally leave the right edge uneven. Straightening it opens up '
+          + 'wide gaps between words in a column this narrow.',
       },
       {
-        key: 'preserveFontShifts', label: "Keep the PDF's font shifts", kind: 'toggle',
-        help: 'Renders inserts, chyrons and on-screen text in the face and size the script '
-          + 'drew them in. Off sets every block in the body typeface.',
+        key: 'preserveFontShifts', label: "Keep the script's own type changes", kind: 'toggle',
+        help: 'Some scripts set titles, inserts and on-screen text in a different typeface '
+          + 'or size. This keeps them the way the script drew them; turning it off puts '
+          + 'every line in one typeface.',
       },
     ],
   },
@@ -115,10 +130,14 @@ export const GROUPS = [
     knobs: [
       {
         key: 'includeTitlePage', label: 'Title page', kind: 'toggle', effect: 'book',
-        help: 'The preview is the script itself, so a title page shows up in the book '
-          + 'rather than here.',
+        help: 'It appears in the finished book, not in the preview here, because the '
+          + 'preview is the script itself.',
       },
-      { key: 'showSceneNumbers', label: 'Scene numbers', kind: 'toggle' },
+      {
+        key: 'showSceneNumbers', label: 'Scene numbers', kind: 'toggle',
+        help: 'Only shows numbers the script already carried. Screepub never invents them: '
+          + 'a numbered draft is a decision someone made, not a formatting choice.',
+      },
     ],
   },
   {
@@ -136,8 +155,9 @@ export const GROUPS = [
     knobs: [
       {
         key: 'rejoinSplitDialogue', label: 'Rejoin speeches split across pages', kind: 'toggle',
-        help: 'Joins the two halves of a speech the printed script broke with (MORE) and '
-          + "(CONT'D). Off keeps the break where the PDF had it.",
+        help: 'A printed script breaks a long speech across two pages and marks it (MORE) '
+          + "and (CONT'D). This stitches the halves back into one speech. Turning it off "
+          + 'keeps the break exactly where the PDF had it.',
       },
       {
         key: 'contdMode', label: "(CONT'D) after a cue", kind: 'choice',

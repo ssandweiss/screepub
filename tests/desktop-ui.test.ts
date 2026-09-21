@@ -2128,7 +2128,7 @@ describe('the Tune surface', () => {
     const centered = { cueAlignment: 'centered' };
     const indented = { cueAlignment: 'indented' };
     expect(tune.notesFor(indent, centered)).toEqual([
-      'Only when character cues are indented.',
+      'Only when character names are indented.',
     ]);
     // Live again: nothing to say, and nothing said.
     expect(tune.notesFor(indent, indented)).toEqual([]);
@@ -2141,12 +2141,17 @@ describe('the Tune surface', () => {
     const both = tune.notesFor(
       { ...indent, help: 'What it is for.' }, centered,
     );
-    expect(both).toEqual(['Only when character cues are indented.', 'What it is for.']);
+    expect(both).toEqual(['Only when character names are indented.', 'What it is for.']);
 
     // A knob that can never explain itself draws no element to explain with;
     // one that can, draws one even while it is empty, or there is nothing to
     // rewrite when the setting it depends on moves.
-    expect(tune.canExplain(tune.knobFor('scenePageBreaks'))).toBe(false);
+    // A bare knob, constructed rather than named. This asserted against
+    // scenePageBreaks until 2026-09-21, when the copy pass gave that knob a
+    // help line and the test failed for a change that was purely an
+    // improvement to it. The contract is about knobs with nothing to say, not
+    // about which knob currently happens to be one.
+    expect(tune.canExplain({ key: 'nothing-to-say', label: 'Bare', kind: 'toggle' })).toBe(false);
     expect(tune.canExplain(indent)).toBe(true);
     expect(tune.canExplain(speeches)).toBe(true);
     expect(tune.canExplain(null)).toBe(false);
@@ -2907,6 +2912,47 @@ describe('the window does not title its own screens as script furniture', () => 
     // And it does not fire on the window's ordinary prose.
     expect(SLUGLINE.test('Needs selectable text, not a scan.')).toBe(false);
     expect(SLUGLINE.test('Send to a reader')).toBe(false);
+  });
+});
+
+describe('the settings explain themselves in the reader\'s words', () => {
+  // The copy was carried over from the SwiftUI reader rail rather than
+  // written fresh, and it explained MECHANISM to a screenwriter in a
+  // compressed register, using KFX, tolino, chyrons and ragged-right as
+  // though they were common words. Rewritten 2026-09-21 to a single brief:
+  // lead with what the reader will see in their book, one plain sentence, no
+  // jargon that is not glossed on the spot.
+  //
+  // Screenplay vocabulary is NOT jargon here and is deliberately not banned.
+  // (MORE), (CONT'D), parenthetical and cue are words this audience uses
+  // daily; KFX is not.
+  const ENGINE_WORDS = ['KFX', 'tolino', 'chyron', 'ragged-right', 'ragged right', 'e-ink ('];
+
+  test('no label or explanation leans on a word only the engine knows', async () => {
+    const tune: any = await import(join(UI, 'tune.js'));
+    const offenders: string[] = [];
+    for (const group of tune.GROUPS) {
+      const texts = [group.title, group.note ?? '', ...group.knobs.flatMap(
+        (k: any) => [k.label, k.help ?? ''],
+      )];
+      for (const text of texts) {
+        for (const word of ENGINE_WORDS) {
+          if (String(text).toLowerCase().includes(word.toLowerCase())) {
+            offenders.push(`"${word}" in: ${text}`);
+          }
+        }
+      }
+    }
+    expect(offenders.join('\n')).toBe('');
+  });
+
+  test('the scan can actually see the jargon it bans', async () => {
+    // Guards the loop above: a GROUPS shape it could not walk would pass by
+    // finding nothing, which is the failure mode of every sweep like this.
+    const tune: any = await import(join(UI, 'tune.js'));
+    const all = tune.GROUPS.flatMap((g: any) => g.knobs.map((k: any) => k.label));
+    expect(all.length).toBe(18);
+    expect(ENGINE_WORDS.some((w) => 'Applies on new-format Kindle (KFX)'.includes(w))).toBe(true);
   });
 });
 
