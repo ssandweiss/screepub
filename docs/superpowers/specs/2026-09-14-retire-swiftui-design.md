@@ -224,6 +224,17 @@ identifier) and swaps the bundle in place. The Tauri DMG carries identifier
 should *refuse* it — which surfaces to the user as a failed update rather
 than a wrong one.
 
+**REVERSED 2026-09-20 by [ADR: the Swift app migrates
+itself](../../adr/2026-09-20-swift-app-migrates-itself.md).** F2 now TAKES the
+`com.darkwell.screepub` identifier and existing installs upgrade themselves
+through the updater they already have. The universal build removed the
+architecture-blindness that disqualified it, the decision to port a full
+self-update removed the "payload deletes the updater" objection, and gate 2
+becoming a parity gate removed the "features vanish" one. What remains, and
+what F2 now owns, is a first-run pass that adopts the Swift app's FLAT library
+into the per-script layout. The paragraph below is the superseded reasoning,
+kept because it is still an accurate account of the hazard.
+
 **SETTLED 2026-09-14 by [ADR: how an installed Swift app gets off the Swift
 app](../../adr/2026-09-14-swift-app-update-path.md).** Read it before
 building F2; it changes this paragraph's conclusion in three ways. The
