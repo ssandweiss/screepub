@@ -106,6 +106,11 @@
       "category": "doc",
       "breaks": "A live instruction to the notes author: edit app/Sources/ScreepubApp/ReaderRail.swift when a bullet announces a UI change. Not a record \u2014 a procedure that would tell someone to edit a deleted file."
     },
+    "docs/parity-audit.md": {
+      "refs": 18,
+      "category": "doc",
+      "breaks": "The audit IS an inventory of what only app/ has, so it names ResultActions.swift, ContentView.swift, ReaderRail.swift, ScreepubApp.swift and KitCheck by path and line. Every reference is the point of the file rather than a dependency on it. It is also the file F3 has to be able to answer: this row goes when the audit is empty, which is the same moment app/ can be deleted."
+    },
     "docs/release-secrets.md": {
       "refs": 2,
       "category": "doc",
