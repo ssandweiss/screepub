@@ -45,17 +45,57 @@ and the sidecar step becomes `--universal`, which lipos both slices.
 Everything downstream already understands it: `--arch universal` implies the
 cargo target, and the released name is `Screepub-Desktop-macOS-universal.dmg`.
 
+**DONE 2026-09-20**, with two deviations worth recording. The row carries no
+`target` column: since `--arch universal` derives the cargo triple inside
+`build-app-bundle.ts`, naming it in YAML too would be a second place for it
+to drift, silently, into a thin bundle wearing a universal name. `arch` is
+the matrix's only axis and every step reads it. And `rustup target add`
+installs BOTH darwin targets rather than only x86_64, because the lipo needs
+two real cargo builds and naming both survives GitHub's macos-15 image
+changing architecture.
+
+Three things followed. `app-upload`'s count is 4, not 5, and its job has
+flipped: it now mainly catches a SECOND `.dmg` reaching the page, which is
+the ambiguity the universal build exists to remove. The smoke step no longer
+skips anything, because the universal DMG has a slice the runner can execute,
+so the shipped Mac bundle is one CI has actually opened and run; the
+`::notice::` survives, naming the slice that ran. And `README.md`,
+`site/index.html` and `docs/releases/0.6.0.md` name one Mac download instead
+of two, with the "nobody has installed this" claims brought up to date,
+because gate 1b had passed and `desktop/README.md`'s ledger had not moved.
+
 **2. Bump `package.json` to 0.6.0.** `tauri.conf.json` and `Cargo.toml`
 already say it; the three-version check blocks the build until all three
 agree. This is the check working, not an obstacle.
 
-**3. Tag, then VERIFY SIGNING ON THE ARTIFACT, not in the log.** Download the
-published DMG and run, against both the DMG and the `.app` inside it:
+**DONE 2026-09-20.** Two things followed the number. `desktop/ui/notes.js` is
+generated from `docs/releases/<package.json version>.md`, so the window was
+showing 0.5.4's notes and now shows 0.6.0's; that also earns a row in
+`tools/app-references.json`, because 0.6.0's notes name `Screepub-macOS.dmg`.
+And `tests/desktop-notes.test.ts`'s plain-caveat test is now fixture-driven:
+it asserted Good to know held exactly one plain bullet, true of 0.5.4's notes
+and not of 0.6.0's, so the bump alone would have ended that coverage rather
+than failing it.
 
-    codesign -dv --verbose=4 <path>
-    codesign --verify --deep --strict --test-requirement \
-      '=anchor apple generic and certificate leaf[subject.OU] = "XSRB3D643J"' <path>
-    spctl -a -t open --context context:primary-signature -v <dmg>
+**3. Tag, then VERIFY SIGNING ON THE ARTIFACT, not in the log.** Download the
+published DMG and run:
+
+    bun tools/verify-signing.ts --dmg <downloaded.dmg> --expect coexist
+
+**Corrected 2026-09-20 while executing this step.** This plan first wrote
+the check out as three commands, and the requirement it pinned,
+
+    '=anchor apple generic and certificate leaf[subject.OU] = "XSRB3D643J"'
+
+is strictly WEAKER than the one `UpdateInstall.swift` actually uses. The
+real `dmgRequirement` and `appRequirement` also pin both Developer ID
+certificate-chain clauses (`field.1.2.840.113635.100.6.2.6` on the
+intermediate, `...6.1.13` on the leaf), and `appRequirement` pins the bundle
+identifier on top. An artifact can satisfy the shorthand and still be
+refused by the installer — which is the exact failure this step exists to
+catch, arriving through the check meant to catch it. `tools/verify-signing.ts`
+uses the real strings and `tests/verify-signing.test.ts` pins them against
+the Swift that builds them.
 
 A green workflow is not the same fact as a signature that satisfies the
 requirement the frozen updater pins. If this fails, stop: v0.6.1 cannot
@@ -66,6 +106,15 @@ Check for Updates. Expected: it finds the newer release, downloads, and
 fails the identifier pin. This is `docs/mac-qa.md` §5 and it has never been
 watched. If it OFFERS the Tauri build, stop and find out why — the pin is
 supposed to make that impossible.
+
+Step 3 now answers the structural half of this before anyone installs
+anything: `--expect coexist` asks codesign directly whether the `.app`
+satisfies the full requirement the frozen installer pins, and FAILS if it
+does. So a wrong answer is caught against a downloaded file rather than
+against a working app on somebody's Mac. Step 4 remains worth doing,
+because what it watches is the whole round trip — find, download, mount,
+refuse, and report the refusal to a person — and only a person can see the
+last part.
 
 **5. Do not touch the download references.** The Swift app is still the
 supported Mac download at 0.6.0.
