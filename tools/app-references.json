@@ -251,6 +251,11 @@
       "category": "test",
       "breaks": "READS app/Sources/ScreepubApp/Theme.swift and parses it. The single hardest F3 dependency: it is the only file outside app/ that opens a file inside app/ for its CONTENT rather than its existence."
     },
+    "tests/verify-signing.test.ts": {
+      "refs": 10,
+      "category": "test",
+      "breaks": "Reads app/Sources/ScreepubKit/UpdateInstall.swift and pins verify-signing.ts's codesign requirement strings against it, clause by clause. This is the cross-pin that stops the release gate checking a paraphrase; it is also the thing that stops working the moment app/ is gone. At F3 the requirements have no upstream left, so either they become this repository's own definition with the Swift quoted in a comment, or the gate goes with the frozen updater it serves."
+    },
     "tools/build-app-bundle.ts": {
       "refs": 3,
       "category": "artifact",
@@ -290,6 +295,11 @@
       "refs": 1,
       "category": "note",
       "breaks": "A comment saying the signed macOS CLI is notarized from app/release.sh."
+    },
+    "tools/verify-signing.ts": {
+      "refs": 2,
+      "category": "test",
+      "breaks": "Carries UpdateInstaller's teamID, bundleID and both designated requirements, because the whole point is to check a published DMG against what the FROZEN app will actually demand of it. Its source of truth is a Swift file in app/. Goes with tests/verify-signing.test.ts at F3."
     },
     "tools/smoke-bundle.ts": {
       "refs": 1,
