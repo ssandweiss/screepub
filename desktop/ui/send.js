@@ -317,7 +317,7 @@ export function preparingPhase(device) {
 }
 
 export const EMPTY = {
-  slug: 'Int. your desk - nothing plugged in',
+  slug: 'No reader connected',
   // The empty state is what most people meet first, so it is an invitation
   // and an explanation rather than a blank panel. It says what is true now,
   // what will happen when that changes, and what Screepub can reach at all.
@@ -330,7 +330,7 @@ export const LEDE = 'The book in your library, on the reader on your desk. Scree
   + 'file each reader can actually open, then copies it across — nothing leaves this computer.';
 
 export const NO_SCRIPT = {
-  slug: 'Int. nothing to send - day',
+  slug: 'Nothing to send yet',
   line: 'Convert a script and it can go to a reader from here.',
 };
 
@@ -406,7 +406,7 @@ function draw() {
   const blocked = blockedReason(ctx.state.script);
   if (blocked !== null) {
     pane.append(
-      el('h2', { class: 'fault' }, 'Int. no book to send - day'),
+      el('h2', { class: 'fault' }, 'No book to send'),
       el('p', { class: 'fault-body' }, blocked),
       el('div', { class: 'read-ways' },
         el('button', {
@@ -423,7 +423,7 @@ function draw() {
   artifactNote.hidden = true;
 
   pane.append(
-    el('h2', { class: 'slug' }, 'Int. your desk - night'),
+    el('h2', { class: 'slug' }, 'Send to a reader'),
     el('p', { class: 'prose' }, LEDE),
     list,
     statusLine,
@@ -470,13 +470,24 @@ function drawEmpty() {
   // el() drops a null child and Node.append() renders it as the word "null".
   // That is not hypothetical: this state shipped a stray "null" under the
   // list on every platform but Windows until it was seen on screen.
+  // The reach table folds away. It is four readers, four honesty labels and
+  // two caveats, and it was the bulk of this page — good information, and not
+  // what someone with nothing plugged in came here to find out. A <details>
+  // rather than a hand-rolled toggle: the open/shut state, the keyboard and
+  // the announcement come from the platform.
+  //
+  // Folded, never dropped. Everything that made the table honest travels with
+  // it, including provenNote(), which carries the one fact the four statuses
+  // cannot: WHERE the single proven route was proven.
   list.append(el('div', { class: 'reader-list' },
     el('p', { class: 'state-label' }, 'Nothing plugged in'),
     el('p', { class: 'prose' }, EMPTY.line),
-    el('h3', { class: 'subslug' }, EMPTY.heading),
-    ...READERS.map((reader) => readerRow(reader, platform)),
-    el('p', { class: 'caption reader-note' }, provenNote(platform)),
-    cannot === null ? null : el('p', { class: 'caption device-caveat' }, cannot),
+    el('details', { class: 'reach' },
+      el('summary', { class: 'reach-summary' }, EMPTY.heading),
+      ...READERS.map((reader) => readerRow(reader, platform)),
+      el('p', { class: 'caption reader-note' }, provenNote(platform)),
+      cannot === null ? null : el('p', { class: 'caption device-caveat' }, cannot),
+    ),
   ));
 }
 

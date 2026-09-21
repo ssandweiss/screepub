@@ -356,14 +356,61 @@ describe('the sidecar name is agreed on both sides', () => {
 });
 
 describe('the window is granted no more than it needs', () => {
-  test('the frontend holds no plugin permission', () => {
-    // The shell and dialog plugins are called only from Rust. If the
-    // frontend ever gains `shell:allow-execute`, the window can spawn
-    // arbitrary processes and the sidecar boundary stops meaning anything.
-    const cap = JSON.parse(
-      readFileSync(join(REPO, 'desktop', 'src-tauri', 'capabilities', 'default.json'), 'utf8'),
+  // This asserted `permissions` was exactly ['core:default'] until
+  // 2026-09-21. It was a tripwire, and it fired as designed: it stopped the
+  // first grant long enough for the decision to be made deliberately, in
+  // ADR 2026-09-21 (doors, not commands), rather than in a diff.
+  //
+  // It is not loosened into "some permissions are fine". What replaces it is
+  // narrower in the way that matters: every grant must be scoped, and the one
+  // permission that would make the sidecar boundary meaningless is named and
+  // forbidden outright.
+  const capability = () => JSON.parse(
+    readFileSync(join(REPO, 'desktop', 'src-tauri', 'capabilities', 'default.json'), 'utf8'),
+  );
+
+  test('the frontend can never spawn a process', () => {
+    // The whole argument for the sidecar is that ONE binary is spawned and
+    // the window chooses its arguments, not its identity. `shell:allow-execute`
+    // hands the window the identity too, and then nothing about the boundary
+    // is true. The ADR refuses it by name.
+    const raw = JSON.stringify(capability());
+    expect(raw).not.toContain('shell:allow-execute');
+    expect(raw).not.toContain('shell:execute');
+    // `shell:default` bundles execute, so the shorthand is refused as well.
+    expect(raw).not.toContain('"shell:default"');
+  });
+
+  test('every plugin permission is scoped, never a bare grant', () => {
+    // "The window is not granted 'open anything'; it is granted the bug
+    // tracker, Amazon's two pages, and the library" — ADR 2026-09-21. A bare
+    // string permission for a plugin is exactly the unscoped grant that
+    // sentence refuses, so the shape is the test.
+    for (const permission of capability().permissions) {
+      if (typeof permission === 'string') {
+        // Only core:* may be a bare string: it is the window's own baseline,
+        // not a door onto the OS.
+        expect(`bare permission: ${permission}`).toBe(`bare permission: ${
+          permission.startsWith('core:') ? permission : `${permission} MUST BE SCOPED`}`);
+        continue;
+      }
+      expect(Array.isArray(permission.allow)).toBe(true);
+      expect(permission.allow.length).toBeGreaterThan(0);
+    }
+  });
+
+  test('the opener may reach this project’s issue tracker and nothing else', () => {
+    const opener = capability().permissions.find(
+      (p: unknown) => typeof p === 'object' && p !== null
+        && (p as { identifier: string }).identifier === 'opener:allow-open-url',
     );
-    expect(cap.permissions).toEqual(['core:default']);
+    expect(opener).toBeDefined();
+    // A glob, so it must not widen past the repository. "https://*" or a bare
+    // "https://github.com/*" would let any page on the host be opened from
+    // whatever text the window happened to be holding.
+    for (const entry of opener.allow) {
+      expect(entry.url.startsWith('https://github.com/ssandweiss/screepub/')).toBe(true);
+    }
   });
 
   test('the identifier does not collide with the Swift app’s', () => {

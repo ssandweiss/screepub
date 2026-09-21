@@ -36,6 +36,11 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        // A door, not a brain (ADR 2026-09-21). This plugin's whole job is
+        // handing a URL or a path to the OS. It adds no command here and no
+        // logic: what may be opened is decided by the SCOPES in
+        // capabilities/default.json, and the window decides nothing else.
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![run_engine, pick_file])
         .run(tauri::generate_context!())
         .expect("the Screepub window failed to start");

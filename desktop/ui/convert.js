@@ -7,8 +7,10 @@
 // pure exported function above the line, tested directly by
 // tests/desktop-ui.test.ts. Below the line is drawing: it holds no rule of
 // its own, so a live run is enough to check it.
-import { runEngine, pickScreenplay, onProgress, argv, FORCE_FLAG } from './app.js';
+import { runEngine, pickScreenplay, onProgress, argv, FORCE_FLAG, openUrl } from './app.js';
 import { el, clear, text } from './dom.js';
+import { newIssueUrl, osLabel } from './feedback.js';
+import { RELEASE } from './notes.js';
 
 // ---------------------------------------------------------------- decisions
 
@@ -17,15 +19,37 @@ import { el, clear, text } from './dom.js';
  *  src/cli-errors.ts can return on the conversion path has an entry, so a
  *  real failure never renders with a blank heading. */
 export const HEADINGS = {
-  'scanned': 'Int. scanned pdf, no text - day',
-  'not-screenplay': 'Int. not a screenplay - day',
-  'password': 'Int. locked pdf - day',
-  'unreadable': 'Int. unreadable file - day',
-  'unsupported-type': 'Int. wrong kind of file - day',
-  'bad-options': 'Int. bad settings - day',
-  'usage': 'Int. bad settings - day',
-  'library': 'Int. no way into the library - day',
-  'internal': 'Int. the engine did not answer - day',
+  'scanned': 'Scanned PDF, no text',
+  'not-screenplay': 'Not a screenplay',
+  'password': 'Locked PDF',
+  'unreadable': 'Unreadable file',
+  'unsupported-type': 'Wrong kind of file',
+  'bad-options': 'Bad settings',
+  'usage': 'Bad settings',
+  'library': 'No way into the library',
+  'internal': 'The engine did not answer',
+};
+
+/** The window's own name. On the idle screen this is the ONLY place the app
+ *  says what it is: the macOS title bar is gone, and the paragraph that used
+ *  to carry the name went with it. */
+export const WORDMARK = 'Screepub';
+
+/** The drop well's words, exported the way send.js and tune.js export theirs,
+ *  so a test can read the copy without mounting a surface.
+ *
+ *  `limits` used to name TWO of the engine's four guards, a scan and a
+ *  password-locked file, on the argument that both are properties a reader
+ *  can check at a glance, which moved both from after the wait to before the
+ *  drop. The password half was cut deliberately (2026-09-20). It is a real
+ *  trade, not a tidy-up: a locked PDF is now met AFTER the conversion wait
+ *  rather than before it. What makes it survivable is that the refusal still
+ *  names the cause — HEADINGS above maps `password` to "Locked PDF" and
+ *  prints the engine's own sentence under it. */
+export const WELL = {
+  call: 'Drop a screenplay PDF',
+  or: 'or',
+  limits: 'Needs selectable text, not a scan.',
 };
 
 /** The one guard a reader can meaningfully overrule. The others describe a
@@ -243,6 +267,19 @@ function icon() {
   return svg;
 }
 
+/** Back to the empty state, which is this window's home: the drop well is
+ *  the one screen that says what Screepub wants from you.
+ *
+ *  It does NOT close the script that is open. The book stays behind the well,
+ *  so Read, Settings and Send stay reachable and a reader who pressed this by
+ *  mistake has lost nothing. "Convert another" is an invitation, not a
+ *  discard — and the engine has already done the work, so throwing it away
+ *  here would be throwing away the only copy in memory. */
+export function reset() {
+  if (busy) return;
+  drawWell();
+}
+
 function drawWell() {
   clear(pane);
   chooseButton = el('button', { type: 'button', class: 'well-btn', onclick: choose },
@@ -250,20 +287,16 @@ function drawWell() {
 
   const well = el('div', { class: 'well' },
     el('span', { class: 'well-mark', 'aria-hidden': 'true' }, icon()),
-    el('span', { class: 'well-call' }, 'Drop a screenplay PDF'),
-    el('span', { class: 'well-or' }, 'or'),
+    el('span', { class: 'well-call' }, WELL.call),
+    el('span', { class: 'well-or' }, WELL.or),
     chooseButton,
-    // The important line. Two of the engine's four guards are properties a
-    // reader can check at a glance, so saying them here moves both from
-    // after the wait to before the drop.
-    el('span', { class: 'well-limits' }, 'Needs selectable text, not a scan. No password.'),
+    el('span', { class: 'well-limits' }, WELL.limits),
   );
 
+  // The wordmark stands where the paragraph did. An h1 because on this screen
+  // it IS the page's title: nothing above it names the app any more.
   pane.append(
-    el('h2', { class: 'slug' }, 'Fade in:'),
-    el('p', { class: 'prose' },
-      'Drop a script and it becomes a real e-book, built entirely on this ' +
-      'computer. Nothing you drop here is ever uploaded.'),
+    el('h1', { class: 'wordmark' }, WORDMARK),
     well,
   );
   pane.dataset.state = 'idle';
@@ -333,7 +366,7 @@ function drawProgress(path) {
   });
 
   pane.append(
-    el('h2', { class: 'slug' }, 'Int. conversion bay - continuous'),
+    el('h2', { class: 'slug' }, 'Converting'),
     el('p', { class: 'work-line' },
       `The pages of ${fileName(path)} reflow themselves, one scene at a time.`),
     el('div', { class: 'meter' },
@@ -355,7 +388,6 @@ function drawResult(path, answer) {
   const script = ctx.state.script;
 
   pane.append(
-    el('h2', { class: 'slug' }, 'Int. your library - night'),
     el('div', { class: 'announce' },
       el('p', { class: 'book-title' }, script.title),
       script.author ? el('p', { class: 'book-by' }, `(by ${script.author})`) : null,
@@ -369,8 +401,8 @@ function drawResult(path, answer) {
         el('button', { type: 'button', class: 'btn-quiet', onclick: () => ctx.goTo('read') },
           'Read it'),
         el('button', { type: 'button', class: 'btn-quiet', onclick: () => ctx.goTo('tune') },
-          'Tune it'),
-        el('button', { type: 'button', class: 'btn-quiet', onclick: choose },
+          'Settings'),
+        el('button', { type: 'button', class: 'btn-quiet', onclick: reset },
           'Convert another'),
       ),
     ),
@@ -398,6 +430,19 @@ function drawFailure(error, path) {
     class: 'btn btn-outline',
     onclick: () => { drawWell(); ctx.restoreFocus(); },
   }, 'Back to one'));
+  // The refusal is the moment someone most wants to tell you what happened,
+  // and until now it was the moment the window gave them nowhere to say it.
+  // The report carries the code and the engine's own sentence, so it arrives
+  // already saying what the window knew.
+  ways.append(el('button', {
+    type: 'button',
+    class: 'btn-quiet',
+    onclick: () => openUrl(newIssueUrl({
+      appVersion: RELEASE.version,
+      osVersion: osLabel(navigator.userAgentData?.platform ?? navigator.platform),
+      context: `${refusal.code}: ${refusal.message}`,
+    })),
+  }, 'Report a bug'));
 
   // The script that was already open stays open: see stillOpenNote. The
   // refusal is news about the file that was just refused, not about the book
@@ -405,7 +450,14 @@ function drawFailure(error, path) {
   // Tune and Send away from a book that was still perfectly good.
   const kept = stillOpenNote(ctx.state.script);
 
-  pane.append(
+  // Built through el() rather than appended straight to the pane, because
+  // el() drops a null child and Node.append() renders it as the literal word
+  // "null". The `kept` line is absent whenever no script is open, which is
+  // the COMMON case on a refusal, so this screen has been printing a stray
+  // "null" under its buttons. Exactly the defect send.js's drawEmpty records
+  // having shipped once already, on the same mistake, which is why it is
+  // worth fixing in the same shape rather than with a conditional here.
+  pane.append(el('div', { class: 'fault-body-block' },
     el('p', { class: 'smash' }, 'Smash cut to:'),
     el('h2', { class: 'fault' }, refusal.heading),
     // The engine's own sentence. The only thing the window takes out of it is
@@ -421,7 +473,7 @@ function drawFailure(error, path) {
     el('p', { class: 'code-note' },
       el('span', { class: 'code-note-label' }, 'Error code'),
       el('code', { class: 'code code-chip' }, refusal.code)),
-  );
+  ));
   // Also on the pane, for a bug report pasted out of the DOM and for anyone
   // reading the window with a tool rather than eyes.
   pane.dataset.errorCode = refusal.code;

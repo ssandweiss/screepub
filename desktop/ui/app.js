@@ -149,6 +149,30 @@ export function onFileDrag({ over, drop }) {
  *  Rust, so one event may carry several lines or a partial one; anything
  *  that is not a progress object is ignored rather than thrown, because a
  *  stray warning on stderr must not take a conversion down with it. */
+/** Hand a URL to the OS. The window's first and only door onto anything
+ *  outside itself (ADR 2026-09-21 — doors, not commands).
+ *
+ *  It is HERE because this file is the only one that touches Tauri, and
+ *  opening a URL is a Tauri call. The URL itself is built by feedback.js,
+ *  which is pure and knows nothing about any of this.
+ *
+ *  What may be opened is not decided here and must not be. The capability
+ *  scopes the grant to this project's issue tracker, so a URL pointing
+ *  anywhere else is refused by Tauri rather than quietly followed — which is
+ *  the property that makes passing a built string to it safe at all.
+ *
+ *  Resolves either way. A bug report that will not open is a disappointment;
+ *  it is not a reason to throw into a click handler on a screen that is
+ *  already showing someone a failure. */
+export async function openUrl(url) {
+  try {
+    await tauri().opener.openUrl(String(url));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function onProgress(handler) {
   return onEngineLine((payload) => {
     for (const line of payload.split('\n')) {

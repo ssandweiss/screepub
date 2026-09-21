@@ -3,7 +3,7 @@
 import { runEngine, argv, onFileDrag, onDialogClosed } from './app.js';
 import { mountFrame } from './frame.js';
 import { stopAfterDialog } from './focus.js';
-import { el, text } from './dom.js';
+import { el } from './dom.js';
 import * as convert from './convert.js';
 import * as read from './read.js';
 import * as tune from './tune.js';
@@ -21,13 +21,29 @@ export const state = {
 const root = document.getElementById('app');
 const frame = mountFrame(root);
 
-// A printer's mark at the foot of the paper, not a status bar: it belongs to
-// the page, so it is legible on it. The desk outside the sheet is dark in
-// both modes and has no ink that reads against it.
-const stamp = el('p', { class: 'engine-stamp' }, 'looking for the engine…');
-frame.sheet.append(stamp);
+// Notes is not in the bar. It is what changed in the version you are running,
+// so it is reached from the stamp that names that version, and it arrives as
+// a sheet over the page rather than a place you navigate to and have to come
+// back from.
+//
+// A real <dialog> rather than a hand-rolled panel: it brings Esc, the focus
+// trap, the inert background and the restored focus with it, all of which
+// this window would otherwise have to write and keep right.
+const notesSheet = el('dialog', { class: 'sheet-over', 'aria-label': 'Release notes' });
+const notesBody = el('div', { class: 'sheet-body' });
+notes.mount(notesBody);
+notesSheet.append(
+  el('button', {
+    type: 'button',
+    class: 'btn-quiet sheet-close',
+    onclick: () => notesSheet.close(),
+  }, 'Close'),
+  notesBody,
+);
+root.append(notesSheet);
+frame.onRev(() => notesSheet.showModal());
 
-const surfaces = { convert, read, tune, send, notes };
+const surfaces = { convert, read, tune, send };
 
 /** The surfaces that have nothing to show until a script is open. */
 const NEEDS_SCRIPT = ['read', 'tune', 'send'];
@@ -121,7 +137,11 @@ addEventListener('keydown', (event) => {
 context.scriptChanged();
 frame.setSurface('convert');
 
+// The stamp already names the build, so a working engine needs no
+// announcement. A broken one does: this is still the only check that the
+// sidecar can be started at all, and without it the first sign of trouble
+// would be a conversion that never begins.
 runEngine(argv.version()).then(
-  (answer) => text(stamp, `engine ${answer.version}`),
-  (err) => { text(stamp, err.message); stamp.classList.add('bad'); },
+  () => {},
+  (err) => frame.engineFailed(err.message),
 );

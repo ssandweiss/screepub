@@ -112,8 +112,11 @@ describe('the window respects the quality floor', () => {
     expect(css).toContain(':focus-visible');
   });
 
-  test('the surface switcher is a real tablist, reachable by keyboard', () => {
+  test('the surface switcher is a real tablist, reachable by keyboard', async () => {
     const frame = read('frame.js');
+    const { SURFACES } = (await import(join(UI, 'frame.js'))) as {
+      SURFACES: Array<{ id: string; label: string }>;
+    };
     // Not a div with a click handler: a test that only looked for the five
     // names would pass against exactly that.
     expect(frame).toContain("'button'");
@@ -125,9 +128,11 @@ describe('the window respects the quality floor', () => {
     // A dimmed surface is not a keyboard stop. Without this the arrow keys
     // land on a tab whose panel says nothing.
     expect(frame).toMatch(/disabled\)?\s*\)?\s*continue|if\s*\(.*disabled.*\)\s*continue/);
-    for (const name of ['convert', 'read', 'tune', 'send', 'notes']) {
-      expect(frame).toContain(name);
-    }
+    // The bar's four. Notes is deliberately absent: it is reached from the
+    // rev stamp, not from a tab. Asserted against the exported SURFACES
+    // rather than the file text, because frame.js imports ./notes.js for the
+    // version and a `toContain('notes')` would pass on the import alone.
+    expect(SURFACES.map((s) => s.id)).toEqual(['convert', 'read', 'tune', 'send']);
   });
 });
 
@@ -335,10 +340,13 @@ describe('the Convert surface', () => {
   const convert = read('convert.js');
 
   test('it tells you what the engine cannot take, before you drop', () => {
-    // brand/components/drop-well.html's own argument: two of the four guards
-    // are properties a reader can check at a glance, so saying them here
-    // moves both from after the wait to before the drop.
-    expect(convert).toContain('Needs selectable text, not a scan. No password.');
+    // brand/components/drop-well.html's own argument: a scanned PDF with no
+    // text layer is a property a reader can check at a glance, so saying it
+    // here moves it from after the wait to before the drop.
+    //
+    // It named a second guard, a password-locked file, until 2026-09-20. See
+    // WELL in convert.js for why that half went and what it cost.
+    expect(convert).toContain('Needs selectable text, not a scan.');
   });
 
   test('it offers "Convert anyway" only for the one guard a reader can overrule', () => {
@@ -832,7 +840,10 @@ describe('where the keyboard stands when a dialog closes', () => {
     stopAfterDialog: (surface: string, queryAll: (s: string) => Iterable<unknown>) => unknown;
   };
   let focus: FocusModule;
-  const SURFACES = ['convert', 'read', 'tune', 'send', 'notes'];
+  // The four the bar switches between. Notes left the bar on 2026-09-20: it
+  // is a <dialog> opened from the rev stamp now, so the platform owns its
+  // focus and there is no #tab-notes for a plan to point at.
+  const SURFACES = ['convert', 'read', 'tune', 'send'];
 
   beforeAll(async () => {
     focus = (await import(join(UI, 'focus.js'))) as FocusModule;
@@ -1361,10 +1372,16 @@ describe('the Read surface', () => {
     // offset is measured from the page and the rail scrolls to a number that
     // means nothing — visible at narrow widths, where the rail is a short
     // strip and the mark simply never comes into view.
+    //
+    // Any POSITIONED value satisfies that, not `relative` specifically. This
+    // asserted the literal until 2026-09-21, when the rail became an absolute
+    // drawer in the binding margin and the test failed for a change that
+    // never threatened what it was protecting.
     expect(reader).toContain('rail.scrollTop = button.offsetTop');
     const css = read('surfaces.css');
     const rule = css.slice(css.indexOf('.scene-rail {'));
-    expect(rule.slice(0, rule.indexOf('}'))).toContain('position: relative');
+    expect(rule.slice(0, rule.indexOf('}')))
+      .toMatch(/position:\s*(relative|absolute|fixed|sticky)/);
   });
 
   test('the parser the window uses is the real one', () => {
@@ -1382,10 +1399,16 @@ describe('the Read surface', () => {
     // What the VALUES do once read is checked below, against the CSS.
     expect(reader).toContain('getPropertyValue');
     expect(reader).toContain('prefers-color-scheme');
-    // adopt() must hand the sheet the tokens it read and nothing else: this
-    // is the seam the value test below cannot see across.
+    // dressFrame() must hand the sheet the tokens it just read and nothing
+    // else: this is the seam the value test below cannot see across.
+    //
+    // The css argument was named `sheetCss` until 2026-09-21, when these
+    // eight lines were lifted out of adopt() so the Settings preview could
+    // share them rather than own a second copy of the CSP dance. The seam is
+    // the same; only the parameter's name moved, so the assertion no longer
+    // pins that name.
     expect(reader).toMatch(/paperFrom\(\(name\) => root\.getPropertyValue\(name\)\)/);
-    expect(reader).toMatch(/sheetText\(sheetCss, tokens\)/);
+    expect(reader).toMatch(/sheetText\(\w+, tokens\)/);
   });
 
   test('a resized window re-measures, because a reflow moves every scene', () => {
@@ -2111,7 +2134,7 @@ describe('the Tune surface', () => {
     const centered = { cueAlignment: 'centered' };
     const indented = { cueAlignment: 'indented' };
     expect(tune.notesFor(indent, centered)).toEqual([
-      'Only when character cues are indented.',
+      'Only when character names are indented.',
     ]);
     // Live again: nothing to say, and nothing said.
     expect(tune.notesFor(indent, indented)).toEqual([]);
@@ -2124,12 +2147,17 @@ describe('the Tune surface', () => {
     const both = tune.notesFor(
       { ...indent, help: 'What it is for.' }, centered,
     );
-    expect(both).toEqual(['Only when character cues are indented.', 'What it is for.']);
+    expect(both).toEqual(['Only when character names are indented.', 'What it is for.']);
 
     // A knob that can never explain itself draws no element to explain with;
     // one that can, draws one even while it is empty, or there is nothing to
     // rewrite when the setting it depends on moves.
-    expect(tune.canExplain(tune.knobFor('scenePageBreaks'))).toBe(false);
+    // A bare knob, constructed rather than named. This asserted against
+    // scenePageBreaks until 2026-09-21, when the copy pass gave that knob a
+    // help line and the test failed for a change that was purely an
+    // improvement to it. The contract is about knobs with nothing to say, not
+    // about which knob currently happens to be one.
+    expect(tune.canExplain({ key: 'nothing-to-say', label: 'Bare', kind: 'toggle' })).toBe(false);
     expect(tune.canExplain(indent)).toBe(true);
     expect(tune.canExplain(speeches)).toBe(true);
     expect(tune.canExplain(null)).toBe(false);
@@ -2837,5 +2865,543 @@ describe('the ladder the Send surface asks for, without a toolchain', () => {
     );
     expect(plain.path).toBe(epub);
     expect(sendUi.artifactLine(plain)).toContain('EPUB');
+  });
+});
+
+describe('the window does not title its own screens as script furniture', () => {
+  // Cut 2026-09-20; see docs/superpowers/specs/2026-09-20-desktop-ui-pass-design.md.
+  //
+  // This needs a guard rather than a one-off edit because the conceit was not
+  // one string, it was NINETEEN across four files, and it spread the way a
+  // house style does: each new surface copied the last one. A heading like
+  // "Int. the tuning bench - day" tells a reader nothing about the tuning
+  // bench, and nine of the nineteen were ERROR headings, where the cost is
+  // real: a person whose file was refused was reading set dressing instead of
+  // the reason.
+  //
+  // Deliberately a source scan and not a DOM check. The strings are what
+  // spread, and a surface can print one without ever mounting in a test.
+
+  /** Every single- or double-quoted literal in a source file. Good enough for
+   *  this window, which has no bundler, no template literals carrying headings
+   *  and no quotes inside these strings. */
+  function stringLiterals(source: string): string[] {
+    return [...source.matchAll(/'([^'\\\n]*)'|"([^"\\\n]*)"/g)]
+      .map((m) => m[1] ?? m[2])
+      .filter((s) => s !== undefined);
+  }
+
+  /** A slugline shape: INT./EXT., something, a dash, a time of day. */
+  const SLUGLINE = /^(int|ext)\.\s.+\s-\s.+$/i;
+  /** The transitions the window used the same way. */
+  const TRANSITION = /^(fade in:|fade out\.|cut to:|dissolve to:)$/i;
+
+  test('no surface is headed with a slugline or a transition', () => {
+    const offenders: string[] = [];
+    for (const name of jsFiles()) {
+      for (const literal of stringLiterals(read(name))) {
+        if (SLUGLINE.test(literal) || TRANSITION.test(literal)) {
+          offenders.push(`${name}: "${literal}"`);
+        }
+      }
+    }
+    expect(offenders.join('\n')).toBe('');
+  });
+
+  test('the scan can actually see a slugline, so a pass means something', () => {
+    // Guards the test above: a literal-extractor that silently matched
+    // nothing would let every heading back in while staying green.
+    const seen = stringLiterals(`const a = 'Int. the tuning bench - day';`);
+    expect(seen).toContain('Int. the tuning bench - day');
+    expect(SLUGLINE.test('Int. the tuning bench - day')).toBe(true);
+    expect(TRANSITION.test('Fade in:')).toBe(true);
+    // And it does not fire on the window's ordinary prose.
+    expect(SLUGLINE.test('Needs selectable text, not a scan.')).toBe(false);
+    expect(SLUGLINE.test('Send to a reader')).toBe(false);
+  });
+});
+
+describe('a refused file is no longer a dead end', () => {
+  // The Swift app could report a bug from the failure screen, and the report
+  // carried the refusal's code with it. The Tauri window could not report
+  // anything, so a file the engine rejected ended the conversation: the one
+  // moment someone most wants to tell you what happened was the moment the
+  // app gave them nowhere to say it.
+  //
+  // Ported from app/Sources/ScreepubKit/Feedback.swift rather than reinvented.
+  let feedback: any;
+  beforeAll(async () => { feedback = await import(join(UI, 'feedback.js')); });
+
+  const parse = (url: string) => new URL(url);
+
+  test('it opens a new issue on this project, not a generic page', () => {
+    const url = parse(feedback.newIssueUrl({ appVersion: '0.6.0', osVersion: 'macOS 15.0' }));
+    expect(`${url.origin}${url.pathname}`)
+      .toBe('https://github.com/ssandweiss/screepub/issues/new');
+  });
+
+  test('the report arrives stamped with both versions', () => {
+    // So a report never begins with two rounds of "which version?".
+    const body = parse(feedback.newIssueUrl({
+      appVersion: '0.6.0', osVersion: 'macOS 15.0',
+    })).searchParams.get('body') ?? '';
+    expect(body).toContain('0.6.0');
+    expect(body).toContain('macOS 15.0');
+  });
+
+  test('a refusal seeds the "what happened" block; nothing else does', () => {
+    const withContext = parse(feedback.newIssueUrl({
+      appVersion: '0.6.0', osVersion: 'x', context: 'password: this PDF is locked',
+    })).searchParams.get('body') ?? '';
+    expect(withContext).toContain('What happened');
+    expect(withContext).toContain('password: this PDF is locked');
+
+    const without = parse(feedback.newIssueUrl({
+      appVersion: '0.6.0', osVersion: 'x',
+    })).searchParams.get('body') ?? '';
+    expect(without).not.toContain('What happened');
+  });
+
+  test('a plus in the context survives the round trip', () => {
+    // Feedback.swift's hard-won detail, carried over: a query parser reads a
+    // literal "+" as a space, so a context containing one arrives corrupted
+    // unless it is percent-encoded. URLSearchParams gets this right where
+    // hand-built query strings do not, which is why this is built with it.
+    const body = parse(feedback.newIssueUrl({
+      appVersion: '0.6.0', osVersion: 'x', context: 'C++ crashed on page 3+4',
+    })).searchParams.get('body') ?? '';
+    expect(body).toContain('C++ crashed on page 3+4');
+  });
+
+  test('no surface appends a bare null to a node', () => {
+    // el() drops a null child; Node.append() renders it as the literal word
+    // "null". send.js's drawEmpty records shipping that once. drawFailure was
+    // doing it too, and on the COMMON path: the "still open" line is absent
+    // whenever no script is loaded, which on a refusal is most of the time.
+    //
+    // The shape is the test, because the mistake is a shape: a conditional
+    // yielding null, sitting directly in a `.append(` argument list.
+    // Depth-aware on purpose. A null nested inside an el() call is CORRECT —
+    // that is the fix — so a flat regex over the argument text flags the very
+    // pattern it should be recommending. Only arguments at depth 0 of the
+    // .append( list are the dangerous ones.
+    // Keeps ONLY the characters sitting directly inside the .append( parens.
+    // Everything a nested call contains is dropped, so `el('p', …, null)` —
+    // the correct pattern — contributes nothing, while a ternary resolving to
+    // null in the argument list itself survives into the skeleton.
+    function topLevelArgs(source: string, at: number): string[] {
+      let depth = 0;
+      let current = '';
+      const args: string[] = [];
+      for (let i = at; i < source.length; i += 1) {
+        const ch = source[i];
+        if (ch === '(') { depth += 1; if (depth === 1) continue; }
+        else if (ch === ')') { depth -= 1; if (depth === 0) { args.push(current); break; } }
+        else if (ch === ',' && depth === 1) { args.push(current); current = ''; continue; }
+        if (depth === 1) current += ch;
+      }
+      return args;
+    }
+
+    const offenders: string[] = [];
+    for (const name of jsFiles()) {
+      const source = read(name);
+      for (const match of source.matchAll(/\.append\(/g)) {
+        const at = (match.index ?? 0) + '.append'.length;
+        for (const arg of topLevelArgs(source, at)) {
+          if (/\bnull\b/.test(arg.replace(/\/\/[^\n]*/g, ''))) {
+            offenders.push(`${name}: ${arg.trim().slice(0, 70).replace(/\s+/g, ' ')}`);
+          }
+        }
+      }
+    }
+    expect(offenders.join('\n')).toBe('');
+  });
+
+  test('the failure screen offers it, carrying the code', () => {
+    const convert = read('convert.js');
+    expect(convert).toContain('Report a bug');
+    // The code is the point. A report that says only "it did not work" costs
+    // a round trip to learn what the engine already knew.
+    expect(convert).toMatch(/newIssueUrl|reportBug/);
+  });
+});
+
+describe('the settings preview is the reader, not a second copy of it', () => {
+  // Settings gets a live script beside the knobs. The tempting way to build
+  // it is a second iframe with its own styling code, and that is the one
+  // thing this window cannot afford twice: the engine ships its stylesheet
+  // INSIDE the preview document, the CSP forbids inline <style> there, and
+  // the fix is to lift it out and adopt it as a constructed stylesheet.
+  // read.js's own header records what happens when that goes wrong — an
+  // unstyled script renders with NO error anywhere. Two copies of that dance
+  // would drift, and the drift would be invisible until someone looked.
+  const reader = read('read.js');
+  const settings = read('tune.js');
+
+  test('the reader exports the dresser rather than keeping it private', () => {
+    expect(reader).toContain('export function dressFrame');
+  });
+
+  test('settings imports it instead of writing its own', () => {
+    expect(settings).toMatch(/import\s*\{[^}]*dressFrame[^}]*\}\s*from\s*'\.\/read\.js'/);
+  });
+
+  test('settings builds no constructed stylesheet of its own', () => {
+    // The specific shape of the duplication this is here to prevent.
+    expect(settings).not.toContain('CSSStyleSheet');
+    expect(settings).not.toContain('adoptedStyleSheets');
+  });
+});
+
+describe('eighteen settings stop arriving as one wall', () => {
+  // All eighteen were open at once, under five headings, which is a long
+  // scroll of controls most of which nobody is looking for. Each group folds
+  // now, and the first is open so the surface never opens as a list of five
+  // shut boxes with nothing to read.
+  let tune: any;
+  beforeAll(async () => { tune = await import(join(UI, 'tune.js')); });
+
+  test('the first group is open and the rest are folded', () => {
+    expect(tune.groupStartsOpen(0)).toBe(true);
+    expect(tune.groupStartsOpen(1)).toBe(false);
+    expect(tune.groupStartsOpen(4)).toBe(false);
+  });
+
+  test('every group is still reachable, none is dropped', () => {
+    // Folding is not hiding: all five headings remain, and all eighteen knobs
+    // remain under them. A "compact" that quietly retired a setting would
+    // leave it applying to every conversion with no way to find it.
+    expect(tune.GROUPS.length).toBe(5);
+    expect(tune.GROUPS.flatMap((g: any) => g.knobs).length).toBe(18);
+  });
+});
+
+describe('the settings explain themselves in the reader\'s words', () => {
+  // The copy was carried over from the SwiftUI reader rail rather than
+  // written fresh, and it explained MECHANISM to a screenwriter in a
+  // compressed register, using KFX, tolino, chyrons and ragged-right as
+  // though they were common words. Rewritten 2026-09-21 to a single brief:
+  // lead with what the reader will see in their book, one plain sentence, no
+  // jargon that is not glossed on the spot.
+  //
+  // Screenplay vocabulary is NOT jargon here and is deliberately not banned.
+  // (MORE), (CONT'D), parenthetical and cue are words this audience uses
+  // daily; KFX is not.
+  const ENGINE_WORDS = ['KFX', 'tolino', 'chyron', 'ragged-right', 'ragged right', 'e-ink ('];
+
+  test('no label or explanation leans on a word only the engine knows', async () => {
+    const tune: any = await import(join(UI, 'tune.js'));
+    const offenders: string[] = [];
+    for (const group of tune.GROUPS) {
+      const texts = [group.title, group.note ?? '', ...group.knobs.flatMap(
+        (k: any) => [k.label, k.help ?? ''],
+      )];
+      for (const text of texts) {
+        for (const word of ENGINE_WORDS) {
+          if (String(text).toLowerCase().includes(word.toLowerCase())) {
+            offenders.push(`"${word}" in: ${text}`);
+          }
+        }
+      }
+    }
+    expect(offenders.join('\n')).toBe('');
+  });
+
+  test('the scan can actually see the jargon it bans', async () => {
+    // Guards the loop above: a GROUPS shape it could not walk would pass by
+    // finding nothing, which is the failure mode of every sweep like this.
+    const tune: any = await import(join(UI, 'tune.js'));
+    const all = tune.GROUPS.flatMap((g: any) => g.knobs.map((k: any) => k.label));
+    expect(all.length).toBe(18);
+    expect(ENGINE_WORDS.some((w) => 'Applies on new-format Kindle (KFX)'.includes(w))).toBe(true);
+  });
+});
+
+describe('"Start from" stops reading as a row of arbitrary buttons', () => {
+  // It was three faults wearing one coat, and only the third is invisible:
+  //   1. it offers exactly two presets, and one of them, "Kindle e-ink (6\")",
+  //      is IDENTICAL to the defaults, so on a fresh script that button
+  //      visibly does nothing;
+  //   2. the label never said it OVERWRITES every setting below it, which the
+  //      SwiftUI version stated out loud;
+  //   3. the engine already answers "which preset am I on" in `answer.preset`
+  //      and the window never read it, so it could not show you where you
+  //      stood — which is exactly what makes a no-op button look arbitrary
+  //      rather than reassuring.
+  let tune: any;
+  beforeAll(async () => { tune = await import(join(UI, 'tune.js')); });
+
+  test('the window can say which preset the script is on', () => {
+    expect(tune.currentPreset({ preset: 'phone' })).toBe('phone');
+    expect(tune.currentPreset({ preset: 'kindleEink' })).toBe('kindleEink');
+  });
+
+  test('a script tuned away from every preset is on none of them', () => {
+    // The engine answers null rather than keeping a remembered name, because
+    // equality is the only honest answer: a stored name would go on claiming
+    // "Kindle e-ink" after the first knob moved.
+    expect(tune.currentPreset({ preset: null })).toBe(null);
+    expect(tune.currentPreset({})).toBe(null);
+    expect(tune.currentPreset(undefined)).toBe(null);
+  });
+
+  test('presets carry their id, so the current one can be marked', async () => {
+    const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+    const presets = tune.presetsFrom({
+      presets: [{ id: 'kindleEink', displayName: 'Kindle e-ink (6")', settings: { ...DEFAULT_FORMAT_OPTIONS } }],
+    });
+    expect(presets[0].id).toBe('kindleEink');
+  });
+
+  test('the control warns that it overwrites', () => {
+    expect(tune.PRESET_NOTE.toLowerCase()).toContain('overwrite');
+  });
+});
+
+describe('the reach table is available, not announced', () => {
+  // "What Screepub can reach" is four readers, four honesty labels and two
+  // caveats, and it was the bulk of the empty Send page. It is good
+  // information and it is not what someone with nothing plugged in came to
+  // find out. Folded away, not deleted: hiding a capability is how a
+  // capability stops existing.
+  const send = read('send.js');
+
+  test('it is a disclosure the reader opens, not a wall they scroll past', () => {
+    const at = send.indexOf('EMPTY.heading');
+    expect(at).toBeGreaterThan(-1);
+    const around = send.slice(Math.max(0, at - 500), at + 200);
+    expect(around).toContain("'details'");
+    expect(around).toContain("'summary'");
+  });
+
+  test('it starts shut', () => {
+    // <details> is open only if the attribute is present at all, so the test
+    // is that nobody sets it. Written as a scan of the whole file because the
+    // attribute could be set anywhere, including later by a well-meaning
+    // "remember it was open" that would quietly undo this.
+    expect(send).not.toMatch(/\bopen:\s*(true|''|"")/);
+  });
+
+  test('the honesty about untested routes is inside it, not lost with it', () => {
+    // provenNote() carries the one fact the statuses cannot: WHERE the single
+    // proven route was proven. It moves with the table rather than being cut.
+    expect(send).toContain('provenNote');
+  });
+});
+
+describe('Convert another goes home, not to a file dialog', () => {
+  test('the result screen offers a way back to the drop well', () => {
+    // It called choose() directly, so the button jumped straight to a native
+    // picker. Cancelling that left you back on the previous result with no
+    // obvious way to reach the empty state at all — the one screen that
+    // explains what this window wants from you.
+    const convert = read('convert.js');
+    const at = convert.indexOf("'Convert another'");
+    expect(at).toBeGreaterThan(-1);
+    const wiring = convert.slice(convert.lastIndexOf('onclick', at), at);
+    expect(wiring).not.toContain('choose');
+    expect(wiring).toContain('reset');
+  });
+
+  test('going home does not close the script that is open', () => {
+    // Deliberate: the book stays open behind the drop well, so Read, Settings
+    // and Send stay reachable. "Convert another" is an invitation, not a
+    // discard — and a reader who changes their mind has lost nothing.
+    const convert = read('convert.js');
+    const reset = convert.slice(convert.indexOf('export function reset'));
+    expect(reset.slice(0, reset.indexOf('\n}'))).not.toContain('scriptChanged');
+  });
+});
+
+describe('the scene index is a drawer in the binding margin', () => {
+  // It sat to the RIGHT of the script and took a grid column from it. Moved
+  // left, per the maintainer, and the constraint turned out to be arithmetic:
+  // the binding margin is 17.6% of the sheet and the brads sit at 5.9%, which
+  // leaves about 96px clear, while the rail wants 150-218px. It cannot sit
+  // BESIDE the fasteners, so it parks over them — and over the margin, never
+  // over the page, which is what a plain overlay got wrong. See the
+  // interface-pass design, decision 16.
+
+  /** The first declaration block for a selector, so a test can read one rule
+   *  instead of the whole stylesheet. */
+  function ruleBlock(css: string, selector: string): string {
+    const at = css.indexOf(`${selector} {`);
+    expect(`${selector} found`).toBe(at === -1 ? `${selector} missing` : `${selector} found`);
+    return css.slice(at, css.indexOf('}', at) + 1);
+  }
+
+  test('the control says what it will do, not what is showing', async () => {
+    const reader = (await import(join(UI, 'read.js'))) as {
+      indexToggle?: (open: boolean) => { label: string; expanded: string };
+    };
+    expect(reader.indexToggle?.(true)).toEqual({ label: 'Hide scenes', expanded: 'true' });
+    expect(reader.indexToggle?.(false)).toEqual({ label: 'Show scenes', expanded: 'false' });
+  });
+
+  test('the panel is capped so it cannot hang off the window', () => {
+    // Its own 218px is wider than the margin it parks in on a narrow window,
+    // and the margin is a PERCENTAGE, so a fixed width is wrong at some size
+    // no matter which size you pick. Measured against the content box: the
+    // sheet gives the margin 17.6% and the content 70.6%, so the margin is
+    // 17.6/70.6 = 24.9% of the box this element is positioned inside.
+    const block = ruleBlock(read('surfaces.css'), '.scene-rail');
+    expect(block).toMatch(/width:\s*min\(/);
+  });
+
+  test('the panel stays positioned, because read.js measures against it', () => {
+    // A regression guard on an existing coupling rather than new behaviour:
+    // read.js keeps the marked scene in view by its button's offsetTop, and
+    // an unpositioned rail would hand it an offset measured from the page
+    // instead. The drawer changes `position` from relative to absolute, which
+    // is still positioned — this is here so the NEXT change cannot quietly
+    // make it static.
+    const block = ruleBlock(read('surfaces.css'), '.scene-rail');
+    expect(block).toMatch(/position:\s*(relative|absolute|fixed|sticky)/);
+  });
+
+  test('hiding it does not rely on moving it', () => {
+    // A translate alone cannot be trusted to clear the window: the margin
+    // GROWS with the window, so on a wide display a panel shifted by its own
+    // width is still sitting on the paper in plain sight.
+    const block = ruleBlock(read('surfaces.css'), '.scene-rail');
+    expect(block).toMatch(/opacity:\s*0\b/);
+    expect(block).toMatch(/visibility:\s*hidden/);
+  });
+});
+
+describe('the foot of the page names the release', () => {
+  // It used to print the ENGINE's self-reported version, labelled "engine".
+  // Two things were wrong with that. The number was the engine's while the
+  // app's own version is different, so it misnamed the build in the one place
+  // people paste into bug reports. And on a failed engine the error REPLACED
+  // it, so the app could be running with no version on screen at all.
+  const frameMod = async () =>
+    (await import(join(UI, 'frame.js'))) as {
+      revLabel?: (version: string) => string;
+      SURFACES?: Array<{ id: string; label: string }>;
+    };
+
+  test('it reads "rev" and the version it was built from', async () => {
+    const { revLabel } = await frameMod();
+    expect(revLabel?.('0.6.0')).toBe('rev 0.6.0');
+  });
+
+  test('the version comes from the notes module, so the stamp and the sheet agree', () => {
+    // desktop/ui/notes.js is generated from docs/releases/<version>.md. Taking
+    // the number from there makes the stamp and the notes it opens agree by
+    // construction rather than by two people remembering to change both.
+    const frame = read('frame.js');
+    expect(frame).toContain('RELEASE');
+    expect(frame).toContain('revLabel');
+  });
+
+  test('the notes sheet is not on the page while it is shut', () => {
+    // A closed <dialog> is hidden by the browser's own
+    // `dialog:not([open]) { display: none }`, and ANY class selector outranks
+    // that. Giving .sheet-over a display unqualified therefore does not style
+    // the sheet, it un-hides it: the release notes sat permanently at the
+    // foot of every surface, invisible in a short window and obvious the
+    // moment anyone scrolled. Shipped and unnoticed for six commits.
+    const css = read('style.css');
+    const unqualified = css.match(/\.sheet-over\s*\{[^}]*\}/g) ?? [];
+    for (const rule of unqualified) {
+      expect(`unqualified .sheet-over: ${rule}`).not.toContain('display:');
+    }
+  });
+
+  test('the bar holds four surfaces, and Notes is not one of them', async () => {
+    // Notes is the release notes for the version you are running. It is a
+    // thing you glance at, not a place you go, and it is reached from the
+    // version it describes.
+    const { SURFACES } = await frameMod();
+    expect(SURFACES?.map((s) => s.id)).toEqual(['convert', 'read', 'tune', 'send']);
+  });
+});
+
+describe('a surface with nothing behind it is absent, not dimmed', () => {
+  // Read, Tune and Send were DISABLED before a conversion, which drew three
+  // greyed words in the bar advertising doors that do not open. Worse for a
+  // screen reader, which reads a disabled control out and then refuses it.
+  // The rule lives in a pure function so it can be tested without a DOM, the
+  // same split convert.js, read.js and tune.js already use.
+  const presence = async () =>
+    (await import(join(UI, 'frame.js'))) as {
+      tabPresence?: (available: boolean, selected: boolean) => { hidden: boolean; tabIndex: number };
+    };
+
+  test('an unreachable surface is off the bar and off the keyboard', async () => {
+    const { tabPresence } = await presence();
+    expect(tabPresence?.(false, false)).toEqual({ hidden: true, tabIndex: -1 });
+  });
+
+  test('an unreachable surface stays off the keyboard even if it was the one showing', async () => {
+    // enable() moves away from a surface it is switching off, but the two
+    // facts arrive separately, and a tab that kept tabIndex 0 while hidden is
+    // a focus stop pointing at nothing.
+    const { tabPresence } = await presence();
+    expect(tabPresence?.(false, true)).toEqual({ hidden: true, tabIndex: -1 });
+  });
+
+  test('the open surface is the bar\'s single tab stop', async () => {
+    const { tabPresence } = await presence();
+    expect(tabPresence?.(true, true)).toEqual({ hidden: false, tabIndex: 0 });
+  });
+
+  test('a reachable surface that is not open is visible but not a tab stop', async () => {
+    // Roving tabindex: one stop for Tab, then the arrows move inside. Five
+    // stops would put every surface five presses further away than the last.
+    const { tabPresence } = await presence();
+    expect(tabPresence?.(true, false)).toEqual({ hidden: false, tabIndex: -1 });
+  });
+});
+
+describe('the drop well states one guard, not two', () => {
+  // The engine guards four failures and two were checkable at a glance, so
+  // the well named both: a scan, and a password-locked file. The maintainer
+  // cut the password half on 2026-09-20 — see the interface-pass design,
+  // decision 10. That is a real trade and it is recorded there: a locked PDF
+  // is now discovered AFTER the wait instead of before it. It is survivable
+  // only because the refusal still names the cause, which the HEADINGS table
+  // and its own tests already guarantee.
+  const ROOT = new URL('..', import.meta.url).pathname;
+  const wellCopy = async () =>
+    (await import(join(UI, 'convert.js'))) as { WELL?: { limits?: string }; WORDMARK?: string };
+
+  test('it still warns about a scan before the drop', async () => {
+    const { WELL } = await wellCopy();
+    expect(WELL?.limits ?? '').toContain('not a scan');
+  });
+
+  test('it no longer warns about a password', async () => {
+    const { WELL } = await wellCopy();
+    expect((WELL?.limits ?? '').toLowerCase()).not.toContain('password');
+  });
+
+  test('the brand component says the same thing the window says', async () => {
+    // These two carried identical copy and NOTHING tied them together, so the
+    // window could be changed and the design system left saying the old line.
+    // The component is what the next surface gets built from, so that drift
+    // does not stay theoretical: it re-adds the sentence by hand later.
+    //
+    // Compared as the rendered COPY rather than by scanning the file, because
+    // the component's caption is documentation and has to stay free to
+    // explain what the line used to say and why that half went. A file-wide
+    // ban on the word forbids the component from recording its own history.
+    const { WELL } = await wellCopy();
+    const brand = readFileSync(join(ROOT, 'brand', 'components', 'drop-well.html'), 'utf8');
+    const limits = [...brand.matchAll(/<span class="well-limits">([^<]*)<\/span>/g)]
+      .map((m) => m[1] ?? '');
+    const expected = WELL?.limits ?? '';
+    expect(expected).not.toBe(''); // the window must actually have copy to compare
+    expect(limits.length).toBeGreaterThan(0); // the scan must actually find them
+    for (const line of limits) expect(line).toBe(expected);
+  });
+
+  test('the window names itself where the paragraph used to be', async () => {
+    // With the title bar gone and the prose cut, this is the only place the
+    // app says what it is.
+    const { WORDMARK } = await wellCopy();
+    expect(WORDMARK).toBe('Screepub');
   });
 });

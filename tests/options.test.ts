@@ -381,8 +381,23 @@ describe('showPageMarkers', () => {
     el3({ text: 'Even more.', type: 'action', pageNum: 3 }),
   ];
 
-  test('off by default — no markers', () => {
-    expect(toFountain(sp3(ELS))).not.toContain('= pg');
+  test('on by default — a note about page 42 can still be found', () => {
+    // Flipped 2026-09-21. Page numbers are navigation: a script gets notes
+    // against printed page numbers, and a book that dropped them made every
+    // one of those notes unfindable. Nothing else in the book carries the
+    // printed pagination, so this was the only way back to it.
+    //
+    // showSceneNumbers was deliberately NOT flipped with it. A scene number
+    // is an intentional property of a draft, present or absent because a
+    // writer decided, and the app has no business inventing one.
+    const out = toFountain(sp3(ELS));
+    expect(out).toContain('= pg 1\n\nMore work.');
+    expect(out).toContain('= pg 2\n\nEven more.');
+  });
+
+  test('and can still be turned off', () => {
+    const out = toFountain(sp3(ELS), undefined, resolveFormatOptions({ showPageMarkers: false }));
+    expect(out).not.toContain('= pg');
   });
 
   test('on: markers carry the PDF-printed numbering, not the sheet index', () => {

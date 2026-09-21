@@ -13,7 +13,7 @@
 // its own and rides on the live run.
 import { runEngine, argv } from './app.js';
 import { el, clear, text } from './dom.js';
-import { render as renderReader } from './read.js';
+import { render as renderReader, splitPreview, dressFrame } from './read.js';
 
 // ---------------------------------------------------------------- decisions
 
@@ -49,17 +49,27 @@ export const GROUPS = [
         key: 'elementSpacingEm', label: 'Space between elements',
         kind: 'range', min: 0.4, max: 2, step: 0.1, unit: ' em',
       },
-      { key: 'scenePageBreaks', label: 'Start each scene on a new page', kind: 'toggle' },
-      { key: 'keepSceneHeadingWithScene', label: 'Keep headings with their scene', kind: 'toggle' },
       {
-        key: 'keepSpeechesWhole', label: 'Keep each speech on one page', kind: 'toggle',
-        help: 'Avoids mid-speech page turns; long speeches may leave white space at page '
-          + 'bottoms. Speeches taller than a full page still break.',
+        key: 'scenePageBreaks', label: 'Start each scene on a new page', kind: 'toggle',
+        help: 'Makes every scene easy to find, and makes the book considerably longer.',
       },
       {
-        key: 'printSplitMinimums', label: 'Print-style split minimums', kind: 'toggle',
-        help: 'Never leaves a single line of a speech or paragraph alone at a page edge. '
-          + 'Off packs pages tighter. Applies on new-format Kindle (KFX) and Kobo/tolino.',
+        key: 'keepSceneHeadingWithScene',
+        label: 'Never end a page on a scene heading', kind: 'toggle',
+        help: 'A heading alone at the foot of a page announces a scene and then makes you '
+          + 'turn over to find it.',
+      },
+      {
+        key: 'keepSpeechesWhole', label: 'Keep each speech on one page', kind: 'toggle',
+        help: 'Stops a page turn landing in the middle of what someone is saying. The cost '
+          + 'is a gap at the bottom of some pages. A speech longer than a whole page still '
+          + 'has to break somewhere.',
+      },
+      {
+        key: 'printSplitMinimums', label: 'Avoid stranded lines', kind: 'toggle',
+        help: 'Stops a single line of a speech or a paragraph being left behind at the top '
+          + 'or bottom of a page. Turning it off fits a little more onto each page. Not '
+          + 'every e-reader obeys this one.',
       },
     ],
   },
@@ -72,13 +82,17 @@ export const GROUPS = [
         kind: 'range', min: 0, max: 30, step: 1, unit: '%',
       },
       {
-        key: 'cueAlignment', label: 'Character cues', kind: 'choice',
+        // A plural noun phrase, not a question. idleReason() composes this
+        // label into "Only when <label> are indented.", so a label that reads
+        // well alone but not in a sentence breaks the explanation beside two
+        // OTHER knobs. "Where character names sit" did exactly that.
+        key: 'cueAlignment', label: 'Character names', kind: 'choice',
         choices: [['centered', 'Centered'], ['indented', 'Indented']],
-        help: 'Centered reads naturally at any screen width. Indented reproduces the '
-          + 'fixed offsets of a printed script.',
+        help: 'Centred looks right at any screen size. Indented copies where they sit on a '
+          + 'printed page, which only lines up at one width.',
       },
       {
-        key: 'cueIndentPct', label: 'Cue indent',
+        key: 'cueIndentPct', label: 'Character name indent',
         kind: 'range', min: 0, max: 60, step: 1, unit: '%',
         needs: { cueAlignment: 'indented' },
       },
@@ -98,14 +112,15 @@ export const GROUPS = [
         choices: [['courier', 'Courier'], ['serif', 'Serif'], ['sans', 'Sans']],
       },
       {
-        key: 'justifyText', label: 'Justify body text', kind: 'toggle',
-        help: 'Screenplays are traditionally ragged-right. Justifying opens stretchy word '
-          + 'gaps in a narrow column.',
+        key: 'justifyText', label: 'Straighten the right edge', kind: 'toggle',
+        help: 'Screenplays normally leave the right edge uneven. Straightening it opens up '
+          + 'wide gaps between words in a column this narrow.',
       },
       {
-        key: 'preserveFontShifts', label: "Keep the PDF's font shifts", kind: 'toggle',
-        help: 'Renders inserts, chyrons and on-screen text in the face and size the script '
-          + 'drew them in. Off sets every block in the body typeface.',
+        key: 'preserveFontShifts', label: "Keep the script's own type changes", kind: 'toggle',
+        help: 'Some scripts set titles, inserts and on-screen text in a different typeface '
+          + 'or size. This keeps them the way the script drew them; turning it off puts '
+          + 'every line in one typeface.',
       },
     ],
   },
@@ -115,10 +130,14 @@ export const GROUPS = [
     knobs: [
       {
         key: 'includeTitlePage', label: 'Title page', kind: 'toggle', effect: 'book',
-        help: 'The preview is the script itself, so a title page shows up in the book '
-          + 'rather than here.',
+        help: 'It appears in the finished book, not in the preview here, because the '
+          + 'preview is the script itself.',
       },
-      { key: 'showSceneNumbers', label: 'Scene numbers', kind: 'toggle' },
+      {
+        key: 'showSceneNumbers', label: 'Scene numbers', kind: 'toggle',
+        help: 'Only shows numbers the script already carried. Screepub never invents them: '
+          + 'a numbered draft is a decision someone made, not a formatting choice.',
+      },
     ],
   },
   {
@@ -136,8 +155,9 @@ export const GROUPS = [
     knobs: [
       {
         key: 'rejoinSplitDialogue', label: 'Rejoin speeches split across pages', kind: 'toggle',
-        help: 'Joins the two halves of a speech the printed script broke with (MORE) and '
-          + "(CONT'D). Off keeps the break where the PDF had it.",
+        help: 'A printed script breaks a long speech across two pages and marks it (MORE) '
+          + "and (CONT'D). This stitches the halves back into one speech. Turning it off "
+          + 'keeps the break exactly where the PDF had it.',
       },
       {
         key: 'contdMode', label: "(CONT'D) after a cue", kind: 'choice',
@@ -290,10 +310,31 @@ export function presetsFrom(answer) {
   if (!Array.isArray(presets)) return [];
   return presets
     .map((preset) => ({
+      // Carried so the surface can mark the one the script is actually on.
+      // Without it the two presets are just two buttons, and the one that
+      // equals the defaults looks like a button that does nothing.
+      id: typeof preset?.id === 'string' ? preset.id : '',
       displayName: typeof preset?.displayName === 'string' ? preset.displayName : '',
       settings: settingsFrom(preset),
     }))
     .filter((preset) => preset.displayName !== '' && preset.settings !== null);
+}
+
+/** Which preset this script's settings currently equal, or null when they
+ *  have been tuned away from every one of them.
+ *
+ *  The engine answers this by comparing values, not by remembering a name it
+ *  was handed — `src/settings/presets.ts` says why: applying a preset stores
+ *  no identity, so equality is the only honest answer, and a remembered name
+ *  would go on claiming "Kindle e-ink" after the first knob moved.
+ *
+ *  The window ignored this field entirely until 2026-09-21. That is what made
+ *  the row read as arbitrary: one of the two presets is identical to the
+ *  defaults, so on a fresh script it appears to do nothing, and without
+ *  "you are here" there was no way to tell a no-op from a confirmation. */
+export function currentPreset(answer) {
+  const id = answer?.preset;
+  return typeof id === 'string' && id !== '' ? id : null;
 }
 
 export function sameSettings(a, b) {
@@ -327,7 +368,7 @@ export function statusFor(phase, message) {
  *  reachable and is not the knobs is a script whose settings could not be
  *  read — a sidecar on a disk that went away. */
 export const FAULT = {
-  slug: 'Int. the tuning bench - settings out of reach',
+  slug: 'Settings out of reach',
   line: 'Screepub could not read this script’s settings. The book itself is fine and can '
     + 'still be sent; converting the PDF again is the way to get the knobs back.',
   way: 'Convert it again',
@@ -337,7 +378,11 @@ export const LEDE = 'These settings belong to this script alone. They are kept w
   + 'your library, never beside the PDF you dropped, and the book on disk is rebuilt to '
   + 'match, so what you send is what you see.';
 
-export const PRESET_LABEL = 'Start from';
+/** "Start from" said nothing about what pressing one does. It does not nudge
+ *  a setting or set a baseline to build on: it REPLACES all eighteen. The
+ *  SwiftUI version said so on screen and this one did not. */
+export const PRESET_LABEL = 'Load a preset';
+export const PRESET_NOTE = 'Overwrites every setting below.';
 
 // ------------------------------------------------------------------ drawing
 
@@ -345,6 +390,10 @@ let ctx = null;
 let pane = null;
 let settings = null;
 let presets = [];
+let onPreset = null;
+let presetsBox = null;
+let previewFrame = null;
+let previewCss = '';
 let loaded = false;
 let timer = null;
 let running = Promise.resolve();
@@ -395,6 +444,7 @@ async function load() {
     const answer = await runEngine(argv.settings(script.fountainPath));
     settings = settingsFrom(answer);
     presets = presetsFrom(answer);
+    onPreset = currentPreset(answer);
   } catch (err) {
     settings = null;
     // Openable again: a sidecar that could not be read once — a disk that
@@ -420,7 +470,10 @@ function draw(status) {
   if (ctx.state.script === null) return;
 
   if (settings === null) {
-    pane.append(
+    // Through el(), which drops a null child, rather than straight onto the
+    // pane, which renders one as the word "null". The status line is absent
+    // whenever nothing has failed yet, so that is the ordinary path.
+    pane.append(el('div', { class: 'fault-body-block' },
       el('h2', { class: 'slug' }, FAULT.slug),
       el('p', { class: 'prose' }, FAULT.line),
       status?.bad ? el('p', { class: 'caption bad' }, status.line) : null,
@@ -428,34 +481,104 @@ function draw(status) {
         el('button', {
           type: 'button', class: 'btn btn-outline', onclick: () => ctx.goTo('convert'),
         }, FAULT.way)),
-    );
+    ));
     return;
   }
 
   statusLine = el('p', { class: 'caption tune-status', role: 'status' }, '');
   pane.append(
-    el('h2', { class: 'slug' }, 'Int. the tuning bench - day'),
+    el('h2', { class: 'slug' }, 'This script’s settings'),
     el('p', { class: 'prose' }, LEDE),
-    drawPresets(),
-    ...GROUPS.map(drawGroup),
-    statusLine,
+    el('div', { class: 'tune-split' },
+      el('div', { class: 'tune-knobs' },
+        (presetsBox = drawPresets()),
+        ...GROUPS.map(drawGroup),
+        statusLine,
+      ),
+      drawPreview(),
+    ),
   );
   say(status ?? statusFor(isPending(pending) ? 'pending' : 'idle'));
+  renderPreview(ctx.state.script?.previewHtml);
+}
+
+/** The script, beside the knobs that change it.
+ *
+ *  Only the `live` knobs can move this — the effect classification above says
+ *  which, and it was measured rather than guessed. The `book` and `reconvert`
+ *  ones cannot, and they say so themselves rather than being hidden: a knob
+ *  that silently does nothing here is worse than one that explains why.
+ *
+ *  A plain frame, not the reader. It carries no scene rail, keeps no reading
+ *  place and takes no keyboard: this is a swatch, not somewhere you read. The
+ *  one thing it shares with the reader is dressFrame(), because the CSP dance
+ *  that gets the engine's stylesheet into the document is the piece that must
+ *  never exist twice. */
+function drawPreview() {
+  previewFrame = el('iframe', {
+    class: 'tune-preview-frame',
+    title: 'Preview',
+    // Same grant the reader's frame gets, and no more: same-origin so the
+    // parent can adopt a stylesheet into it, nothing that lets the document
+    // run anything.
+    sandbox: 'allow-same-origin',
+    // Not a Tab stop. There is nothing to do inside it.
+    tabindex: '-1',
+    'aria-hidden': 'true',
+  });
+  previewFrame.addEventListener('load', () => dressFrame(previewFrame, previewCss));
+  return el('div', { class: 'tune-preview' },
+    el('p', { class: 'state-label' }, 'Preview'),
+    previewFrame);
+}
+
+/** Show a document in the preview. Safe to call before the frame exists and
+ *  safe to call with nothing, which is what happens on the fault screen. */
+function renderPreview(previewHtml) {
+  if (previewFrame === null || previewHtml === undefined || previewHtml === null) return;
+  const parts = splitPreview(previewHtml, new DOMParser());
+  previewCss = parts.css;
+  previewFrame.setAttribute('srcdoc', parts.html);
 }
 
 function drawPresets() {
   if (presets.length === 0) return null;
   return el('div', { class: 'presets' },
     el('p', { class: 'state-label presets-label' }, PRESET_LABEL),
-    ...presets.map((preset) => el('button', {
-      type: 'button', class: 'btn btn-outline btn-small',
-      onclick: () => applyAll(preset.settings),
-    }, preset.displayName)));
+    el('div', { class: 'preset-row' },
+      ...presets.map((preset) => {
+        // The one the script is already on is marked and inert. It is what
+        // turns a button that appears to do nothing — the Kindle preset IS
+        // the defaults — into a statement about where you are.
+        const on = preset.id !== '' && preset.id === onPreset;
+        return el('button', {
+          type: 'button',
+          class: `btn btn-outline btn-small${on ? ' preset-on' : ''}`,
+          disabled: on,
+          'aria-current': on ? 'true' : null,
+          onclick: () => applyAll(preset.settings),
+        }, preset.displayName);
+      })),
+    el('p', { class: 'caption presets-note' }, PRESET_NOTE));
 }
 
-function drawGroup(group) {
-  return el('section', { class: 'knob-group' },
-    el('h3', { class: 'subslug knob-group-title' }, group.title),
+/** Which groups arrive open. Only the first: five shut boxes is a surface
+ *  with nothing on it, and eighteen open controls is the wall this replaced.
+ *
+ *  Exported so the rule is a fact rather than an inline literal, and so a
+ *  later "remember what was open" can be added without hunting for where the
+ *  decision was made. */
+export function groupStartsOpen(index) {
+  return index === 0;
+}
+
+function drawGroup(group, index) {
+  // <details> rather than a toggle of our own: the open state, the keyboard
+  // and the announcement all come from the platform. Folding, never
+  // dropping — all five groups and all eighteen knobs are still here, because
+  // a setting that cannot be found still applies to every conversion.
+  return el('details', { class: 'knob-group', open: groupStartsOpen(index) ? '' : null },
+    el('summary', { class: 'subslug knob-group-title' }, group.title),
     group.note ? el('p', { class: 'caption knob-group-note' }, group.note) : null,
     ...group.knobs.map((knob) => drawKnob(knobFor(knob.key))));
 }
@@ -533,6 +656,11 @@ function applyAll(next) {
     if (settings[key] !== next[key]) changed[key] = next[key];
   }
   if (Object.keys(changed).length === 0) return;
+  // The script is now on whichever preset these settings are, by equality —
+  // the same rule the engine uses. Matched on the values rather than on the
+  // button that was pressed, so applying a preset that happens to equal
+  // another one cannot leave the wrong one marked.
+  onPreset = presets.find((p) => OPTION_KEYS.every((k) => p.settings[k] === next[k]))?.id ?? null;
   settings = { ...settings, ...changed };
   ctx.state.script.settings = settings;
   pending = { ...pending, ...changed };
@@ -543,6 +671,13 @@ function applyAll(next) {
 function change(knob, raw) {
   const value = coerceValue(knob, raw);
   if (value === null || settings[knob.key] === value) return;
+  // One moved knob takes the script off whatever preset it was on. The mark
+  // has to go with it or the surface keeps claiming a name that stopped
+  // being true, which is the exact failure src/settings/presets.ts refuses
+  // to commit by storing equality instead of an identity.
+  const wasOn = onPreset;
+  onPreset = null;
+  if (wasOn !== null) refreshPresets();
   settings = { ...settings, [knob.key]: value };
   ctx.state.script.settings = settings;
   pending = mergePending(pending, knob.key, value);
@@ -551,6 +686,18 @@ function change(knob, raw) {
   if (knob.key === 'cueAlignment') refreshIdle();
   say(statusFor('pending'));
   schedule();
+}
+
+/** Swap the preset row for a fresh one, so the "you are here" mark can move
+ *  when a knob does. Only this row is rebuilt, for the same reason
+ *  refreshIdle() exists: a full redraw under the reader's pointer would drop
+ *  the control they are currently holding. */
+function refreshPresets() {
+  if (presetsBox === null) return;
+  const next = drawPresets();
+  if (next === null) return;
+  presetsBox.replaceWith(next);
+  presetsBox = next;
 }
 
 /** Re-state the knobs whose meaning depends on another setting, without
@@ -628,7 +775,11 @@ async function flush() {
       return;
     }
     script.previewHtml = answer.previewHtml ?? script.previewHtml;
+    // Both frames, because the reader is a surface the reader may come back
+    // to and this one is on screen right now. They render the same document;
+    // neither is a copy of the other's rendering.
     renderReader(script.previewHtml);
+    renderPreview(script.previewHtml);
     say(statusFor(isPending(pending) ? 'pending' : 'saved'));
   } catch (err) {
     if (stale()) return;

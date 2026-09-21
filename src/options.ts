@@ -64,7 +64,7 @@ export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
   cueAlignment: 'centered',
   includeTitlePage: true,
   showSceneNumbers: false,
-  showPageMarkers: false,
+  showPageMarkers: true,
   dualDialogue: 'sideBySide',
   justifyText: false,
   printSplitMinimums: true,
