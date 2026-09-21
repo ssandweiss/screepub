@@ -347,6 +347,35 @@ was given a `display` on its bare class, which does not style a closed dialog
 commits, invisible in a short window. There is now a test for the shape of
 that mistake, not just the instance.
 
+**Shipped after the merge (2026-09-21), from the parity audit rather than
+from the five note batches.** Report a Bug, which closed the hole where a
+refused file was a dead end, and Show in Finder. Both are *doors* under
+ADR 2026-09-21: two scoped opener grants, no new Rust command, the shell
+still registering exactly `run_engine` and `pick_file`.
+
+The tripwire asserting the capability was exactly `['core:default']` fired on
+the first of those and did its job: it stopped the grant long enough for the
+decision to be made in an ADR rather than in a diff. Its replacement is
+narrower where it counts — every plugin grant must be scoped, `shell:execute`
+is refused by name, and the opener's allow-lists may not widen past the issue
+tracker and `$DOCUMENT/Screepub/**`.
+
+**A coupling that outlives this document.** Reveal is scoped to
+`$DOCUMENT/Screepub/**`, so a library moved with `$SCREEPUB_LIBRARY` is
+outside it and reveal fails there, deliberately. When decision 18's app-wide
+store lands and the output folder becomes settable, **the scope has to move
+with the setting**. The engine session has this in the store's spec; it is
+recorded here too because the two halves live in different documents.
+
+**Two contracts agreed with the engine session, to build against.**
+- Save a copy: `screepub export <epub> --for <fmt> --out <path>`. The engine
+  writes the artifact to the chosen absolute path, creating parents, and the
+  `--json` answer's `path` is that path. The window raises the save dialog
+  and hands over a destination; it never writes a file. Anything else would
+  need a filesystem write grant, which is not a door.
+- The send routes: the `{id, title, detail, button, available}` list plus a
+  perform-route call, ranking and remembered choice on the engine side.
+
 **Two things the blocked pieces learned.** Decision 25's route contract was
 adopted by the engine session as written, so the shape it specifies (a route
 list of `{id, title, detail, button, available}` plus a perform-route call,
