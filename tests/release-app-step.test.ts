@@ -56,6 +56,7 @@ const BUILD_STEP = stepNamed('app-bundles', "Build and verify this platform's bu
 const NOTARIZE_STEP = stepNamed('app-bundles', 'Notarize and staple the disk image');
 const SMOKE_STEP = stepNamed('app-bundles', 'Run the engine out of each bundle');
 const SUMS_STEP = stepNamed('app-upload', 'Rebuild the checksums from what arrived, then verify them');
+const MANIFEST_STEP = stepNamed('app-upload', 'Build the update manifest from what arrived, and publish it last');
 
 /** A recorder script standing in for a real executable. It APPENDS one
  *  tab-joined line per invocation, so a loop's repeated calls are all
@@ -154,6 +155,10 @@ describe("release.yml's bundle step, executed as bash", () => {
     expect(lines('bun')).toEqual([
       'tools/build-app-bundle.ts\t--version\t0.6.0\t--out\tbundles',
     ]);
+    // No --updater off macOS: nothing signs the Linux and Windows
+    // artifacts yet, and the manifest builder refuses a signature it has
+    // no row for, so this is where that stays deliberate.
+    expect(lines('bun')[0]).not.toContain('--updater');
   });
 
   test('the macOS leg asks for a universal bundle AND the transition overlay', () => {
@@ -164,9 +169,13 @@ describe("release.yml's bundle step, executed as bash", () => {
     const { dir, lines } = stubDir('build-mac', ['bun']);
     const r = runStep(BUILD_STEP, dir, { TAG: 'v0.6.0', ARCH: 'universal' });
     expect(r.status).toBe(0);
+    // --updater too: the macOS leg is the one that produces the updater
+    // archive and its signature, and the tool refuses to start without
+    // TAURI_SIGNING_PRIVATE_KEY, so a release without the secret fails in
+    // seconds rather than after a full universal build.
     expect(lines('bun')).toEqual([
       'tools/build-app-bundle.ts\t--version\t0.6.0\t--out\tbundles\t--arch\tuniversal' +
-        '\t--config\ttauri.transition.conf.json',
+        '\t--config\ttauri.transition.conf.json\t--updater',
     ]);
     expect(lines('bun')[0]).not.toContain('--target');
   });
@@ -337,10 +346,13 @@ describe("release.yml's smoke step, executed as bash", () => {
 });
 
 describe("release.yml's checksum step, executed as bash", () => {
+  // `arrivals`, since 2026-09-21: app-upload now checks the repository
+  // out, and the old download directory name is the Swift app's source
+  // directory in a checkout.
   const withArrivals = (tag: string, names: string[]) => {
     const dir = mkdtempSync(join(WORK, `sums-${tag}-`));
-    mkdirSync(join(dir, 'app'), { recursive: true });
-    for (const n of names) writeFileSync(join(dir, 'app', n), `contents of ${n}`);
+    mkdirSync(join(dir, 'arrivals'), { recursive: true });
+    for (const n of names) writeFileSync(join(dir, 'arrivals', n), `contents of ${n}`);
     return dir;
   };
 
@@ -357,7 +369,7 @@ describe("release.yml's checksum step, executed as bash", () => {
     const dir = withArrivals('ok', [...FOUR, 'SHA256SUMS-app']);
     const r = runStep(SUMS_STEP, dir, {});
     expect(r.status).toBe(0);
-    const sums = readFileSync(join(dir, 'app', 'SHA256SUMS-app'), 'utf8');
+    const sums = readFileSync(join(dir, 'arrivals', 'SHA256SUMS-app'), 'utf8');
     for (const n of FOUR) expect(sums).toContain(n);
     // Bare filenames, so anyone downloading into their own directory can
     // run `sha256sum -c` against it.
@@ -404,5 +416,53 @@ describe("release.yml's checksum step, executed as bash", () => {
     const r = runStep(script, dir, {});
     expect(r.status).not.toBe(0);
     expect(r.stdout + r.stderr).toContain('FAILED');
+  });
+});
+
+describe("release.yml's manifest step, executed as bash", () => {
+  // The last thing app-upload does: build latest.json over the arrivals
+  // and upload it, AFTER the installers and the archive it points at are
+  // already on the release page. A manifest that goes up first is a
+  // window in which the app is told about a file that is not there.
+  const withArrivals = (tag: string) => {
+    const { dir, lines } = stubDir(`manifest-${tag}`, ['bun', 'gh']);
+    mkdirSync(join(dir, 'arrivals'), { recursive: true });
+    return { dir, lines };
+  };
+  const env = { GH_TOKEN: 't', GH_REPO: 'ssandweiss/screepub' };
+
+  test('an ordinary tag builds the manifest over arrivals/ and uploads it, from that directory', () => {
+    const { dir, lines } = withArrivals('ok');
+    const r = runStep(MANIFEST_STEP, dir, { ...env, TAG: 'v0.6.1' });
+    expect(r.status).toBe(0);
+    expect(lines('bun')).toEqual([
+      'tools/build-update-manifest.ts\t--dir\tarrivals\t--version\t0.6.1\t--out\tarrivals/latest.json',
+    ]);
+    // Bare filename with --clobber, like every other upload in the file.
+    expect(lines('gh')).toEqual(['release\tupload\tv0.6.1\tlatest.json\t--clobber']);
+  });
+
+  test('a prerelease gets no manifest and says so, and uploads nothing', () => {
+    // releases/latest/download never resolves to a prerelease, and the
+    // manifest builder refuses one anyway; the step must not fail a
+    // release candidate for it.
+    const { dir, lines } = withArrivals('pre');
+    const r = runStep(MANIFEST_STEP, dir, { ...env, TAG: 'v0.7.0-rc1' });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('::notice::');
+    expect(lines('bun')).toEqual([]);
+    expect(lines('gh')).toEqual([]);
+  });
+
+  test('a manifest builder that refuses stops the step before anything is uploaded', () => {
+    // "No signed artifact" is exit 1 from the tool. A step that shrugged
+    // and uploaded whatever was there would publish a release whose
+    // updater silently cannot work.
+    const { dir, lines } = withArrivals('refused');
+    writeFileSync(join(dir, 'bun'), '#!/bin/sh\necho "no signed artifact" >&2\nexit 1\n');
+    chmodSync(join(dir, 'bun'), 0o755);
+    const r = runStep(MANIFEST_STEP, dir, { ...env, TAG: 'v0.6.1' });
+    expect(r.status).not.toBe(0);
+    expect(lines('gh')).toEqual([]);
   });
 });

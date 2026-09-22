@@ -112,16 +112,41 @@ function stripComments(text: string): string {
 
 describe('Rust is a window, not a brain', () => {
   test('the crate cannot parse the engine’s answer', () => {
-    // THE load-bearing assertion of this whole piece. Without serde_json,
-    // the engine's stdout is an opaque string on its way to the frontend,
-    // and no amount of well-meant Rust can start branching on what is
-    // inside it. `serde` itself is allowed: it is how the ipc layer encodes
-    // arguments, and it cannot read an arbitrary JSON document.
+    // THE load-bearing assertion of this whole piece. The engine's stdout
+    // is an opaque string on its way to the frontend, and no amount of
+    // well-meant Rust may start branching on what is inside it. `serde`
+    // itself is allowed: it is how the ipc layer encodes arguments, and it
+    // cannot read an arbitrary JSON document.
+    //
+    // AMENDED 2026-09-21, deliberately. This used to assert serde_json was
+    // not in Cargo.toml at all. Then the updater plugin arrived: its config
+    // has to live under `plugins` in tauri.conf.json (the plugin has no
+    // Rust setter for its endpoints), and `tauri::generate_context!` embeds
+    // any `plugins` block as `::serde_json::Value` literals
+    // (tauri-utils/src/tokens.rs, json_value_lit), so the build fails
+    // without the crate. Measured, not assumed.
+    //
+    // So the guarantee moves from "not linked" to "linked for the
+    // generator, and no source here may name it", which is the half of the
+    // rule that ever did the work: a parser nobody calls parses nothing.
+    // The dependency line must carry that reason in the comment directly
+    // above it, so it cannot later be read as permission.
+    const dep = /^serde_json = "1"$/m.exec(CARGO);
+    expect(dep).not.toBeNull();
+    const commentAbove = CARGO.slice(0, dep!.index)
+      .split('\n')
+      .reverse()
+      .slice(1) // the empty tail after the final newline
+      .filter((_line, i, arr) => arr.slice(0, i + 1).every((l) => l.startsWith('#')))
+      .join('\n');
+    expect(commentAbove).toContain('generate_context');
+    expect(commentAbove).toContain('no source');
+    // Exactly one such line, and nothing widening it (no features, no path).
+    expect(CARGO.match(/^\s*serde_json\s*=/gm)).toHaveLength(1);
     //
     // This reads comment-stripped code: a doc comment that mentions
-    // `serde_json` to EXPLAIN why it is absent (as sidecar.rs's does) must
+    // `serde_json` to EXPLAIN why it is unused (as sidecar.rs's does) must
     // not trip the same guard that catches actually depending on it.
-    expect(CARGO).not.toMatch(/^\s*serde_json\s*=/m);
     for (const { name, text } of rustSources) {
       expect(`${name}: ${stripComments(text)}`).not.toContain('serde_json');
     }
@@ -389,9 +414,14 @@ describe('the window is granted no more than it needs', () => {
     for (const permission of capability().permissions) {
       if (typeof permission === 'string') {
         // Only core:* may be a bare string: it is the window's own baseline,
-        // not a door onto the OS.
+        // not a door onto the OS. ONE named exception: updater:default has
+        // no allow-list to write, because the plugin can only ever reach
+        // the endpoints in tauri.conf.json. That list is its scope, and the
+        // updater tests at the end of this file pin it to one URL on this
+        // repository.
+        const allowed = permission.startsWith('core:') || permission === 'updater:default';
         expect(`bare permission: ${permission}`).toBe(`bare permission: ${
-          permission.startsWith('core:') ? permission : `${permission} MUST BE SCOPED`}`);
+          allowed ? permission : `${permission} MUST BE SCOPED`}`);
         continue;
       }
       expect(Array.isArray(permission.allow)).toBe(true);
@@ -831,5 +861,159 @@ describe('the macOS transition overlay', () => {
       if (key === 'productName') continue;
       expect(merged[key]).toEqual(CONFIG[key]);
     }
+  });
+});
+
+describe('the updater: transport in the crate, judgement in the engine', () => {
+  // Piece A of docs/superpowers/plans/2026-09-21-parity.md. The plugin
+  // moves bytes: it fetches latest.json, verifies a minisign signature,
+  // downloads the archive and swaps the bundle. It decides nothing about
+  // WHETHER to: that is src/update/compare.ts, reached from the window
+  // through desktop/ui/update-compare.js. See
+  // docs/superpowers/specs/2026-09-21-updater-design.md and the transport
+  // plan beside it.
+  const capability = () => JSON.parse(
+    readFileSync(join(REPO, 'desktop', 'src-tauri', 'capabilities', 'default.json'), 'utf8'),
+  );
+  const LOCK = readFileSync(join(REPO, 'desktop', 'src-tauri', 'Cargo.lock'), 'utf8');
+
+  test('the crate depends on the updater plugin, and the lockfile resolves the measured version', () => {
+    // The platform-key rule, the error on a missing platform and the
+    // macOS install path were all read off 2.12.0's source. The lockfile
+    // is what pins that; the Cargo.toml line is the floor.
+    expect(CARGO).toMatch(/^tauri-plugin-updater = "2\.12\.0"$/m);
+    expect(LOCK).toMatch(/^name = "tauri-plugin-updater"\nversion = "2\.12\.0"$/m);
+  });
+
+  test('main.rs registers it, and registers no command for it', () => {
+    const main = rustSources.find((f) => basename(f.name) === 'main.rs')!.text;
+    const bare = stripComments(main);
+    expect(bare).toContain('.plugin(tauri_plugin_updater::Builder::new().build())');
+    // The plugin brings its own commands (check, download, install), which
+    // the capability exposes. This crate adds none: the invoke handler
+    // still names exactly the two commands the ADR allows.
+    expect(bare).toMatch(/generate_handler!\[run_engine, pick_file\]/);
+  });
+
+  test('the window may check, download and install, and that grant is bare BY NECESSITY', () => {
+    // updater:default is check + download + install + download-and-install,
+    // read off the plugin's permissions/default.toml. It has no allow-list
+    // to scope, because the plugin can only ever reach the endpoints in
+    // tauri.conf.json, which the next test pins. So this is the one plugin
+    // permission the scoped-grant rule names as an exception.
+    expect(capability().permissions).toContain('updater:default');
+  });
+
+  test('the endpoint is exactly one URL, on this repository’s releases, over TLS', () => {
+    // releases/latest/download/<asset> is GitHub's redirect to the newest
+    // non-prerelease, non-draft release's asset. One URL, not a list: a
+    // second endpoint is a second place for the manifest to go stale.
+    const updater = CONFIG.plugins?.updater;
+    expect(updater).toBeDefined();
+    expect(updater.endpoints).toEqual([
+      'https://github.com/ssandweiss/screepub/releases/latest/download/latest.json',
+    ]);
+  });
+
+  test('the public key is either empty (not yet supplied) or a real minisign public key', () => {
+    // EMPTY is a working-branch state: the owner generates the key pair
+    // and hands over the public half (docs/release-secrets.md §4). A tag
+    // with an empty key is refused by release.yml's checks job, not by
+    // this test, because a test that fails until a person acts is a red
+    // main for nobody's fault. What this test refuses is GARBAGE: a key
+    // that is set and is not a minisign public key box would make the
+    // updater refuse every release, silently, forever.
+    const pubkey = CONFIG.plugins.updater.pubkey;
+    expect(typeof pubkey).toBe('string');
+    if (pubkey === '') return;
+    const decoded = Buffer.from(pubkey, 'base64').toString('utf8');
+    const lines = decoded.trim().split('\n');
+    // `tauri signer generate` base64-encodes the whole minisign box: a
+    // comment line carrying the key id, then the 56-character key.
+    expect(lines[0]).toMatch(/^untrusted comment: minisign public key: [0-9A-Fa-f]{16}$/);
+    expect(lines[1]).toMatch(/^RW[A-Za-z0-9+/]{54}$/);
+  });
+
+  test('the plugin’s JavaScript reaches the window without a build step', () => {
+    // The plugin's build.rs registers its api-iife.js as a global API
+    // script, which Tauri injects as window.__TAURI__.updater ONLY when
+    // withGlobalTauri is on. desktop/ui has no bundler to import
+    // @tauri-apps/plugin-updater from, so this flag is the whole bridge.
+    expect(CONFIG.app.withGlobalTauri).toBe(true);
+  });
+
+  test('no update decision leaks into the crate', () => {
+    // The plugin compares versions with semver internally and the window
+    // overrules it with the engine's comparator. Nothing in this crate may
+    // add a third opinion.
+    for (const { name, text } of rustSources) {
+      const bare = stripComments(text);
+      expect(`${name} decides versions: ${/\bsemver\b|Version::parse|is_newer|isNewer/.test(bare)}`)
+        .toBe(`${name} decides versions: false`);
+    }
+  });
+});
+
+describe('the updater overlay: the archive is a RELEASE artifact, not a build artifact', () => {
+  // tauri-cli signs updater artifacts itself, whenever
+  // bundle.createUpdaterArtifacts is on, and fails the whole bundle with "A
+  // public key has been found, but no private key" when
+  // TAURI_SIGNING_PRIVATE_KEY is unset (src/bundle.rs, sign_updaters). So
+  // the flag cannot live in tauri.conf.json: desktop.yml bundles on every
+  // push with no secrets, and so does anyone running cargo tauri build at
+  // home. It lives in an overlay that only release.yml's macOS leg passes,
+  // through build-app-bundle.ts --updater.
+  const overlayPath = join(REPO, 'desktop', 'src-tauri', 'tauri.updater.conf.json');
+  const overlay = () => JSON.parse(readFileSync(overlayPath, 'utf8')) as Record<string, unknown>;
+
+  /** tauri-cli's merge (helpers/config.rs, merge_patches): RFC 7396,
+   *  descending into objects. NOT the shallow spread the transition
+   *  overlay's test uses, because this overlay reaches INSIDE `bundle`
+   *  and a shallow merge would replace the whole table. */
+  function mergePatch(doc: unknown, patch: unknown): unknown {
+    if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) return patch;
+    const out: Record<string, unknown> =
+      typeof doc === 'object' && doc !== null && !Array.isArray(doc)
+        ? { ...(doc as Record<string, unknown>) }
+        : {};
+    for (const [k, v] of Object.entries(patch as Record<string, unknown>)) {
+      out[k] = mergePatch(out[k], v);
+    }
+    return out;
+  }
+
+  test('it exists and turns on exactly the one flag', () => {
+    expect(existsSync(overlayPath)).toBe(true);
+    expect(overlay()).toEqual({ bundle: { createUpdaterArtifacts: true } });
+  });
+
+  test('merged the way the CLI merges, it changes that flag and nothing else', () => {
+    const merged = mergePatch(CONFIG, overlay()) as typeof CONFIG;
+    expect(merged.bundle.createUpdaterArtifacts).toBe(true);
+    for (const key of Object.keys(CONFIG.bundle)) {
+      expect(merged.bundle[key]).toEqual(CONFIG.bundle[key]);
+    }
+    for (const key of Object.keys(CONFIG)) {
+      if (key === 'bundle') continue;
+      expect(merged[key]).toEqual(CONFIG[key]);
+    }
+  });
+
+  test('tauri.conf.json itself never turns the archive on', () => {
+    expect(CONFIG.bundle.createUpdaterArtifacts).toBeUndefined();
+  });
+
+  test('the push workflow never passes it', () => {
+    // No secret reaches desktop.yml, by design (its own comment). Passing
+    // this overlay there would fail every push at the bundle step.
+    const desktopYml = readFileSync(join(REPO, '.github', 'workflows', 'desktop.yml'), 'utf8');
+    expect(desktopYml).not.toContain('tauri.updater.conf.json');
+    expect(desktopYml).not.toContain('--updater');
+  });
+
+  test('desktop/README.md says why it is a separate file', () => {
+    const readme = readFileSync(join(REPO, 'desktop', 'README.md'), 'utf8');
+    expect(readme).toContain('tauri.updater.conf.json');
+    expect(readme).toContain('TAURI_SIGNING_PRIVATE_KEY');
   });
 });

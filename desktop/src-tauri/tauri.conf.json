@@ -42,5 +42,13 @@
       "../../LICENSE": "LICENSE",
       "../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/ssandweiss/screepub/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

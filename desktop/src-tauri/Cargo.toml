@@ -11,10 +11,16 @@ description = "Screepub desktop shell. A window around the engine; no logic live
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# No serde_json, on purpose and permanently. The engine's answer is an
-# opaque string on its way to the frontend; a JSON parser in this crate is
-# the first step to a decision being made in it.
-#
+# serde_json is here for ONE reason, and no source file in this crate may
+# name it: `tauri::generate_context!` embeds the `plugins` block of
+# tauri.conf.json (the updater's endpoint and public key) as
+# `::serde_json::Value` literals, and the build fails without the crate.
+# Measured 2026-09-21, the day the updater plugin arrived; until then the
+# rule was "not linked at all". The engine's answer is still an opaque
+# string on its way to the frontend: a JSON parser that nothing calls
+# parses nothing, and tests/desktop-shell.test.ts fails the moment a .rs
+# file mentions it.
+serde_json = "1"
 # `features = []` is not decoration and must not be tidied away: the Tauri
 # CLI derives these lists from tauri.conf.json and writes them back on every
 # `cargo tauri build`. Committed in the spelling the CLI produces, the
@@ -26,3 +32,9 @@ tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2.5.5"
+# Transport for the updater, and nothing else: fetch latest.json, verify the
+# minisign signature, download, swap the bundle. WHETHER to update is the
+# engine's call (src/update/compare.ts); this crate never compares versions.
+# 2.12.0 is the version whose source the platform-key rule and the macOS
+# install path were read off; the lockfile pins it.
+tauri-plugin-updater = "2.12.0"

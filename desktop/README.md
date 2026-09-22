@@ -136,6 +136,33 @@ against a ceiling of 200.
 > tracker, so Report a Bug can open it. That is a door, not a command: the
 > count of registered commands is still two. See
 > [ADR 2026-09-21](../docs/adr/2026-09-21-doors-not-commands.md).
+>
+> Later the same day it gained `updater:default`, the updater plugin's
+> check/download/install set. That grant is bare because the plugin has no
+> allow-list to write: its scope is the single endpoint in `tauri.conf.json`
+> (this repository's `releases/latest/download/latest.json`), and
+> `tests/desktop-shell.test.ts` pins that to one URL. Still two commands.
+
+### The updater archive is a release artifact, not a build artifact
+
+`tauri.updater.conf.json` is a second overlay beside the transition one,
+and it holds exactly `bundle.createUpdaterArtifacts: true`. It is passed by
+`tools/build-app-bundle.ts --updater`, which only `release.yml`'s macOS leg
+uses. The flag is **not** in `tauri.conf.json` on purpose: tauri-cli signs
+the updater archive itself whenever that flag is on and fails the whole
+bundle with "A public key has been found, but no private key" when
+`TAURI_SIGNING_PRIVATE_KEY` is unset. `desktop.yml` bundles on every push
+with no secrets, and so does anyone running `cargo tauri build` at home, so
+the flag has to be something only a release turns on. Read off
+`tauri-cli/src/bundle.rs` (`sign_updaters`), 2026-09-21.
+
+One more consequence of the plugin: `serde_json` is now in `Cargo.toml`.
+Not because any Rust here parses anything, but because
+`tauri::generate_context!` embeds the `plugins` block of `tauri.conf.json`
+as `::serde_json::Value` literals and the build fails without the crate.
+The rule moved from "not linked" to "linked for the generator, and no `.rs`
+file may name it", and the test that used to assert the former now asserts
+the latter, with the reason written next to the dependency line.
 
 **There is no Cancel.** `brand/components/progress.html` draws one, and the
 SwiftUI app has one, but killing a running sidecar needs a kill handle the
@@ -470,7 +497,11 @@ showed neither installed. `await document.fonts.load(...)` and then read the
 - **No global "app defaults"** — settings are per script, in the sidecar
   `src/settings/sidecar.ts` owns. A cross-platform preference store would
   mean a new Tauri plugin and a new capability grant.
-- **No auto-update.** Notes says so on the surface.
+- **No auto-update.** Notes says so on the surface. *(True until
+  2026-09-21. The transport half of the updater now exists, see the
+  overlay section above and `docs/superpowers/plans/2026-09-21-updater-transport.md`;
+  the window side is the interface-pass session's, and Notes changes when
+  it lands.)*
 
 ### Known, open, and found by running it — and fixed in 13b (task 13, 2026-09-14)
 

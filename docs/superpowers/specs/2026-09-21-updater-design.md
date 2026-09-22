@@ -1,6 +1,11 @@
 # Design: how the Tauri app updates itself
 
-Date: 2026-09-21 · Status: draft, one decision open
+Date: 2026-09-21 · Status: accepted. The open decision below (losing
+install-time codesign pinning) was accepted and recorded in
+`docs/retired-coverage.md`. The judgement half landed 2026-09-21; the
+transport half is [its own plan](../plans/2026-09-21-updater-transport.md),
+on branch `worktree-updater-transport`; the window half is the
+interface-pass session's, against the contract sent the same day.
 Decision it serves: [ADR 2026-09-21](../../adr/2026-09-21-doors-not-commands.md),
 which says v0.6.1 waits for this.
 Piece A of [the parity plan](../plans/2026-09-21-parity.md).
