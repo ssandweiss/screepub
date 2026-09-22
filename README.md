@@ -148,15 +148,19 @@ tune its formatting, send it to a reader, and the release notes.
 
 | Machine | File |
 | --- | --- |
-| Linux, Debian or Ubuntu, Intel or AMD | `Screepub_0.6.0_amd64.deb` |
-| Linux, Fedora or openSUSE, Intel or AMD | `Screepub-0.6.0-1.x86_64.rpm` |
+| Linux, Debian or Ubuntu, Intel or AMD | `Screepub-linux-amd64.deb` |
+| Linux, Fedora or openSUSE, Intel or AMD | `Screepub-linux-x86_64.rpm` |
 | macOS, Apple Silicon or Intel | `Screepub-Desktop-macOS-universal.dmg` |
-| Windows, 64-bit | `Screepub-0.6.0-setup.exe` |
+| Windows, 64-bit | `Screepub-windows-x64-setup.exe` |
+
+These names carry no version from 0.7.2 on, so they are the same at every
+release. Releases up to 0.7.1 put the version in the Linux and Windows
+names.
 
 ```bash
-sudo apt install ./Screepub_0.6.0_amd64.deb     # Debian, Ubuntu
-sudo dnf install ./Screepub-0.6.0-1.x86_64.rpm     # Fedora
-sudo zypper install ./Screepub-0.6.0-1.x86_64.rpm  # openSUSE
+sudo apt install ./Screepub-linux-amd64.deb      # Debian, Ubuntu
+sudo dnf install ./Screepub-linux-x86_64.rpm     # Fedora
+sudo zypper install ./Screepub-linux-x86_64.rpm  # openSUSE
 ```
 
 `SHA256SUMS-app` on the release page covers these four files. (`SHA256SUMS`,

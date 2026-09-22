@@ -89,7 +89,10 @@ export const BUNDLE_KINDS: readonly BundleKind[] = [
     magic: ARCH_MAGIC,
     magicAt: 'head',
     floorBytes: FLOOR,
-    releasedName: (v, arch) => `Screepub_${v}_${arch === 'x64' ? 'amd64' : 'arm64'}.deb`,
+    // No version in the name, on purpose (spec 2026-09-22, part 4): pages
+    // link to releases/latest/download/<name>, which a versioned name breaks
+    // at every release. The version is still inside the package.
+    releasedName: (_v, arch) => `Screepub-linux-${arch === 'x64' ? 'amd64' : 'arm64'}.deb`,
   },
   {
     id: 'rpm',
@@ -99,7 +102,7 @@ export const BUNDLE_KINDS: readonly BundleKind[] = [
     magic: RPM_MAGIC,
     magicAt: 'head',
     floorBytes: FLOOR,
-    releasedName: (v, arch) => `Screepub-${v}-1.${arch === 'x64' ? 'x86_64' : 'aarch64'}.rpm`,
+    releasedName: (_v, arch) => `Screepub-linux-${arch === 'x64' ? 'x86_64' : 'aarch64'}.rpm`,
   },
   {
     // "Desktop" in the name, and NOT Screepub-macOS.dmg: app/release.sh
@@ -124,7 +127,7 @@ export const BUNDLE_KINDS: readonly BundleKind[] = [
     magic: MZ_MAGIC,
     magicAt: 'head',
     floorBytes: FLOOR,
-    releasedName: (v) => `Screepub-${v}-setup.exe`,
+    releasedName: () => 'Screepub-windows-x64-setup.exe',
   },
 ];
 

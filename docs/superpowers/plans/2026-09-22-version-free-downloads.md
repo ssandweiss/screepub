@@ -222,6 +222,18 @@ with:
 Run: `bun test tests/release-artifacts.test.ts -t "derivation found"`
 Expected: FAIL, with the received list still showing the versioned names.
 
+- [ ] **Step 3 (added during execution): pin the 0.6.0 notes as history**
+
+The test `'the notes name the app downloads too, not only the CLI ones'`
+derived the names 0.6.0's notes must contain from `BUNDLE_KINDS`. After
+the rename it would demand that notes for an already-published release
+name files that release never had. Published notes are never rewritten,
+so it becomes `'the 0.6.0 notes named the app downloads 0.6.0 actually
+published'`, asserting the four names 0.6.0 really shipped as literals:
+`Screepub_0.6.0_amd64.deb`, `Screepub-0.6.0-1.x86_64.rpm`,
+`Screepub-0.6.0-setup.exe` and `Screepub-Desktop-macOS-universal.dmg`.
+This plan missed it; running the suite found it.
+
 ### Task 3: Rename in the one place names are decided
 
 **Files:**

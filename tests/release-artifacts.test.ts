@@ -753,20 +753,20 @@ describe('the app downloads are described where a reader meets them', () => {
     // make them all vacuously true. Four is what app-upload's own line-count
     // check demands: one .deb, one .rpm, ONE .dmg, one .exe.
     expect([...published].sort()).toEqual([
-      'Screepub-0.6.0-1.x86_64.rpm',
-      'Screepub-0.6.0-setup.exe',
       'Screepub-Desktop-macOS-universal.dmg',
-      'Screepub_0.6.0_amd64.deb',
+      'Screepub-linux-amd64.deb',
+      'Screepub-linux-x86_64.rpm',
+      'Screepub-windows-x64-setup.exe',
     ]);
     // And the ones no leg builds, which no page may offer. The two
     // per-arch DMGs joined this list on 2026-09-20: a page still naming
     // one sends a Mac user to a download the release does not carry, and
     // the point of the universal build is that there is exactly one.
     expect([...unpublished].sort()).toEqual([
-      'Screepub-0.6.0-1.aarch64.rpm',
       'Screepub-Desktop-macOS-arm64.dmg',
       'Screepub-Desktop-macOS-x64.dmg',
-      'Screepub_0.6.0_arm64.deb',
+      'Screepub-linux-aarch64.rpm',
+      'Screepub-linux-arm64.deb',
     ]);
   });
 
@@ -868,8 +868,22 @@ describe('the app downloads are described where a reader meets them', () => {
     expect(lower).toContain('tolino');
   });
 
-  test('the notes name the app downloads too, not only the CLI ones', () => {
-    for (const name of published) expect(notes).toContain(name);
+  test('the 0.6.0 notes named the app downloads 0.6.0 actually published', () => {
+    // HISTORY, pinned as literals on purpose. This used to derive the names
+    // from BUNDLE_KINDS like the tests above, which was right while 0.6.0
+    // was the release being described. On 2026-09-22 the Linux and Windows
+    // names lost their version, and a derivation would now demand that
+    // notes for an already-published release name files that release never
+    // had. Published notes are never rewritten, so the record is fixed
+    // here: these are the four files 0.6.0 put on its release page.
+    for (const name of [
+      'Screepub_0.6.0_amd64.deb',
+      'Screepub-0.6.0-1.x86_64.rpm',
+      'Screepub-0.6.0-setup.exe',
+      'Screepub-Desktop-macOS-universal.dmg',
+    ]) {
+      expect(notes).toContain(name);
+    }
   });
 
   test('the download page carries the unsigned-Windows warning', () => {

@@ -104,12 +104,20 @@ describe('the bundle matrix', () => {
     }
   });
 
-  test('the published names carry the version and say which machine they are for', () => {
-    expect(kind('deb').releasedName('0.6.0', 'x64')).toBe('Screepub_0.6.0_amd64.deb');
-    expect(kind('deb').releasedName('0.6.0', 'arm64')).toBe('Screepub_0.6.0_arm64.deb');
-    expect(kind('rpm').releasedName('0.6.0', 'x64')).toBe('Screepub-0.6.0-1.x86_64.rpm');
-    expect(kind('rpm').releasedName('0.6.0', 'arm64')).toBe('Screepub-0.6.0-1.aarch64.rpm');
-    expect(kind('nsis').releasedName('0.6.0', 'x64')).toBe('Screepub-0.6.0-setup.exe');
+  test('the published names carry NO version, and say which machine they are for', () => {
+    // CHANGED 2026-09-22, deliberately: this used to assert the version WAS
+    // in each name. Every page that named a file went stale at the next
+    // release, which is why the README and the site both still said 0.6.0
+    // at 0.7.1. Without the version, a link can be
+    // releases/latest/download/<name> and stay right forever. The version
+    // still lives INSIDE each package (the deb control file, the rpm
+    // header, the NSIS product version), so package tools show it.
+    // Architecture words follow each format's own convention.
+    expect(kind('deb').releasedName('0.6.0', 'x64')).toBe('Screepub-linux-amd64.deb');
+    expect(kind('deb').releasedName('0.6.0', 'arm64')).toBe('Screepub-linux-arm64.deb');
+    expect(kind('rpm').releasedName('0.6.0', 'x64')).toBe('Screepub-linux-x86_64.rpm');
+    expect(kind('rpm').releasedName('0.6.0', 'arm64')).toBe('Screepub-linux-aarch64.rpm');
+    expect(kind('nsis').releasedName('0.6.0', 'x64')).toBe('Screepub-windows-x64-setup.exe');
     // The two Mac names must not collide with the SwiftUI app's
     // Screepub-macOS.dmg, which app/release.sh uploads to the same release
     // page and tools/bump-tap.sh hardcodes.
@@ -123,6 +131,20 @@ describe('the bundle matrix', () => {
       .toBe('Screepub-Desktop-macOS-universal.dmg');
     for (const arch of ['x64', 'arm64'] as const) {
       expect(kind('dmg').releasedName('0.6.0', arch)).not.toBe('Screepub-macOS.dmg');
+    }
+  });
+
+  test('no published name changes when the version does', () => {
+    // The property the renaming exists for, stated directly rather than
+    // implied by five literals: a prerelease and a far-future release get
+    // exactly the names 0.6.0 gets, and no name carries a version at all.
+    for (const k of BUNDLE_KINDS) {
+      for (const arch of ['x64', 'arm64', 'universal'] as const) {
+        if (arch === 'universal' && k.id !== 'dmg') continue;
+        const name = k.releasedName('0.6.0', arch);
+        expect(k.releasedName('9.12.3-rc1', arch)).toBe(name);
+        expect(name).not.toMatch(/\d+\.\d+\.\d+/);
+      }
     }
   });
 
@@ -558,8 +580,8 @@ describe('a whole run, against a fake cargo', () => {
       repo,
     );
     expect(made.map((p) => p.replace(/^.*[/\\]/, ''))).toEqual([
-      'Screepub_0.6.0_arm64.deb',
-      'Screepub-0.6.0-1.aarch64.rpm',
+      'Screepub-linux-arm64.deb',
+      'Screepub-linux-aarch64.rpm',
     ]);
     // The returned paths are the files that are actually on disk.
     for (const p of made) expect(() => readFileSync(p)).not.toThrow();
@@ -571,8 +593,8 @@ describe('a whole run, against a fake cargo', () => {
 
     const sums = parseChecksums(readFileSync(join(out, 'SHA256SUMS-app'), 'utf8'));
     expect([...sums.keys()].sort()).toEqual([
-      'Screepub-0.6.0-1.aarch64.rpm',
-      'Screepub_0.6.0_arm64.deb',
+      'Screepub-linux-aarch64.rpm',
+      'Screepub-linux-arm64.deb',
     ]);
     // The digests describe the files that are actually there, not the ones
     // the bundler wrote before the rename.
@@ -607,8 +629,8 @@ describe('a whole run, against a fake cargo', () => {
     // The arch actually reaches the names on a second architecture.
     const sums = parseChecksums(readFileSync(join(out, 'SHA256SUMS-app'), 'utf8'));
     expect([...sums.keys()].sort()).toEqual([
-      'Screepub-0.6.0-1.x86_64.rpm',
-      'Screepub_0.6.0_amd64.deb',
+      'Screepub-linux-amd64.deb',
+      'Screepub-linux-x86_64.rpm',
     ]);
   });
 
@@ -663,7 +685,7 @@ describe('a whole run, against a fake cargo', () => {
     await expect(
       buildBundles({ version: '0.6.0', outDir: out, os: 'linux', arch: 'x64' }, spawn, repo),
     ).rejects.toThrow(/floor/);
-    expect(() => readFileSync(join(out, 'Screepub_0.6.0_amd64.deb'))).toThrow();
+    expect(() => readFileSync(join(out, 'Screepub-linux-amd64.deb'))).toThrow();
   });
 
   // ---- the updater archive ---------------------------------------------
