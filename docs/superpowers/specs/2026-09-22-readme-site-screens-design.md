@@ -161,6 +161,41 @@ webview. The fonts are bundled, so text matches, but a rendering difference
 between the two engines would not be caught here. The frame is drawn, not
 captured.
 
+### Amended while planning (2026-09-22), from measurements
+
+Each of these was found by running something, not by reasoning, before
+the plan was written. None changes what the owner approved; each changes
+how.
+
+- **Live engine answers, not recorded ones.** The capture server answers
+  each engine call the window makes by running the real CLI with exactly
+  those arguments, so every answer is real by construction. The "never
+  answers what it did not record" rule becomes an allow-list: the version
+  check, a conversion of the demo script, and settings or re-renders
+  inside the demo library. Anything else (devices, send, export, any other
+  path) is refused and fails the capture, naming the call.
+- **Chrome is driven over its remote-control protocol**, not the
+  `--screenshot` flag. The flag photographs whatever is on screen when its
+  time runs out, including a failed state; the protocol lets the tool wait
+  for the page to report `ready` or `failed`. No dependency: Bun's built-in
+  WebSocket. Dark mode through the protocol's media emulation (the obvious
+  command-line flag, `--force-prefers-color-scheme`, does nothing).
+- **Two passes per window picture.** The window pins its binding and brads
+  with fixed positioning, so it cannot be drawn inside a smaller frame on
+  one page. Pass one captures the window at its own 860 by 620 size; pass
+  two places that image in a rounded, shadowed frame with the traffic
+  lights and captures again on a transparent background.
+- **The window's own `index.html` is served, not copied.** The server
+  inserts the capture scripts into it on the way out, so a stylesheet the
+  window adds later is picked up without anyone touching the capture tool.
+- **The site's scene sits on pages 14 to 18**, where the site's own page
+  markers put it, not as scene one. It ends on FADE OUT, so Field Station
+  is about 18 pages, not 25.
+- **The demo library is `/Users/Shared/Documents/Screepub`**, because the
+  result screen prints the book's full path. That folder exists on every
+  Mac, needs no username, and reads naturally. The tool refuses to run if
+  it already exists, and removes it afterwards.
+
 ## Part 4: version-free download names
 
 In `tools/build-app-bundle.ts`'s `releasedName`:
