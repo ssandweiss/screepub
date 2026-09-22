@@ -362,7 +362,99 @@ describe('release.yml ships the cross-platform artifacts', () => {
       'secrets.DEVELOPER_ID_CERT_P12_BASE64',
       'secrets.KEYCHAIN_PASSWORD',
       'secrets.TAP_TOKEN',
+      // The updater's signing key and its password (docs/release-secrets.md
+      // §4). Added 2026-09-21 for piece A; the ONLY two added since the
+      // list above was written.
+      'secrets.TAURI_SIGNING_PRIVATE_KEY',
+      'secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD',
     ]);
+  });
+
+  // ---- the updater ------------------------------------------------------
+  // Piece A's transport half: the signed archive, the manifest, and the
+  // alarm. docs/superpowers/plans/2026-09-21-updater-transport.md.
+
+  test('the checks job refuses a tag whose app trusts no real updater key', () => {
+    // From the TAGGED commit, like every other assertion in that job. A
+    // tag with an empty pubkey ships an updater that can never accept a
+    // release, which is what ADR 2026-09-21 says v0.6.1 must not do. This
+    // is a tag-time gate and not a bun test on purpose: the key does not
+    // exist yet, and a test that fails until the owner acts is a red main
+    // for nobody's fault.
+    const text = runText(rel.jobs['checks']!);
+    expect(text).toContain('tools/update-signature.ts --pubkey-from-config');
+    expect(text).toMatch(/git cat-file blob "\$GITHUB_SHA:desktop\/src-tauri\/tauri\.conf\.json"[^\n]*>/);
+    // After bun is set up, since it is a bun tool; still before any
+    // certificate is imported, since `release` needs `checks`.
+    const steps = rel.jobs['checks']!.steps ?? [];
+    const bun = steps.findIndex((s) => (s.uses ?? '').includes('setup-bun'));
+    const gate = steps.findIndex((s) => /pubkey-from-config/.test(s.run ?? ''));
+    expect(gate).toBeGreaterThan(bun);
+  });
+
+  test('the macOS leg asks for the updater archive and carries the signing key, macOS only', () => {
+    const yml = read(join(WORKFLOWS, 'release.yml'));
+    const text = runText(rel.jobs['app-bundles']!);
+    // --updater inside the universal branch, beside the transition overlay.
+    expect(text).toMatch(/if \[ "\$ARCH" = universal \][\s\S]*--updater/);
+    // The two secrets reach tauri-cli under its OWN variable names, and
+    // only on macOS, in exactly the shape the APPLE_* ones already use.
+    expect(yml).toMatch(/TAURI_SIGNING_PRIVATE_KEY: \$\{\{ runner\.os == 'macOS' && secrets\.TAURI_SIGNING_PRIVATE_KEY \|\| '' \}\}/);
+    expect(yml).toMatch(/TAURI_SIGNING_PRIVATE_KEY_PASSWORD: \$\{\{ runner\.os == 'macOS' && secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD \|\| '' \}\}/);
+    // And desktop.yml, the push path, knows nothing of either.
+    const desktop = read(join(WORKFLOWS, 'desktop.yml'));
+    expect(desktop).not.toContain('TAURI_SIGNING');
+    expect(desktop).not.toContain('--updater');
+  });
+
+  test('app-upload builds latest.json from what arrived, LAST, and uploads archive, signature and manifest', () => {
+    const job = rel.jobs['app-upload']!;
+    const steps = job.steps ?? [];
+    // It needs a checkout and bun now, because the manifest is built by a
+    // tool rather than by YAML. The download therefore cannot land under
+    // the old name, which in a checkout is the Swift app's source directory.
+    expect(steps.some((s) => (s.uses ?? '').includes('actions/checkout'))).toBe(true);
+    expect(steps.some((s) => (s.uses ?? '').includes('setup-bun'))).toBe(true);
+    const download = steps.find((s) => (s.uses ?? '').includes('download-artifact'));
+    expect(download?.with?.path).toBe('arrivals');
+    const text = runText(job);
+    expect(text).not.toMatch(/cd app\b/);
+    expect(text).toContain('tools/build-update-manifest.ts --dir arrivals');
+    expect(text).toContain('--out arrivals/latest.json');
+    // The installers, the archive and its signature go up first; the
+    // manifest that points at them goes up LAST, so nothing it names is
+    // ever missing when it is read.
+    const upload = steps.findIndex((s) => /gh release upload[\s\S]*\*\.app\.tar\.gz\.sig/.test(s.run ?? ''));
+    const manifest = steps.findIndex((s) => /build-update-manifest\.ts/.test(s.run ?? ''));
+    expect(upload).toBeGreaterThanOrEqual(0);
+    expect(manifest).toBeGreaterThan(upload);
+    expect(steps[manifest]!.run).toContain('latest.json');
+    expect(steps[manifest]!.run).toMatch(/gh release upload/);
+    // A prerelease gets no manifest: releases/latest never points at one.
+    expect(steps[manifest]!.run).toMatch(/\*-\*/);
+  });
+
+  test('latest-check reads the manifest back from GitHub after the upload, per release', () => {
+    // The tap-check pattern: a job INSIDE the release run, because a
+    // `release: published` trigger elsewhere never fires for a release
+    // created with the default token. A red job here means the release
+    // published and the updater cannot use it.
+    const job = rel.jobs['latest-check'];
+    expect(job).toBeDefined();
+    expect(needs('latest-check')).toEqual(['app-upload']);
+    expect(runText(job!)).toContain('tools/check-latest.ts');
+    // No --version: the question is whether the ENDPOINT serves the newest
+    // release, which is what the app asks and is the right question even
+    // when an old tag is being re-run.
+    expect(runText(job!)).not.toContain('--version');
+    expect(JSON.stringify(job)).toContain("!contains(github.ref_name, '-')");
+  });
+
+  test('the weekly freshness workflow checks the manifest as well as the tap', () => {
+    const weekly = workflow('tap-freshness.yml');
+    const jobs = Object.values(weekly.jobs);
+    expect(jobs.some((j) => runText(j).includes('tools/check-tap.sh'))).toBe(true);
+    expect(jobs.some((j) => runText(j).includes('tools/check-latest.ts'))).toBe(true);
   });
 
   test('the Windows leg is deliberately unsigned', () => {
@@ -428,7 +520,10 @@ describe('release.yml ships the cross-platform artifacts', () => {
     const upload = steps.findIndex((s) => /gh release upload/.test(s.run ?? ''));
     expect(verify).toBeGreaterThanOrEqual(0);
     expect(verify).toBeLessThan(upload);
-    expect(steps[verify]!.run).toMatch(/cd app/);
+    // `arrivals`, since 2026-09-21: the job checks the repository out now,
+    // and the old download directory name collides with the Swift app's
+    // source directory in a checkout.
+    expect(steps[verify]!.run).toMatch(/cd arrivals/);
   });
 
   test('the app checksums file does not overwrite the CLI one', () => {

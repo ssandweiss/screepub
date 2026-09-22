@@ -60,10 +60,10 @@ gear's three settings.
 | `mail-and-books` | 5 | `port` | **no** | Apple Books is the product's only route to an iPhone; it is one `open`. |
 | `feedback-url` | 5 | `port` | **no** | ~20 lines of pure URL building, and the only bug-report path the product has. |
 | `engine-cancellation` | 10 (part) | **`out`**, owner, 2026-09-21 | n/a | Was `port`. Put back to the owner after gate 2, with desktop/README.md's note that a kill handle means a third Rust command; the answer was no. Not open. |
-| `updater-version-compare` | 17 | `port` | **no** | Pure; carries a downgrade defence that was found the hard way once already. |
-| `update-selection` | 17 | `port` | **no** | Same unit as the above: pure, no network, no keys. |
-| `update-decoding` | 14 | `port` | **no** | Same unit. |
-| `update-error-descriptions` | 11 | `port` | **no** | Same unit; the difference between a message and "The operation couldn't be completed." |
+| `updater-version-compare` | 17 | `port` | **yes**, 2026-09-21 | `src/update/compare.ts` and its generated twin in `desktop/ui/update-compare.js`; the downgrade defence found the hard way is `isDescribeSuffix`. |
+| `update-selection` | 17 | **`replaced`** (was `port`), 2026-09-21 | n/a | The plugin selects: one manifest, one platform key. Which release and which asset is decided at PUBLISH time by `tools/build-update-manifest.ts` and re-checked by `tools/check-latest.ts`, both tested. |
+| `update-decoding` | 14 | **`replaced`** (was `port`), 2026-09-21 | n/a | The plugin decodes `latest.json`; a malformed one is a `check()` error the window shows as a message, and the manifest is validated when published and weekly. |
+| `update-error-descriptions` | 11 | `port` | **no** | The window side, per the contract sent to the interface-pass session 2026-09-21: a rejection from `check()` is a message, never "up to date". |
 | `self-update-installer` | 26 | **`replaced`** (was `port`), 2026-09-21 | n/a | Tauri's updater plugin does the swap and verifies its own signature. Install-time codesign pinning is the accepted loss: see below. |
 | `release-notes-parsing` | 21 | `accept-loss` | yes, in kind | Of the Swift assertions only. The feature is replaced in kind and nothing is lost. |
 | `kfx-install-plugin` | not a kit-check section | **`replaced`** (was `accept-loss`) | engine yes, **UNREACHABLE** | Detection ports; installation is a 485 KB GPL-3 binary and a packaging decision. |

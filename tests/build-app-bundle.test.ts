@@ -14,6 +14,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   BUNDLE_KINDS,
+  SIGNATURE_EXT,
+  UPDATER_KINDS,
+  UPDATER_OVERLAY,
   assertBundleVersions,
   buildArgv,
   buildBundles,
@@ -23,10 +26,13 @@ import {
   discoverArtifact,
   kindsForOs,
   parseBundleArgs,
+  updaterKindsForOs,
   verifyBundleFile,
   type BundleKind,
+  type UpdaterKind,
 } from '../tools/build-app-bundle';
 import { parseChecksums } from '../tools/build-cli';
+import { fakeSignatureBox } from './signature-box';
 
 const OUT = mkdtempSync(join(tmpdir(), 'screepub-bundle-'));
 afterAll(() => rmSync(OUT, { recursive: true, force: true }));
@@ -658,6 +664,219 @@ describe('a whole run, against a fake cargo', () => {
       buildBundles({ version: '0.6.0', outDir: out, os: 'linux', arch: 'x64' }, spawn, repo),
     ).rejects.toThrow(/floor/);
     expect(() => readFileSync(join(out, 'Screepub_0.6.0_amd64.deb'))).toThrow();
+  });
+
+  // ---- the updater archive ---------------------------------------------
+  // Piece A's transport half. With --updater the macOS run also carries
+  // out the `.app.tar.gz` the bundler makes when createUpdaterArtifacts is
+  // on, and the `.sig` beside it. Both are what latest.json points at.
+
+  const appTar = (): UpdaterKind => UPDATER_KINDS.find((k) => k.id === 'app-tar')!;
+
+  /** A fake cargo for macOS that writes the DMG AND, when asked, the
+   *  updater archive and its signature under the bundler's own names,
+   *  which the transition overlay makes "Screepub Desktop". */
+  const fakeMacCargo = (
+    desktopDir: string,
+    write: { tar?: boolean; sig?: boolean | string } = { tar: true, sig: true },
+  ) => {
+    const calls: string[][] = [];
+    const spawn = (argv: string[], _cwd: string) => {
+      calls.push(argv);
+      const target = argv.includes('--target') ? argv[argv.indexOf('--target') + 1] : undefined;
+      for (const k of kindsForOs('macos')) {
+        const dir = bundleDirFor(k, target, desktopDir);
+        mkdirSync(dir, { recursive: true });
+        plausible(join(dir, `Screepub Desktop${k.ext}`), k);
+      }
+      const macos = bundleDirFor(appTar(), target, desktopDir);
+      mkdirSync(macos, { recursive: true });
+      const tar = join(macos, 'Screepub Desktop.app.tar.gz');
+      if (write.tar) plausible(tar, appTar() as unknown as BundleKind);
+      if (write.sig === true) {
+        writeFileSync(`${tar}${SIGNATURE_EXT}`, fakeSignatureBox('Screepub Desktop.app.tar.gz'));
+      } else if (typeof write.sig === 'string') {
+        writeFileSync(`${tar}${SIGNATURE_EXT}`, write.sig);
+      }
+      return { exitCode: 0, stderr: '' };
+    };
+    return { calls, spawn };
+  };
+  const macRun = (out: string, updater: boolean) => ({
+    version: '0.6.0',
+    outDir: out,
+    os: 'macos' as const,
+    arch: 'universal' as const,
+    target: 'universal-apple-darwin',
+    config: 'tauri.transition.conf.json',
+    updater,
+  });
+  // Both variables SET. The password may be empty, for a key made without
+  // one, but it must be present: tauri-cli reads its absence as "prompt
+  // me", and a build spawned by this tool has no terminal to prompt on.
+  // Measured 2026-09-21: "incorrect updater private key password: Device
+  // not configured (os error 6)", after the whole build.
+  const withKey = { TAURI_SIGNING_PRIVATE_KEY: 'not-a-real-key-but-set', TAURI_SIGNING_PRIVATE_KEY_PASSWORD: '' };
+
+  test('--updater passes the updater overlay AFTER the transition overlay', () => {
+    // Order is the whole point of it being a second file: the transition
+    // overlay renames the product and this one turns the archive on, and
+    // the CLI merges them in the order given. Both reach cargo.
+    expect(buildArgv('macos', { target: 'universal-apple-darwin', config: 'tauri.transition.conf.json', updater: true })).toEqual([
+      'cargo', 'tauri', 'build', '--bundles', 'app,dmg',
+      '--target', 'universal-apple-darwin',
+      '--config', 'tauri.transition.conf.json',
+      '--config', UPDATER_OVERLAY,
+    ]);
+    expect(UPDATER_OVERLAY).toBe('tauri.updater.conf.json');
+  });
+
+  test('without --updater the overlay is never passed, so a push build needs no key', () => {
+    for (const os of ['linux', 'macos', 'windows'] as const) {
+      expect(buildArgv(os, {})).not.toContain(UPDATER_OVERLAY);
+      expect(buildArgv(os, { updater: false })).not.toContain(UPDATER_OVERLAY);
+    }
+  });
+
+  test('the parser reads --updater, and it is off by default', () => {
+    expect(parseBundleArgs(['--version', '0.6.0', '--out', OUT], 'darwin', 'arm64').updater).toBe(false);
+    expect(
+      parseBundleArgs(['--version', '0.6.0', '--out', OUT, '--updater'], 'darwin', 'arm64').updater,
+    ).toBe(true);
+  });
+
+  test('the updater archive is a macOS kind only, gzip at the head, floor like the rest', () => {
+    // One row today. Linux and Windows updater artifacts exist in the
+    // plugin but are not signed by this release yet; adding them is a
+    // row here and a leg in release.yml, not a redesign.
+    expect(UPDATER_KINDS.map((k) => k.id)).toEqual(['app-tar']);
+    expect(updaterKindsForOs('macos').map((k) => k.id)).toEqual(['app-tar']);
+    expect(updaterKindsForOs('linux')).toEqual([]);
+    expect(updaterKindsForOs('windows')).toEqual([]);
+    const k = appTar();
+    expect(k.dir).toBe('macos');
+    expect(k.ext).toBe('.app.tar.gz');
+    expect(k.magic).toEqual([0x1f, 0x8b]);
+    expect(k.magicAt).toBe('head');
+    expect(k.floorBytes).toBe(kind('dmg').floorBytes);
+  });
+
+  test('the published name carries the arch, and the platform keys follow from it', () => {
+    const k = appTar();
+    expect(k.releasedName('0.6.0', 'universal')).toBe('Screepub-Desktop-macOS-universal.app.tar.gz');
+    // A universal archive serves BOTH darwin platforms: the plugin asks for
+    // darwin-<arch of the running binary>, and a fat binary runs as either.
+    expect(k.platformKeys('universal')).toEqual(['darwin-x86_64', 'darwin-aarch64']);
+    expect(k.platformKeys('arm64')).toEqual(['darwin-aarch64']);
+    expect(k.platformKeys('x64')).toEqual(['darwin-x86_64']);
+  });
+
+  test('the published name can be read back to its arch, which is how the manifest builder finds it', () => {
+    const k = appTar();
+    for (const arch of ['universal', 'arm64', 'x64'] as const) {
+      expect(k.archOf(k.releasedName('0.6.0', arch))).toBe(arch);
+    }
+    expect(k.archOf('Screepub-Desktop-macOS-universal.dmg')).toBeUndefined();
+    expect(k.archOf('Screepub-Desktop-macOS-universal.app.tar.gz.sig')).toBeUndefined();
+    expect(k.archOf('Screepub-Desktop-macOS-riscv.app.tar.gz')).toBeUndefined();
+  });
+
+  test('the verifier accepts a plausible archive and rejects a non-gzip one', () => {
+    const k = appTar();
+    const good = join(OUT, 'plausible.app.tar.gz');
+    plausible(good, k as unknown as BundleKind);
+    expect(() => verifyBundleFile(good, k)).not.toThrow();
+    const bad = join(OUT, 'not-gzip.app.tar.gz');
+    plausible(bad, kind('deb'));
+    expect(() => verifyBundleFile(bad, k)).toThrow(/magic/);
+  });
+
+  test('with --updater the archive and its signature come out under the published names, byte for byte', async () => {
+    const repo = agreeingRepo('0.6.0');
+    const { calls, spawn } = fakeMacCargo(repo.desktopDir);
+    const out = join(OUT, 'run-updater');
+    const made = await buildBundles(macRun(out, true), spawn, repo, withKey);
+    const names = made.map((p) => p.replace(/^.*[/\\]/, '')).sort();
+    expect(names).toEqual([
+      'Screepub-Desktop-macOS-universal.app.tar.gz',
+      'Screepub-Desktop-macOS-universal.app.tar.gz.sig',
+      'Screepub-Desktop-macOS-universal.dmg',
+    ]);
+    expect(calls[0]).toContain(UPDATER_OVERLAY);
+    // The signature is the plugin's whole basis for trusting the download,
+    // and latest.json carries its CONTENT. A copy that changed one byte
+    // would make every install fail with "signature could not be decoded".
+    expect(readFileSync(join(out, 'Screepub-Desktop-macOS-universal.app.tar.gz.sig'), 'utf8')).toBe(
+      fakeSignatureBox('Screepub Desktop.app.tar.gz'),
+    );
+    // SHA256SUMS-app keeps naming installers only: the archive is proven by
+    // its signature, and app-upload rebuilds the checksums file over
+    // exactly the four installers anyway.
+    const sums = parseChecksums(readFileSync(join(out, 'SHA256SUMS-app'), 'utf8'));
+    expect([...sums.keys()]).toEqual(['Screepub-Desktop-macOS-universal.dmg']);
+  });
+
+  test('without --updater a macOS run ignores an archive that happens to be there', async () => {
+    // The push path and a local build. Whatever a previous signed run
+    // left in bundle/macos must not be swept into an unsigned release.
+    const repo = agreeingRepo('0.6.0');
+    const { calls, spawn } = fakeMacCargo(repo.desktopDir);
+    const out = join(OUT, 'run-no-updater');
+    const made = await buildBundles(macRun(out, false), spawn, repo, {});
+    expect(made.map((p) => p.replace(/^.*[/\\]/, ''))).toEqual(['Screepub-Desktop-macOS-universal.dmg']);
+    expect(calls[0]).not.toContain(UPDATER_OVERLAY);
+  });
+
+  test('--updater without the signing key fails BEFORE cargo is spawned', async () => {
+    // The CLI would fail too, after a full universal build, with "A public
+    // key has been found, but no private key". Twenty minutes is a long
+    // way to travel to read an environment variable.
+    const repo = agreeingRepo('0.6.0');
+    const { calls, spawn } = fakeMacCargo(repo.desktopDir);
+    await expect(
+      buildBundles(macRun(join(OUT, 'run-nokey'), true), spawn, repo, {}),
+    ).rejects.toThrow(/TAURI_SIGNING_PRIVATE_KEY/);
+    expect(calls.length).toBe(0);
+  });
+
+  test('--updater with the key but no password variable at all fails BEFORE cargo, and says empty is fine', async () => {
+    // The variable may be empty; it may not be missing. Missing means
+    // tauri-cli prompts, and there is no terminal, so the failure lands
+    // after the full build as "Device not configured".
+    const repo = agreeingRepo('0.6.0');
+    const { calls, spawn } = fakeMacCargo(repo.desktopDir);
+    await expect(
+      buildBundles(macRun(join(OUT, 'run-nopw'), true), spawn, repo, {
+        TAURI_SIGNING_PRIVATE_KEY: 'set',
+      }),
+    ).rejects.toThrow(/TAURI_SIGNING_PRIVATE_KEY_PASSWORD[\s\S]*empty/);
+    expect(calls.length).toBe(0);
+  });
+
+  test('a cargo that exits 0 and writes no archive fails, naming it', async () => {
+    const repo = agreeingRepo('0.6.0');
+    const { spawn } = fakeMacCargo(repo.desktopDir, { tar: false, sig: false });
+    await expect(
+      buildBundles(macRun(join(OUT, 'run-notar'), true), spawn, repo, withKey),
+    ).rejects.toThrow(/\.app\.tar\.gz/);
+  });
+
+  test('an archive with no signature beside it fails, naming the signature', async () => {
+    const repo = agreeingRepo('0.6.0');
+    const { spawn } = fakeMacCargo(repo.desktopDir, { tar: true, sig: false });
+    await expect(
+      buildBundles(macRun(join(OUT, 'run-nosig'), true), spawn, repo, withKey),
+    ).rejects.toThrow(/\.sig/);
+  });
+
+  test('a signature that is not a minisign box fails, and the archive is not published', async () => {
+    const repo = agreeingRepo('0.6.0');
+    const { spawn } = fakeMacCargo(repo.desktopDir, { tar: true, sig: 'definitely not a signature' });
+    const out = join(OUT, 'run-badsig');
+    await expect(buildBundles(macRun(out, true), spawn, repo, withKey)).rejects.toThrow(
+      /signature|base64|untrusted comment/i,
+    );
+    expect(() => readFileSync(join(out, 'Screepub-Desktop-macOS-universal.app.tar.gz'))).toThrow();
   });
 
   test('the macOS run passes the target triple and the overlay through', async () => {

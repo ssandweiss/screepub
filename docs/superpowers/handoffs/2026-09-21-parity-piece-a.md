@@ -30,8 +30,23 @@ plugin does transport and the engine keeps the decision. Landed:
 - `screepub update-decision` and `screepub update-should-check`: the
   same judgement for anything that is not the window. Both offline.
 
-**Piece A's transport half is not started, and it is blocked on a
-secret only the owner can create.** See the checklist below.
+**Piece A's transport half is built, on branch `worktree-updater-transport`,
+and waits on the owner for one thing: the merge.** The key pair was
+generated, stored in 1Password and added as the two repo secrets on the
+evening of 2026-09-21 (key id `EC5C19F83FC2D502`, the public half is in
+`tauri.conf.json`). The plan that records every decision is
+[`2026-09-21-updater-transport.md`](../plans/2026-09-21-updater-transport.md).
+What is on the branch: the plugin registered and granted, the release-only
+overlay, `build-app-bundle.ts --updater`, `build-update-manifest.ts`,
+`check-latest.ts`, the release workflow's key gate, signed macOS leg,
+manifest upload and `latest-check` job, the weekly manifest check, and the
+docs. `tauri.conf.json` carries an EMPTY `pubkey` until the owner pastes
+the public half in; `bun test` allows that, the tag-time gate does not.
+The window contract went to the interface-pass session the same day.
+Two things a reader of the older text below will not expect: the crate
+now links `serde_json` (Tauri's code generator needs it for any `plugins`
+block; no `.rs` file may name it, and the test that guarded the old rule
+now guards that one), and Linux and Windows are not in the manifest yet.
 
 **Piece B's first door landed** with the interface pass: `tauri-plugin-opener`
 with one scoped grant, this repository's GitHub URLs only, so Report a

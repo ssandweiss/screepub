@@ -41,6 +41,13 @@ fn main() {
         // logic: what may be opened is decided by the SCOPES in
         // capabilities/default.json, and the window decides nothing else.
         .plugin(tauri_plugin_opener::init())
+        // Transport, not judgement (docs/superpowers/specs/2026-09-21-updater-design.md).
+        // The plugin fetches the manifest named in tauri.conf.json, checks
+        // the minisign signature against the public key there, downloads
+        // and swaps the bundle. Whether a release is NEWER is decided by the
+        // engine's comparator, which the window applies over the plugin's
+        // answer. No command is registered here for any of it.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![run_engine, pick_file])
         .run(tauri::generate_context!())
         .expect("the Screepub window failed to start");

@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "This app's own two commands, plus scoped doors: the window may ask the OS to open the project's issue tracker, and to reveal a file inside the Screepub library. Nothing else. The shell and dialog plugins are still used only from Rust. See ADR 2026-09-21 — doors, not commands.",
+  "description": "This app's own two commands, plus scoped doors: the window may ask the OS to open the project's issue tracker, to reveal a file inside the Screepub library, and to ask the updater plugin to check, download and install. The updater grant has no allow-list to write; its scope is the one endpoint in tauri.conf.json. Nothing else. The shell and dialog plugins are still used only from Rust. See ADR 2026-09-21 — doors, not commands.",
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "updater:default",
     {
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "https://github.com/ssandweiss/screepub/*" }]

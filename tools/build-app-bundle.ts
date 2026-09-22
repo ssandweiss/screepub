@@ -3,6 +3,12 @@
 //   bun tools/build-app-bundle.ts --version 0.6.0 --out dist/
 //   bun tools/build-app-bundle.ts --version 0.6.0 --out dist/ \
 //     --target aarch64-apple-darwin --config tauri.transition.conf.json
+//   bun tools/build-app-bundle.ts --version 0.6.0 --out dist/ \
+//     --arch universal --config tauri.transition.conf.json --updater
+//       # the release's macOS leg: ALSO the updater archive and its
+//       # signature. Needs TAURI_SIGNING_PRIVATE_KEY (a path or the key
+//       # text) and TAURI_SIGNING_PRIVATE_KEY_PASSWORD (set, and "" for a
+//       # key without one) in the environment.
 //
 // A Bun script and not workflow YAML, following tools/build-cli.ts exactly:
 // YAML can only be tested by cutting a release, and a release tool nobody
@@ -12,6 +18,9 @@
 // It never signs anything. On macOS, tauri-bundler signs and notarizes from
 // the APPLE_* environment variables the release workflow sets; there is no
 // codesign call in this file and app/release.sh is neither read nor touched.
+// The updater archive's minisign signature is likewise tauri-cli's own,
+// from TAURI_SIGNING_PRIVATE_KEY: this file only checks the key is SET
+// before spending a build, and that what came out is a signature.
 
 import {
   closeSync,
@@ -27,6 +36,7 @@ import {
 import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { REPO_DIR, writeChecksums, type Spawn } from './build-cli';
+import { parseSignatureBox } from './update-signature';
 
 export type BundleOs = 'linux' | 'macos' | 'windows';
 // 'universal' is macOS-only and is not a CPU: it is a lipo of the other two.
@@ -36,11 +46,10 @@ export type BundleOs = 'linux' | 'macos' | 'windows';
 // docs/adr/2026-09-14-swift-app-update-path.md.
 export type BundleArch = 'x64' | 'arm64' | 'universal';
 
-export interface BundleKind {
-  id: 'deb' | 'rpm' | 'dmg' | 'nsis';
-  os: BundleOs;
-  /** The directory under `target/[<triple>/]release/bundle/`. */
-  dir: string;
+/** What every artifact this tool handles has in common: a container it
+ *  can be checked against, and a scale it must clear. */
+export interface ArtifactShape {
+  id: string;
   ext: string;
   /** Container magic, checked rather than assumed. */
   magic: readonly number[];
@@ -48,6 +57,13 @@ export interface BundleKind {
    *  bytes of the file; a DMG has no header magic at all. */
   magicAt: 'head' | 'udif-trailer';
   floorBytes: number;
+}
+
+export interface BundleKind extends ArtifactShape {
+  id: 'deb' | 'rpm' | 'dmg' | 'nsis';
+  os: BundleOs;
+  /** The directory under `target/[<triple>/]release/bundle/`. */
+  dir: string;
   /** The stable published filename. Deliberately ours, not the bundler's:
    *  tauri names the DMG after productName, which the macOS transition
    *  overlay changes to "Screepub Desktop" (with a space). */
@@ -118,6 +134,70 @@ export function kindsForOs(os: BundleOs): BundleKind[] {
   return BUNDLE_KINDS.filter((k) => k.os === os);
 }
 
+// ── the updater archive ──────────────────────────────────────────────
+//
+// With bundle.createUpdaterArtifacts on, tauri-bundler ALSO writes the
+// thing the in-app updater downloads: on macOS a `.tar.gz` of the .app,
+// beside the .app under bundle/macos/. tauri-cli then signs it and writes
+// the minisign signature beside that as `<archive>.sig`. Neither is an
+// installer: nobody double-clicks them, latest.json points at them.
+//
+// The flag lives in an OVERLAY and not in tauri.conf.json, because the CLI
+// fails any bundle that asks for updater artifacts without the private
+// key, and the push workflow and every local build have no key. --updater
+// passes the overlay and, afterwards, insists the archive and its
+// signature exist and are what they claim to be.
+
+export const UPDATER_OVERLAY = 'tauri.updater.conf.json';
+export const SIGNATURE_EXT = '.sig';
+const GZIP_MAGIC = [0x1f, 0x8b];
+
+/** The key the plugin looks up in latest.json: `<os>-<arch>` of the
+ *  RUNNING binary (tauri-plugin-updater, updater.rs, `target()`), so a
+ *  universal archive has to answer for both darwin keys. */
+export type PlatformKey = 'darwin-x86_64' | 'darwin-aarch64';
+
+export interface UpdaterKind extends ArtifactShape {
+  id: 'app-tar';
+  os: BundleOs;
+  dir: string;
+  releasedName(version: string, arch: BundleArch): string;
+  /** The inverse of releasedName, for a tool that only has the filename:
+   *  the manifest builder runs in a job that never saw the build. */
+  archOf(releasedName: string): BundleArch | undefined;
+  platformKeys(arch: BundleArch): PlatformKey[];
+}
+
+export const UPDATER_KINDS: readonly UpdaterKind[] = [
+  {
+    // One row. Linux and Windows updater artifacts exist in the plugin but
+    // this release does not sign them; adding one is a row here, a key in
+    // the manifest builder, and the secret on that leg in release.yml.
+    id: 'app-tar',
+    os: 'macos',
+    dir: 'macos',
+    ext: '.app.tar.gz',
+    magic: GZIP_MAGIC,
+    magicAt: 'head',
+    floorBytes: FLOOR,
+    releasedName: (_v, arch) => `Screepub-Desktop-macOS-${arch}.app.tar.gz`,
+    archOf: (name) => {
+      const m = /^Screepub-Desktop-macOS-(universal|arm64|x64)\.app\.tar\.gz$/.exec(name);
+      return m ? (m[1] as BundleArch) : undefined;
+    },
+    platformKeys: (arch) =>
+      arch === 'universal'
+        ? ['darwin-x86_64', 'darwin-aarch64']
+        : arch === 'arm64'
+          ? ['darwin-aarch64']
+          : ['darwin-x86_64'],
+  },
+];
+
+export function updaterKindsForOs(os: BundleOs): UpdaterKind[] {
+  return UPDATER_KINDS.filter((k) => k.os === os);
+}
+
 /** The `--bundles` value, pinned per OS and NEVER the default: on Linux the
  *  default is deb, rpm and appimage, so a bare `cargo tauri build` attempts
  *  an AppImage whose linuxdeploy pass corrupts the Bun-compiled engine, and
@@ -129,10 +209,17 @@ export function bundleListFor(os: BundleOs): string {
   return 'nsis';
 }
 
-export function buildArgv(os: BundleOs, opts: { target?: string; config?: string }): string[] {
+export function buildArgv(
+  os: BundleOs,
+  opts: { target?: string; config?: string; updater?: boolean },
+): string[] {
   const argv = ['cargo', 'tauri', 'build', '--bundles', bundleListFor(os)];
   if (opts.target) argv.push('--target', opts.target);
   if (opts.config) argv.push('--config', opts.config);
+  // AFTER any other overlay: the CLI takes --config repeatedly and merges
+  // them in the order given, so this one lands on top of whatever renamed
+  // the product rather than under it.
+  if (opts.updater) argv.push('--config', UPDATER_OVERLAY);
   return argv;
 }
 
@@ -144,7 +231,7 @@ export function buildArgv(os: BundleOs, opts: { target?: string; config?: string
  *  a whole run at a temporary tree instead of writing fake artifacts into
  *  the repo's own `target/`, where they would be found by the NEXT run. */
 export function bundleDirFor(
-  kind: BundleKind,
+  kind: { dir: string },
   target?: string,
   desktopDir: string = DESKTOP_DIR,
 ): string {
@@ -161,7 +248,7 @@ export function bundleDirFor(
  *  extension and insist on EXACTLY ONE match, which is what turns a glob
  *  into a fact. `rw.` is excluded by name because bundle_dmg leaves
  *  `rw.$$.<name>.dmg` behind when it dies partway. */
-export function discoverArtifact(dir: string, kind: BundleKind): string {
+export function discoverArtifact(dir: string, kind: ArtifactShape): string {
   if (!existsSync(dir)) {
     throw new Error(
       `build-app-bundle: ${kind.id}: no bundle directory at ${dir}. cargo tauri build ` +
@@ -207,7 +294,7 @@ function bytesAt(path: string, n: number, position: number): Uint8Array {
  *  still does not exist, for the weaker and more durable reason: nothing
  *  makes two different bundlers stay in step, so the only thing true of
  *  every kind is its container and its scale. */
-export function verifyBundleFile(path: string, kind: BundleKind): void {
+export function verifyBundleFile(path: string, kind: ArtifactShape): void {
   if (!existsSync(path)) {
     throw new Error(`build-app-bundle: ${kind.id}: nothing at ${path}`);
   }
@@ -296,6 +383,9 @@ export interface BundleArgs {
   arch: BundleArch;
   target?: string;
   config?: string;
+  /** Also produce the updater archive and its signature. Off by default:
+   *  it needs TAURI_SIGNING_PRIVATE_KEY, which only a release has. */
+  updater?: boolean;
 }
 
 export function osForPlatform(platform: string): BundleOs {
@@ -321,6 +411,7 @@ export function parseBundleArgs(
       // bundle needs a flag; there is no host to infer it from.
       arch: { type: 'string' },
       config: { type: 'string' },
+      updater: { type: 'boolean', default: false },
     },
     strict: true,
     allowPositionals: false,
@@ -367,6 +458,7 @@ export function parseBundleArgs(
     arch,
     target,
     config: values.config,
+    updater: values.updater ?? false,
   };
 }
 
@@ -392,13 +484,40 @@ export async function buildBundles(
   args: BundleArgs,
   spawn: Spawn = realSpawn,
   dirs: BundleDirs = {},
+  env: Record<string, string | undefined> = process.env,
 ): Promise<string[]> {
   const repoDir = dirs.repoDir ?? REPO_DIR;
   const desktopDir = dirs.desktopDir ?? join(repoDir, 'desktop', 'src-tauri');
   assertBundleVersions(args.version, repoDir);
+  if (args.updater && !env.TAURI_SIGNING_PRIVATE_KEY) {
+    // tauri-cli would fail on exactly this, AFTER the whole universal
+    // build, with "A public key has been found, but no private key".
+    // Twenty minutes is a long way to travel to read one variable.
+    throw new Error(
+      'build-app-bundle: --updater needs TAURI_SIGNING_PRIVATE_KEY in the environment, and ' +
+        'it is not set. See docs/release-secrets.md §4.',
+    );
+  }
+  if (args.updater && env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD === undefined) {
+    // SET, not necessarily non-empty. tauri-cli reads an absent password
+    // variable as "prompt me", and a build spawned from here has no
+    // terminal to prompt on: measured 2026-09-21 as "incorrect updater
+    // private key password: Device not configured (os error 6)", again
+    // after the whole build. release.yml always sets it, to '' when there
+    // is no such secret, which is exactly what a password-less key wants.
+    throw new Error(
+      'build-app-bundle: --updater needs TAURI_SIGNING_PRIVATE_KEY_PASSWORD SET in the ' +
+        'environment, empty if the key has no password (TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""). ' +
+        'Unset, tauri-cli tries to prompt for one and there is no terminal here.',
+    );
+  }
   mkdirSync(args.outDir, { recursive: true });
 
-  const argv = buildArgv(args.os, { target: args.target, config: args.config });
+  const argv = buildArgv(args.os, {
+    target: args.target,
+    config: args.config,
+    updater: args.updater,
+  });
   console.log(`── ${argv.join(' ')}`);
   const { exitCode, stderr } = spawn(argv, desktopDir);
   if (exitCode !== 0) {
@@ -420,10 +539,55 @@ export async function buildBundles(
     names.push(name);
   }
 
+  // The updater archive and its signature, only when asked. They are NOT
+  // in SHA256SUMS-app: the archive is proven by its signature, and
+  // app-upload rebuilds that file over exactly the installers anyway.
+  const extras: string[] = [];
+  if (args.updater) {
+    for (const kind of updaterKindsForOs(args.os)) {
+      const built = discoverArtifact(bundleDirFor(kind, args.target, desktopDir), kind);
+      verifyBundleFile(built, kind);
+      const sig = `${built}${SIGNATURE_EXT}`;
+      if (!existsSync(sig)) {
+        throw new Error(
+          `build-app-bundle: ${kind.id}: ${basename(built)} has no ${basename(sig)} beside it. ` +
+            'tauri-cli writes the signature right after bundling, so a missing one means ' +
+            `signing did not run. Was --config ${UPDATER_OVERLAY} passed?`,
+        );
+      }
+      // Read as text, and checked BEFORE the archive is copied out: a
+      // signature that is not one means nothing here may be published.
+      const sigText = readFileSync(sig, 'utf8');
+      try {
+        parseSignatureBox(sigText);
+      } catch (err) {
+        throw new Error(
+          `build-app-bundle: ${kind.id}: ${basename(sig)} is not a minisign signature: ` +
+            (err as Error).message,
+        );
+      }
+      const name = kind.releasedName(args.version, args.arch);
+      const dest = join(args.outDir, name);
+      copyFileSync(built, dest);
+      verifyBundleFile(dest, kind);
+      const sigDest = `${dest}${SIGNATURE_EXT}`;
+      copyFileSync(sig, sigDest);
+      // Byte for byte. latest.json will carry this text, and the plugin
+      // refuses an install over a signature that decodes wrongly.
+      if (readFileSync(sigDest, 'utf8') !== sigText) {
+        throw new Error(`build-app-bundle: ${kind.id}: ${basename(sigDest)} did not copy intact`);
+      }
+      console.log(
+        `   ${basename(built)} → ${name} (+${SIGNATURE_EXT})  ${statSync(dest).size} bytes  ok`,
+      );
+      extras.push(name, `${name}${SIGNATURE_EXT}`);
+    }
+  }
+
   // NOT "SHA256SUMS": release.yml's cross-upload job already publishes a
   // file by that name for the three CLI archives, onto the same release.
   writeChecksums(args.outDir, names, 'SHA256SUMS-app');
-  return names.map((n) => join(args.outDir, n));
+  return [...names, ...extras].map((n) => join(args.outDir, n));
 }
 
 if (import.meta.main) {

@@ -1,6 +1,7 @@
 # Release on version tags. Requires repo secrets (see docs/release-secrets.md):
 #   DEVELOPER_ID_CERT_P12_BASE64, CERT_PASSWORD, KEYCHAIN_PASSWORD,
-#   AC_API_KEY_P8_BASE64, AC_API_KEY_ID, AC_API_ISSUER_ID
+#   AC_API_KEY_P8_BASE64, AC_API_KEY_ID, AC_API_ISSUER_ID,
+#   TAURI_SIGNING_PRIVATE_KEY (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD if set)
 # Least privilege + pinned third-party actions, matching ci.yml. The
 # checkout SHA, setup-bun SHA, and bun-version below are duplicated from
 # ci.yml on purpose (this workflow must validate its own toolchain rather
@@ -124,6 +125,20 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
+      # The app that ships must trust a real updater key. From the TAGGED
+      # commit, like every assertion above: a checkout is not proof of what
+      # was tagged. Here and not in `bun test`, because tauri.conf.json
+      # carries an EMPTY key until the owner generates the pair, and a test
+      # that fails until a person acts is a red main for nobody's fault. A
+      # TAG with an empty key would ship an updater that can never accept a
+      # release, which is exactly what ADR 2026-09-21 says v0.6.1 must not
+      # do. The tool prints the key id, so the run log records which key
+      # this release's app trusts.
+      - name: The app trusts a real updater key
+        run: |
+          set -euo pipefail
+          git cat-file blob "$GITHUB_SHA:desktop/src-tauri/tauri.conf.json" > "$RUNNER_TEMP/tauri.conf.json"
+          bun tools/update-signature.ts --pubkey-from-config "$RUNNER_TEMP/tauri.conf.json"
       - run: bunx tsc --noEmit
       - run: bun test
       - run: swift build -c release
@@ -656,6 +671,15 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && 'Developer ID Application' || '' }}
           APPLE_API_KEY: ${{ runner.os == 'macOS' && secrets.AC_API_KEY_ID || '' }}
           APPLE_API_ISSUER: ${{ runner.os == 'macOS' && secrets.AC_API_ISSUER_ID || '' }}
+          # The updater archive's signing key, read by tauri-cli's
+          # sign_updaters under its OWN variable names, like the APPLE_*
+          # ones. macOS only: nothing signs the Linux and Windows artifacts
+          # yet, and the manifest builder refuses a signature it has no row
+          # for, so widening this is a deliberate three-place change. An
+          # empty password is right for a key generated without one; a key
+          # WITH a password and no secret fails loudly at decryption.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ runner.os == 'macOS' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
         run: |
           set -euo pipefail
           rm -rf bundles
@@ -667,7 +691,15 @@ jobs:
             # universal-apple-darwin from the arch, precisely so the two
             # cannot disagree. A universal arch carrying a per-arch target
             # would produce a thin bundle wearing a universal name.
-            ARGS+=(--arch universal --config tauri.transition.conf.json)
+            #
+            # --updater: ALSO the updater archive and its signature, through
+            # the release-only overlay the tool passes for it. The tool
+            # refuses to start without TAURI_SIGNING_PRIVATE_KEY, so a
+            # release missing the secret fails in seconds, not after the
+            # full universal build. There is no degrade path on purpose:
+            # ADR 2026-09-21 makes the updater the precondition for v0.6.1,
+            # and a release that cannot sign one is the thing it forbids.
+            ARGS+=(--arch universal --config tauri.transition.conf.json --updater)
           fi
           bun tools/build-app-bundle.ts ${ARGS[@]+"${ARGS[@]}"}
       # tauri-bundler notarizes the .app and NEVER the image. app.rs
@@ -777,25 +809,34 @@ jobs:
     permissions:
       contents: write
     steps:
+      # A checkout and bun, which this job used to do without: the update
+      # manifest is built by a tool, for the reason every file in tools/
+      # gives. The download therefore lands in `arrivals`, no longer under
+      # the name that in a checkout is the Swift app's source directory.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: app-bundles-*
           merge-multiple: true
-          path: app
+          path: arrivals
       # Each leg wrote its own SHA256SUMS-app covering only its own files,
       # and merge-multiple keeps whichever arrived last. Rebuilt here from
       # what actually landed, so the published file describes every file
       # published beside it -- which no per-leg file could, since no leg
       # ever saw the others.
       #
-      # `cd app` is load-bearing: the file names bare filenames, which is
-      # what makes it usable by anyone who downloads into their own
+      # `cd arrivals` is load-bearing: the file names bare filenames, which
+      # is what makes it usable by anyone who downloads into their own
       # directory, so `-c` must run with the files as its cwd.
       - name: Rebuild the checksums from what arrived, then verify them
         shell: bash
         run: |
           set -euo pipefail
-          cd app
+          cd arrivals
           rm -f SHA256SUMS-app
           sha256sum *.deb *.rpm *.dmg *.exe > SHA256SUMS-app
           # Exactly what the three legs produce between them: one .deb, one
@@ -824,12 +865,77 @@ jobs:
       - name: Upload the app bundles
         env:
           GH_TOKEN: ${{ github.token }}
-          # No checkout in this job, so gh has no repository to infer.
+          # Explicit even though a checkout now exists: an upload should
+          # never depend on what gh infers from a working directory.
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          cd app
+          cd arrivals
+          # The updater archive and its signature ride with the installers.
+          # They are NOT in SHA256SUMS-app: the archive is proven by its
+          # signature, and the count above is a count of installers. Both
+          # globs must match, which is the assertion that the macOS leg
+          # produced them: a literal, unmatched glob fails the upload.
           gh release upload "$TAG" \
-            *.deb *.rpm *.dmg *.exe SHA256SUMS-app \
+            *.deb *.rpm *.dmg *.exe *.app.tar.gz *.app.tar.gz.sig SHA256SUMS-app \
             --clobber
+      # LAST, on purpose. The manifest points at the archive and its
+      # signature by url, and the app reads whatever is at the endpoint the
+      # moment it looks. Uploaded first, it would describe a file that is
+      # not there yet. Built from arrivals/ rather than on the macOS leg for
+      # the same reason SHA256SUMS-app is: it describes what actually
+      # landed. A prerelease gets none: releases/latest/download never
+      # resolves to one, and the tool refuses to write one anyway.
+      - name: Build the update manifest from what arrived, and publish it last
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "::notice::$TAG is a prerelease, so no latest.json is published: releases/latest/download never resolves to a prerelease."
+            exit 0
+          fi
+          bun tools/build-update-manifest.ts --dir arrivals --version "$VERSION" --out arrivals/latest.json
+          cd arrivals
+          gh release upload "$TAG" latest.json --clobber
+
+  # Did the manifest actually publish, and does it describe this release?
+  # Reads latest.json FROM THE ENDPOINT THE APP USES, never from arrivals/:
+  # what is checked is what a user's app fetches. Same reasoning and same
+  # shape as tap-check, including why it lives here and not on a
+  # `release: published` trigger elsewhere: that trigger never fires for a
+  # release created with the default token.
+  #
+  # A red job here means the release published fine and the updater cannot
+  # use it. No --version: the question is whether the endpoint serves the
+  # NEWEST release, which is what the app asks, and is the right question
+  # even when an old tag is being re-run.
+  latest-check:
+    needs: app-upload
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: The published latest.json describes the newest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # `needs: app-upload` already sequences this after the upload; a
+          # few seconds of propagation is the only thing worth absorbing.
+          n=1
+          while [ "$n" -le 3 ]; do
+            if bun tools/check-latest.ts; then exit 0; fi
+            [ "$n" -lt 3 ] && { echo "--- attempt $n of 3, waiting 20s ---"; sleep 20; }
+            n=$((n + 1))
+          done
+          echo "::error::The release published, but the updater manifest at releases/latest/download/latest.json does not describe it. See docs/release-secrets.md §4."
+          exit 1
