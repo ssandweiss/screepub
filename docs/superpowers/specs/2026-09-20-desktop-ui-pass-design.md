@@ -367,6 +367,31 @@ store lands and the output folder becomes settable, **the scope has to move
 with the setting**. The engine session has this in the store's spec; it is
 recorded here too because the two halves live in different documents.
 
+**Two update decisions, delegated by the maintainer and taken here
+(2026-09-22).**
+
+- **No first-run prompt.** The Swift app asked once on a first-launch page,
+  and the README still describes that. The window does not. Off by default
+  plus a toggle sitting beside the version gets the same consent without
+  stopping someone before they know what the app is, and an interruption is
+  a poor way to ask a question whose honest answer is "I do not know yet,
+  what is this?". The consent property the README cares about is unchanged:
+  nothing is requested until somebody opts in or presses the button.
+- **No one-click restart, yet, and the condition for revisiting is
+  specific.** The plugin swaps the bundle and does not relaunch on macOS, so
+  the flow ends by asking. A restart costs `tauri-plugin-process` and
+  `process:allow-restart`. That is defensible under the ADR — restarting
+  itself is a door, not an opinion — and it was explicitly permitted. It is
+  still declined *for now*, because the whole install path is currently
+  untestable here: the transport branch is unmerged, so neither the download
+  nor the swap can be exercised. Adding an unexercisable restart to the end
+  of an unexercisable flow puts new code exactly where nothing can see it,
+  and it would also need a guard against restarting mid-conversion, which is
+  a second untested branch.
+  **Revisit when the transport branch is merged and one real update has been
+  installed by hand.** At that point the restart is a small, testable
+  addition rather than a blind one.
+
 **Two contracts agreed with the engine session, to build against.**
 - Save a copy: `screepub export <epub> --for <fmt> --out <path>`. The engine
   writes the artifact to the chosen absolute path, creating parents, and the
