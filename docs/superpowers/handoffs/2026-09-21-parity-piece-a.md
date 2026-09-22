@@ -31,9 +31,11 @@ plugin does transport and the engine keeps the decision. Landed:
   same judgement for anything that is not the window. Both offline.
 
 **Piece A's transport half is built, on branch `worktree-updater-transport`,
-and waits on the owner for exactly two things: the key pair and the
-merge.** Written later on 2026-09-21; the plan that records every decision
-is [`2026-09-21-updater-transport.md`](../plans/2026-09-21-updater-transport.md).
+and waits on the owner for one thing: the merge.** The key pair was
+generated, stored in 1Password and added as the two repo secrets on the
+evening of 2026-09-21 (key id `EC5C19F83FC2D502`, the public half is in
+`tauri.conf.json`). The plan that records every decision is
+[`2026-09-21-updater-transport.md`](../plans/2026-09-21-updater-transport.md).
 What is on the branch: the plugin registered and granted, the release-only
 overlay, `build-app-bundle.ts --updater`, `build-update-manifest.ts`,
 `check-latest.ts`, the release workflow's key gate, signed macOS leg,
