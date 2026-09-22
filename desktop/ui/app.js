@@ -173,6 +173,59 @@ export async function openUrl(url) {
   }
 }
 
+/** Show a file where it lives, selected, in the OS file manager.
+ *
+ *  Scoped to the library in capabilities/default.json, so a path outside it
+ *  is refused by Tauri rather than revealed. That scope uses `$DOCUMENT`,
+ *  which means a library MOVED with $SCREEPUB_LIBRARY is outside it and this
+ *  returns false. Honest and narrow beats broad and convenient: the day the
+ *  settings gear can set the folder, the scope follows it there.
+ *
+ *  Resolves either way, like openUrl. A reveal that will not open is a
+ *  disappointment, not a reason to throw inside a click handler. */
+export async function revealItem(path) {
+  try {
+    await tauri().opener.revealItemInDir(String(path));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the updater plugin is linked into THIS build.
+ *
+ *  It arrives on a separate branch, so a window built before that lands has
+ *  no `updater` at all. Every update affordance is drawn behind this, which
+ *  means the feature appears when the plugin does and never shows a control
+ *  that can only throw. */
+export function updaterReady() {
+  return typeof tauri()?.updater?.check === 'function';
+}
+
+/** Ask the endpoint whether there is a newer release.
+ *
+ *  Deliberately NOT caught here. A rejection is the answer in the failure
+ *  case and carries the only description of what went wrong — a 404 manifest
+ *  reads differently from no network — so it goes up to update.js, which
+ *  turns it into something a person can read. Swallowing it here is how a
+ *  failed check becomes an indistinguishable "you are up to date". */
+export async function updateCheck() {
+  return tauri().updater.check();
+}
+
+/** Download and swap the bundle, reporting bytes as they arrive.
+ *
+ *  `close()` releases a resource held on the Rust side, so it runs whatever
+ *  happened. The plugin does not relaunch on macOS; saying so is update.js's
+ *  job, not this file's. */
+export async function updateInstall(update, onProgress) {
+  try {
+    await update.downloadAndInstall((event) => onProgress?.(event));
+  } finally {
+    await update.close?.();
+  }
+}
+
 export function onProgress(handler) {
   return onEngineLine((payload) => {
     for (const line of payload.split('\n')) {

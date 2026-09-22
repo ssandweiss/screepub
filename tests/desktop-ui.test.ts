@@ -2921,6 +2921,158 @@ describe('the window does not title its own screens as script furniture', () => 
   });
 });
 
+describe('the update check asks once, stamps first, and never guesses', () => {
+  // Contract read off tauri-plugin-updater 2.12.0 by the engine session. The
+  // three rules that are easy to get wrong, and are therefore the tests:
+  //
+  //   1. check() REJECTS on any failure — a 404 manifest, no network, an
+  //      unlisted platform. A rejection is a message to show. It is NEVER
+  //      "you are up to date", and conflating them would tell someone they
+  //      are current when nobody could reach the server.
+  //   2. The day-stamp is written BEFORE the request, not after. The README
+  //      promises at most one request a day; stamping after would turn a
+  //      persistent failure into a request on every single launch.
+  //   3. The window never compares versions. pickUpdate does, in code
+  //      transpiled from the engine, so the CLI and the window cannot
+  //      disagree about what "newer" means.
+  let update: any;
+  beforeAll(async () => { update = await import(join(UI, 'update.js')); });
+
+  /** A storage that behaves like localStorage, including its habit of
+   *  handing back strings for everything. */
+  const store = (seed: Record<string, string> = {}) => {
+    const map = new Map(Object.entries(seed));
+    return {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => { map.set(k, String(v)); },
+      dump: () => Object.fromEntries(map),
+    };
+  };
+
+  test('it is offered only where the manifest actually covers', () => {
+    // The manifest lists darwin only. On Linux and Windows check() throws
+    // TargetNotFound every time, so showing the control there would offer a
+    // button whose only outcome is an error.
+    expect(update.updatesPossible('MacIntel')).toBe(true);
+    expect(update.updatesPossible('Win32')).toBe(false);
+    expect(update.updatesPossible('Linux x86_64')).toBe(false);
+    expect(update.updatesPossible(undefined)).toBe(false);
+  });
+
+  test('a fresh install has not opted in and has not been asked', () => {
+    const s = update.readState(store());
+    expect(s.optedIn).toBe(false);
+    expect(s.asked).toBe(false);
+    expect(s.lastChecked).toBe(null);
+  });
+
+  test('a corrupt stamp does not wedge the check', () => {
+    // localStorage is a string bucket anyone can edit. A junk timestamp must
+    // read as "never checked" rather than NaN, which would make every
+    // comparison false and silently disable the daily check forever.
+    const s = update.readState(store({ updateLastChecked: 'yesterday-ish' }));
+    expect(s.lastChecked).toBe(null);
+  });
+
+  test('a launch check does not run before the reader has opted in', async () => {
+    let asked = false;
+    const result = await update.runCheck({
+      manual: false,
+      storage: store({ updateAsked: 'true', updateOptIn: 'false' }),
+      now: 1_000_000,
+      check: async () => { asked = true; return null; },
+    });
+    expect(result.outcome).toBe('skipped');
+    expect(asked).toBe(false);
+  });
+
+  test('a manual check runs even when the launch check would not', async () => {
+    // Pressing the button IS the consent for that one request, so it ignores
+    // both the opt-in and the once-a-day throttle.
+    let asked = false;
+    const result = await update.runCheck({
+      manual: true,
+      storage: store({ updateOptIn: 'false', updateLastChecked: String(1_000_000 - 5) }),
+      now: 1_000_000,
+      check: async () => { asked = true; return null; },
+    });
+    expect(asked).toBe(true);
+    expect(result.outcome).toBe('current');
+  });
+
+  test('the day is stamped before the request, not after', async () => {
+    // Captured into an array rather than a variable: assigning inside the
+    // closure lets TypeScript narrow a `let` to its initialiser and then
+    // reject the comparison.
+    const stampedWhenAsked: Array<string | null> = [];
+    const s = store({ updateOptIn: 'true' });
+    await update.runCheck({
+      manual: false,
+      storage: s,
+      now: 4_242_424,
+      check: async () => {
+        stampedWhenAsked.push(s.getItem('updateLastChecked'));
+        throw 'the network is not there';
+      },
+    });
+    // Written before the call, and still written after it failed.
+    expect(stampedWhenAsked[0]).toBe('4242424');
+    expect(s.dump().updateLastChecked).toBe('4242424');
+  });
+
+  test('a failed check is an error, never "you are up to date"', async () => {
+    const result = await update.runCheck({
+      manual: true,
+      storage: store(),
+      now: 1,
+      check: async () => { throw 'Could not fetch a valid release JSON from the remote'; },
+    });
+    expect(result.outcome).toBe('error');
+    expect(result.message).toContain('Could not fetch');
+  });
+
+  test('null means current, and says so with the engine\'s reason', async () => {
+    const result = await update.runCheck({
+      manual: true, storage: store(), now: 1, check: async () => null,
+    });
+    expect(result.outcome).toBe('current');
+  });
+
+  test('an offer carries the version and the notes the server sent', async () => {
+    const result = await update.runCheck({
+      manual: true,
+      storage: store(),
+      now: 1,
+      check: async () => ({ version: '0.7.0', currentVersion: '0.6.0', body: 'Two fixes.' }),
+    });
+    expect(result.outcome).toBe('offer');
+    expect(result.version).toBe('0.7.0');
+    expect(result.body).toBe('Two fixes.');
+  });
+
+  test('an older or equal version offered by the server is refused here', async () => {
+    // The judgement is pickUpdate's, not this module's, and this proves the
+    // wiring reaches it: a server that offers a downgrade gets no prompt.
+    const result = await update.runCheck({
+      manual: true,
+      storage: store(),
+      now: 1,
+      check: async () => ({ version: '0.5.0', currentVersion: '0.6.0', body: '' }),
+    });
+    expect(result.outcome).toBe('current');
+    expect(result.reason).toBeTruthy();
+  });
+
+  test('after installing, it asks for a restart it cannot perform', () => {
+    // The plugin swaps the bundle in place on macOS and does NOT relaunch.
+    // A one-click restart is another crate and another permission, which is
+    // not ours to add, so the honest thing is to ask.
+    const line = update.installedLine('0.7.0');
+    expect(line).toContain('0.7.0');
+    expect(line.toLowerCase()).toContain('quit');
+  });
+});
+
 describe('a refused file is no longer a dead end', () => {
   // The Swift app could report a bug from the failure screen, and the report
   // carried the refusal's code with it. The Tauri window could not report
@@ -2971,6 +3123,19 @@ describe('a refused file is no longer a dead end', () => {
       appVersion: '0.6.0', osVersion: 'x', context: 'C++ crashed on page 3+4',
     })).searchParams.get('body') ?? '';
     expect(body).toContain('C++ crashed on page 3+4');
+  });
+
+  test('the file manager is called what it is called, per platform', async () => {
+    // The Swift app said "SHOW IN FINDER" because it only ran on a Mac. This
+    // one runs on three, and "Finder" on Windows names a thing that is not
+    // there. An unknown platform gets the generic phrasing rather than a
+    // guess, on the same rule send.js's platformOf already follows:
+    // under-claiming beats naming the wrong system.
+    const convert: any = await import(join(UI, 'convert.js'));
+    expect(convert.revealLabel('MacIntel')).toBe('Show in Finder');
+    expect(convert.revealLabel('Win32')).toBe('Show in File Explorer');
+    expect(convert.revealLabel('Linux x86_64')).toBe('Show in folder');
+    expect(convert.revealLabel(undefined)).toBe('Show in folder');
   });
 
   test('no surface appends a bare null to a node', () => {
