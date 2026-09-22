@@ -3063,6 +3063,40 @@ describe('the update check asks once, stamps first, and never guesses', () => {
     expect(result.reason).toBeTruthy();
   });
 
+  test('the once-a-day check is actually wired to something', () => {
+    // The toggle stores updateOptIn, shouldCheck reads it, runCheck honours
+    // it — and for a while NOTHING called runCheck with manual:false, so the
+    // preference was a switch connected to no wire. The README promised "one
+    // request a day" for behaviour that never ran. A feature that exists in
+    // three modules and no caller is indistinguishable from an absent one.
+    const main = read('main.js');
+    expect(main).toContain('runCheck');
+    expect(main).toMatch(/manual:\s*false/);
+  });
+
+  test('the mark on the stamp points at a sheet that has the news', () => {
+    // The ordering bug this exists to prevent, found by driving the live
+    // window and not by any unit test: the notes sheet is built ONCE at boot
+    // and the launch check resolves afterwards, so reading the held offer
+    // during mount reads null. The dot appeared on the stamp and the sheet
+    // it pointed at said nothing. A late answer needs a seam to arrive
+    // through, and the caller has to use it.
+    expect(read('notes-surface.js')).toContain('export function updateFound');
+    expect(read('main.js')).toContain('notes.updateFound');
+  });
+
+  test('a launch check that finds something leaves a mark to find', async () => {
+    // Otherwise the daily check is a request that changes nothing a person
+    // can see, which is the worst of both: it costs the network and tells
+    // nobody. The offer is held so the sheet can show it without asking the
+    // server a second time.
+    const up: any = await import(join(UI, 'update.js'));
+    up.setPending({ outcome: 'offer', version: '0.9.0' });
+    expect(up.pendingUpdate()?.version).toBe('0.9.0');
+    up.setPending(null);
+    expect(up.pendingUpdate()).toBe(null);
+  });
+
   test('after installing, it asks for a restart it cannot perform', () => {
     // The plugin swaps the bundle in place on macOS and does NOT relaunch.
     // A one-click restart is another crate and another permission, which is

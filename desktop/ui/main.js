@@ -1,6 +1,9 @@
 // Boots the window: the frame, the five surfaces, the keyboard, and the one
 // line that proves the engine is there.
-import { runEngine, argv, onFileDrag, onDialogClosed } from './app.js';
+import {
+  runEngine, argv, onFileDrag, onDialogClosed, updaterReady, updateCheck,
+} from './app.js';
+import { updatesPossible, runCheck, setPending } from './update.js';
 import { mountFrame } from './frame.js';
 import { stopAfterDialog } from './focus.js';
 import { el } from './dom.js';
@@ -145,3 +148,35 @@ runEngine(argv.version()).then(
   () => {},
   (err) => frame.engineFailed(err.message),
 );
+
+// The once-a-day check the README promises. Every gate is somebody else's
+// rule: updatesPossible() knows which platforms the manifest covers,
+// updaterReady() knows whether the plugin is in this build at all, and
+// shouldCheck() inside runCheck owns both the opt-in and the throttle. This
+// line only decides WHEN to ask, which is once, at launch.
+//
+// `manual: false`, which is the whole point: without a caller passing that,
+// the opt-in toggle is a switch wired to nothing, and "one request a day"
+// describes code that never runs.
+//
+// Nothing is drawn unless there is news. A daily request that changes
+// nothing a person can see would be the worst of both: it costs the network
+// and tells nobody, so a found update marks the stamp and is held for the
+// sheet rather than asked for twice.
+if (updaterReady() && updatesPossible(navigator.userAgentData?.platform ?? navigator.platform)) {
+  runCheck({
+    manual: false, storage: localStorage, now: Date.now(), check: updateCheck,
+  }).then((result) => {
+    if (result.outcome !== 'offer') return;
+    setPending(result);
+    frame.updateWaiting(result.version);
+    // The sheet was built at boot, before this answer existed. Without this
+    // the dot on the stamp points at a sheet with no news in it.
+    notes.updateFound(result);
+  }, () => {
+    // A launch check that fails says nothing. It is not the reader's
+    // errand — they did not ask — and a startup that shouts about the
+    // network is worse than one that quietly tries again tomorrow. The
+    // manual button reports its failures, because there somebody asked.
+  });
+}

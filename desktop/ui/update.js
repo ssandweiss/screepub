@@ -59,6 +59,15 @@ export function rememberAnswer(storage, optedIn) {
   storage?.setItem(OPT_IN, optedIn ? 'true' : 'false');
 }
 
+/** An offer the LAUNCH check found, held until somebody opens the sheet.
+ *
+ *  Held rather than re-requested, because asking the server twice for an
+ *  answer already in hand would break the once-a-day promise the moment
+ *  anyone opened the notes. */
+let pending = null;
+export function setPending(result) { pending = result ?? null; }
+export function pendingUpdate() { return pending; }
+
 /** What to tell someone after the bundle has been swapped. */
 export function installedLine(version) {
   return `Update installed. Quit and reopen Screepub to use ${version}.`;

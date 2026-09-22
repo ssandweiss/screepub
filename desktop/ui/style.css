@@ -188,6 +188,15 @@ body {
   transition: color var(--motion-state) var(--ease);
 }
 .rev-stamp:hover { color: var(--ink); }
+/* A newer version is waiting. One brass dot before the stamp, because the
+ * launch check is Screepub's errand and not the reader's: it may say so, it
+ * may not interrupt. The colour is the accent doing its only job, marking
+ * the one thing on screen that is new. */
+.rev-new::before {
+  content: "\2022";
+  margin-right: var(--space-2);
+  color: var(--brass);
+}
 .rev-stamp:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 
 /* A dead engine, ABOVE the stamp rather than instead of it. The stamp answers

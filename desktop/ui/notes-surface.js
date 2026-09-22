@@ -6,7 +6,9 @@
 import { RELEASE } from './notes.js';
 import { el, text } from './dom.js';
 import { updaterReady, updateCheck, updateInstall } from './app.js';
-import { updatesPossible, readState, rememberAnswer, runCheck, installedLine } from './update.js';
+import {
+  updatesPossible, readState, rememberAnswer, runCheck, installedLine, pendingUpdate,
+} from './update.js';
 
 /** What the surface decides: which sections have anything to show. The
  *  generator now throws rather than shipping a heading with zero bullets
@@ -26,6 +28,21 @@ function noteItem(item) {
     ? el('p', { class: 'note-item' },
         el('strong', { class: 'note-lead' }, item.lead), ` ${item.body}`)
     : el('p', { class: 'note-item' }, item.body);
+}
+
+// The sheet is built ONCE, at boot, and the launch check resolves after
+// that. So a pending offer cannot be read during mount — it is not there
+// yet. This is the seam that lets the answer arrive late, and it exists
+// because the first version read pendingUpdate() at build time and silently
+// showed nothing: the dot appeared on the stamp and the sheet it pointed at
+// had no news in it.
+let statusEl = null;
+let checkButton = null;
+
+/** A launch check found something, after this surface was already drawn. */
+export function updateFound(result) {
+  if (statusEl === null || checkButton === null) return;
+  offer(statusEl, checkButton, result);
 }
 
 export function mount(pane) {
@@ -66,6 +83,12 @@ function updateBlock() {
 
   const say = el('p', { class: 'caption update-status', role: 'status' }, '');
   const state = readState(localStorage);
+  statusEl = say;
+  // Held from the launch check, if it found something. Shown without asking
+  // the server again: the answer is already in hand, and a second request
+  // the moment somebody opens the notes would break the once-a-day promise
+  // that made the first one acceptable.
+  const waiting = pendingUpdate();
 
   const auto = el('input', {
     type: 'checkbox',
@@ -81,6 +104,7 @@ function updateBlock() {
 
   const button = el('button', { type: 'button', class: 'btn btn-outline btn-small' },
     'Check for updates');
+  checkButton = button;
   button.addEventListener('click', async () => {
     button.disabled = true;
     text(say, 'Looking…');
@@ -98,7 +122,7 @@ function updateBlock() {
     offer(say, button, result);
   });
 
-  return el('section', { class: 'notes-section update-block' },
+  const block = el('section', { class: 'notes-section update-block' },
     el('h3', { class: 'state-label' }, 'Updates'),
     el('p', { class: 'auto-check' },
       auto,
@@ -108,6 +132,11 @@ function updateBlock() {
     el('div', { class: 'read-ways' }, button),
     say,
   );
+  // The launch check already found one. Present it straight away rather than
+  // making somebody press a button to be told what the app has known since
+  // startup.
+  if (waiting) offer(say, button, waiting);
+  return block;
 }
 
 /** There is a newer one. Name it, show what the server said about it, and
