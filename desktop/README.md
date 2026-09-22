@@ -500,10 +500,11 @@ showed neither installed. `await document.fonts.load(...)` and then read the
   `src/settings/sidecar.ts` owns. A cross-platform preference store would
   mean a new Tauri plugin and a new capability grant.
 - **No auto-update.** Notes says so on the surface. *(True until
-  2026-09-21. The transport half of the updater now exists, see the
-  overlay section above and `docs/superpowers/plans/2026-09-21-updater-transport.md`;
-  the window side is the interface-pass session's, and Notes changes when
-  it lands.)*
+  2026-09-21. Both halves exist now: the transport half is the overlay
+  section above and `docs/superpowers/plans/2026-09-21-updater-transport.md`,
+  and the window half is `desktop/ui/update.js`, off by default with a
+  switch beside the version number. The first release to carry them is what
+  makes it live.)*
 
 ### Known, open, and found by running it — and fixed in 13b (task 13, 2026-09-14)
 
