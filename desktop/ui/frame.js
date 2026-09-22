@@ -210,6 +210,16 @@ export function mountFrame(root) {
     onSurface: (handler) => handlers.push(handler),
     /** Called when the reader asks what changed in this version. */
     onRev: (handler) => revHandlers.push(handler),
+    /** A newer version is waiting. The stamp is the right place to say so:
+     *  it already names the version you have, and it is the door to the
+     *  sheet that will name the one you could have. A brass dot rather than
+     *  a banner, because nobody asked — the launch check is Screepub's
+     *  errand, not the reader's, and interrupting a screenplay to announce
+     *  it would be the app putting itself first. */
+    updateWaiting: (version) => {
+      stamp.classList.add('rev-new');
+      stamp.title = `Screepub ${version} is available`;
+    },
     /** The engine could not be started. Says so without taking the version
      *  off the page. */
     engineFailed: (message) => {
