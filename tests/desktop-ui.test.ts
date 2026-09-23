@@ -1406,7 +1406,7 @@ describe('the window knows when the engine is working, and can restart', () => {
     // clock could make (Date.now() - lastEnded) go negative or huge, either
     // holding a restart off forever or releasing it early. performance.now()
     // cannot jump like that. Comments are stripped first (as the Tune
-    // surface's `engine` helper does above) so an honest future comment
+    // surface's `engine` helper does below) so an honest future comment
     // that merely mentions Date.now() cannot fail this: the claim is about
     // CODE.
     const code = read('app.js')
@@ -3765,11 +3765,8 @@ describe('one update run, one moment, heard by the label and the notes alike', (
     let installs = 0;
     const { flow, calls, seen } = make({
       install: async () => { installs += 1; if (installs === 1) throw new Error('interrupted'); },
-      // The plan's own version of this fake did not increment `calls.check`,
-      // which left `toBe(0)` below meaningless and `toBe(1)` impossible: the
-      // test failed whatever the code did. Counting it is what makes this
-      // test actually prove a retry asked the server again, matching every
-      // other `check` fake in this file.
+      // Counted so this test can prove a retry asked the server again,
+      // matching every other `check` fake in this file.
       check: async () => { calls.check += 1; return { version: '0.8.0', currentVersion: '0.7.2', body: '' }; },
     });
     flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } });

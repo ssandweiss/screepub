@@ -929,11 +929,13 @@ describe('the updater: transport in the crate, judgement in the engine', () => {
   });
 
   test('the window may restart itself, and may not quit itself', () => {
-    // The plugin's default set grants exit AND restart. Only restart is ours.
+    // The plugin's default set grants exit AND restart. Only restart is
+    // ours. Checked on the JSON text, not `.toContain` on the array itself:
+    // an array check only catches a BARE string grant, and misses the same
+    // identifier arriving as an object (e.g. `{identifier: "process:default"}`).
     const permissions = capability().permissions;
     expect(permissions).toContain('process:allow-restart');
-    expect(JSON.stringify(permissions)).not.toContain('process:allow-exit');
-    expect(permissions).not.toContain('process:default');
+    expect(JSON.stringify(permissions)).not.toMatch(/"process:(default|allow-exit)"/);
   });
 
   test('the window can be dragged, and zooming it needed nothing new', () => {

@@ -123,6 +123,9 @@ people will never turn it on and never hear about an update.
   asks the engine to save it. Not closed by this plan.
 - **Fallback:** if `restartReady()` is false, the label ends on today's
   `installedLine`: "Update installed. Quit and reopen Screepub to use 0.7.3."
+  A refused `restart()` call (the realistic cause is a build missing
+  `process:allow-restart`) falls back to the same line: the bundle is
+  already swapped either way, so this is not reported as a failed update.
 - **Comments to rewrite:** `update.js` and `notes-surface.js` both say a
   one-click restart is "another crate and another permission, so ask rather
   than pretend". The owner has now approved both; the comments must say so
