@@ -132,7 +132,12 @@ export function mountFrame(root) {
   // The tabs live ON the paper, inside the binding margin, so they line up
   // with the slugline below them and read as part of the page rather than as
   // chrome around it.
-  const tablist = el('nav', { class: 'tabs', role: 'tablist', 'aria-label': 'Screepub' }, tabs);
+  // `data-tauri-drag-region` bare: a click on the bar ITSELF (the gaps
+  // between tabs) moves the window; a click on a tab is still a tab, because
+  // Tauri's drag script leaves anything clickable alone.
+  const tablist = el('nav', {
+    class: 'tabs', role: 'tablist', 'aria-label': 'Screepub', 'data-tauri-drag-region': '',
+  }, tabs);
   const sheet = el('div', { class: 'sheet' }, tablist);
   const page = el('div', { class: 'page' }, sheet);
   const rail = el('div', { class: 'rail', 'aria-hidden': 'true' },
@@ -155,8 +160,27 @@ export function mountFrame(root) {
   const fault = el('p', { class: 'engine-fault' }, '');
   fault.hidden = true;
 
-  sheet.append(fault, stamp);
-  root.append(defs, page, rail);
+  // Beside the stamp, not on it: the stamp opens the notes for the version
+  // you HAVE, and this does something about the one you could have. Hidden
+  // until update-flow.js has something to say.
+  const updateHandlers = [];
+  const updateLabel = el('button', {
+    type: 'button',
+    class: 'rev-update',
+    hidden: true,
+    onclick: () => { for (const handler of updateHandlers) handler(); },
+  });
+  const foot = el('div', { class: 'rev-foot' }, updateLabel, stamp);
+
+  sheet.append(fault, foot);
+
+  // The window has no title bar of its own (tauri.conf.json, titleBarStyle
+  // "Overlay"), so without this there is nothing to grab. A transparent
+  // strip along the top, fixed like a title bar, as tall as the sheet's top
+  // margin so it never covers a control.
+  const strip = el('div', { class: 'drag-strip', 'data-tauri-drag-region': '', 'aria-hidden': 'true' });
+
+  root.append(defs, page, rail, strip);
 
   /** `disabled` is where a tab's availability is kept, so presence is derived
    *  from it rather than tracked twice. */
@@ -210,16 +234,14 @@ export function mountFrame(root) {
     onSurface: (handler) => handlers.push(handler),
     /** Called when the reader asks what changed in this version. */
     onRev: (handler) => revHandlers.push(handler),
-    /** A newer version is waiting. The stamp is the right place to say so:
-     *  it already names the version you have, and it is the door to the
-     *  sheet that will name the one you could have. A brass dot rather than
-     *  a banner, because nobody asked — the launch check is Screepub's
-     *  errand, not the reader's, and interrupting a screenplay to announce
-     *  it would be the app putting itself first. */
-    updateWaiting: (version) => {
-      stamp.classList.add('rev-new');
-      stamp.title = `Screepub ${version} is available`;
+    /** What the label beside the stamp says, or null to take it down. The
+     *  words are update.js's (updateLabel); the frame only shows them. */
+    setUpdateLabel: (words) => {
+      updateLabel.textContent = words ?? '';
+      updateLabel.hidden = words === null || words === undefined;
     },
+    /** Called when the reader clicks the label. */
+    onUpdateClick: (handler) => updateHandlers.push(handler),
     /** The engine could not be started. Says so without taking the version
      *  off the page. */
     engineFailed: (message) => {

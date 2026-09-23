@@ -125,6 +125,18 @@ body {
 .rail .c { top: 69.3%; }
 .defs { position: absolute; }
 
+/* The window's handle (frame.js). Transparent, fixed like a title bar, and
+ * exactly as tall as the sheet's top padding, so at rest it covers no
+ * control. Above the page in paint order so a drag always starts. */
+.drag-strip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--space-7);
+  z-index: 1;
+}
+
 /* The tabs sit on the paper, above the surface they switch, with the brass
  * rule under the open one doing the work an accent is for. */
 .tabs {
@@ -168,13 +180,22 @@ body {
 .tab:nth-child(4).tab-arriving { animation-delay: 140ms; }
 .tab:nth-child(5).tab-arriving { animation-delay: 210ms; }
 
+/* The stamp and the update label share one foot, pinned to the corner, so
+ * the label can sit beside the stamp without either knowing the other's
+ * width. */
+.rev-foot {
+  position: absolute;
+  right: var(--page-right);
+  bottom: var(--space-5);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+
 /* The engine's own name for itself, at the foot of the page the way a
  * revision stamp sits on a script. Quiet, and on the paper rather than on
  * the desk, because the desk has no ink that reads against it. */
 .rev-stamp {
-  position: absolute;
-  right: var(--page-right);
-  bottom: var(--space-5);
   margin: 0;
   padding: 0;
   background: none;
@@ -188,16 +209,27 @@ body {
   transition: color var(--motion-state) var(--ease);
 }
 .rev-stamp:hover { color: var(--ink); }
-/* A newer version is waiting. One brass dot before the stamp, because the
- * launch check is Screepub's errand and not the reader's: it may say so, it
- * may not interrupt. The colour is the accent doing its only job, marking
- * the one thing on screen that is new. */
-.rev-new::before {
-  content: "\2022";
-  margin-right: var(--space-2);
-  color: var(--brass);
-}
 .rev-stamp:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+
+/* A newer version, beside the stamp and in the stamp's own type. Ink, not
+ * brass, because brass text on the paper does not reach a readable
+ * contrast; the brass is the rule under it, the same mark the open tab
+ * carries. It replaced a brass dot on 2026-09-23, after the owner missed the
+ * dot and the update both. */
+.rev-update {
+  margin: 0;
+  padding: 0 0 var(--space-1);
+  background: none;
+  border: none;
+  border-bottom: 1.5px solid var(--brass);
+  font-family: var(--font-structure);
+  font-size: var(--text-fine);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  cursor: pointer;
+}
+.rev-update:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 
 /* A dead engine, ABOVE the stamp rather than instead of it. The stamp answers
  * "which build is this?", and that question is worth more when the engine is
@@ -261,7 +293,7 @@ body {
   .sheet { padding-left: 11%; padding-right: var(--space-4); }
   .rail svg { width: 20px; height: 20px; }
   .tabs { gap: var(--space-3); }
-  .engine-stamp { right: var(--space-4); }
+  .rev-foot { right: var(--space-4); }
 }
 @media (prefers-reduced-motion: reduce) {
   .tab { transition: none; }

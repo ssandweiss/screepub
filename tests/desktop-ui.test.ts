@@ -4490,6 +4490,73 @@ describe('the foot of the page names the release', () => {
   });
 });
 
+describe('the window can be moved by its top, like any other window', () => {
+  // titleBarStyle "Overlay" puts the page under the title bar, and until
+  // 2026-09-23 the page marked nothing as a drag region, so the window could
+  // not be moved at all. Tauri's drag script (2.11.5, drag.js): a bare
+  // attribute drags only when the click lands on THAT element; anything
+  // clickable without the attribute stays clickable.
+  const frame = read('frame.js');
+  const css = read('style.css');
+
+  test('a transparent strip along the top is a drag region', () => {
+    expect(frame).toMatch(/class:\s*'drag-strip',\s*'data-tauri-drag-region':\s*''/);
+    const rule = css.match(/\.drag-strip\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(rule).toContain('position: fixed');
+    expect(rule).toContain('top: 0');
+    expect(rule).toContain('height: var(--space-7)');
+  });
+
+  test('the gaps in the tab bar drag, and the tabs stay tabs', () => {
+    expect(frame).toMatch(/el\('nav',\s*\{[^}]*'data-tauri-drag-region':\s*''/);
+    // The attribute is never on a tab button: that would turn a click on
+    // "Read" into a window move.
+    const start = frame.indexOf("el('button', {\n      type: 'button',\n      class: 'tab'");
+    expect(start).toBeGreaterThan(-1); // or the next line would pass on nothing
+    const tabButton = frame.slice(start);
+    expect(tabButton.slice(0, tabButton.indexOf('}, label)'))).not.toContain('data-tauri-drag-region');
+    // Counted as PROPS (quoted, with a colon), so a comment naming the
+    // attribute does not change the count.
+    expect(frame.match(/'data-tauri-drag-region':/g)?.length).toBe(2);
+  });
+});
+
+describe('a newer version is a label you can click, not a dot you can miss', () => {
+  const frame = read('frame.js');
+  const css = read('style.css');
+
+  test('the brass dot is gone', () => {
+    // The owner missed it, and the update with it (2026-09-23).
+    expect(css).not.toContain('.rev-new');
+    expect(frame).not.toContain('rev-new');
+    expect(frame).not.toContain('updateWaiting');
+  });
+
+  test('the label sits beside the stamp, and the stamp still opens the notes', () => {
+    expect(frame).toContain("class: 'rev-update'");
+    expect(frame).toMatch(/el\('div',\s*\{\s*class:\s*'rev-foot'\s*\},\s*updateLabel,\s*stamp\)/);
+    expect(frame).toContain('setUpdateLabel');
+    expect(frame).toContain('onUpdateClick');
+    expect(frame).toContain('revHandlers'); // the stamp's own click is untouched
+  });
+
+  test('the label is ink with a brass rule, not brass text', () => {
+    // Brass on the paper does not reach a readable contrast; the brass is the
+    // rule under it, the same mark the open tab carries.
+    const rule = css.match(/\.rev-update\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(rule).toContain('color: var(--ink)');
+    expect(rule).toMatch(/border-bottom:\s*1\.5px solid var\(--brass\)/);
+    expect(css).toMatch(/\.rev-update:focus-visible/);
+  });
+
+  test('the foot, not the stamp, is what is pinned to the corner', () => {
+    const foot = css.match(/\.rev-foot\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(foot).toContain('position: absolute');
+    const stamp = css.match(/\.rev-stamp\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(stamp).not.toContain('position: absolute');
+  });
+});
+
 describe('a surface with nothing behind it is absent, not dimmed', () => {
   // Read, Tune and Send were DISABLED before a conversion, which drew three
   // greyed words in the bar advertising doors that do not open. Worse for a
