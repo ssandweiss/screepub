@@ -64,38 +64,99 @@ export const argv = {
  *  wrong, and the rest only buries the two buttons under it. */
 const RAW_SHOWN = 300;
 
-// How many engine calls are running right now. An update's restart waits
-// for this to reach zero (update.js, installAndRestart), because every call
-// is somebody's work: a conversion, a copy to a Kindle, a settings file half
-// written. Counted HERE because this is the one door every call goes through.
+// How many COUNTED engine calls are running right now (see countsTowardBusy
+// for the one exception). An update's restart waits for the engine to have
+// been quiet a while (update.js, installAndRestart), because every counted
+// call is somebody's work: a conversion, a copy to a Kindle, a settings file
+// half written. Counted HERE because this is the one door every call goes
+// through.
 let inFlight = 0;
 let idleWaiters = [];
 
-/** Run the engine and parse its one line of stdout, counted while it runs.
- *  See runEngineOnce for what the answer means. */
+// Idle means no counted engine call has been RUNNING for this long, not
+// merely that the count last touched zero. A reviewer reproduced the bug a
+// single macrotask left open: send.js runs settings, export and send as an
+// AWAITED CHAIN (send.js:534, 560, 576), and tune.js runs a save then a
+// rebuild the same way (tune.js:743, 766); the next call in either chain
+// starts again within microtasks of the one before it finishing, so the
+// count touches zero BETWEEN two calls that belong to the same job, not just
+// after the job ends. 500 ms covers that gap and tune.js's own 300 ms settle
+// timer before a change even reaches the engine as a save.
+export const ENGINE_QUIET_MS = 500;
+
+// Date.now() when a counted call last finished. -Infinity so a whenIdle()
+// asked before anything has ever run resolves at once, the same as one asked
+// long after everything has.
+let lastEnded = -Infinity;
+let settleTimer = null;
+
+/** Whether a call is worth counting toward "the engine is busy".
+ *
+ *  `devices` is not: send.js polls it every 2 s while the Send tab is open,
+ *  and each poll takes about 1.5 s on its own (the reMarkable probe
+ *  timeout). It is never mid-job — killing a listing loses nothing — so
+ *  counting it would flash "Restarting after this finishes…" on a tab that
+ *  is just sitting there polling, and WITH a quiet period, could hold a
+ *  restart off indefinitely for as long as that tab stayed open. */
+function countsTowardBusy(args) {
+  return args[0] !== argv.devices()[0];
+}
+
+/** Release every whenIdle() waiter if the engine has been quiet for
+ *  ENGINE_QUIET_MS; otherwise arrange to try again once it has been. Called
+ *  both when a counted call finishes and when whenIdle() adds a waiter, so a
+ *  caller arriving after the quiet period already elapsed does not sit
+ *  waiting for a moment that already passed. */
+function settle() {
+  if (inFlight !== 0 || idleWaiters.length === 0) return;
+  const remaining = ENGINE_QUIET_MS - (Date.now() - lastEnded);
+  if (settleTimer) {
+    clearTimeout(settleTimer);
+    settleTimer = null;
+  }
+  if (remaining > 0) {
+    settleTimer = setTimeout(settle, remaining);
+    return;
+  }
+  const waiters = idleWaiters;
+  idleWaiters = [];
+  for (const resolve of waiters) resolve();
+}
+
+/** Run the engine and parse its one line of stdout, counted while it runs
+ *  (see countsTowardBusy for the one call this skips). See runEngineOnce for
+ *  what the answer means. */
 export async function runEngine(args) {
-  inFlight += 1;
+  const counted = countsTowardBusy(args);
+  if (counted) inFlight += 1;
   try {
     return await runEngineOnce(args);
   } finally {
-    inFlight -= 1;
-    if (inFlight === 0) {
-      const waiters = idleWaiters;
-      idleWaiters = [];
-      for (const resolve of waiters) resolve();
+    if (counted) {
+      inFlight -= 1;
+      lastEnded = Date.now();
+      settle();
     }
   }
 }
 
-/** True while any engine call is running. */
+/** True while any COUNTED engine call is running. Unlike whenIdle, this asks
+ *  nothing about the quiet period: it is the instantaneous fact a surface
+ *  reads to disable a button, not the promise a restart waits on. */
 export function engineBusy() {
   return inFlight > 0;
 }
 
-/** Resolves when no engine call is running: at once if none is. */
+/** Resolves once the engine has been quiet for ENGINE_QUIET_MS: at once if
+ *  it already has been (including if nothing has run yet). Always goes
+ *  through settle(), the one place a waiter is ever released, so a caller
+ *  can never observe "idle" a macrotask before the quiet period is actually
+ *  up. */
 export function whenIdle() {
-  if (inFlight === 0) return Promise.resolve();
-  return new Promise((resolve) => idleWaiters.push(resolve));
+  return new Promise((resolve) => {
+    idleWaiters.push(resolve);
+    settle();
+  });
 }
 
 /** Run the engine and parse its one line of stdout.
@@ -179,10 +240,6 @@ export function onFileDrag({ over, drop }) {
   });
 }
 
-/** The progress lines, decoded. The payload is whatever the OS handed the
- *  Rust, so one event may carry several lines or a partial one; anything
- *  that is not a progress object is ignored rather than thrown, because a
- *  stray warning on stderr must not take a conversion down with it. */
 /** Hand a URL to the OS. The window's first and only door onto anything
  *  outside itself (ADR 2026-09-21 — doors, not commands).
  *
@@ -251,7 +308,7 @@ export async function updateCheck() {
  *
  *  `close()` releases a resource held on the Rust side, so it runs whatever
  *  happened. The plugin does not relaunch on macOS; restartApp below does,
- *  when update.js says the engine is idle. */
+ *  once whenIdle above says the engine is quiet enough to leave. */
 export async function updateInstall(update, onProgress) {
   try {
     await update.downloadAndInstall((event) => onProgress?.(event));
@@ -275,6 +332,10 @@ export async function restartApp() {
   await tauri().process.relaunch();
 }
 
+/** The progress lines, decoded. The payload is whatever the OS handed the
+ *  Rust, so one event may carry several lines or a partial one; anything
+ *  that is not a progress object is ignored rather than thrown, because a
+ *  stray warning on stderr must not take a conversion down with it. */
 export function onProgress(handler) {
   return onEngineLine((payload) => {
     for (const line of payload.split('\n')) {

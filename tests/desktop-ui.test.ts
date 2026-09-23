@@ -11,6 +11,18 @@ const read = (name: string) => readFileSync(join(UI, name), 'utf8');
 const cssFiles = () => readdirSync(UI).filter((f) => f.endsWith('.css'));
 const jsFiles = () => readdirSync(UI).filter((f) => f.endsWith('.js'));
 
+/** A storage that behaves like localStorage, including its habit of handing
+ *  back strings for everything. Shared by every update.js describe block
+ *  below rather than copied three times. */
+const store = (seed: Record<string, string> = {}) => {
+  const map = new Map(Object.entries(seed));
+  return {
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => { map.set(k, String(v)); },
+    dump: () => Object.fromEntries(map),
+  };
+};
+
 describe('the window uses the brand, not its own colours', () => {
   test('no stylesheet but the two token files carries a hex literal', () => {
     // The spec's acceptance criterion 5, as a test: "a review can grep for a
@@ -1259,7 +1271,9 @@ describe('the window knows when the engine is working, and can restart', () => {
     try {
       expect(app.engineBusy()).toBe(false);
       const first = app.runEngine(['--version', '--json']);
-      const second = app.runEngine(['devices', '--json']).catch(() => 'failed');
+      // NOT 'devices': that one is never counted (see below), and this test
+      // is about two COUNTED calls overlapping.
+      const second = app.runEngine(['send', 'x.epub', '--json']).catch(() => 'failed');
       expect(app.engineBusy()).toBe(true);
       let idle = false;
       const waiting = app.whenIdle().then(() => { idle = true; });
@@ -1273,15 +1287,91 @@ describe('the window knows when the engine is working, and can restart', () => {
       expect(idle).toBe(true);
       expect(app.engineBusy()).toBe(false);
     } finally {
+      // A failing assertion above would otherwise leave a pending promise
+      // unsettled and `inFlight` stuck above zero: app.js's counters are a
+      // module-level singleton, shared with every OTHER test that imports
+      // it, so a hang here would hang tests that run long after this one.
+      // Resolving an already-settled promise a second time is a documented
+      // no-op, so this is safe whether the try block finished cleanly or not.
+      for (const p of pending) p.resolve('{}');
+      await new Promise((r) => setTimeout(r, 0));
       delete win.window;
     }
   });
 
-  test('whenIdle answers at once when nothing is running', async () => {
+  test('an awaited chain (settings, then export, then send) keeps the engine busy start to finish', async () => {
+    // The bug a reviewer reproduced: "done settings -> phase restarting ->
+    // RESTART -> invoke export". A single macrotask of quiet was read as
+    // "idle" between two calls of the SAME job. Real invoke() calls answer
+    // on their own timer, not a manually-resolved Promise, so this drives
+    // app.runEngine for real through three awaited calls that each answer
+    // after setTimeout(10ms): the same shape send.js's settings/export/send
+    // chain has (send.js:534, 560, 576), with whenIdle() asked right after
+    // the chain starts, not after it finishes.
     const app = await import(join(UI, 'app.js'));
-    let idle = false;
-    await app.whenIdle().then(() => { idle = true; });
-    expect(idle).toBe(true);
+    await app.whenIdle(); // start from a genuinely idle baseline
+    const log: string[] = [];
+    win.window = {
+      __TAURI__: {
+        core: {
+          invoke: (_cmd: string, payload: { args: string[] }) => new Promise<string>((resolve) => {
+            setTimeout(() => { log.push(`finished ${payload.args[0]}`); resolve('{"ok":true}'); }, 10);
+          }),
+        },
+      },
+    };
+    try {
+      const chain = (async () => {
+        await app.runEngine(['settings', 'x.fountain', '--json']);
+        await app.runEngine(['export', 'x.epub', '--json', '--for', 'azw3']);
+        await app.runEngine(['send', 'x.epub', '--json']);
+      })();
+      app.whenIdle().then(() => log.push('idle'));
+      await chain;
+      // The chain is over, but the quiet period has not: this is exactly the
+      // window a single-macrotask idle check would have missed.
+      expect(log).not.toContain('idle');
+      await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+      expect(log).toEqual(['finished settings', 'finished export', 'finished send', 'idle']);
+    } finally {
+      delete win.window;
+    }
+  });
+
+  test('a devices call is never counted: it does not make the engine busy or hold a restart', async () => {
+    // send.js polls `devices` every 2 s while the Send tab is open, and each
+    // poll takes about 1.5 s on its own (the reMarkable probe timeout).
+    // Counting it would flash "Restarting after this finishes..." on that tab
+    // on every poll and, with a quiet period, could hold a restart off for
+    // as long as the tab stayed open.
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    win.window = {
+      __TAURI__: {
+        core: { invoke: () => new Promise((resolve) => setTimeout(() => resolve('{"ok":true}'), 10)) },
+      },
+    };
+    try {
+      const call = app.runEngine(['devices', '--json']);
+      expect(app.engineBusy()).toBe(false);
+      expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
+      await call;
+      expect(app.engineBusy()).toBe(false);
+    } finally {
+      delete win.window;
+    }
+  });
+
+  test('whenIdle is actually fulfilled once the engine has been quiet long enough, not just eventually', async () => {
+    // A test that only awaits whenIdle() and checks the flag it set passes
+    // no matter how long that takes, which is not what "at once" means.
+    // Bun.peek.status reads a promise's state without a microtask of its
+    // own, so this proves the promise returned is ALREADY settled the
+    // instant it is created, not merely one that resolves eventually.
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // let any residual quiet period from an earlier test lapse
+    await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+    expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
   });
 
   test('restart is offered only when the process plugin is in this build', async () => {
@@ -1300,9 +1390,14 @@ describe('the window knows when the engine is working, and can restart', () => {
   });
 
   test('the window is never given the plugin\'s exit', () => {
-    // process:allow-exit is not granted (capabilities/default.json), and the
-    // window must not reach for it either.
-    expect(read('app.js')).not.toMatch(/process\.exit\(/);
+    // process:allow-exit is not granted (capabilities/default.json). Rather
+    // than banning one spelling of "call exit", check every property this
+    // file actually reads off `process`, always through tauri(), the one
+    // door onto Tauri this file uses for anything: the only two are
+    // restartReady's guard and restartApp's call, and both name relaunch.
+    const matches = read('app.js').match(/tauri\(\)\??\.process\??\.\w+/g) ?? [];
+    expect(matches.length).toBeGreaterThan(0);
+    for (const m of matches) expect(m).toMatch(/relaunch$/);
   });
 });
 
@@ -3063,17 +3158,6 @@ describe('the update check asks once, stamps first, and never guesses', () => {
   let update: any;
   beforeAll(async () => { update = await import(join(UI, 'update.js')); });
 
-  /** A storage that behaves like localStorage, including its habit of
-   *  handing back strings for everything. */
-  const store = (seed: Record<string, string> = {}) => {
-    const map = new Map(Object.entries(seed));
-    return {
-      getItem: (k: string) => map.get(k) ?? null,
-      setItem: (k: string, v: string) => { map.set(k, String(v)); },
-      dump: () => Object.fromEntries(map),
-    };
-  };
-
   test('it is offered only where the manifest actually covers', () => {
     // The manifest lists darwin only. On Linux and Windows check() throws
     // TargetNotFound every time, so showing the control there would offer a
@@ -3224,15 +3308,6 @@ describe('what the update label says, and what it remembers', () => {
   let update: any;
   beforeAll(async () => { update = await import(join(UI, 'update.js')); });
 
-  const store = (seed: Record<string, string> = {}) => {
-    const map = new Map(Object.entries(seed));
-    return {
-      getItem: (k: string) => map.get(k) ?? null,
-      setItem: (k: string, v: string) => { map.set(k, String(v)); },
-      dump: () => Object.fromEntries(map),
-    };
-  };
-
   test('the Convert page asks only where updates work, and only until answered', () => {
     expect(update.shouldAsk(true, store())).toBe(true);
     expect(update.shouldAsk(false, store())).toBe(false);
@@ -3268,6 +3343,21 @@ describe('what the update label says, and what it remembers', () => {
     await update.runCheck({
       manual: true, storage: s, now: 1, check: async () => { throw 'offline'; },
     });
+    expect(update.rememberedOffer(s, '0.7.2')).toBe('0.8.0');
+  });
+
+  test('a skipped check (the once-a-day throttle) leaves a remembered offer alone', async () => {
+    // shouldCheck says no because lastChecked is already `now`: this is what
+    // a launch check sees later the same day. No request was made, so there
+    // is nothing to have learned, and nothing to forget.
+    let asked = false;
+    const now = 1_000_000;
+    const s = store({ updateFound: '0.8.0', updateOptIn: 'true', updateLastChecked: String(now) });
+    const result = await update.runCheck({
+      manual: false, storage: s, now, check: async () => { asked = true; return null; },
+    });
+    expect(result.outcome).toBe('skipped');
+    expect(asked).toBe(false);
     expect(update.rememberedOffer(s, '0.7.2')).toBe('0.8.0');
   });
 
@@ -3318,14 +3408,6 @@ describe('an update downloads, installs, waits for the engine, then restarts', (
   let update: any;
   beforeAll(async () => { update = await import(join(UI, 'update.js')); });
 
-  const store = (seed: Record<string, string> = {}) => {
-    const map = new Map(Object.entries(seed));
-    return {
-      getItem: (k: string) => map.get(k) ?? null,
-      setItem: (k: string, v: string) => { map.set(k, String(v)); },
-    };
-  };
-
   /** A plugin Update object whose download sends the events tauri-plugin-updater
    *  2.12.0 sends (src/commands.rs: tag "event", content "data", camelCase). */
   const liveOffer = (version = '0.8.0') => ({
@@ -3363,15 +3445,36 @@ describe('an update downloads, installs, waits for the engine, then restarts', (
   }
 
   test('each moment is reported in order, and it ends in a restart', async () => {
-    const { args, phases, calls } = deps();
+    // A real download reports progress in network chunks, thousands of them
+    // for a bundle this size, but the reader only cares when the WORDS
+    // beside the stamp change. Two chunks here (100, then 5) land on the
+    // same whole percent (10%) to prove the second one produces no extra
+    // phase: the assertion is the de-duplicated sequence of LABELS the
+    // reader sees, not a raw count of 'downloading' phases.
+    const { args, phases, calls } = deps({
+      install: async (u: unknown, p: (e: unknown) => void) => {
+        await installer([
+          { event: 'Started', data: { contentLength: 1000 } },
+          { event: 'Progress', data: { chunkLength: 100 } }, // 10%
+          { event: 'Progress', data: { chunkLength: 5 } },   // still 10%: deduped
+          { event: 'Progress', data: { chunkLength: 295 } }, // 40%
+          { event: 'Progress', data: { chunkLength: 600 } }, // 100%
+          { event: 'Finished' },
+        ])(u, p);
+      },
+    });
     const outcome = await update.installAndRestart(args);
     expect(outcome.outcome).toBe('restarting');
     expect(calls.restart).toBe(1);
-    expect(phases.map((p: any) => p?.kind)).toEqual([
-      'downloading', 'downloading', 'downloading', 'downloading', 'installing', 'restarting',
+    expect(phases.map((p: any) => update.updateLabel(p))).toEqual([
+      'Downloading 0.8.0…',
+      'Downloading 0.8.0… 0%',
+      'Downloading 0.8.0… 10%',
+      'Downloading 0.8.0… 40%',
+      'Downloading 0.8.0… 100%',
+      'Installing…',
+      'Restarting…',
     ]);
-    const last = phases.filter((p: any) => p.kind === 'downloading').at(-1) as any;
-    expect(update.updateLabel(last)).toBe('Downloading 0.8.0… 100%');
   });
 
   test('it waits while the engine is working, and says so', async () => {
@@ -3388,17 +3491,27 @@ describe('an update downloads, installs, waits for the engine, then restarts', (
     expect((phases.at(-1) as any).kind).toBe('restarting');
   });
 
-  test('a label drawn from memory fetches a fresh update first', async () => {
+  test('a label drawn from memory fetches a fresh update first, and installs exactly what that check returned', async () => {
     // The plugin's Update object lives only as long as the session that
     // fetched it, so a remembered version has none. The click is the consent
-    // for one request, even with the daily check switched off.
-    const { args, calls } = deps({
+    // for one request, even with the daily check switched off. And what
+    // reaches install() is that request's own answer object, by reference,
+    // not a stand-in built somewhere else.
+    const sentinel = { version: '0.8.0', currentVersion: '0.7.2', body: '' };
+    let checkCalls = 0;
+    let installedWith: unknown = null;
+    const { args } = deps({
       offer: { outcome: 'offer', version: '0.8.0', body: '', update: null },
       storage: store({ updateOptIn: 'false' }),
+      check: async () => { checkCalls += 1; return sentinel; },
+      install: async (u: unknown, p: (e: unknown) => void) => {
+        installedWith = u;
+        await installer([{ event: 'Finished' }])(u, p);
+      },
     });
     const outcome = await update.installAndRestart(args);
-    expect(calls.check).toBe(1);
-    expect(calls.install).toBe(1);
+    expect(checkCalls).toBe(1);
+    expect(installedWith).toBe(sentinel);
     expect(outcome.outcome).toBe('restarting');
   });
 
@@ -3445,6 +3558,19 @@ describe('an update downloads, installs, waits for the engine, then restarts', (
     const outcome = await update.installAndRestart(args);
     expect(outcome.outcome).toBe('installed');
     expect(calls.restart).toBe(0);
+    expect(update.updateLabel(phases.at(-1))).toBe(update.installedLine('0.8.0'));
+  });
+
+  test('a rejected restart is not reported as a failed update: the bundle is already swapped', async () => {
+    // The realistic cause is a build missing process:allow-restart, not a
+    // broken install. "Update failed. Try again" would draw a button that
+    // reinstalls a bundle already on disk, in a loop, so this falls back to
+    // the same honest line a build without the plugin at all shows.
+    const { args, phases } = deps({
+      restart: async () => { throw new Error('process:allow-restart is not granted'); },
+    });
+    const outcome = await update.installAndRestart(args);
+    expect(outcome.outcome).toBe('installed');
     expect(update.updateLabel(phases.at(-1))).toBe(update.installedLine('0.8.0'));
   });
 });

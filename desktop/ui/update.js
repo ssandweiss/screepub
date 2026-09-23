@@ -19,10 +19,14 @@
 //   * The plugin does not relaunch on macOS. It swaps the bundle and stops.
 //     Until 2026-09-23 that was the end of it: a one-click restart was
 //     another crate and another permission, so the window asked the reader
-//     to quit and reopen. The owner watched that fail on his own Mac (0.7.2
-//     installed, the window still said 0.7.1, and nothing said why) and
-//     approved both: tauri-plugin-process and process:allow-restart. The
-//     restart waits for any engine work still running (installAndRestart).
+//     to quit and reopen. The owner watched that fail on his own Mac: 0.7.2
+//     installed, the window still ran 0.7.1, and the caption in the notes
+//     sheet that said "Quit and reopen" went unseen. He approved both:
+//     tauri-plugin-process and process:allow-restart. The restart waits for
+//     app.js's whenIdle, which does not mean the engine's call count just
+//     touched zero — it means the engine has been quiet for a while
+//     (ENGINE_QUIET_MS in app.js), long enough to cover an awaited chain like
+//     settings-then-export-then-send.
 import { pickUpdate, shouldCheck } from './update-compare.js';
 
 const OPT_IN = 'updateOptIn';
@@ -134,8 +138,10 @@ export function updateLabel(phase) {
 }
 
 /** What to tell someone when the bundle has been swapped and this build
- *  cannot restart itself (no process plugin). With the plugin, the window
- *  restarts instead and nobody reads this. */
+ *  cannot restart itself: no process plugin, or the plugin's restart() was
+ *  refused (installAndRestart falls back here rather than call that a
+ *  failed update, since the bundle is already on disk either way). With a
+ *  working restart, the window does that instead and nobody reads this. */
 export function installedLine(version) {
   return `Update installed. Quit and reopen Screepub to use ${version}.`;
 }
@@ -192,8 +198,12 @@ export async function runCheck({ manual, storage, now, check }) {
 /** Download, install and restart, saying each moment through onPhase.
  *
  *  Every Tauri call is injected, as `check` is for runCheck, so the whole
- *  order of events runs under `bun test` without a window. Returns what
- *  happened, so the caller knows what a second click should do:
+ *  order of events runs under `bun test` without a window. app.js's
+ *  updateInstall closes the plugin's Update object after any attempt,
+ *  succeeded or not, so a retry from here must fetch a fresh one rather than
+ *  reuse `offer.update` — pass `offer: { ...offer, update: null }` (a later
+ *  task, the retry button, depends on that rule). Returns what happened, so
+ *  the caller knows what a second click should do:
  *    restarting  the restart was asked for (the process is on its way out)
  *    installed   the bundle is swapped but this build cannot restart itself
  *    current     a fresh check found nothing newer after all
@@ -201,6 +211,18 @@ export async function runCheck({ manual, storage, now, check }) {
 export async function installAndRestart({
   offer, storage, now, check, install, busy, whenIdle, restartReady, restart, onPhase,
 }) {
+  // A real download reports its progress in network chunks, thousands of
+  // them for a bundle this size. Only the reader's own words change when the
+  // percent does, so only a phase whose LABEL differs from the last one sent
+  // is worth a call: 'installing', 'waiting', 'restarting', 'failed' and
+  // 'installed' each fire once already and stay distinct on their own.
+  let lastLabel;
+  const emit = (phase) => {
+    const label = updateLabel(phase);
+    if (label === lastLabel) return;
+    lastLabel = label;
+    onPhase(phase);
+  };
   let result = offer;
   try {
     // A label drawn from memory has no live Update object: the plugin's
@@ -210,38 +232,48 @@ export async function installAndRestart({
       result = await runCheck({ manual: true, storage, now, check });
       if (result.outcome === 'error') throw new Error(result.message);
       if (result.outcome !== 'offer') {
-        onPhase(null);
+        emit(null);
         return { outcome: 'current' };
       }
     }
     const { version } = result;
     let received = 0;
     let total = null;
-    onPhase({ kind: 'downloading', version, received, total });
+    emit({ kind: 'downloading', version, received, total });
     await install(result.update, (event) => {
       if (event?.event === 'Started') total = event.data?.contentLength ?? null;
       else if (event?.event === 'Progress') received += event.data?.chunkLength ?? 0;
       else if (event?.event === 'Finished') {
-        onPhase({ kind: 'installing', version });
+        emit({ kind: 'installing', version });
         return;
       }
-      onPhase({ kind: 'downloading', version, received, total });
+      emit({ kind: 'downloading', version, received, total });
     });
     if (!restartReady()) {
-      onPhase({ kind: 'installed', version });
+      emit({ kind: 'installed', version });
       return { outcome: 'installed', version };
     }
     // Every engine call is somebody's work: a conversion, a copy to a
     // Kindle, a settings file half written. Say why the restart is waiting
     // rather than sitting on "Installing…" with no reason given.
-    if (busy()) onPhase({ kind: 'waiting', version });
+    if (busy()) emit({ kind: 'waiting', version });
     await whenIdle();
-    onPhase({ kind: 'restarting', version });
-    await restart();
+    emit({ kind: 'restarting', version });
+    try {
+      await restart();
+    } catch {
+      // The bundle is ALREADY SWAPPED at this point: the realistic cause is
+      // a build that never got process:allow-restart, not a failed update.
+      // Reporting this as a failure would draw a "Try again" that reinstalls
+      // a bundle already on disk, in a loop. Fall back to the same honest
+      // line a build without the plugin at all shows.
+      emit({ kind: 'installed', version });
+      return { outcome: 'installed', version };
+    }
     return { outcome: 'restarting', version };
   } catch (err) {
     const message = String(err?.message ?? err);
-    onPhase({ kind: 'failed', version: result?.version ?? null, message });
+    emit({ kind: 'failed', version: result?.version ?? null, message });
     return { outcome: 'error', message };
   }
 }
