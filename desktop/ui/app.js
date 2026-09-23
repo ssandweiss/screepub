@@ -118,9 +118,14 @@ let settleTimer = null;
  *  timeout). It is never mid-job — killing a listing loses nothing — so
  *  counting it would flash "Restarting after this finishes…" on a tab that
  *  is just sitting there polling, and WITH a quiet period, could hold a
- *  restart off indefinitely for as long as that tab stayed open. */
+ *  restart off indefinitely for as long as that tab stayed open.
+ *
+ *  `kfx-status` is not either, for the same reason: kfx.js's probe() runs
+ *  it when the Send tab opens and again every time the window gets focus
+ *  back, read-only and never mid-job. `kfx-install` is the one that
+ *  actually writes (into Calibre) and stays counted. */
 function countsTowardBusy(args) {
-  return args[0] !== argv.devices()[0];
+  return args[0] !== argv.devices()[0] && args[0] !== argv.kfxStatus()[0];
 }
 
 /** Release every whenIdle() waiter if the engine has been quiet for

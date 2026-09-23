@@ -240,12 +240,15 @@ app name and version and nothing else. **Install and Relaunch** verifies the
 DMG's Apple signature against this project's Developer ID *and* checks it is the
 exact version offered before swapping anything.
 
-The cross-platform window touches the network in three places, each needing
+The cross-platform window touches the network in five places, each needing
 your click: the upload to a docked reMarkable over USB, GitHub when you choose
-**Report a bug**, which opens a pre-filled issue in your browser,
-and, only if you say yes when it first asks (one line under the drop area,
-which stays until you answer; the switch in the release notes changes your
-answer later), one request a day for this project's `latest.json` on GitHub,
+**Report a bug**, which opens a pre-filled issue in your browser, Calibre's
+or Amazon's download page when you choose **Get Calibre** or **Get Kindle
+Previewer** on the Send page's KFX checklist, that same checklist's own
+**Install** button, which fetches the KFX plugin from Calibre's own plugin
+index, and, only if you say yes when it first asks (one line under the drop
+area, which stays until you answer; the switch in the release notes changes
+your answer later), one request a day for this project's `latest.json` on GitHub,
 plus the download when you choose **Update to** beside the version number, or
 **Install** in the release notes. That download's signature is checked
 against a key built into the app before anything is swapped, and the app

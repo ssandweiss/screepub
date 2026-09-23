@@ -1372,6 +1372,38 @@ describe('the window knows when the engine is working, and can restart', () => {
     }
   });
 
+  test('a kfx-status call is never counted, like devices; a kfx-install call is', async () => {
+    // Merged in from parity piece D: kfx.js's probe() runs kfx-status when
+    // the Send tab opens (kfxShown) and again on window focus (onFocus) —
+    // read-only, same shape as send.js's devices poll, and for the same
+    // reason it must not count: flashing "Restarting after this
+    // finishes…" every time the reader tabs back to the window, and
+    // holding a restart off for as long as Send stays open, is the exact
+    // bug devices was excluded to avoid. kfx-install actually writes (into
+    // Calibre), so it counts like any other mutating call.
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    win.window = {
+      __TAURI__: {
+        core: { invoke: () => new Promise((resolve) => setTimeout(() => resolve('{"ok":true}'), 10)) },
+      },
+    };
+    try {
+      const status = app.runEngine(app.argv.kfxStatus());
+      expect(app.engineBusy()).toBe(false);
+      expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
+      await status;
+
+      const install = app.runEngine(app.argv.kfxInstall());
+      expect(app.engineBusy()).toBe(true);
+      expect(Bun.peek.status(app.whenIdle())).toBe('pending');
+      await install;
+      expect(app.engineBusy()).toBe(false);
+    } finally {
+      delete win.window;
+    }
+  });
+
   test('whenIdle is actually fulfilled once the engine has been quiet long enough, not just eventually', async () => {
     // A test that only awaits whenIdle() and checks the flag it set passes
     // no matter how long that takes, which is not what "at once" means.

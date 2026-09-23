@@ -70,6 +70,20 @@ grant here: a door, not an opinion. What to link is decided by
 `src/export/kfx-setup.ts`, and `tests/desktop-shell.test.ts` holds that
 file's links and this grant to the same three strings.
 
+**Amended 2026-09-23 (the update notice and window drag).** One new crate:
+`tauri-plugin-process`, linked for exactly one reason, restarting the
+window after an update once the engine is idle. Only
+`process:allow-restart` is granted; the plugin's own `exit` is not. A
+second grant, `core:window:allow-start-dragging`, costs no new crate at
+all: it widens a permission `core` already provides, so the strip along
+the top of the window, and the gaps in the tab bar, can move it. Neither
+grant has an allow-list to write, unlike the opener grants above:
+`process:allow-restart` restarts THIS app and reaches nothing else to
+scope, and `core:window:allow-start-dragging` only lets the page ask to
+move the one window it is already inside, which is not a resource a list
+of allowed values would narrow. Approved by the owner the same day. Still
+two commands.
+
 What this buys, and it is six of the nine gaps the audit found: Apple
 Books, Send-to-Kindle, email-to-Kindle, save-a-copy, Report a Bug, and
 Show in Finder.
