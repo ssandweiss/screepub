@@ -476,7 +476,11 @@ describe('exportCommand --out', () => {
       error = err;
     }
     expect((error as { code?: string } | undefined)?.code).toBe('usage');
-    expect((error as Error | undefined)?.message).toContain('.epub');
+    // The FILE's type is named, not the name the person typed: the book is
+    // an EPUB whatever the save box said.
+    expect((error as Error | undefined)?.message).toBe(
+      'that is an EPUB file: choose a name ending in .epub',
+    );
     expect(existsSync(out)).toBe(false);
   });
 
@@ -521,7 +525,9 @@ describe('exportCommand --out', () => {
       error = err;
     }
     expect((error as { code?: string } | undefined)?.code).toBe('usage');
-    expect((error as Error | undefined)?.message).toContain('.azw3');
+    expect((error as Error | undefined)?.message).toBe(
+      'that is an AZW3 file: choose a name ending in .azw3',
+    );
     // Unlike the relative-path check, the extension cannot be known until
     // the ladder has already run once: it fired exactly once, not zero.
     expect(ladderCalls).toBe(1);

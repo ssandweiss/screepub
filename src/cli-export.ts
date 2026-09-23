@@ -84,9 +84,14 @@ function readFormat(optionsJson: string | undefined): FormatOptions {
 function checkOutExtension(out: string, wantExt: string): void {
   const outExt = extname(out).slice(1);
   if (outExt.toLowerCase() !== wantExt.toLowerCase()) {
+    // Names what the FILE is, not the name the person typed: a book that is
+    // an AZW3 saved as `.kfx` would be a broken book, so the sentence says
+    // AZW3 and the extension to use.
+    const kind = wantExt.toUpperCase();
+    const article = /^[AEIOU]/.test(kind) ? 'an' : 'a';
     throw new CliError(
       'usage',
-      `that is a ${outExt.toUpperCase()} file: choose a name ending in .${wantExt.toLowerCase()}`,
+      `that is ${article} ${kind} file: choose a name ending in .${wantExt.toLowerCase()}`,
     );
   }
 }

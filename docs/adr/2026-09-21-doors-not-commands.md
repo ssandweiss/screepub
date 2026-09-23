@@ -71,13 +71,13 @@ grant here: a door, not an opinion. What to link is decided by
 file's links and this grant to the same three strings.
 
 **Amended 2026-09-23 (parity piece B, send routes).** Apple Books, Amazon's
-Send to Kindle app and its own web page, the default mail app and, with
+Send to Kindle app and its own web page, Apple Mail and, with
 piece C, the file manager are all opened by the ENGINE, not the window.
 The owner's reasoning: every one of those routes opens a file that lives in
 the Screepub library, piece C is what makes that library's location
 movable, and a window permission is a fixed path written into a manifest
 that cannot follow it there. So those five routes are `screepub route <key>`
-calls the engine performs on its own machine, the same door `run_engine`
+calls the engine performs, through the same door `run_engine`
 already is, and they cost the window no new permission at all. The
 window's own doors gain exactly one new entry for this piece:
 `dialog:allow-save`, so the reader can choose where a saved copy of the
