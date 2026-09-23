@@ -13,35 +13,58 @@ import {
 } from './update.js';
 import { RELEASE } from './notes.js';
 
+/** 'restarting' and 'installed' are final: the process is on its way out, or
+ *  there is nothing left for a second click to do. Every other outcome —
+ *  INCLUDING none at all, when a run failed before installAndRestart could
+ *  report anything — is not, and start() below has exactly one place that
+ *  asks. */
+function isFinalOutcome(outcome) {
+  return outcome?.outcome === 'restarting' || outcome?.outcome === 'installed';
+}
+
 export function createUpdateFlow(deps) {
   let phase = null;
   let offer = null;
   let running = false;
+  let booted = false;
   const listeners = new Set();
 
-  function setPhase(next) {
-    phase = next ?? null;
-    for (const listener of listeners) {
-      try {
-        listener(phase);
-      } catch (err) {
-        // One subscriber's bug (a typo in frame.js, say) must not silence
-        // every OTHER subscriber, and must not turn a restart that would
-        // otherwise succeed into a reported failure: this fires from deep
-        // inside installAndRestart's own try/catch (update.js), so an
-        // uncaught throw here does not stop at "that listener didn't hear
-        // it" — it can end the whole run. Logged rather than swallowed
-        // outright, so a broken listener still leaves something to debug.
-        console.error('update-flow.js: a subscriber threw', err);
-      }
+  /** Call a listener without letting it take anything else down. One
+   *  subscriber's bug (a typo in frame.js, say) must not silence every
+   *  OTHER subscriber, and must not turn a restart that would otherwise
+   *  succeed into a reported failure — this can fire from deep inside
+   *  installAndRestart's own try/catch (update.js), so an uncaught throw
+   *  here does not stop at "that listener didn't hear it", it can end the
+   *  whole run. The same guard covers subscribe()'s own first call, so a
+   *  broken listener cannot crash the SUBSCRIBE either. Logged rather than
+   *  swallowed outright, so a broken listener still leaves something to
+   *  debug. */
+  function notify(listener, value) {
+    try {
+      listener(value);
+    } catch (err) {
+      console.error('update-flow.js: a subscriber threw', err);
     }
   }
 
-  /** A check somewhere found a newer version. A run already under way keeps
-   *  its own moment on screen; the new offer waits behind it. */
+  function setPhase(next) {
+    phase = next ?? null;
+    for (const listener of listeners) notify(listener, phase);
+  }
+
+  /** A check somewhere found a newer version. If nothing is running, this
+   *  becomes the visible phase, body and all — so a subscriber that skips
+   *  a redraw when the version repeats (a remembered stub, then a live
+   *  check confirming the same version with real notes) still sees the
+   *  real body, because the two emits are not identical payloads. If a run
+   *  is already under way, the new offer is remembered for afterwards, and
+   *  the CURRENT phase is re-emitted (unchanged) so a listener waiting on
+   *  a change — a "Looking…" caption, say — still hears something rather
+   *  than sticking on its own words forever. */
   function offerFound(result) {
     offer = result;
-    if (!running) setPhase({ kind: 'offer', version: result.version });
+    if (!running) setPhase({ kind: 'offer', version: result.version, body: result.body ?? '' });
+    else setPhase(phase);
   }
 
   async function launchCheck() {
@@ -69,7 +92,7 @@ export function createUpdateFlow(deps) {
     /** Hear every change of moment, starting with the current one. */
     subscribe(listener) {
       listeners.add(listener);
-      listener(phase);
+      notify(listener, phase);
       return () => listeners.delete(listener);
     },
 
@@ -78,8 +101,12 @@ export function createUpdateFlow(deps) {
 
     /** At launch: redraw what an earlier check found, then run today's check
      *  (which runCheck skips unless the reader said yes, and at most once a
-     *  day). */
+     *  day). Runs once, ever: a second call must not redraw a remembered
+     *  stub over a live offer the first call (or offerFound since) already
+     *  fetched. */
     async boot() {
+      if (booted) return;
+      booted = true;
       if (!deps.usable()) return;
       const remembered = rememberedOffer(deps.storage(), deps.currentVersion);
       if (remembered) offerFound({ outcome: 'offer', version: remembered, body: '', update: null });
@@ -99,6 +126,7 @@ export function createUpdateFlow(deps) {
     async start() {
       if (running || offer === null) return;
       running = true;
+      const attempted = offer;
       let outcome;
       try {
         outcome = await installAndRestart({
@@ -113,30 +141,45 @@ export function createUpdateFlow(deps) {
           restart: deps.restart,
           onPhase: setPhase,
         });
-      } finally {
-        // 'restarting' and 'installed' are final: the process is on its way
-        // out, or there is nothing left for a second click to do. Every
-        // other outcome must let go of `running`, INCLUDING one that never
-        // arrived at all (a rejection leaves `outcome` undefined here) — or
-        // a fault on the way in, with no outcome to report, would wedge
-        // every later start() shut as a silent no-op forever.
-        if (!outcome || (outcome.outcome !== 'restarting' && outcome.outcome !== 'installed')) {
-          running = false;
+      } catch (err) {
+        // Something failed before installAndRestart could report anything
+        // of its own — a storage accessor throwing, say. This runs from
+        // click handlers with no catch of their own, so start() must
+        // resolve, not reject, and the label must say something rather
+        // than stick on whatever it last showed. installAndRestart never
+        // got to run, so nothing was actually attempted: `offer` (and
+        // whatever live Update handle it holds) is left exactly as it was.
+        running = false;
+        if (offer === attempted) {
+          setPhase({ kind: 'failed', version: attempted.version, message: String(err?.message ?? err) });
         }
+        return;
       }
-      // Restarting, or installed with no way to restart: either way there is
-      // nothing left for a second click to do.
-      if (outcome.outcome === 'restarting' || outcome.outcome === 'installed') return;
-      if (outcome.outcome === 'current') offer = null;
-      // app.js closes the Update object after any attempt, so a retry has to
-      // fetch a fresh one (installAndRestart does, when `update` is null).
-      else offer = { ...offer, update: null };
+      if (!isFinalOutcome(outcome)) running = false;
+      if (isFinalOutcome(outcome)) return;
+      // A newer offer already replaced this one while the run was under
+      // way: that offer (and whatever live Update handle it holds) was
+      // never attempted, so leave it alone here — clearing its `update`
+      // would throw away a resource nobody used, and cost the next start()
+      // an extra request it did not need.
+      if (offer !== attempted) return;
+      if (outcome.outcome === 'current') { offer = null; return; }
+      // app.js closes the Update object after any attempt, so a retry has
+      // to fetch a fresh one (installAndRestart does, when `update` is
+      // null). outcome.offer is the offer installAndRestart actually used,
+      // which can be newer than what this call started with, when a label
+      // drawn from memory triggers a live check inside it.
+      offer = { ...(outcome.offer ?? offer), update: null };
     },
   };
 }
 
-/** The window's one flow. Every dependency is read when a method runs, not
- *  at import, so bun test can import this file without a window. */
+/** The window's one flow, built at import — RELEASE.version is read here
+ *  too, since notes.js is pure data and that is safe at import time. What
+ *  is NOT read at import: storage (localStorage), navigator, the clock
+ *  (Date.now/performance.now) and every Tauri call. Each of those is a
+ *  closure here, called only when a method runs, so importing this file
+ *  needs no window and bun test can do it directly. */
 export const flow = createUpdateFlow({
   usable: () => updaterReady()
     && updatesPossible(navigator.userAgentData?.platform ?? navigator.platform),

@@ -203,7 +203,12 @@ export async function runCheck({ manual, storage, now, check }) {
  *  succeeded or not, so a retry from here must fetch a fresh one rather than
  *  reuse `offer.update` — pass `offer: { ...offer, update: null }` (a later
  *  task, the retry button, depends on that rule). Returns what happened, so
- *  the caller knows what a second click should do:
+ *  the caller knows what a second click should do. Every outcome but
+ *  `current` also carries `offer`: the one actually used, which can differ
+ *  from the one passed in (a label drawn from memory has no live Update
+ *  object, so the fresh check this function runs on its own behalf can
+ *  answer with a newer version and a real body) — the caller has no other
+ *  way to learn what a failed or finished attempt was actually for.
  *    restarting  the restart was asked for (the process is on its way out)
  *    installed   the bundle is swapped but this build cannot restart itself,
  *                or its restart was refused
@@ -252,7 +257,7 @@ export async function installAndRestart({
     });
     if (!restartReady()) {
       emit({ kind: 'installed', version });
-      return { outcome: 'installed', version };
+      return { outcome: 'installed', version, offer: result };
     }
     // Every engine call is somebody's work: a conversion, a copy to a
     // Kindle, a settings file half written. Say why the restart is waiting
@@ -269,12 +274,12 @@ export async function installAndRestart({
       // a bundle already on disk, in a loop. Fall back to the same honest
       // line a build without the plugin at all shows.
       emit({ kind: 'installed', version });
-      return { outcome: 'installed', version };
+      return { outcome: 'installed', version, offer: result };
     }
-    return { outcome: 'restarting', version };
+    return { outcome: 'restarting', version, offer: result };
   } catch (err) {
     const message = String(err?.message ?? err);
     emit({ kind: 'failed', version: result?.version ?? null, message });
-    return { outcome: 'error', message };
+    return { outcome: 'error', message, offer: result };
   }
 }

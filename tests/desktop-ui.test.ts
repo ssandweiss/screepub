@@ -3481,6 +3481,7 @@ describe('an update downloads, installs, waits for the engine, then restarts', (
     });
     const outcome = await update.installAndRestart(args);
     expect(outcome.outcome).toBe('restarting');
+    expect(outcome.offer).toBe(args.offer); // the offer actually used, not just a version
     expect(calls.restart).toBe(1);
     expect(phases.map((p: any) => update.updateLabel(p))).toEqual([
       'Downloading 0.8.0…',
@@ -3531,6 +3532,24 @@ describe('an update downloads, installs, waits for the engine, then restarts', (
     expect(outcome.outcome).toBe('restarting');
   });
 
+  test('every outcome that has an offer reports the one actually used, not the one passed in', async () => {
+    // The offer passed in can be a remembered stub with no live Update
+    // object and an empty body. Once the fresh check inside replaces it,
+    // the caller (update-flow.js) has no other way to learn the real
+    // version and body a failed attempt was actually for.
+    const live = { version: '0.8.1', currentVersion: '0.7.2', body: 'release notes' };
+    const { args, phases } = deps({
+      offer: { outcome: 'offer', version: '0.8.0', body: '', update: null },
+      check: async () => live,
+      install: async () => { throw new Error('interrupted'); },
+    });
+    const outcome = await update.installAndRestart(args);
+    expect(outcome.outcome).toBe('error');
+    expect(outcome.offer?.version).toBe('0.8.1');
+    expect(outcome.offer?.body).toBe('release notes');
+    expect((phases.at(-1) as any).version).toBe('0.8.1');
+  });
+
   test('if the fresh check finds nothing newer, nothing is installed', async () => {
     const s = store({ updateFound: '0.8.0' });
     const { args, phases, calls } = deps({
@@ -3573,6 +3592,7 @@ describe('an update downloads, installs, waits for the engine, then restarts', (
     const { args, phases, calls } = deps({ restartReady: () => false });
     const outcome = await update.installAndRestart(args);
     expect(outcome.outcome).toBe('installed');
+    expect(outcome.offer).toBe(args.offer);
     expect(calls.restart).toBe(0);
     expect(update.updateLabel(phases.at(-1))).toBe(update.installedLine('0.8.0'));
   });
@@ -3587,6 +3607,7 @@ describe('an update downloads, installs, waits for the engine, then restarts', (
     });
     const outcome = await update.installAndRestart(args);
     expect(outcome.outcome).toBe('installed');
+    expect(outcome.offer).toBe(args.offer);
     expect(update.updateLabel(phases.at(-1))).toBe(update.installedLine('0.8.0'));
   });
 });
@@ -3634,6 +3655,25 @@ describe('one update run, one moment, heard by the label and the notes alike', (
     expect(flow.currentOffer()?.update).toBeTruthy(); // the live object replaced the remembered one
   });
 
+  test('a live check\'s body reaches subscribers even when the version repeats a remembered offer', async () => {
+    // Boot draws the remembered stub first (empty body), then the live
+    // check answers. When the version is UNCHANGED, a subscriber that
+    // skips a redraw on the same version must still see the live body, or
+    // it is stuck showing empty notes for an offer that has real ones.
+    let answer: (v: unknown) => void = () => {};
+    const { flow, seen } = make({
+      storage: store({ updateOptIn: 'true', updateAsked: 'true', updateFound: '0.8.0' }),
+      check: () => new Promise((r) => { answer = r; }),
+    });
+    const booting = flow.boot();
+    expect((seen.at(-1) as any)?.body).toBe('');
+    answer({ version: '0.8.0', currentVersion: '0.7.2', body: 'what is new' });
+    await booting;
+    expect((seen.at(-1) as any)?.kind).toBe('offer');
+    expect((seen.at(-1) as any)?.version).toBe('0.8.0');
+    expect((seen.at(-1) as any)?.body).toBe('what is new');
+  });
+
   test('a build that has caught up forgets the remembered version and draws nothing', async () => {
     const s = store({ updateOptIn: 'false', updateAsked: 'true', updateFound: '0.7.2' });
     const { flow, seen } = make({ storage: s });
@@ -3651,6 +3691,22 @@ describe('one update run, one moment, heard by the label and the notes alike', (
     expect(s.dump().updateFound).toBe('0.8.0');
   });
 
+  test('boot only ever runs once: a second call cannot replace a live offer with a remembered stub', async () => {
+    const s = store({ updateOptIn: 'true', updateAsked: 'true', updateFound: '0.8.0' });
+    const { flow, calls } = make({
+      storage: s,
+      check: async () => { calls.check += 1; return { version: '0.8.0', currentVersion: '0.7.2', body: 'notes' }; },
+    });
+    await flow.boot();
+    expect(calls.check).toBe(1);
+    expect(flow.currentOffer()?.update).toBeTruthy();
+    await flow.boot();
+    // A second boot must not redraw the remembered stub over the live
+    // offer the first boot already fetched.
+    expect(calls.check).toBe(1);
+    expect(flow.currentOffer()?.update).toBeTruthy();
+  });
+
   test('a check that answers "nothing newer" takes a remembered label down', async () => {
     const { flow, seen } = make({
       storage: store({ updateOptIn: 'true', updateAsked: 'true', updateFound: '0.8.0' }),
@@ -3659,6 +3715,28 @@ describe('one update run, one moment, heard by the label and the notes alike', (
     await flow.boot();
     expect(seen.at(-1)).toBe(null);
     expect(flow.currentOffer()).toBe(null);
+  });
+
+  test('currentOffer() matches what was actually attempted: remembered 0.8.0, live check finds 0.8.1, install fails', async () => {
+    // The probe from review: a label drawn from memory has no live Update
+    // object, so start() triggers installAndRestart's own fresh check.
+    // Before the fix, that live result never reached this flow's `offer`:
+    // the phase said "failed 0.8.1" while currentOffer() still pointed at
+    // the stale, empty-body 0.8.0 stub, even though storage (runCheck's own
+    // doing) already said 0.8.1.
+    const s = store({ updateOptIn: 'true', updateAsked: 'true' });
+    const { flow, seen } = make({
+      storage: s,
+      check: async () => ({ version: '0.8.1', currentVersion: '0.7.2', body: 'release notes' }),
+      install: async () => { throw new Error('interrupted'); },
+    });
+    flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: null });
+    await flow.start();
+    expect((seen.at(-1) as any).kind).toBe('failed');
+    expect((seen.at(-1) as any).version).toBe('0.8.1');
+    expect(flow.currentOffer()?.version).toBe('0.8.1');
+    expect(flow.currentOffer()?.body).toBe('release notes');
+    expect(s.dump().updateFound).toBe('0.8.1');
   });
 
   test('saying yes checks at once; saying no sends nothing', async () => {
@@ -3719,6 +3797,48 @@ describe('one update run, one moment, heard by the label and the notes alike', (
     await run;
   });
 
+  test('offerFound re-emits the current phase while a run is under way, so a "Looking…" caption does not stick', async () => {
+    let release: () => void = () => {};
+    const idle = new Promise<void>((r) => { release = r; });
+    const { flow, seen } = make({ busy: () => true, whenIdle: () => idle });
+    flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } });
+    const run = flow.start();
+    await new Promise((r) => setTimeout(r, 0));
+    const before = seen.length;
+    flow.offerFound({ outcome: 'offer', version: '0.8.1', body: '', update: { version: '0.8.1' } });
+    // Nothing about the visible phase changed (still 'waiting'), but a
+    // subscriber driven by "did I hear anything new" rather than "did the
+    // value change" must still hear it, or it sticks on its own last words
+    // forever.
+    expect(seen.length).toBeGreaterThan(before);
+    expect((seen.at(-1) as any).kind).toBe('waiting');
+    release();
+    await run;
+  });
+
+  test('a newer offer that arrived mid-run keeps its own live handle: the finished run does not touch it', async () => {
+    let failInstall: (e: unknown) => void = () => {};
+    const pending = new Promise((_resolve, reject) => { failInstall = reject; });
+    const { flow, calls } = make({
+      install: async () => { await pending; },
+    });
+    flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } });
+    const run = flow.start();
+    await new Promise((r) => setTimeout(r, 0)); // let start() reach the pending install
+    const newer = { outcome: 'offer', version: '0.8.1', body: '', update: { version: '0.8.1' } };
+    flow.offerFound(newer);
+    failInstall(new Error('interrupted'));
+    await run;
+    // The run that just failed was attempting 0.8.0, not this one: clearing
+    // ITS `update` must not reach the 0.8.1 offer that replaced it, or the
+    // next start() throws away a live handle nobody used and re-checks for
+    // nothing.
+    expect(flow.currentOffer()).toBe(newer);
+    expect(flow.currentOffer()?.update).toBeTruthy();
+    await flow.start();
+    expect(calls.check).toBe(0);
+  });
+
   test('a broken subscriber does not stop the others from hearing it, or stop the run', async () => {
     // A reviewer's concern: one subscriber's bug (a typo in frame.js, say)
     // must not silence the OTHER subscriber, and must not turn a restart
@@ -3751,19 +3871,35 @@ describe('one update run, one moment, heard by the label and the notes alike', (
     expect(String(logged[0]?.[0])).toContain('a subscriber threw');
   });
 
-  test('an exception starting the run does not leave `running` stuck true', async () => {
-    // Without a finally, `running` stays true forever the moment the one
-    // run throws before installAndRestart can return an outcome (start()
-    // never reaches its own `running = false`), and every later start()
-    // becomes a silent no-op. A storage accessor that throws once stands in
-    // for anything that could fail on the way in — real localStorage can
-    // throw in a private window — and is independent of the subscriber
-    // guard above: it never reaches onPhase at all. make()'s `storage`
-    // override always wraps a STORE, not a function, so this flow is built
-    // directly rather than through make().
+  test('subscribe does not throw when the new listener itself does, on the very first call', () => {
+    // subscribe() calls the new listener at once with the current phase.
+    // That call must go through the same guard as every later one, or a
+    // broken listener crashes the SUBSCRIBE, not just a later notification.
+    // The guard logs via console.error, captured here rather than left to
+    // print noise for an expected throw.
+    const { flow } = make();
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      expect(() => flow.subscribe(() => { throw new Error('boom'); })).not.toThrow();
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  test('an exception starting the run resolves as a failed phase, not a rejection, and does not leave `running` stuck true', async () => {
+    // Wired straight to click handlers with no catch of their own, so
+    // start() must resolve, not reject, and say something rather than
+    // leave the label wherever it was. A storage accessor that throws once
+    // stands in for anything that could fail on the way in — real
+    // localStorage can throw in a private window — and is independent of
+    // the subscriber guard above: it never reaches onPhase at all. make()'s
+    // `storage` override always wraps a STORE, not a function, so this flow
+    // is built directly rather than through make().
     let storageCalls = 0;
     const goodStorage = store({ updateOptIn: 'true' });
     const calls = { check: 0, install: 0, restart: 0 };
+    const seen: unknown[] = [];
     const flow = flowMod.createUpdateFlow({
       usable: () => true,
       storage: () => {
@@ -3780,18 +3916,26 @@ describe('one update run, one moment, heard by the label and the notes alike', (
       restart: async () => { calls.restart += 1; },
       currentVersion: '0.7.2',
     });
+    flow.subscribe((phase: unknown) => seen.push(phase));
     flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } });
-    const failure = await flow.start().catch((err: unknown) => err);
-    expect(failure).toBeInstanceOf(Error);
+    await flow.start(); // must not throw
+    const failed = seen.at(-1) as any;
+    expect(failed?.kind).toBe('failed');
+    expect(failed?.version).toBe('0.8.0');
+    expect(failed?.message).toContain('storage unavailable');
     // If `running` were stuck true, this would silently do nothing and
     // `calls.restart` would stay 0.
     await flow.start();
     expect(calls.restart).toBe(1);
   });
 
-  test('the window\'s flow is built lazily, so importing it needs no window', () => {
-    // localStorage and navigator are read when a method runs, not at import:
-    // otherwise this module could not be imported by bun test at all.
+  test('importing update-flow.js touches no window: storage, navigator and the clock are read lazily', () => {
+    // The flow object itself, and RELEASE.version (notes.js is pure data),
+    // ARE built and read at import. What must NOT be read at import is
+    // anything that only exists inside a window: localStorage, navigator
+    // and the clock (Date.now/performance.now), same as every Tauri call.
+    // Each is a closure here, called only when a method runs — otherwise
+    // this module could not be imported by bun test at all.
     expect(typeof flowMod.flow.boot).toBe('function');
     const src = read('update-flow.js');
     expect(src).toContain('storage: () => localStorage');
