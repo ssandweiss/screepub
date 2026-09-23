@@ -599,10 +599,71 @@ describe('preselected', () => {
     expect(preselected(list, 'save-epub').key).toBe('save-epub');
   });
 
-  test('a remembered email route stays chosen while Mail is not the default', () => {
+  // A route that can never work on this system is structurally absent, as a
+  // Mac without Books.app is: remembering it must not strand the person on a
+  // dimmed row. It falls back exactly as a route that is not listed does.
+  // connect and setup are states a person can change, so those stay chosen.
+  for (const platform of ['linux', 'win32']) {
+    test(`a remembered Apple Books on ${platform} falls back to the first available row`, () => {
+      const list = routes(facts({ platform }));
+      const chosen = preselected(list, 'apple-books');
+      expect(chosen.key).toBe('send-to-kindle');
+      expect(chosen.available).toBe(true);
+    });
+
+    test(`a remembered email route on ${platform} falls back too`, () => {
+      expect(preselected(routes(facts({ platform })), 'email-to-kindle').key).toBe('send-to-kindle');
+    });
+  }
+
+  test('a remembered Apple Books on linux with a Kindle plugged in falls back to the Kindle', () => {
+    const list = routes(facts({ platform: 'linux', devices: [kindle] }));
+    expect(preselected(list, 'apple-books').id).toBe('device:kindle#/Volumes/Kindle');
+  });
+
+  test('a remembered tolino on win32 falls back: it cannot be found there', () => {
+    const chosen = preselected(routes(facts({ platform: 'win32' })), 'device:tolino');
+    expect(chosen.key).toBe('send-to-kindle');
+    expect(chosen.available).toBe(true);
+  });
+
+  test('a remembered tolino on darwin stays chosen while unplugged (connect)', () => {
+    const chosen = preselected(routes(facts({ platform: 'darwin' })), 'device:tolino');
+    expect(chosen.key).toBe('device:tolino');
+    expect(chosen.unavailable).toBe('connect');
+  });
+
+  test('a remembered Kobo on darwin stays chosen while unplugged (connect)', () => {
+    const chosen = preselected(routes(facts({ platform: 'darwin' })), 'device:kobo');
+    expect(chosen.key).toBe('device:kobo');
+    expect(chosen.available).toBe(false);
+    expect(chosen.unavailable).toBe('connect');
+  });
+
+  test('a remembered email route on darwin without Apple Mail stays chosen (setup)', () => {
     const chosen = preselected(routes(facts({ appleMailDefault: false })), 'email-to-kindle');
     expect(chosen.key).toBe('email-to-kindle');
+    expect(chosen.available).toBe(false);
     expect(chosen.unavailable).toBe('setup');
+  });
+
+  test('across the platforms, a remembered row is kept unless it is platform-unavailable', () => {
+    for (const platform of ['darwin', 'linux', 'win32']) {
+      const list = routes(facts({ platform, booksApp: true }));
+      for (const r of list) {
+        const chosen = preselected(list, r.key);
+        if (r.unavailable === 'platform') {
+          expect({ platform, key: r.key, chosen: chosen.key, available: chosen.available }).toEqual({
+            platform,
+            key: r.key,
+            chosen: list.find((x) => x.available)!.key,
+            available: true,
+          });
+        } else {
+          expect({ platform, key: r.key, chosen: chosen.key }).toEqual({ platform, key: r.key, chosen: r.key });
+        }
+      }
+    }
   });
 
   test('with no available row at all, the first row', () => {

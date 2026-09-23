@@ -195,16 +195,21 @@ export function routes(facts: RouteFacts): Route[] {
 }
 
 /** The row to choose first. What the person chose last time wins whenever
- *  it is listed, even unavailable: an unplugged Kindle stays chosen and its
- *  button waits for the hardware. A remembered choice beats any ordering;
- *  the order is the fallback for a first run, not a policy about what people
- *  ought to want. With nothing remembered (or a route no longer listed),
- *  the first available row, so a first run never guesses at hardware that
- *  is not there. */
+ *  it is listed and could work here, even while unavailable: an unplugged
+ *  Kindle (connect) or a changed mail app (setup) stays chosen and its
+ *  button waits. A remembered choice beats any ordering; the order is the
+ *  fallback for a first run, not a policy about what people ought to want.
+ *
+ *  A remembered row that is unavailable for `platform` can never work on
+ *  this system, so it is treated like a route that is not listed at all
+ *  (Swift: "a structurally absent remembered route falls back instead of
+ *  stranding the user"). Then, as with nothing remembered, the first
+ *  available row, so a first run never guesses at hardware that is not
+ *  there. */
 export function preselected(list: Route[], lastRoute: string | undefined): Route {
   if (lastRoute !== undefined) {
     const remembered = list.find((r) => r.key === lastRoute);
-    if (remembered) return remembered;
+    if (remembered && remembered.unavailable !== 'platform') return remembered;
   }
   const chosen = list.find((r) => r.available) ?? list[0];
   if (!chosen) throw new Error('preselected needs at least one route');
