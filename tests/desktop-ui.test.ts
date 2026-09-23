@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, test, expect } from 'bun:test
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { kfxSetup } from '../src/export/kfx-setup';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-desktop-ui-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
@@ -3691,7 +3692,7 @@ describe('the Send page’s KFX block: decisions', () => {
       | { type: 'status'; text: string }
       | { type: 'link'; label: string; url: string }
       | { type: 'install'; label: string; disabled: boolean };
-    installedLine: (answer: unknown) => string;
+    installedLine: (version: unknown, removed: unknown, ready: unknown) => string;
     failedLine: (answer: unknown) => string;
     linkFailedLine: (url: string) => string;
     afterInstall: (answer: unknown, previous: Setup | null) =>
@@ -3720,6 +3721,32 @@ describe('the Send page’s KFX block: decisions', () => {
   const kindle = { id: '/m/Kindle', kind: 'kindle', name: 'Kindle', volume: '/m/Kindle' };
   const kobo = { id: '/m/KOBOe', kind: 'kobo', name: 'Kobo', volume: '/m/KOBOe' };
 
+  test('the validator accepts every checklist a real engine can build, for every platform', () => {
+    // The worst possible gap in the validator below: reject exactly the
+    // calibre-missing branch, and the suite stays green because none of the
+    // hand-written fixtures above happen to cover it. This walks every
+    // status the probe can report, on every platform kfx-setup.ts branches
+    // on (8 combinations x 3 platforms = 24, 16 of them on a platform where
+    // KFX is possible), and proves checklistFrom() and setupFrom() round-trip
+    // every one of the engine's own real answers rather than just the
+    // fixtures this file typed out by hand.
+    for (const platform of ['darwin', 'win32', 'linux']) {
+      for (const calibre of [true, false]) {
+        for (const previewer of [true, false]) {
+          for (const pluginInstalled of [true, false]) {
+            const status = {
+              calibre, previewer, pluginInstalled,
+              ready: calibre && previewer && pluginInstalled,
+            };
+            const setup = kfxSetup(status, platform);
+            expect(kfx.checklistFrom(setup)).toEqual(setup);
+            expect(kfx.setupFrom({ ok: true, ...setup })).toEqual(setup);
+          }
+        }
+      }
+    }
+  });
+
   test('the engine’s answer is taken whole, or not at all', () => {
     expect(kfx.setupFrom({ ok: true, ...notReady })).toEqual(notReady);
     expect(kfx.setupFrom({ ok: false, error: { code: 'x', message: 'y' } })).toBe(null);
@@ -3738,6 +3765,51 @@ describe('the Send page’s KFX block: decisions', () => {
     const fixWhileInstalled = structuredClone(notReady);
     (fixWhileInstalled.steps[0] as { fix: unknown }).fix = { kind: 'install', label: 'Install' };
     expect(kfx.checklistFrom(fixWhileInstalled)).toBe(null);
+    // Steps in the wrong order: the contract is calibre, then previewer,
+    // then plugin, in that sequence, not merely those three ids as a set.
+    const swapped = structuredClone(notReady);
+    swapped.steps = [swapped.steps[1], swapped.steps[0], swapped.steps[2]];
+    expect(kfx.checklistFrom(swapped)).toBe(null);
+    // Four steps: one too many.
+    const extraStep = structuredClone(notReady);
+    extraStep.steps.push({ id: 'plugin', name: 'KFX plugin', installed: true, fix: null });
+    expect(kfx.checklistFrom(extraStep)).toBe(null);
+    // ok: false, or no ok at all: setupFrom refuses before it ever looks at
+    // the shape, however well-formed the rest of the object is.
+    expect(kfx.setupFrom({ ok: false, ...notReady })).toBe(null);
+    expect(kfx.setupFrom(notReady)).toBe(null);
+    expect(kfx.checklistFrom({ ...notReady, ready: 'no' })).toBe(null);
+    const blankName = structuredClone(notReady);
+    (blankName.steps[0] as { name: string }).name = '   ';
+    expect(kfx.checklistFrom(blankName)).toBe(null);
+    const blankInstallLabel = structuredClone(notReady);
+    (blankInstallLabel.steps[2] as { fix: unknown }).fix = { kind: 'install', label: '  ' };
+    expect(kfx.checklistFrom(blankInstallLabel)).toBe(null);
+    const blankAfterWhy = structuredClone(notReady);
+    (blankAfterWhy.steps[2] as { fix: unknown }).fix = { kind: 'after', why: '' };
+    expect(kfx.checklistFrom(blankAfterWhy)).toBe(null);
+  });
+
+  test('a fix is rebuilt clean: no extra key the engine happened to attach survives', () => {
+    const withExtraLink = structuredClone(notReady);
+    (withExtraLink.steps[1] as { fix: Record<string, unknown> }).fix = {
+      kind: 'link', label: 'Get Kindle Previewer',
+      url: 'https://kdp.amazon.com/en_US/help/topic/G202131170', extra: 'x',
+    };
+    expect(kfx.checklistFrom(withExtraLink)?.steps[1].fix).toEqual({
+      kind: 'link', label: 'Get Kindle Previewer',
+      url: 'https://kdp.amazon.com/en_US/help/topic/G202131170',
+    });
+    const withExtraInstall = structuredClone(notReady);
+    (withExtraInstall.steps[2] as { fix: Record<string, unknown> }).fix = {
+      kind: 'install', label: 'Install', extra: 'x',
+    };
+    expect(kfx.checklistFrom(withExtraInstall)?.steps[2].fix).toEqual({ kind: 'install', label: 'Install' });
+    const withExtraAfter = structuredClone(notReady);
+    (withExtraAfter.steps[2] as { fix: Record<string, unknown> }).fix = {
+      kind: 'after', why: 'Install Calibre first', extra: 'x',
+    };
+    expect(kfx.checklistFrom(withExtraAfter)?.steps[2].fix).toEqual({ kind: 'after', why: 'Install Calibre first' });
   });
 
   test('Kindle advice is for Kindles: shown with a Kindle, or nothing, connected', () => {
@@ -3774,13 +3846,13 @@ describe('the Send page’s KFX block: decisions', () => {
     )).toEqual({ type: 'status', text: 'Install Calibre first' });
   });
 
-  test('success names the version, whether Kindles now get KFX, and any fork removed', () => {
-    expect(kfx.installedLine({ ok: true, version: '2.20.1', removed: [], setup: ready }))
-      .toBe('Installed the KFX plugin 2.20.1. Kindles now get KFX.');
-    expect(kfx.installedLine({ ok: true, version: '2.20.1', removed: [], setup: notReady }))
-      .toBe('Installed the KFX plugin 2.20.1.');
-    expect(kfx.installedLine({ ok: true, version: '2.20.1', removed: ['KFX Output (fork)', 'Old KFX'], setup: ready }))
-      .toBe('Installed the KFX plugin 2.20.1. Kindles now get KFX. Removed an older copy: KFX Output (fork), Old KFX.');
+  test('success names the version, whether Kindles now get KFX, and any forks removed', () => {
+    expect(kfx.installedLine('2.20.1', [], true)).toBe('Installed the KFX plugin 2.20.1. Kindles now get KFX.');
+    expect(kfx.installedLine('2.20.1', [], false)).toBe('Installed the KFX plugin 2.20.1.');
+    expect(kfx.installedLine('2.20.1', ['KFX Output (fork)'], true))
+      .toBe('Installed the KFX plugin 2.20.1. Kindles now get KFX. Removed an older copy: KFX Output (fork).');
+    expect(kfx.installedLine('2.20.1', ['KFX Output (fork)', 'Old KFX'], true))
+      .toBe('Installed the KFX plugin 2.20.1. Kindles now get KFX. Removed older copies: KFX Output (fork), Old KFX.');
   });
 
   test('a failure shows the engine’s own sentence, or a stand-in', () => {
@@ -3806,6 +3878,24 @@ describe('the Send page’s KFX block: decisions', () => {
     const out = kfx.afterInstall({ ok: true, version: '2.20.1', removed: [], setup: { nonsense: true } }, notReady);
     expect(out.setup).toEqual(notReady);
     expect(out.bad).toBe(false);
+  });
+
+  test('afterInstall: a malformed checklist is never credited with readiness the validator refused', () => {
+    // The bug this guards: reading `answer.setup.ready` straight off the
+    // engine's raw object would still say "Kindles now get KFX." even
+    // though checklistFrom() just rejected that same object and the block
+    // fell back to a previous checklist that is NOT ready.
+    const out = kfx.afterInstall(
+      { ok: true, version: '2.20.1', removed: [], setup: { ready: true, nonsense: true } },
+      notReady,
+    );
+    expect(out.setup).toEqual(notReady);
+    expect(out.line).toBe('Installed the KFX plugin 2.20.1.');
+  });
+
+  test('afterInstall: success needs a version of its own, or it counts as a failure', () => {
+    const out = kfx.afterInstall({ ok: true, removed: [], setup: ready }, notReady);
+    expect(out.bad).toBe(true);
   });
 
   test('afterInstall: a refusal keeps the checklist and shows the reason in alarm', () => {

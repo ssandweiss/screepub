@@ -17,7 +17,7 @@ import { el, clear, text } from './dom.js';
 
 export const HEADING = 'Best Kindle quality';
 export const INSTALLED = 'Installed';
-export const INSTALLING = 'Installing the KFX plugin from Calibre’s plugin index. This takes a few seconds.';
+export const INSTALLING = 'Downloading and installing the KFX plugin. This takes a few seconds.';
 export const NO_REASON = 'The KFX plugin was not installed, and nothing said why.';
 
 const KINDS = new Set(['link', 'install', 'after', 'unavailable']);
@@ -25,12 +25,19 @@ const IDS = ['calibre', 'previewer', 'plugin'];
 
 const isText = (value) => typeof value === 'string' && value.trim() !== '';
 
+// Rebuilt clean rather than passed through: the engine's object is trusted
+// for its SHAPE, not kept by reference, so a stray extra key it happened to
+// attach never rides along into what this file draws.
 function fixFrom(fix) {
   if (fix === null) return null;
   if (typeof fix !== 'object' || Array.isArray(fix) || !KINDS.has(fix.kind)) return undefined;
-  if (fix.kind === 'link') return isText(fix.label) && isText(fix.url) ? fix : undefined;
-  if (fix.kind === 'install') return isText(fix.label) ? fix : undefined;
-  return isText(fix.why) ? fix : undefined;
+  if (fix.kind === 'link') {
+    return isText(fix.label) && isText(fix.url) ? { kind: fix.kind, label: fix.label, url: fix.url } : undefined;
+  }
+  if (fix.kind === 'install') {
+    return isText(fix.label) ? { kind: fix.kind, label: fix.label } : undefined;
+  }
+  return isText(fix.why) ? { kind: fix.kind, why: fix.why } : undefined;
 }
 
 function stepFrom(step, id) {
@@ -88,14 +95,20 @@ export function controlFor(step, busy) {
   return { type: 'status', text: fix.why };
 }
 
-/** What the status line says after a successful install. Removed forks are
- *  named: Screepub took out something the reader installed (usually the
- *  Swift app's copy), and that deserves saying. */
-export function installedLine(answer) {
-  const parts = [`Installed the KFX plugin ${answer?.version}.`];
-  if (answer?.setup?.ready === true) parts.push('Kindles now get KFX.');
-  const removed = Array.isArray(answer?.removed) ? answer.removed.filter(isText) : [];
-  if (removed.length > 0) parts.push(`Removed an older copy: ${removed.join(', ')}.`);
+/** What the status line says after a successful install. `ready` is the
+ *  CHECKED checklist's own field, never the engine's raw `answer.setup.ready`
+ *  taken on faith: afterInstall() passes the same value checklistFrom() just
+ *  validated (or the previous checklist, when the fresh one did not pass),
+ *  so this never claims "Kindles now get KFX." for a checklist the validator
+ *  actually rejected. Removed forks are named: Screepub took out something
+ *  the reader installed (usually the Swift app's copy), and that deserves
+ *  saying. */
+export function installedLine(version, removed, ready) {
+  const parts = [`Installed the KFX plugin ${version}.`];
+  if (ready === true) parts.push('Kindles now get KFX.');
+  const names = Array.isArray(removed) ? removed.filter(isText) : [];
+  if (names.length === 1) parts.push(`Removed an older copy: ${names[0]}.`);
+  else if (names.length > 1) parts.push(`Removed older copies: ${names.join(', ')}.`);
   return parts.join(' ');
 }
 
@@ -116,9 +129,13 @@ export function linkFailedLine(url) {
  *  the old one rather than blanking the block under the success line. */
 export function afterInstall(answer, previous) {
   if (answer?.ok === true && isText(answer.version)) {
+    // Checked once, then reused for both the setup this returns and the
+    // "Kindles now get KFX." sentence: the two must agree on the same
+    // validated checklist, never on the engine's unchecked raw object.
+    const setup = checklistFrom(answer.setup) ?? previous;
     return {
-      setup: checklistFrom(answer.setup) ?? previous,
-      line: installedLine(answer),
+      setup,
+      line: installedLine(answer.version, answer.removed, setup?.ready === true),
       bad: false,
       justInstalled: true,
     };

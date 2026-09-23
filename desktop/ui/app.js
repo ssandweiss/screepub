@@ -57,7 +57,7 @@ export const argv = {
       fountain ? '--fountain' : null, fountain,
       optionsJson ? '--options-json' : null, optionsJson].filter((a) => a !== null),
 
-  /** Can this computer make KFX for a Kindle? Reads only. */
+  /** Can this computer make KFX for a Kindle? Installs nothing. */
   kfxStatus: () => ['kfx-status', '--json'],
 
   /** Install the KFX plugin into Calibre. Fetches it from Calibre's plugin
@@ -165,9 +165,11 @@ export function onFileDrag({ over, drop }) {
  *  which is pure and knows nothing about any of this.
  *
  *  What may be opened is not decided here and must not be. The capability
- *  scopes the grant to this project's issue tracker, so a URL pointing
- *  anywhere else is refused by Tauri rather than quietly followed — which is
- *  the property that makes passing a built string to it safe at all.
+ *  scopes the grant to this project's issue tracker and the three Calibre
+ *  and Kindle Previewer download pages the KFX checklist links to, so a URL
+ *  pointing anywhere else is refused by Tauri rather than quietly followed —
+ *  which is the property that makes passing a built string to it safe at
+ *  all.
  *
  *  Resolves either way. A bug report that will not open is a disappointment;
  *  it is not a reason to throw into a click handler on a screen that is

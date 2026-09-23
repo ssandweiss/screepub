@@ -198,16 +198,18 @@ Decisions:
   `setup.possible`, `kindleRelevant(devices)`, and either `!setup.ready` or
   `justInstalled`. So a ready machine sees nothing, except the success line
   right after an install.
-- `installedLine(answer)`: `Installed the KFX plugin 2.20.1.`, plus
-  `Kindles now get KFX.` when `answer.setup.ready`, plus `Removed an older
-  copy: <names>.` when forks were removed (Swift-era users will see this,
-  and it deserves saying because we removed something they installed).
+- `installedLine(version, removed, ready)`: `Installed the KFX plugin
+  2.20.1.`, plus `Kindles now get KFX.` when `ready` (the CHECKED checklist's
+  own field, never the engine's raw, unvalidated `answer.setup.ready`), plus
+  `Removed an older copy: <name>.` for exactly one fork removed or
+  `Removed older copies: <names>.` for more than one (Swift-era users will
+  see this, and it deserves saying because we removed something they
+  installed).
 - `failedLine(answer)`: the engine's own message, or a stand-in when it
   sent none.
 - `linkFailedLine(url)`: `Could not open the page. It is at <url>`.
 - Copy constants: `HEADING = 'Best Kindle quality'`, `INSTALLING =
-  'Installing the KFX plugin from Calibre’s plugin index. This takes a few
-  seconds.'`
+  'Downloading and installing the KFX plugin. This takes a few seconds.'`
 
 Drawing, at the bottom of the Send page, below the status lines:
 
