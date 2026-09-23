@@ -28,7 +28,7 @@ PAGES_BEFORE = [
     [  # 1.
         ("scene", "EXT. RIDGE ROAD - DAY"),
         ("action", "Wind comes down off the ridge in long flat gusts, pushing the grass one way and then, for no reason, the other."),
-        ("action", "A road climbs the ridge in switchbacks. Nothing with wheels has used it since the washout, and the grass is taking it back."),
+        ("action", "A road climbs the ridge in switchbacks. Nobody has driven it since the washout, and the grass is taking it back."),
         ("action", "MARA, 40s, walks it with a pack on and four days in her legs. She has the face of someone who fixes things and is never thanked."),
         ("action", "DELACROIX, 50s, walks behind her with a paper map folded to the right square. He does not look at it. He looks at the road, and counts."),
         ("character", "DELACROIX"), ("dialogue", "Thirty-one."),

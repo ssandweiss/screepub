@@ -94,7 +94,7 @@ describe('Field Station', () => {
       if (kind === 'd') return; // checked with its cue
       const want = kind === 'c' ? `@${plain(text)} ${plain(scene[i + 1]![1])}` : plain(text);
       const at = (pages.get(page) ?? '').indexOf(want, from);
-      expect(at).toBeGreaterThanOrEqual(0);
+      expect(at, `page ${page}: ${want}`).toBeGreaterThanOrEqual(0);
       from = at + want.length;
     });
   });
