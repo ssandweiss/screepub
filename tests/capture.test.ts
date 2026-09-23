@@ -1,9 +1,18 @@
 // The capture tool's pure parts. The picture-taking itself needs Chrome and
 // runs in /release; everything that DECIDES something is tested here.
 import { describe, test, expect } from 'bun:test';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { gateEngineCall } from '../tools/capture/gate';
+import { captureIndex } from '../tools/capture/page';
+import { SHOTS, outputsFor, writeIfChanged } from '../tools/capture/shots';
 // @ts-expect-error -- plain JS module, no types
 import { argv } from '../desktop/ui/app.js';
+
+// Every path below is built off the file's own location, not the working
+// directory the suite happens to be launched from.
+const ROOT = join(import.meta.dir, '..');
 
 const ctx = {
   demoPdf: '/repo/tests/fixtures/field-station.pdf',
@@ -52,13 +61,59 @@ describe('the engine gate', () => {
   test('an empty call is refused, not allowed by default', () => {
     expect(gateEngineCall([], ctx).allow).toBe(false);
   });
+
+  const D = ctx.demoPdf;
+  const F = inLib('field-station.fountain');
+  const E = inLib('field-station.epub');
+
+  // Each of these is CLOSE to a real call but not one the window's own argv
+  // builders can produce: a smuggled flag, a repeated flag, a `--x=` form,
+  // a missing constant flag, a relative path, a `..` escape, or a verb the
+  // window never sends. A gate that only checks the first argument, or only
+  // checks that -o lands in the library, allows every one of these.
+  const REFUSALS: [string, string[]][] = [
+    ['a flag smuggled onto a convert after --library',
+      [D, '--json', '--library', '--fountain', '/Users/me/real.fountain']],
+    ['a second flag smuggled onto a convert after --library',
+      [D, '--json', '--progress', '--preview-inline', '--library', '--preview-html', '/anywhere.html']],
+    ['--output instead of -o', [D, '--json', '--output', '/x.epub']],
+    ['--output= form', [D, '--json', '--output=/x.epub']],
+    ['-o glued to its value', [D, '--json', '-o/x.epub']],
+    ['a repeated -o', [F, '--json', '--preview-inline', '-o', E, '-o', '/x.epub', '--options-json', '{}']],
+    ['a convert without --library, which would write into tests/fixtures', [D, '--json']],
+    ['an unknown flag after --library',
+      [D, '--json', '--progress', '--preview-inline', '--library', '--options', '/any/file']],
+    ['a .. escape out of the library', argv.settings(`${ctx.library}/../../../Users/me/x.fountain`)],
+    ['a relative demo path', argv.convert('tests/fixtures/field-station.pdf')],
+    ['a relative settings path', argv.settings('field-station/x.fountain')],
+    ['flag-first', ['--json', 'settings', F]],
+    ['update-decision', ['update-decision', '--offered', '1', '--current', '0']],
+    ['update-should-check', ['update-should-check', '--json']],
+    ['extra args on version', ['--version', '--json', '--debug']],
+  ];
+
+  test('it refuses any call whose whole shape the window would not actually produce', () => {
+    for (const [label, args] of REFUSALS) {
+      const a = gateEngineCall(args, ctx);
+      expect(`${label}: ${a.allow}`).toBe(`${label}: false`);
+    }
+  });
+
+  test('it allows every shape the window really sends on the way to a picture', () => {
+    const ALLOWS: string[][] = [
+      argv.convert(D, { force: true }),
+      argv.convert(D, { optionsJson: '{"a":1}' }),
+      argv.convert(D, { force: true, optionsJson: '{}' }),
+      argv.settings(F, '{"a":1}'),
+    ];
+    for (const args of ALLOWS) {
+      expect(gateEngineCall(args, ctx)).toEqual({ allow: true });
+    }
+  });
 });
 
-import { readFileSync as readFile, readdirSync } from 'node:fs';
-import { captureIndex } from '../tools/capture/page';
-
 describe('the window page the capture serves', () => {
-  const real = readFile('desktop/ui/index.html', 'utf8');
+  const real = readFileSync(join(ROOT, 'desktop', 'ui', 'index.html'), 'utf8');
   const cfg = { shot: 'result', demoPdf: '/Users/Shared/demo.pdf' };
 
   test('it is the window’s own index.html, with the capture scripts inserted before main.js', () => {
@@ -84,22 +139,31 @@ describe('the window page the capture serves', () => {
     const twice = real.replace('</body>', '<script type="module" src="main.js"></script></body>');
     expect(() => captureIndex(twice, cfg)).toThrow(/exactly once/);
   });
+
+  test('a value cannot close the <script> early, or be read as a replace() substitution pattern', () => {
+    const evil = { shot: '</script><script>alert(1)</script>', demoPdf: '/Users/a$&b/demo.pdf' };
+    const out = captureIndex(real, evil);
+    expect(out).toContain('/Users/a$&b/demo.pdf');
+    expect(out).not.toContain('</script><script>alert');
+  });
+
+  test('a <head> with attributes is not recognised, and fails loudly rather than skip the insert', () => {
+    const html = '<html><head lang="en"></head><body>' +
+      '<script type="module" src="main.js"></script></body></html>';
+    expect(() => captureIndex(html, cfg)).toThrow(/no <head>/);
+  });
 });
 
 describe('nothing from the capture ships in the window', () => {
   test('no file in desktop/ui knows the capture tool exists', () => {
-    for (const f of readdirSync('desktop/ui')) {
+    const ui = join(ROOT, 'desktop', 'ui');
+    for (const f of readdirSync(ui)) {
       if (!/\.(js|html|css)$/.test(f)) continue;
-      const text = readFile(`desktop/ui/${f}`, 'utf8');
+      const text = readFileSync(join(ui, f), 'utf8');
       expect(`${f}: ${/__CAPTURE__|__captureState|tools\/capture/.test(text)}`).toBe(`${f}: false`);
     }
   });
 });
-
-import { mkdtempSync as tmp, readFileSync as readBytes } from 'node:fs';
-import { tmpdir as osTmp } from 'node:os';
-import { join as joinPath } from 'node:path';
-import { SHOTS, outputsFor, writeIfChanged } from '../tools/capture/shots';
 
 describe('the shot list', () => {
   test('the four README pictures, with light and dark for the window ones', () => {
@@ -111,7 +175,7 @@ describe('the shot list', () => {
 
   test('the window pictures are the window’s own size', () => {
     // tauri.conf.json's window is 860 by 620.
-    const conf = JSON.parse(readFile('desktop/src-tauri/tauri.conf.json', 'utf8'));
+    const conf = JSON.parse(readFileSync(join(ROOT, 'desktop', 'src-tauri', 'tauri.conf.json'), 'utf8'));
     const w = conf.app.windows[0];
     for (const s of SHOTS.filter((x) => x.kind === 'window')) {
       expect([s.width, s.height]).toEqual([w.width, w.height]);
@@ -128,11 +192,15 @@ describe('the shot list', () => {
   });
 
   test('a file is written only when its bytes differ', () => {
-    const dir = tmp(joinPath(osTmp(), 'screepub-capture-'));
-    const path = joinPath(dir, 'x.png');
-    expect(writeIfChanged(path, new Uint8Array([1, 2, 3]))).toBe('written');
-    expect(writeIfChanged(path, new Uint8Array([1, 2, 3]))).toBe('unchanged');
-    expect(writeIfChanged(path, new Uint8Array([1, 2, 4]))).toBe('written');
-    expect([...readBytes(path)]).toEqual([1, 2, 4]);
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-capture-'));
+    try {
+      const path = join(dir, 'x.png');
+      expect(writeIfChanged(path, new Uint8Array([1, 2, 3]))).toBe('written');
+      expect(writeIfChanged(path, new Uint8Array([1, 2, 3]))).toBe('unchanged');
+      expect(writeIfChanged(path, new Uint8Array([1, 2, 4]))).toBe('written');
+      expect([...readFileSync(path)]).toEqual([1, 2, 4]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

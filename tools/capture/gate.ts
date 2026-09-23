@@ -1,17 +1,25 @@
 // Which engine calls the capture tool may make on the window's behalf.
 //
-// The capture server answers each engine call the window makes by running
-// the REAL CLI with exactly those arguments, so every answer in a picture
-// is real by construction. What it must never do is let a picture reach
-// anything real besides the demo: a connected Kindle, a send, an export,
-// or a file that is not the invented script. So every call passes this
-// gate first, and a refusal fails the whole capture, naming the call.
+// The gate allows only calls whose WHOLE SHAPE the window's own argv
+// builders (desktop/ui/app.js) reproduce exactly — not calls that merely
+// start with a recognised verb, or merely put -o somewhere inside the
+// library. That is the difference between a real boundary and a checklist:
+// an unknown flag, a repeated flag, a `--flag=value` form the window never
+// writes, a missing constant flag like --library, or a relative path all
+// fail closed, because none of them is a shape any argv.* builder can
+// produce. A constant flag a builder adds tomorrow is allowed automatically,
+// since the gate rebuilds the call with that same builder and compares; a
+// new VARIABLE part (a flag that takes a path, say) is refused until the
+// gate is taught to recognise it, because nothing here can guess whether an
+// unfamiliar value is safe.
 //
-// Pure. tests/capture.test.ts builds its cases with the window's own argv
-// builders from desktop/ui/app.js, so the gate recognises the window's
-// calls rather than a copy of them.
+// Pure. tests/capture.test.ts builds both its allowed and its refused cases
+// with the window's own argv builders, so the gate is checked against the
+// real contract rather than a copy of it.
 
-import { resolve, sep } from 'node:path';
+import { isAbsolute, resolve, sep } from 'node:path';
+// @ts-expect-error -- plain JS module, no types
+import { argv } from '../../desktop/ui/app.js';
 
 export interface GateContext {
   /** The one file the capture may convert. */
@@ -22,44 +30,50 @@ export interface GateContext {
 
 export type GateAnswer = { allow: true } | { allow: false; reason: string };
 
-/** Verbs that reach hardware or write a file somewhere a person chose. */
-const REFUSED_VERBS = new Set(['devices', 'send', 'export', 'update-decision', 'update-should-check']);
+const ALLOW: GateAnswer = { allow: true };
 
-const refuse = (reason: string): GateAnswer => ({ allow: false, reason });
-
-function inside(path: string | undefined, dir: string): boolean {
-  if (!path) return false;
-  const p = resolve(path);
-  const d = resolve(dir);
-  return p.startsWith(d + sep);
+function inside(path: string | null | undefined, dir: string): boolean {
+  if (!path || !isAbsolute(path)) return false;
+  return resolve(path).startsWith(resolve(dir) + sep);
 }
 
+const valueAfter = (args: readonly string[], flag: string): string | null => {
+  const i = args.indexOf(flag);
+  return i === -1 ? null : (args[i + 1] ?? null);
+};
+
+const same = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
+
 export function gateEngineCall(args: readonly string[], ctx: GateContext): GateAnswer {
-  if (args.length === 0) return refuse('an empty engine call');
-  const [first] = args as [string, ...string[]];
+  const [first] = args;
+  if (first === undefined) return { allow: false, reason: 'an empty engine call' };
+  const opts = valueAfter(args, '--options-json');
 
-  if (first === '--version') return { allow: true };
+  if (same(args, argv.version())) return ALLOW;
 
-  if (REFUSED_VERBS.has(first)) {
-    return refuse(`${first}: it reaches a device or writes outside the demo library`);
-  }
+  if (
+    first === 'settings' &&
+    inside(args[1], ctx.library) &&
+    same(args, argv.settings(args[1], valueAfter(args, '--set')))
+  )
+    return ALLOW;
 
-  // Wherever the call names an output with -o, that output must be inside
-  // the library, whatever else the call is.
-  const o = args.indexOf('-o');
-  if (o !== -1 && !inside(args[o + 1], ctx.library)) {
-    return refuse(`${first} -o ${args[o + 1] ?? '<nothing>'}: writes outside the demo library`);
-  }
+  if (
+    isAbsolute(first) &&
+    resolve(first) === resolve(ctx.demoPdf) &&
+    same(args, argv.convert(first, { force: args.includes('--force'), optionsJson: opts }))
+  )
+    return ALLOW;
 
-  if (first === 'settings') {
-    return inside(args[1], ctx.library)
-      ? { allow: true }
-      : refuse(`settings ${args[1] ?? '<nothing>'}: not a script in the demo library`);
-  }
+  const out = valueAfter(args, '-o');
+  if (
+    inside(first, ctx.library) &&
+    inside(out, ctx.library) &&
+    opts !== null &&
+    same(args, argv.reconvert(first, out, opts))
+  )
+    return ALLOW;
 
-  // Otherwise the first argument is an input file: the demo script itself,
-  // or the cached .fountain the window re-renders from.
-  if (resolve(first) === resolve(ctx.demoPdf)) return { allow: true };
-  if (inside(first, ctx.library)) return { allow: true };
-  return refuse(`a conversion of ${first}: it is not the demo script`);
+  return { allow: false, reason: `${args.join(' ')}: not a call the window makes on the way to a picture` };
 }

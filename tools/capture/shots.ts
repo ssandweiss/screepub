@@ -38,10 +38,7 @@ export function outputsFor(shot: Shot, theme: Theme): string[] {
 /** Same pixels in, same bytes out, so a release where the window did not
  *  change commits no new images and the repository does not grow. */
 export function writeIfChanged(path: string, bytes: Uint8Array): 'written' | 'unchanged' {
-  if (existsSync(path)) {
-    const old = readFileSync(path);
-    if (old.length === bytes.length && old.equals(Buffer.from(bytes))) return 'unchanged';
-  }
+  if (existsSync(path) && readFileSync(path).equals(bytes)) return 'unchanged';
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, bytes);
   return 'written';

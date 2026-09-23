@@ -29,12 +29,18 @@ export function captureIndex(html: string, cfg: CaptureConfig): string {
     );
   }
   if (!html.includes('<head>')) throw new Error('capture: desktop/ui/index.html has no <head>');
+  // Escaped so a `<` in a value cannot close the <script> early (the HTML
+  // parser looks for the literal text `</script`, however it got there —
+  // quoting inside the JS string does not stop it), and inserted with a
+  // replacer FUNCTION below so a literal `$` in a value (a `$&`, say) is
+  // never read as a String.replace substitution pattern.
+  const config = JSON.stringify(cfg).replace(/</g, '\\u003c');
   const head =
     '<head>\n    <base href="/desktop/ui/">\n' +
-    `    <script>window.__CAPTURE__ = ${JSON.stringify(cfg)};</script>`;
+    `    <script>window.__CAPTURE__ = ${config};</script>`;
   const scripts =
     '<script type="module" src="/tools/capture/bridge.js"></script>\n    ' +
     MAIN +
     '\n    <script type="module" src="/tools/capture/steps.js"></script>';
-  return html.replace('<head>', head).replace(MAIN, scripts);
+  return html.replace('<head>', () => head).replace(MAIN, () => scripts);
 }
