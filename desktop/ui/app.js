@@ -72,12 +72,12 @@ export const argv = {
  *  wrong, and the rest only buries the two buttons under it. */
 const RAW_SHOWN = 300;
 
-// How many COUNTED engine calls are running right now (see countsTowardBusy
-// for the one exception). An update's restart waits for the engine to have
-// been quiet a while (update.js, installAndRestart), because every counted
-// call is somebody's work: a conversion, a copy to a Kindle, a settings file
-// half written. Counted HERE because this is the one door every call goes
-// through.
+// How many COUNTED engine calls are running right now (countsTowardBusy
+// leaves out the read-only ones). An update's restart waits for the engine
+// to have been quiet a while (update.js, installAndRestart), because every
+// counted call is somebody's work: a conversion, a copy to a Kindle, a
+// settings file half written. Counted HERE because this is the one door
+// every call goes through.
 let inFlight = 0;
 let idleWaiters = [];
 
@@ -150,8 +150,8 @@ function settle() {
 }
 
 /** Run the engine and parse its one line of stdout, counted while it runs
- *  (see countsTowardBusy for the one call this skips). See runEngineOnce for
- *  what the answer means. */
+ *  (countsTowardBusy names the read-only calls this skips). See
+ *  runEngineOnce for what the answer means. */
 export async function runEngine(args) {
   const counted = countsTowardBusy(args);
   if (counted) inFlight += 1;

@@ -242,18 +242,19 @@ exact version offered before swapping anything.
 
 The cross-platform window touches the network in five places, each needing
 your click: the upload to a docked reMarkable over USB, GitHub when you choose
-**Report a bug**, which opens a pre-filled issue in your browser, Calibre's
-or Amazon's download page when you choose **Get Calibre** or **Get Kindle
+**Report a bug**, which opens a pre-filled issue in your browser, Calibre's or
+Amazon's download page when you choose **Get Calibre** or **Get Kindle
 Previewer** on the Send page's KFX checklist, that same checklist's own
 **Install** button, which fetches the KFX plugin from Calibre's own plugin
-index, and, only if you say yes when it first asks (one line under the drop
-area, which stays until you answer; the switch in the release notes changes
-your answer later), one request a day for this project's `latest.json` on GitHub,
-plus the download when you choose **Update to** beside the version number, or
-**Install** in the release notes. That download's signature is checked
-against a key built into the app before anything is swapped, and the app
-then restarts itself, waiting first for any conversion, send or export that
-is still running. It has no Send-to-Kindle
+index, and this project's `latest.json` on GitHub. That last one is asked
+once a day only if you say yes when the window first asks (one line under the
+drop area, which stays until you answer; the switch in the release notes
+changes your answer later), and once whenever you press **Check for updates**
+in the release notes. The download follows only when you choose **Update to**
+beside the version number, or **Install** in the release notes. Its signature
+is checked against a key built into the app before anything is swapped, and
+the app then restarts itself, waiting first for any conversion, send or
+export that is still running. It has no Send-to-Kindle
 page yet. Showing a book in your file manager is local and reaches nothing.
 
 The one thing worth being clear about: **you** can choose to send a script
