@@ -125,11 +125,19 @@ body {
 .rail .c { top: 69.3%; }
 .defs { position: absolute; }
 
-/* The window's handle (frame.js). Transparent, fixed like a title bar, and
- * exactly as tall as the sheet's top padding, so at rest it covers no
- * control. Above the page in paint order so a drag always starts. */
+/* The window's handle (frame.js). Transparent, and exactly as tall as the
+ * sheet's top padding. Absolute, NOT fixed: `position: fixed` stayed pinned
+ * to the viewport while the page scrolled underneath it, so a control that
+ * had scrolled up into that band was covered instead of clicked — confirmed
+ * live, a click on a tab started a window drag once Read had scrolled
+ * 21.5px, and the strip sat over a slider on Settings (1495px tall) once it
+ * had scrolled to 400px. Absolute makes it part of the PAGE (it is appended
+ * beside .page, inside #app, which is unpositioned, so its containing block
+ * is the document itself): it scrolls away with the sheet's top padding, so
+ * it only ever sits where that padding does, and never over a control.
+ * Above the page in paint order so a drag always starts. */
 .drag-strip {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
   right: 0;
@@ -237,7 +245,7 @@ body {
 .engine-fault {
   position: absolute;
   right: var(--page-right);
-  bottom: var(--space-8);
+  bottom: var(--space-9);
   margin: 0;
   max-width: var(--measure);
   text-align: right;
@@ -294,6 +302,7 @@ body {
   .rail svg { width: 20px; height: 20px; }
   .tabs { gap: var(--space-3); }
   .rev-foot { right: var(--space-4); }
+  .engine-fault { right: var(--space-4); }
 }
 @media (prefers-reduced-motion: reduce) {
   .tab { transition: none; }

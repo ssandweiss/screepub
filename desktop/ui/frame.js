@@ -176,8 +176,9 @@ export function mountFrame(root) {
 
   // The window has no title bar of its own (tauri.conf.json, titleBarStyle
   // "Overlay"), so without this there is nothing to grab. A transparent
-  // strip along the top, fixed like a title bar, as tall as the sheet's top
-  // margin so it never covers a control.
+  // strip at the top of the PAGE, not fixed to the viewport: see style.css's
+  // .drag-strip for why a fixed strip covered controls scrolled under it.
+  // As tall as the sheet's top margin so at rest it covers no control.
   const strip = el('div', { class: 'drag-strip', 'data-tauri-drag-region': '', 'aria-hidden': 'true' });
 
   root.append(defs, page, rail, strip);

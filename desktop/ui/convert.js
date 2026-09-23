@@ -308,17 +308,22 @@ export function reset() {
  *  hands the keyboard back, because the button that had it is gone. */
 function askLine() {
   if (!ctx.updates?.shouldAsk()) return null;
-  const answer = (on) => {
-    ctx.updates.answer(on);
-    line.remove();
+  const answer = (on, event) => {
+    // The reader could have flipped the switch in the release notes while
+    // this line was still on screen: shouldAsk() would now say the
+    // question is already answered, and a stale click here must not
+    // overwrite that newer answer with this one.
+    if (ctx.updates.shouldAsk()) ctx.updates.answer(on);
+    // Found through the clicked button's own ancestor, not a variable this
+    // closure would otherwise have to reach forward to.
+    event.currentTarget.closest('.well-ask')?.remove();
     ctx.restoreFocus();
   };
-  const line = el('p', { class: 'well-ask' },
+  return el('p', { class: 'well-ask' },
     el('span', { class: 'well-ask-question' }, ASK.question),
-    el('button', { type: 'button', class: 'btn-quiet', onclick: () => answer(true) }, ASK.yes),
-    el('button', { type: 'button', class: 'btn-quiet', onclick: () => answer(false) }, ASK.no),
+    el('button', { type: 'button', class: 'btn-quiet', onclick: (event) => answer(true, event) }, ASK.yes),
+    el('button', { type: 'button', class: 'btn-quiet', onclick: (event) => answer(false, event) }, ASK.no),
   );
-  return line;
 }
 
 function drawWell() {

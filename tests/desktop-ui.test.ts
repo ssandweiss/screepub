@@ -4510,7 +4510,13 @@ describe('the window can be moved by its top, like any other window', () => {
   test('a transparent strip along the top is a drag region', () => {
     expect(frame).toMatch(/class:\s*'drag-strip',\s*'data-tauri-drag-region':\s*''/);
     const rule = css.match(/\.drag-strip\s*\{[^}]*\}/)?.[0] ?? '';
-    expect(rule).toContain('position: fixed');
+    // NOT fixed: a strip pinned to the viewport stayed over content that
+    // scrolled underneath it — confirmed live, a click on a tab started a
+    // window drag once Read had scrolled 21.5px, and the strip sat over a
+    // slider on Settings (1495px tall) once it had scrolled to 400px.
+    // Absolute, so it is part of the page and scrolls away with it.
+    expect(rule).toContain('position: absolute');
+    expect(rule).not.toContain('position: fixed');
     expect(rule).toContain('top: 0');
     expect(rule).toContain('height: var(--space-7)');
   });
@@ -4518,14 +4524,31 @@ describe('the window can be moved by its top, like any other window', () => {
   test('the gaps in the tab bar drag, and the tabs stay tabs', () => {
     expect(frame).toMatch(/el\('nav',\s*\{[^}]*'data-tauri-drag-region':\s*''/);
     // The attribute is never on a tab button: that would turn a click on
-    // "Read" into a window move.
-    const start = frame.indexOf("el('button', {\n      type: 'button',\n      class: 'tab'");
-    expect(start).toBeGreaterThan(-1); // or the next line would pass on nothing
-    const tabButton = frame.slice(start);
-    expect(tabButton.slice(0, tabButton.indexOf('}, label)'))).not.toContain('data-tauri-drag-region');
+    // "Read" into a window move. Matched by shape (an el('button', ...)
+    // call whose props carry class: 'tab'), not by exact whitespace, so a
+    // reformat cannot make this pass on nothing.
+    const tabButton = frame.match(/el\('button',\s*\{[\s\S]*?class:\s*'tab'[\s\S]*?\},\s*label\)/);
+    expect(tabButton).not.toBeNull();
+    expect(tabButton?.[0]).not.toContain('data-tauri-drag-region');
     // Counted as PROPS (quoted, with a colon), so a comment naming the
     // attribute does not change the count.
     expect(frame.match(/'data-tauri-drag-region':/g)?.length).toBe(2);
+  });
+});
+
+describe('the dead-engine line does not crowd the update label', () => {
+  test('it sits a full row below the foot, not 1.4px away', () => {
+    const rule = read('style.css').match(/\.engine-fault\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(rule).toContain('bottom: var(--space-9)');
+  });
+
+  test('it stays aligned with the foot below 720px, like the foot itself', () => {
+    const css = read('style.css');
+    const start = css.indexOf('@media (max-width: 720px)');
+    expect(start).toBeGreaterThan(-1);
+    const nextMedia = css.indexOf('@media', start + 1);
+    const block = css.slice(start, nextMedia === -1 ? undefined : nextMedia);
+    expect(block).toContain('.engine-fault { right: var(--space-4); }');
   });
 });
 
@@ -4545,7 +4568,11 @@ describe('a newer version is a label you can click, not a dot you can miss', () 
     expect(frame).toMatch(/el\('div',\s*\{\s*class:\s*'rev-foot'\s*\},\s*updateLabel,\s*stamp\)/);
     expect(frame).toContain('setUpdateLabel');
     expect(frame).toContain('onUpdateClick');
-    expect(frame).toContain('revHandlers'); // the stamp's own click is untouched
+    // The stamp's own click handler is untouched: it still calls every
+    // registered rev handler. `toContain('revHandlers')` alone would still
+    // pass with the stamp's onclick deleted, since the array declaration
+    // and push still mention the name.
+    expect(frame).toMatch(/onclick:\s*\(\)\s*=>\s*\{\s*for\s*\(const handler of revHandlers\)\s*handler\(\);\s*\}/);
   });
 
   test('the label is ink with a brass rule, not brass text', () => {
@@ -4580,11 +4607,36 @@ describe('the Convert page asks once whether to look for new versions', () => {
     const convert = read('convert.js');
     expect(convert).toContain('ctx.updates?.shouldAsk()');
     expect(convert).toContain("class: 'well-ask'");
-    // Answering hands the keyboard back: the button that had it is gone.
-    expect(convert).toMatch(/line\.remove\(\);\s*ctx\.restoreFocus\(\);/);
+    // Answering hands the keyboard back: the line that had the buttons is
+    // gone. Matched by shape (a removal followed by restoring focus), not
+    // by a `line` variable name, since the removal goes through the
+    // clicked button's own ancestor rather than a forward reference.
+    expect(convert).toMatch(/\.closest\('\.well-ask'\)\?\.remove\(\);\s*ctx\.restoreFocus\(\);/);
     const main = read('main.js');
     expect(main).toContain('shouldAsk(flow.usable(), localStorage)');
     expect(main).toContain('flow.answer(on)');
+  });
+
+  test('the question sits after the well, so Choose PDF stays the first focus stop', () => {
+    // askLine() is appended in a SECOND pane.append() call, after the one
+    // that draws the wordmark and the well. Reversing that order would put
+    // the question's own buttons ahead of Choose PDF in the DOM, and this
+    // surface's first focus stop is the first control the DOM contains.
+    const convert = read('convert.js');
+    const wellDeclared = convert.indexOf("class: 'well'");
+    const askAppended = convert.indexOf('if (ask) pane.append(ask);');
+    expect(wellDeclared).toBeGreaterThan(-1);
+    expect(askAppended).toBeGreaterThan(wellDeclared);
+  });
+
+  test('flipping the switch in the release notes while the question is still up wins', () => {
+    // The reader could answer both ways at once: flip the switch in the
+    // release notes, then click a stale "No thanks" that was already on
+    // screen. The second answer re-checks shouldAsk() and, if it is
+    // already false, only removes the line rather than overwriting the
+    // newer answer.
+    const convert = read('convert.js');
+    expect(convert).toMatch(/if\s*\(ctx\.updates\.shouldAsk\(\)\)\s*ctx\.updates\.answer\(on\)/);
   });
 
   test('it is styled quietly, in the window\'s own tokens', () => {
