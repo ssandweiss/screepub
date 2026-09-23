@@ -64,6 +64,22 @@ export const argv = {
    *  index and writes into the user's Calibre, so it is only ever built in
    *  answer to a press of the button that says so (kfx.js). */
   kfxInstall: () => ['kfx-install', '--json'],
+
+  /** Every route this script can be sent by, in the engine's order, read-only
+   *  (parity piece B). send.js polls this the way it used to poll `devices`. */
+  routes: (epub) => ['routes', epub, '--json'],
+
+  /** Perform one route: open an app (`apple-books`, `send-to-kindle`,
+   *  `email-to-kindle`), or write a copy (`save-epub`, `save-kindle`) when
+   *  `out` names where. `fountain`/`optionsJson` are only ever sent for a
+   *  save that has to build the file first (the Kindle route). Same
+   *  null-filter idiom as `export` above: an option left at its default
+   *  never reaches the engine as a flag. */
+  route: (key, epub, { out = null, fountain = null, optionsJson = null } = {}) =>
+    ['route', key, epub, '--json',
+      out ? '--out' : null, out,
+      fountain ? '--fountain' : null, fountain,
+      optionsJson ? '--options-json' : null, optionsJson].filter((a) => a !== null),
 };
 
 /** How much of an unparseable answer goes in the message a person reads.
@@ -123,9 +139,16 @@ let settleTimer = null;
  *  `kfx-status` is not either, for the same reason: kfx.js's probe() runs
  *  it when the Send tab opens and again every time the window gets focus
  *  back, read-only and never mid-job. `kfx-install` is the one that
- *  actually writes (into Calibre) and stays counted. */
+ *  actually writes (into Calibre) and stays counted.
+ *
+ *  `routes` is not either, for the same reason again: it REPLACES the
+ *  `devices` poll (parity piece B), so it is the thing send.js now polls
+ *  every 2 s, read-only, never mid-job. `route` is the one that actually
+ *  does the work a route promises: it opens an app or writes a file, so
+ *  it stays counted, the way `send` and `kfx-install` already are. */
 function countsTowardBusy(args) {
-  return args[0] !== argv.devices()[0] && args[0] !== argv.kfxStatus()[0];
+  return args[0] !== argv.devices()[0] && args[0] !== argv.kfxStatus()[0]
+    && args[0] !== argv.routes('')[0];
 }
 
 /** Release every whenIdle() waiter if the engine has been quiet for
@@ -233,18 +256,39 @@ export function isDialogOpen() {
   return dialogOpen;
 }
 
-/** Ask the OS for a screenplay. Null when the reader cancelled — and null,
- *  without opening anything, when a picker is already up. */
-export async function pickScreenplay() {
+/** The one guard every native dialog this window opens goes through, so at
+ *  most one is ever on screen: Ctrl-O and a save button must not be able to
+ *  put up two at once any more than Ctrl-O twice could. Runs `open`,
+ *  resolves whatever it resolves (or null, for a cancel), and always clears
+ *  the guard and calls every onDialogClosed handler afterward, in a
+ *  `finally`, so a rejection still cleans up and still reaches the caller
+ *  (main.js needs the keyboard back either way). */
+async function withOneDialog(open) {
   if (dialogOpen) return null;
   dialogOpen = true;
   try {
-    const path = await tauri().core.invoke('pick_file');
-    return path ?? null;
+    const result = await open();
+    return result ?? null;
   } finally {
     dialogOpen = false;
     for (const handler of dialogClosed) handler();
   }
+}
+
+/** Ask the OS for a screenplay. Null when the reader cancelled — and null,
+ *  without opening anything, when a picker is already up. */
+export async function pickScreenplay() {
+  return withOneDialog(() => tauri().core.invoke('pick_file'));
+}
+
+/** Ask the OS where to save a copy. Resolves to the chosen path, or null on
+ *  cancel, and null, without opening anything, when a dialog is already up
+ *  (shares pickScreenplay's guard above, the one door this file ever opens
+ *  onto a native dialog). Owner-approved 2026-09-23: the window may show
+ *  this box, but it never writes the file itself. It hands the chosen path
+ *  to `argv.route`, and the engine is what writes there. */
+export async function saveDialog({ defaultPath, filters }) {
+  return withOneDialog(() => tauri().dialog.save({ defaultPath, filters }));
 }
 
 /** Every diagnostic line the engine writes, verbatim, as it writes it.

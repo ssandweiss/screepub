@@ -237,10 +237,16 @@ describe('the engine contract lives in exactly one file', () => {
       }),
       kfxStatus: argv.kfxStatus(),
       kfxInstall: argv.kfxInstall(),
+      routes: argv.routes('/s/script.epub'),
+      route: argv.route('apple-books', '/s/script.epub'),
+      routeSaveEpub: argv.route('save-epub', '/s/script.epub', { out: '/s/out.epub' }),
+      routeSaveKindle: argv.route('save-kindle', '/s/script.epub', {
+        out: '/s/out.azw3', fountain: '/s/script.fountain', optionsJson: '{"a":1}',
+      }),
     };
     // Every builder the interface promises is exercised above.
     expect(Object.keys(argv).sort()).toEqual(
-      ['convert', 'devices', 'export', 'kfxInstall', 'kfxStatus', 'reconvert', 'send', 'settings', 'version'].sort(),
+      ['convert', 'devices', 'export', 'kfxInstall', 'kfxStatus', 'reconvert', 'route', 'routes', 'send', 'settings', 'version'].sort(),
     );
     for (const [name, args] of Object.entries(built)) {
       expect(`${name} has --json: ${args.includes('--json')}`).toBe(`${name} has --json: true`);
@@ -256,6 +262,27 @@ describe('the engine contract lives in exactly one file', () => {
     const { argv } = await import(join(UI, 'app.js'));
     expect(argv.kfxStatus()).toEqual(['kfx-status', '--json']);
     expect(argv.kfxInstall()).toEqual(['kfx-install', '--json']);
+  });
+
+  test('the route builders, pinned whole: routes never carries an out/fountain/options triple, route always may', async () => {
+    // Same reasoning as the "pinned WHOLE" convert assertion below: this argv
+    // is the entire contract with the engine, and an extra or missing element
+    // is exactly what a wrong edit leaves behind.
+    const { argv } = await import(join(UI, 'app.js'));
+    expect(argv.routes('/s/script.epub')).toEqual(['routes', '/s/script.epub', '--json']);
+
+    expect(argv.route('apple-books', '/s/script.epub')).toEqual(
+      ['route', 'apple-books', '/s/script.epub', '--json'],
+    );
+    expect(argv.route('save-epub', '/s/script.epub', { out: '/s/out.epub' })).toEqual(
+      ['route', 'save-epub', '/s/script.epub', '--json', '--out', '/s/out.epub'],
+    );
+    expect(argv.route('save-kindle', '/s/script.epub', {
+      out: '/s/out.azw3', fountain: '/s/script.fountain', optionsJson: '{"a":1}',
+    })).toEqual([
+      'route', 'save-kindle', '/s/script.epub', '--json',
+      '--out', '/s/out.azw3', '--fountain', '/s/script.fountain', '--options-json', '{"a":1}',
+    ]);
   });
 
   test('an optional flag brings its value and an absent one brings nothing', async () => {
@@ -1161,6 +1188,113 @@ describe('one file dialog at a time', () => {
   });
 });
 
+describe('the save dialog shares pickScreenplay\'s one-dialog guard', () => {
+  // Parity piece B: dialog:allow-save lets the window ask for a save path
+  // directly (ADR 2026-09-21). It must not be a second, independent guard,
+  // or Ctrl-O and a save button could put two native dialogs up at once,
+  // which is the exact defect the picker's own guard exists to prevent.
+  type AppModule = {
+    pickScreenplay: () => Promise<string | null>;
+    saveDialog: (opts: {
+      defaultPath: string;
+      filters: Array<{ name: string; extensions: string[] }>;
+    }) => Promise<string | null>;
+    isDialogOpen: () => boolean;
+    onDialogClosed: (handler: () => void) => void;
+  };
+
+  function stubDialogs() {
+    let pickCalls = 0;
+    let saveCalls = 0;
+    let lastSaveArgs: unknown = null;
+    let settlePick: ((path: string | null) => void) | null = null;
+    let settleSave: ((path: string | null) => void) | null = null;
+    (globalThis as unknown as { window: unknown }).window = {
+      __TAURI__: {
+        core: {
+          invoke: () => {
+            pickCalls += 1;
+            return new Promise((resolve) => { settlePick = resolve; });
+          },
+        },
+        dialog: {
+          save: (args: unknown) => {
+            saveCalls += 1;
+            lastSaveArgs = args;
+            return new Promise((resolve) => { settleSave = resolve; });
+          },
+        },
+      },
+    };
+    return {
+      get pickCalls() { return pickCalls; },
+      get saveCalls() { return saveCalls; },
+      get lastSaveArgs() { return lastSaveArgs; },
+      answerPick: (path: string | null) => settlePick!(path),
+      answerSave: (path: string | null) => settleSave!(path),
+    };
+  }
+
+  afterEach(() => { delete (globalThis as unknown as { window?: unknown }).window; });
+
+  test('it asks the OS with the given defaultPath and filters, and resolves the chosen path', async () => {
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    const dialogs = stubDialogs();
+    const filters = [{ name: 'EPUB', extensions: ['epub'] }];
+    const asked = app.saveDialog({ defaultPath: 'script.epub', filters });
+    await Promise.resolve();
+    expect(app.isDialogOpen()).toBe(true);
+    expect(dialogs.lastSaveArgs).toEqual({ defaultPath: 'script.epub', filters });
+    dialogs.answerSave('/s/out.epub');
+    expect(await asked).toBe('/s/out.epub');
+    expect(app.isDialogOpen()).toBe(false);
+  });
+
+  test('cancelling resolves null, same as a cancelled picker', async () => {
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    const dialogs = stubDialogs();
+    const asked = app.saveDialog({ defaultPath: 'script.epub', filters: [] });
+    await Promise.resolve();
+    dialogs.answerSave(null);
+    expect(await asked).toBeNull();
+  });
+
+  test('a picker already open blocks a save dialog, and a save dialog already open blocks a picker', async () => {
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    const dialogs = stubDialogs();
+
+    const picking = app.pickScreenplay();
+    await Promise.resolve();
+    expect(app.isDialogOpen()).toBe(true);
+    expect(await app.saveDialog({ defaultPath: 'x.epub', filters: [] })).toBeNull();
+    expect(`save dialogs opened: ${dialogs.saveCalls}`).toBe('save dialogs opened: 0');
+    dialogs.answerPick('/s/script.pdf');
+    expect(await picking).toBe('/s/script.pdf');
+    expect(app.isDialogOpen()).toBe(false);
+
+    const saving = app.saveDialog({ defaultPath: 'x.epub', filters: [] });
+    await Promise.resolve();
+    expect(app.isDialogOpen()).toBe(true);
+    expect(await app.pickScreenplay()).toBeNull();
+    expect(`pickers opened: ${dialogs.pickCalls}`).toBe('pickers opened: 1');
+    dialogs.answerSave('/s/out.epub');
+    expect(await saving).toBe('/s/out.epub');
+    expect(app.isDialogOpen()).toBe(false);
+  });
+
+  test('onDialogClosed handlers fire after a save dialog closes too, cancel or not', async () => {
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    const dialogs = stubDialogs();
+    let closed = 0;
+    app.onDialogClosed(() => { closed += 1; });
+    const asked = app.saveDialog({ defaultPath: 'x.epub', filters: [] });
+    await Promise.resolve();
+    dialogs.answerSave(null);
+    await asked;
+    expect(`closed: ${closed}`).toBe('closed: 1');
+  });
+});
+
 describe('what runEngine does with the answer it is handed', () => {
   // Scope, stated plainly, because these used to claim more than they
   // covered: `invoke` is a stub here, so NOTHING below tests a transport.
@@ -1398,6 +1532,36 @@ describe('the window knows when the engine is working, and can restart', () => {
       expect(app.engineBusy()).toBe(true);
       expect(Bun.peek.status(app.whenIdle())).toBe('pending');
       await install;
+      expect(app.engineBusy()).toBe(false);
+    } finally {
+      delete win.window;
+    }
+  });
+
+  test('a routes call is never counted, like devices; a route call is', async () => {
+    // send.js's poll swaps from `devices` to `routes` (parity piece B), and
+    // the reason routes must not count is the same one devices was excluded
+    // for: it is polled every 2 s while Send is open, never mid-job, and
+    // counting it would flash "Restarting after this finishes…" on a tab
+    // that is just sitting there polling. `route` actually writes: it saves
+    // a file or opens an app, so it counts like send or kfx-install.
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    win.window = {
+      __TAURI__: {
+        core: { invoke: () => new Promise((resolve) => setTimeout(() => resolve('{"ok":true}'), 10)) },
+      },
+    };
+    try {
+      const routes = app.runEngine(app.argv.routes('/s/script.epub'));
+      expect(app.engineBusy()).toBe(false);
+      expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
+      await routes;
+
+      const route = app.runEngine(app.argv.route('apple-books', '/s/script.epub'));
+      expect(app.engineBusy()).toBe(true);
+      expect(Bun.peek.status(app.whenIdle())).toBe('pending');
+      await route;
       expect(app.engineBusy()).toBe(false);
     } finally {
       delete win.window;

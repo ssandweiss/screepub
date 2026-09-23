@@ -70,6 +70,23 @@ grant here: a door, not an opinion. What to link is decided by
 `src/export/kfx-setup.ts`, and `tests/desktop-shell.test.ts` holds that
 file's links and this grant to the same three strings.
 
+**Amended 2026-09-23 (parity piece B, send routes).** Apple Books, Amazon's
+Send to Kindle app and its own web page, the default mail app and, with
+piece C, the file manager are all opened by the ENGINE, not the window.
+The owner's reasoning: every one of those routes opens a file that lives in
+the Screepub library, piece C is what makes that library's location
+movable, and a window permission is a fixed path written into a manifest
+that cannot follow it there. So those five routes are `screepub route <key>`
+calls the engine performs on its own machine, the same door `run_engine`
+already is, and they cost the window no new permission at all. The
+window's own doors gain exactly one new entry for this piece:
+`dialog:allow-save`, so the reader can choose where a saved copy of the
+EPUB or the Kindle file goes. It has no allow-list to write, for the same
+reason `process:allow-restart` does not: the user picks the path in the
+native box, and the window only ever hands that one string back to the
+engine, which is what writes there. Approved by the owner the same day
+("yes go for it"). Same test as every grant here: a door, not an opinion.
+
 **Amended 2026-09-23 (the update notice and window drag).** One new crate:
 `tauri-plugin-process`, linked for exactly one reason, restarting the
 window after an update once the engine is idle. Only

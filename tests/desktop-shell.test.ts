@@ -414,16 +414,21 @@ describe('the window is granted no more than it needs', () => {
     for (const permission of capability().permissions) {
       if (typeof permission === 'string') {
         // Only core:* may be a bare string: it is the window's own baseline,
-        // not a door onto the OS. TWO named exceptions. updater:default has
+        // not a door onto the OS. THREE named exceptions. updater:default has
         // no allow-list to write, because the plugin can only ever reach
         // the endpoints in tauri.conf.json. That list is its scope, and the
         // updater tests at the end of this file pin it to one URL on this
         // repository. process:allow-restart has nothing to scope at all: it
         // restarts this app and nothing else (tauri-plugin-process 2.3.1,
-        // commands::restart is app.request_restart()).
+        // commands::restart is app.request_restart()). dialog:allow-save
+        // (parity piece B, owner-approved 2026-09-23) has nothing to scope
+        // either: the user chooses the path in the native save box, and the
+        // window only ever receives a path string back and hands it to the
+        // engine, which is the one that writes the file.
         const allowed = permission.startsWith('core:')
           || permission === 'updater:default'
-          || permission === 'process:allow-restart';
+          || permission === 'process:allow-restart'
+          || permission === 'dialog:allow-save';
         expect(`bare permission: ${permission}`).toBe(`bare permission: ${
           allowed ? permission : `${permission} MUST BE SCOPED`}`);
         continue;
@@ -958,6 +963,18 @@ describe('the updater: transport in the crate, judgement in the engine', () => {
     const permissions = capability().permissions;
     expect(permissions).toContain('core:window:allow-start-dragging');
     expect(permissions).not.toContain('core:window:allow-internal-toggle-maximize');
+  });
+
+  test('the window may show a save dialog, and that grant is bare because there is nothing to scope', () => {
+    // Parity piece B, owner-approved 2026-09-23 ("yes go for it"). The window
+    // gets exactly the save half of the dialog plugin: pick_file stays a Rust
+    // command (it already was), and the JS side gains only dialog:allow-save,
+    // never dialog:default, which would also hand it open/message/ask/confirm
+    // it has no use for.
+    const permissions = capability().permissions;
+    expect(permissions).toContain('dialog:allow-save');
+    expect(permissions).not.toContain('dialog:default');
+    expect(JSON.stringify(permissions)).not.toMatch(/"dialog:allow-(open|message|ask|confirm)"/);
   });
 
   test('the window may check, download and install, and that grant is bare BY NECESSITY', () => {

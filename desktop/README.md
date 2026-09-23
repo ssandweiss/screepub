@@ -157,6 +157,16 @@ against a ceiling of 200.
 > granted. And `core:window:allow-start-dragging`, so the strip along the
 > top of the window, and the gaps in the tab bar, can move it. Double-click
 > zoom was already in `core:default`. Still two commands.
+>
+> Later still on 2026-09-23 it gained a third bare grant, `dialog:allow-save`
+> (parity piece B, the owner's "yes go for it"). It is the window's only new
+> door for that piece: Apple Books, Send to Kindle, email and the file
+> manager are all opened by the ENGINE instead, because those routes open a
+> file in the library and a window permission is a fixed path that cannot
+> follow the library if it ever moves (see the same amendment in
+> [ADR 2026-09-21](../docs/adr/2026-09-21-doors-not-commands.md)). The save
+> box has nothing to scope: the reader picks the path, and the window only
+> ever hands that path to the engine. Still two commands.
 
 ### The updater archive is a release artifact, not a build artifact
 

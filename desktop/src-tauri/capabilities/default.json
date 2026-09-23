@@ -1,13 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "This app's own two commands, plus scoped doors: the window may ask the OS to open the project's issue tracker and the three Calibre and Kindle Previewer download pages the KFX checklist links to, to reveal a file inside the Screepub library, and to ask the updater plugin to check, download and install. The updater grant has no allow-list to write; its scope is the one endpoint in tauri.conf.json. Two bare grants besides the doors: process:allow-restart, so the window can restart itself after an update once the engine is idle (the plugin's exit is not granted), and core:window:allow-start-dragging, so the strip along the top of the page, and the gaps in the tab bar, can move it. The shell and dialog plugins are still used only from Rust. See ADR 2026-09-21 — doors, not commands.",
+  "description": "This app's own two commands, plus scoped doors: the window may ask the OS to open the project's issue tracker and the three Calibre and Kindle Previewer download pages the KFX checklist links to, to reveal a file inside the Screepub library, to show a save dialog so the user can choose where a copy goes (the engine is what writes the file), and to ask the updater plugin to check, download and install. The updater grant has no allow-list to write; its scope is the one endpoint in tauri.conf.json. Three bare grants besides the doors: dialog:allow-save, which has nothing to scope because the user picks the path and the window only ever hands a string back to the engine; process:allow-restart, so the window can restart itself after an update once the engine is idle (the plugin's exit is not granted); and core:window:allow-start-dragging, so the strip along the top of the page, and the gaps in the tab bar, can move it. The shell plugin is still used only from Rust; the dialog plugin now serves both sides: pick_file stays a Rust command, and the save box is asked for directly by the window. See ADR 2026-09-21 — doors, not commands.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "updater:default",
     "process:allow-restart",
     "core:window:allow-start-dragging",
+    "dialog:allow-save",
     {
       "identifier": "opener:allow-open-url",
       "allow": [
