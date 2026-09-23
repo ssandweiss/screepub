@@ -222,10 +222,12 @@ describe('the engine contract lives in exactly one file', () => {
       exportFull: argv.export('/s/script.epub', {
         forFormat: 'azw3', fountain: '/s/script.fountain', optionsJson: '{"a":1}',
       }),
+      kfxStatus: argv.kfxStatus(),
+      kfxInstall: argv.kfxInstall(),
     };
     // Every builder the interface promises is exercised above.
     expect(Object.keys(argv).sort()).toEqual(
-      ['convert', 'devices', 'export', 'reconvert', 'send', 'settings', 'version'].sort(),
+      ['convert', 'devices', 'export', 'kfxInstall', 'kfxStatus', 'reconvert', 'send', 'settings', 'version'].sort(),
     );
     for (const [name, args] of Object.entries(built)) {
       expect(`${name} has --json: ${args.includes('--json')}`).toBe(`${name} has --json: true`);
@@ -235,6 +237,12 @@ describe('the engine contract lives in exactly one file', () => {
         `${name} args: `,
       );
     }
+  });
+
+  test('the KFX builders are exactly the two verbs, with nothing else on them', async () => {
+    const { argv } = await import(join(UI, 'app.js'));
+    expect(argv.kfxStatus()).toEqual(['kfx-status', '--json']);
+    expect(argv.kfxInstall()).toEqual(['kfx-install', '--json']);
   });
 
   test('an optional flag brings its value and an absent one brings nothing', async () => {
@@ -3665,5 +3673,155 @@ describe('the drop well states one guard, not two', () => {
     // app says what it is.
     const { WORDMARK } = await wellCopy();
     expect(WORDMARK).toBe('Screepub');
+  });
+});
+
+describe('the Send page’s KFX block: decisions', () => {
+  type Setup = {
+    ready: boolean; possible: boolean; summary: string;
+    steps: { id: string; name: string; installed: boolean; fix: unknown }[];
+  };
+  type KfxModule = {
+    HEADING: string; INSTALLED: string; INSTALLING: string; NO_REASON: string;
+    checklistFrom: (value: unknown) => Setup | null;
+    setupFrom: (answer: unknown) => Setup | null;
+    kindleRelevant: (devices: unknown) => boolean;
+    showSetup: (setup: Setup | null, devices: unknown, justInstalled: boolean) => boolean;
+    controlFor: (step: Setup['steps'][number], busy: boolean) =>
+      | { type: 'status'; text: string }
+      | { type: 'link'; label: string; url: string }
+      | { type: 'install'; label: string; disabled: boolean };
+    installedLine: (answer: unknown) => string;
+    failedLine: (answer: unknown) => string;
+    linkFailedLine: (url: string) => string;
+    afterInstall: (answer: unknown, previous: Setup | null) =>
+      { setup: Setup | null; line: string; bad: boolean; justInstalled: boolean };
+  };
+  let kfx: KfxModule;
+  beforeAll(async () => { kfx = (await import(join(UI, 'kfx.js'))) as KfxModule; });
+
+  const notReady: Setup = {
+    ready: false,
+    possible: true,
+    summary: 'Kindles get AZW3 for now. KFX looks better, and needs the three free tools below.',
+    steps: [
+      { id: 'calibre', name: 'Calibre', installed: true, fix: null },
+      {
+        id: 'previewer', name: 'Kindle Previewer', installed: false,
+        fix: { kind: 'link', label: 'Get Kindle Previewer', url: 'https://kdp.amazon.com/en_US/help/topic/G202131170' },
+      },
+      { id: 'plugin', name: 'KFX plugin', installed: false, fix: { kind: 'install', label: 'Install' } },
+    ],
+  };
+  const ready: Setup = {
+    ready: true, possible: true, summary: 'Kindles get KFX, the best quality Screepub can make.',
+    steps: notReady.steps.map((s) => ({ ...s, installed: true, fix: null })),
+  };
+  const kindle = { id: '/m/Kindle', kind: 'kindle', name: 'Kindle', volume: '/m/Kindle' };
+  const kobo = { id: '/m/KOBOe', kind: 'kobo', name: 'Kobo', volume: '/m/KOBOe' };
+
+  test('the engine’s answer is taken whole, or not at all', () => {
+    expect(kfx.setupFrom({ ok: true, ...notReady })).toEqual(notReady);
+    expect(kfx.setupFrom({ ok: false, error: { code: 'x', message: 'y' } })).toBe(null);
+    expect(kfx.setupFrom(null)).toBe(null);
+    // A broken contract draws nothing: this block is advice, and a reader
+    // cannot act on "the probe answered strangely".
+    expect(kfx.checklistFrom({ ...notReady, steps: notReady.steps.slice(0, 2) })).toBe(null);
+    expect(kfx.checklistFrom({ ...notReady, summary: 7 })).toBe(null);
+    expect(kfx.checklistFrom({ ...notReady, possible: 'yes' })).toBe(null);
+    const badLink = structuredClone(notReady);
+    (badLink.steps[1] as { fix: unknown }).fix = { kind: 'link', label: 'Get it' };
+    expect(kfx.checklistFrom(badLink)).toBe(null);
+    const unknownKind = structuredClone(notReady);
+    (unknownKind.steps[2] as { fix: unknown }).fix = { kind: 'teleport', label: 'Go' };
+    expect(kfx.checklistFrom(unknownKind)).toBe(null);
+    const fixWhileInstalled = structuredClone(notReady);
+    (fixWhileInstalled.steps[0] as { fix: unknown }).fix = { kind: 'install', label: 'Install' };
+    expect(kfx.checklistFrom(fixWhileInstalled)).toBe(null);
+  });
+
+  test('Kindle advice is for Kindles: shown with a Kindle, or nothing, connected', () => {
+    expect(kfx.kindleRelevant([])).toBe(true);
+    expect(kfx.kindleRelevant([kindle])).toBe(true);
+    expect(kfx.kindleRelevant([kobo, kindle])).toBe(true);
+    expect(kfx.kindleRelevant([kobo])).toBe(false);
+    // Before the first device poll answers, the list is unknown, and the
+    // block waits rather than flashing up and vanishing a moment later.
+    expect(kfx.kindleRelevant(null)).toBe(false);
+  });
+
+  test('shown only when it helps', () => {
+    expect(kfx.showSetup(notReady, [], false)).toBe(true);
+    expect(kfx.showSetup(ready, [], false)).toBe(false);
+    // Right after an install the success line needs somewhere to stand.
+    expect(kfx.showSetup(ready, [], true)).toBe(true);
+    expect(kfx.showSetup(null, [], true)).toBe(false);
+    expect(kfx.showSetup({ ...notReady, possible: false }, [], false)).toBe(false);
+    expect(kfx.showSetup(notReady, [kobo], false)).toBe(false);
+    expect(kfx.showSetup(notReady, null, false)).toBe(false);
+  });
+
+  test('each step’s control says what to do, and install waits for a send', () => {
+    expect(kfx.controlFor(notReady.steps[0], false)).toEqual({ type: 'status', text: kfx.INSTALLED });
+    expect(kfx.controlFor(notReady.steps[1], true)).toEqual({
+      type: 'link', label: 'Get Kindle Previewer', url: 'https://kdp.amazon.com/en_US/help/topic/G202131170',
+    });
+    expect(kfx.controlFor(notReady.steps[2], false)).toEqual({ type: 'install', label: 'Install', disabled: false });
+    expect(kfx.controlFor(notReady.steps[2], true)).toEqual({ type: 'install', label: 'Install', disabled: true });
+    expect(kfx.controlFor(
+      { id: 'plugin', name: 'KFX plugin', installed: false, fix: { kind: 'after', why: 'Install Calibre first' } },
+      false,
+    )).toEqual({ type: 'status', text: 'Install Calibre first' });
+  });
+
+  test('success names the version, whether Kindles now get KFX, and any fork removed', () => {
+    expect(kfx.installedLine({ ok: true, version: '2.20.1', removed: [], setup: ready }))
+      .toBe('Installed the KFX plugin 2.20.1. Kindles now get KFX.');
+    expect(kfx.installedLine({ ok: true, version: '2.20.1', removed: [], setup: notReady }))
+      .toBe('Installed the KFX plugin 2.20.1.');
+    expect(kfx.installedLine({ ok: true, version: '2.20.1', removed: ['KFX Output (fork)', 'Old KFX'], setup: ready }))
+      .toBe('Installed the KFX plugin 2.20.1. Kindles now get KFX. Removed an older copy: KFX Output (fork), Old KFX.');
+  });
+
+  test('a failure shows the engine’s own sentence, or a stand-in', () => {
+    expect(kfx.failedLine({ ok: false, error: { code: 'kfx-install-failed', message: 'could not install the KFX plugin: offline' } }))
+      .toBe('could not install the KFX plugin: offline');
+    expect(kfx.failedLine({ ok: false })).toBe(kfx.NO_REASON);
+    expect(kfx.failedLine(null)).toBe(kfx.NO_REASON);
+  });
+
+  test('a link that will not open still tells the reader where it goes', () => {
+    expect(kfx.linkFailedLine('https://calibre-ebook.com/download_osx'))
+      .toBe('Could not open the page. It is at https://calibre-ebook.com/download_osx');
+  });
+
+  test('afterInstall: success redraws from the fresh checklist and keeps the block up', () => {
+    const out = kfx.afterInstall({ ok: true, version: '2.20.1', removed: [], setup: ready }, notReady);
+    expect(out).toEqual({
+      setup: ready, line: 'Installed the KFX plugin 2.20.1. Kindles now get KFX.', bad: false, justInstalled: true,
+    });
+  });
+
+  test('afterInstall: a success with a broken checklist keeps the old one rather than blanking', () => {
+    const out = kfx.afterInstall({ ok: true, version: '2.20.1', removed: [], setup: { nonsense: true } }, notReady);
+    expect(out.setup).toEqual(notReady);
+    expect(out.bad).toBe(false);
+  });
+
+  test('afterInstall: a refusal keeps the checklist and shows the reason in alarm', () => {
+    const out = kfx.afterInstall({ ok: false, error: { code: 'kfx-install-failed', message: 'nope' } }, notReady);
+    expect(out).toEqual({ setup: notReady, line: 'nope', bad: true, justInstalled: false });
+  });
+
+  test('no copy in kfx.js carries an em dash', () => {
+    expect(read('kfx.js').includes('—')).toBe(false);
+  });
+
+  test('kfx.js holds no engine flag and no Tauri call of its own', () => {
+    const source = read('kfx.js');
+    expect(source).not.toContain("'--json'");
+    expect(source).not.toContain('__TAURI__');
+    expect(source).not.toContain("'kfx-install'");
+    expect(source).not.toContain("'kfx-status'");
   });
 });

@@ -56,6 +56,14 @@ export const argv = {
     ['export', epub, '--json', '--for', forFormat,
       fountain ? '--fountain' : null, fountain,
       optionsJson ? '--options-json' : null, optionsJson].filter((a) => a !== null),
+
+  /** Can this computer make KFX for a Kindle? Reads only. */
+  kfxStatus: () => ['kfx-status', '--json'],
+
+  /** Install the KFX plugin into Calibre. Fetches it from Calibre's plugin
+   *  index and writes into the user's Calibre, so it is only ever built in
+   *  answer to a press of the button that says so (kfx.js). */
+  kfxInstall: () => ['kfx-install', '--json'],
 };
 
 /** How much of an unparseable answer goes in the message a person reads.
