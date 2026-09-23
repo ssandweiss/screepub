@@ -1,5 +1,15 @@
 import { afterAll, describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  existsSync,
+  statSync,
+  utimesSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { exportCommand } from '../src/cli-export';
@@ -386,5 +396,292 @@ describe('--options-json validity does not depend on --for', () => {
         { calibreAvailable: () => false, kfxStatus: async () => noToolchainStatus },
       ),
     ).rejects.toMatchObject({ code: 'bad-options' });
+  });
+});
+
+// --out: the window's save dialog raises the dialog and hands the engine an
+// absolute path; the window never writes a file itself. This is the only
+// place a copy of the artifact reaches a spot the user actually chose.
+describe('exportCommand --out', () => {
+  test('epub is copied to a new nested absolute path: parents created, bytes equal, answer path is out', async () => {
+    const out = join(dir, 'nested', 'deeper', 'Saved.epub');
+    const result = await exportCommand({ epub, for: 'epub', out });
+    expect(result.path).toBe(out);
+    expect(existsSync(out)).toBe(true);
+    expect(readFileSync(out).equals(readFileSync(epub))).toBe(true);
+  });
+
+  test('a relative --out is refused on the epub rung, naming "absolute"', async () => {
+    // Run with cwd inside SCRATCH: were the absolute check ever bypassed (a
+    // regression, or a mutant), a relative path resolves against cwd and
+    // would otherwise land in whatever directory happened to be current,
+    // which must never be the repo itself.
+    const before = process.cwd();
+    process.chdir(dir);
+    let error: unknown;
+    try {
+      await exportCommand({ epub, for: 'epub', out: 'relative.epub' });
+    } catch (err) {
+      error = err;
+    } finally {
+      process.chdir(before);
+    }
+    expect((error as { code?: string } | undefined)?.code).toBe('usage');
+    expect((error as Error | undefined)?.message).toContain('absolute');
+  });
+
+  // The point of this one: the absolute check must fire before Calibre's
+  // probe or the ladder ever runs, not merely before the ladder SUCCEEDS.
+  // An injected ladder that records its own calls is the only way to prove
+  // zero of them happened, rather than merely that the visible answer was
+  // an error.
+  test('a relative --out is refused before the kindle ladder runs, zero ladder calls', async () => {
+    const before = process.cwd();
+    process.chdir(dir); // see the note above: keep any stray write inside SCRATCH
+    let ladderCalls = 0;
+    let calibreCalls = 0;
+    let error: unknown;
+    try {
+      await exportCommand(
+        { epub, for: 'kindle', fountain, out: 'relative/path.mobi' },
+        {
+          calibreAvailable: () => {
+            calibreCalls++;
+            return false;
+          },
+          kfxStatus: async () => noToolchainStatus,
+          freshKindleArtifact: async () => {
+            ladderCalls++;
+            return join(dir, 'Script.mobi');
+          },
+        },
+      );
+    } catch (err) {
+      error = err;
+    } finally {
+      process.chdir(before);
+    }
+    expect((error as { code?: string } | undefined)?.code).toBe('usage');
+    expect((error as Error | undefined)?.message).toContain('absolute');
+    expect(calibreCalls).toBe(0);
+    expect(ladderCalls).toBe(0);
+  });
+
+  test('the wrong extension for epub is refused before any copy, naming .epub', async () => {
+    const out = join(dir, 'Saved.mobi');
+    let error: unknown;
+    try {
+      await exportCommand({ epub, for: 'epub', out });
+    } catch (err) {
+      error = err;
+    }
+    expect((error as { code?: string } | undefined)?.code).toBe('usage');
+    expect((error as Error | undefined)?.message).toContain('.epub');
+    expect(existsSync(out)).toBe(false);
+  });
+
+  test('kindle rung: out ending in the produced extension (.azw3) copies', async () => {
+    const fakeAzw3 = join(dir, 'Script.azw3');
+    writeFileSync(fakeAzw3, 'fake-azw3-bytes');
+    const out = join(dir, 'ForKindle.azw3');
+    const result = await exportCommand(
+      { epub, for: 'kindle', fountain, out },
+      {
+        calibreAvailable: () => true,
+        kfxStatus: async () => calibreOnlyStatus,
+        freshKindleArtifact: async () => fakeAzw3,
+      },
+    );
+    expect(result.path).toBe(out);
+    expect(readFileSync(out, 'utf8')).toBe('fake-azw3-bytes');
+  });
+
+  // The extension is only known once the ladder answers: this is a rung
+  // that would have made an .azw3, refused a save name ending .kfx, naming
+  // the extension it actually would have produced.
+  test('kindle rung: out ending .kfx is refused naming .azw3, after the ladder ran', async () => {
+    const fakeAzw3 = join(dir, 'Script.azw3');
+    writeFileSync(fakeAzw3, 'fake-azw3-bytes');
+    const out = join(dir, 'ForKindle.kfx');
+    let ladderCalls = 0;
+    let error: unknown;
+    try {
+      await exportCommand(
+        { epub, for: 'kindle', fountain, out },
+        {
+          calibreAvailable: () => true,
+          kfxStatus: async () => calibreOnlyStatus,
+          freshKindleArtifact: async () => {
+            ladderCalls++;
+            return fakeAzw3;
+          },
+        },
+      );
+    } catch (err) {
+      error = err;
+    }
+    expect((error as { code?: string } | undefined)?.code).toBe('usage');
+    expect((error as Error | undefined)?.message).toContain('.azw3');
+    // Unlike the relative-path check, the extension cannot be known until
+    // the ladder has already run once: it fired exactly once, not zero.
+    expect(ladderCalls).toBe(1);
+    expect(existsSync(out)).toBe(false);
+  });
+
+  test('an existing file at out is replaced', async () => {
+    const out = join(dir, 'Existing.epub');
+    writeFileSync(out, 'stale-bytes-that-must-go');
+    const result = await exportCommand({ epub, for: 'epub', out });
+    expect(result.path).toBe(out);
+    expect(readFileSync(out).equals(readFileSync(epub))).toBe(true);
+  });
+
+  test('no temp file is left beside the destination on success', async () => {
+    const destDir = join(dir, 'clean-success');
+    mkdirSync(destDir);
+    const out = join(destDir, 'Saved.epub');
+    await exportCommand({ epub, for: 'epub', out });
+    expect(readdirSync(destDir)).toEqual(['Saved.epub']);
+  });
+
+  // Forces the copy's own rename to fail (a directory sits where the file
+  // must go) so the catch-and-unlink path actually runs, not just the happy
+  // path's implicit cleanup-by-rename.
+  test('no temp file is left beside the destination on failure, and it answers export-failed', async () => {
+    const destDir = join(dir, 'clean-failure');
+    mkdirSync(destDir);
+    const out = join(destDir, 'Saved.epub');
+    mkdirSync(out);
+    let error: unknown;
+    try {
+      await exportCommand({ epub, for: 'epub', out });
+    } catch (err) {
+      error = err;
+    }
+    expect((error as { code?: string } | undefined)?.code).toBe('export-failed');
+    expect(readdirSync(destDir)).toEqual(['Saved.epub']);
+  });
+
+  test('out equal to the epub artifact\'s own path answers without copying', async () => {
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(epub, past, past);
+    const result = await exportCommand({ epub, for: 'epub', out: epub });
+    expect(result.path).toBe(epub);
+    // A copy-then-rename over itself would still succeed, but it would also
+    // give the file a fresh mtime; this is the only way from outside to
+    // tell "answered without touching it" from "copied it onto itself".
+    expect(statSync(epub).mtime.getTime()).toBe(past.getTime());
+  });
+
+  test('kindle rung: out equal to the produced path answers without copying', async () => {
+    const fakeAzw3 = join(dir, 'Script.azw3');
+    writeFileSync(fakeAzw3, 'fake-azw3-bytes');
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(fakeAzw3, past, past);
+    const result = await exportCommand(
+      { epub, for: 'kindle', fountain, out: fakeAzw3 },
+      {
+        calibreAvailable: () => true,
+        kfxStatus: async () => calibreOnlyStatus,
+        freshKindleArtifact: async () => fakeAzw3,
+      },
+    );
+    expect(result.path).toBe(fakeAzw3);
+    expect(statSync(fakeAzw3).mtime.getTime()).toBe(past.getTime());
+  });
+
+  // A behavioral test cannot easily force a mid-copy interruption, so this
+  // pins the mechanism at the source: the copy goes through a temp name in
+  // the destination folder and a rename, never a direct write onto `out`.
+  // Mirrors how tests/cli-kfx.test.ts already pins its own branch's shape.
+  test('the copy goes through a temp name and a rename, not a direct write', () => {
+    const src = readFileSync(new URL('../src/cli-export.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/\.tmp`\);/);
+    expect(src).toMatch(/await rename\(tmp, destination\)/);
+  });
+});
+
+describe('screepub export --out (through the CLI)', () => {
+  test('epub to a new absolute path, through the spawned CLI', () => {
+    const out = join(dir, 'cli-nested', 'Saved.epub');
+    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'export', epub, '--for', 'epub', '--out', out, '--json']);
+    const answer = JSON.parse(proc.stdout.toString());
+    expect(answer.ok).toBe(true);
+    expect(answer.path).toBe(out);
+    expect(existsSync(out)).toBe(true);
+  });
+
+  test('export --help mentions --out', () => {
+    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'export', '--help', '--json']);
+    const answer = JSON.parse(proc.stdout.toString());
+    expect(answer.ok).toBe(true);
+    expect(answer.usage).toContain('--out');
+  });
+});
+
+// Every OTHER verb must refuse --out, the same way every verb but export
+// already refuses --for and --fountain. Task 6 adds `route`, which also
+// accepts it; until then export is the only owner.
+describe('every other verb refuses --out', () => {
+  test('devices --out is a usage error naming export and route', () => {
+    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'devices', '--out', '/tmp/x.epub', '--json']);
+    const answer = JSON.parse(proc.stdout.toString());
+    expect(answer.ok).toBe(false);
+    expect(answer.error.code).toBe('usage');
+    expect(answer.error.message).toContain('--out belongs to export and route');
+  });
+
+  test('send <file> --out is a usage error naming export and route', () => {
+    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'send', epub, '--out', '/tmp/x.epub', '--json']);
+    const answer = JSON.parse(proc.stdout.toString());
+    expect(answer.ok).toBe(false);
+    expect(answer.error.code).toBe('usage');
+    expect(answer.error.message).toContain('--out belongs to export and route');
+  });
+
+  test('settings <file> --out is a usage error naming export and route', () => {
+    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'settings', fountain, '--out', '/tmp/x.epub', '--json']);
+    const answer = JSON.parse(proc.stdout.toString());
+    expect(answer.ok).toBe(false);
+    expect(answer.error.code).toBe('usage');
+    expect(answer.error.message).toContain('--out belongs to export and route');
+  });
+
+  test('kfx-status --out is a usage error naming export and route', () => {
+    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'kfx-status', '--out', '/tmp/x.epub', '--json']);
+    const answer = JSON.parse(proc.stdout.toString());
+    expect(answer.ok).toBe(false);
+    expect(answer.error.code).toBe('usage');
+    expect(answer.error.message).toContain('--out belongs to export and route');
+  });
+
+  // Safe to spawn: the refusal sits ahead of kfxInstallCommand() in cli.ts
+  // (tests/cli-kfx.test.ts pins that order), so this exits on the usage
+  // error before the installer ever touches the network or Calibre.
+  test('kfx-install --out is a usage error naming export and route, before installing anything', () => {
+    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'kfx-install', '--out', '/tmp/x.epub', '--json']);
+    const answer = JSON.parse(proc.stdout.toString());
+    expect(answer.ok).toBe(false);
+    expect(answer.error.code).toBe('usage');
+    expect(answer.error.message).toContain('--out belongs to export and route');
+  });
+
+  test('update-decision --out is a usage error naming export and route', () => {
+    const proc = Bun.spawnSync([
+      'bun', 'src/cli.ts', 'update-decision',
+      '--offered', '0.7.0', '--current', '0.6.0', '--out', '/tmp/x.epub', '--json',
+    ]);
+    const answer = JSON.parse(proc.stdout.toString());
+    expect(answer.ok).toBe(false);
+    expect(answer.error.code).toBe('usage');
+    expect(answer.error.message).toContain('--out belongs to export and route');
+  });
+
+  test('update-should-check --out is a usage error naming export and route', () => {
+    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'update-should-check', '--out', '/tmp/x.epub', '--json']);
+    const answer = JSON.parse(proc.stdout.toString());
+    expect(answer.ok).toBe(false);
+    expect(answer.error.code).toBe('usage');
+    expect(answer.error.message).toContain('--out belongs to export and route');
   });
 });

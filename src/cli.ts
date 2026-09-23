@@ -139,7 +139,7 @@ Options:
 const EXPORT_USAGE = `screepub export — the file you would put on a reader
 
 Usage:
-  screepub export <file.epub> [--for kindle|epub] [--fountain <f>] [--json]
+  screepub export <file.epub> [--for kindle|epub] [--fountain <f>] [--out <path>] [--json]
 
 export never sends: it produces (or reuses) the right file, and
 \`screepub send\` moves it. Kindle climbs KFX → AZW3 → MOBI, taking the best
@@ -149,6 +149,8 @@ Options:
   --for <kindle|epub>    which file you want (default epub)
   --fountain <file>      the script's .fountain, needed to rebuild a MOBI
   --options-json <json>  this script's settings, so a rebuild keeps them
+  --out <path>           also copy the result to this absolute path (its
+                         extension must match the file produced)
   --json                 machine-readable result on stdout (for the app)
   -h, --help             show this help
 `;
@@ -380,6 +382,7 @@ function parseVerbArgs(args: string[]) {
       for: { type: 'string' },
       fountain: { type: 'string' },
       'options-json': { type: 'string' },
+      out: { type: 'string' },
       offered: { type: 'string' },
       current: { type: 'string' },
       'opted-in': { type: 'boolean', default: false },
@@ -422,6 +425,14 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
           fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
         }
       }
+    }
+
+    // --out is export's own flag (route gains it too, once it exists): the
+    // window's save dialog hands the engine a chosen path, and every verb
+    // that cannot write a file there must refuse it loud, the same way
+    // --for and --fountain are refused everywhere but export.
+    if (verb !== 'export' && values.out !== undefined) {
+      fail({ code: 'usage', message: `${verb} takes no --out (--out belongs to export and route)` });
     }
 
     if (verb === 'devices') {
@@ -590,6 +601,7 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
         for: values.for,
         fountain: values.fountain,
         optionsJson: values['options-json'],
+        out: values.out,
       });
       if (jsonMode) {
         console.log(JSON.stringify({ ok: true, ...result }));
