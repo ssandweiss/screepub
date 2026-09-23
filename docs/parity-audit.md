@@ -60,7 +60,7 @@ Two of six. The ranking and the remembered choice are missing too:
 | Cancel during conversion | 54 | 0 | **OUT, decided twice** |
 | **Feedback / Report a Bug** | 17 | 0 | **in nobody's list** |
 | **Show in Finder (two places)** | 2 | 0 | **in nobody's list** |
-| **KFX plugin install** | button | 0 | **written but unreachable** |
+| **KFX plugin install** | button | 0 | **done 2026-09-23** (piece D: `kfx-status`, `kfx-install`, Send page) |
 | **The gear (three things)** | 3 | 0 | **in nobody's list** |
 | First-run welcome screen | 1 | 0 | lower confidence |
 | "Open Amazon's settings page" | 1 | 0 | rides with email-to-Kindle |
@@ -91,6 +91,11 @@ plugin" button. So this is not a port: the engine capability already
 exists and nothing can reach it. **"Implemented" and "reachable" have come
 apart, and this row exists to keep that visible** — it is the cheapest
 item here and it is invisible to any audit that greps for absence.
+
+**Closed 2026-09-23 (piece D).** `screepub kfx-status` and
+`screepub kfx-install` reach it from the CLI, and the Send page draws the
+same three-step checklist with Get and Install buttons. See
+[the spec](superpowers/specs/2026-09-23-kfx-install-surface-design.md).
 
 **The gear is three things.** `ScreepubApp.swift:157` "Output folder" with
 a picker and a Reset, `ReaderRail.swift:100` "Save as app defaults" which
