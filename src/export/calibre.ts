@@ -76,9 +76,16 @@ export class CalibreFailedError extends Error {
   }
 }
 
-/** Exported because export/kfx.ts runs the same tool with the same guards. */
-export async function runCalibre(tool: string, args: string[]): Promise<void> {
-  const proc = Bun.spawn([tool, ...args], { stdout: 'pipe', stderr: 'pipe' });
+/** Exported because export/kfx.ts runs the same tool with the same guards.
+ *  `env` replaces the child's environment when given (kfx.ts uses it to
+ *  hand Kindle Previewer a temp folder of its own); omitted, the child
+ *  inherits this process's. */
+export async function runCalibre(
+  tool: string,
+  args: string[],
+  env?: Record<string, string | undefined>,
+): Promise<void> {
+  const proc = Bun.spawn([tool, ...args], { stdout: 'pipe', stderr: 'pipe', env });
   const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
   if (code !== 0) throw new CalibreFailedError(stderr.trim() || `exit ${code}`);
 }
