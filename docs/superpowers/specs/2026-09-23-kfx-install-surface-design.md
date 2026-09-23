@@ -101,7 +101,10 @@ Rules:
 - Plugin missing with Calibre present: `{ kind: 'install', label: 'Install' }`.
   Plugin missing without Calibre: `{ kind: 'after', why: 'Install Calibre
   first' }`. `pluginInstalled` is only meaningful with Calibre, so the step
-  reads `installed: false` whenever Calibre is missing.
+  reads `installed: false` whenever Calibre is missing. Where `possible` is
+  false, a missing plugin is `{ kind: 'unavailable', why: 'Of no use without
+  Kindle Previewer' }` instead, whatever Calibre says: installing it there
+  would fetch code that can never run.
 - `summary`, in this order of precedence:
   - ready: `Kindles get KFX, the best quality Screepub can make.`
   - not possible: `Amazon does not make Kindle Previewer for Linux, so

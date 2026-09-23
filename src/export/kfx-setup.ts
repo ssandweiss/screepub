@@ -79,8 +79,12 @@ function previewerFix(status: KfxStatus, platform: string): KfxFix | null {
   return { kind: 'link', label: 'Get Kindle Previewer', url: PREVIEWER_PAGE };
 }
 
-function pluginFix(status: KfxStatus, installed: boolean): KfxFix | null {
+function pluginFix(status: KfxStatus, installed: boolean, possible: boolean): KfxFix | null {
   if (installed) return null;
+  // Off darwin/win32 there is no Kindle Previewer for the plugin to drive,
+  // so it is useless there: neither "install it" nor "install Calibre
+  // first" leads anywhere a Linux user can act on.
+  if (!possible) return { kind: 'unavailable', why: 'Of no use without Kindle Previewer' };
   if (!status.calibre) return { kind: 'after', why: 'Install Calibre first' };
   return { kind: 'install', label: 'Install' };
 }
@@ -98,7 +102,12 @@ export function kfxSetup(status: KfxStatus, platform: string): KfxSetup {
       installed: status.previewer,
       fix: previewerFix(status, platform),
     },
-    { id: 'plugin', name: 'KFX plugin', installed: pluginInstalled, fix: pluginFix(status, pluginInstalled) },
+    {
+      id: 'plugin',
+      name: 'KFX plugin',
+      installed: pluginInstalled,
+      fix: pluginFix(status, pluginInstalled, possible),
+    },
   ];
   // The ladder's own answer for "not KFX", so this sentence cannot disagree
   // with what the export actually builds.

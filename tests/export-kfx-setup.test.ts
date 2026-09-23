@@ -48,6 +48,18 @@ describe('kfxSetup', () => {
     expect(setup.steps.every((s) => s.installed)).toBe(true);
   });
 
+  test('ready is exactly status.ready, for every status and platform', () => {
+    // A mutant that hard-codes `ready: true` passes the single-case test
+    // above (status.ready IS true there). This walks the whole matrix so a
+    // false case is checked too.
+    for (const platform of ['darwin', 'win32', 'linux']) {
+      for (const s of ALL) {
+        expect(`${platform} ${JSON.stringify(s)} ready=${kfxSetup(s, platform).ready}`)
+          .toBe(`${platform} ${JSON.stringify(s)} ready=${s.ready}`);
+      }
+    }
+  });
+
   test('missing Calibre links to the download page for this platform', () => {
     expect(step(kfxSetup(status(false, true, false), 'darwin'), 'calibre').fix).toEqual({
       kind: 'link', label: 'Get Calibre', url: 'https://calibre-ebook.com/download_osx',
@@ -77,6 +89,25 @@ describe('kfxSetup', () => {
   });
 
   test('the plugin installs when Calibre is there, and waits for Calibre when it is not', () => {
+    expect(step(kfxSetup(status(true, true, false), 'darwin'), 'plugin').fix).toEqual({
+      kind: 'install', label: 'Install',
+    });
+    expect(step(kfxSetup(status(false, true, false), 'darwin'), 'plugin').fix).toEqual({
+      kind: 'after', why: 'Install Calibre first',
+    });
+  });
+
+  test('the plugin is unavailable where KFX cannot happen, whatever Calibre says', () => {
+    // Off darwin/win32 the plugin can never run (no Kindle Previewer to
+    // drive), so offering to install it, or telling the user to install
+    // Calibre first so they CAN install it, both point at a dead end.
+    expect(step(kfxSetup(status(true, false, false), 'linux'), 'plugin').fix).toEqual({
+      kind: 'unavailable', why: 'Of no use without Kindle Previewer',
+    });
+    expect(step(kfxSetup(status(false, false, false), 'linux'), 'plugin').fix).toEqual({
+      kind: 'unavailable', why: 'Of no use without Kindle Previewer',
+    });
+    // darwin is unaffected: install/after still hold there.
     expect(step(kfxSetup(status(true, true, false), 'darwin'), 'plugin').fix).toEqual({
       kind: 'install', label: 'Install',
     });
