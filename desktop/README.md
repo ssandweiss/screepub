@@ -144,6 +144,13 @@ against a ceiling of 200.
 > allow-list to write: its scope is the single endpoint in `tauri.conf.json`
 > (this repository's `releases/latest/download/latest.json`), and
 > `tests/desktop-shell.test.ts` pins that to one URL. Still two commands.
+>
+> On 2026-09-23 it gained two more bare grants. `process:allow-restart`, from
+> `tauri-plugin-process`, so the window can restart itself after an update
+> once the engine is idle; the plugin's `exit` is deliberately not granted.
+> And `core:window:allow-start-dragging`, so the strip along the top of the
+> window, and the gaps in the tab bar, can move it. Double-click zoom was
+> already in `core:default`. Still two commands.
 
 ### The updater archive is a release artifact, not a build artifact
 

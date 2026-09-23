@@ -48,6 +48,10 @@ fn main() {
         // engine's comparator, which the window applies over the plugin's
         // answer. No command is registered here for any of it.
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Restart after an update (docs/superpowers/specs/2026-09-23-update-notice-and-window-drag-design.md).
+        // The window decides WHEN, after the engine is idle; this only makes
+        // `relaunch()` exist. Only `restart` is granted; `exit` is not.
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![run_engine, pick_file])
         .run(tauri::generate_context!())
         .expect("the Screepub window failed to start");
