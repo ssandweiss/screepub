@@ -64,6 +64,40 @@ export const argv = {
  *  wrong, and the rest only buries the two buttons under it. */
 const RAW_SHOWN = 300;
 
+// How many engine calls are running right now. An update's restart waits
+// for this to reach zero (update.js, installAndRestart), because every call
+// is somebody's work: a conversion, a copy to a Kindle, a settings file half
+// written. Counted HERE because this is the one door every call goes through.
+let inFlight = 0;
+let idleWaiters = [];
+
+/** Run the engine and parse its one line of stdout, counted while it runs.
+ *  See runEngineOnce for what the answer means. */
+export async function runEngine(args) {
+  inFlight += 1;
+  try {
+    return await runEngineOnce(args);
+  } finally {
+    inFlight -= 1;
+    if (inFlight === 0) {
+      const waiters = idleWaiters;
+      idleWaiters = [];
+      for (const resolve of waiters) resolve();
+    }
+  }
+}
+
+/** True while any engine call is running. */
+export function engineBusy() {
+  return inFlight > 0;
+}
+
+/** Resolves when no engine call is running: at once if none is. */
+export function whenIdle() {
+  if (inFlight === 0) return Promise.resolve();
+  return new Promise((resolve) => idleWaiters.push(resolve));
+}
+
 /** Run the engine and parse its one line of stdout.
  *  Throws an Error whose message is fit to show a person.
  *
@@ -73,7 +107,7 @@ const RAW_SHOWN = 300;
  *  live window at 384 KB, 1.04 MB and 3.47 MB, and was SLOWER every time
  *  (median 430 vs 330 ms, 1006 vs 718 ms, 4803 vs 3864 ms), so the decode
  *  branch it needed was taken out again. See desktop/README.md. */
-export async function runEngine(args) {
+async function runEngineOnce(args) {
   let stdout;
   try {
     stdout = await tauri().core.invoke('run_engine', { args });
@@ -216,14 +250,29 @@ export async function updateCheck() {
 /** Download and swap the bundle, reporting bytes as they arrive.
  *
  *  `close()` releases a resource held on the Rust side, so it runs whatever
- *  happened. The plugin does not relaunch on macOS; saying so is update.js's
- *  job, not this file's. */
+ *  happened. The plugin does not relaunch on macOS; restartApp below does,
+ *  when update.js says the engine is idle. */
 export async function updateInstall(update, onProgress) {
   try {
     await update.downloadAndInstall((event) => onProgress?.(event));
   } finally {
     await update.close?.();
   }
+}
+
+/** Whether tauri-plugin-process is linked into THIS build, the same test
+ *  updaterReady makes for the updater. A build without it falls back to
+ *  asking the reader to quit and reopen. */
+export function restartReady() {
+  return typeof tauri()?.process?.relaunch === 'function';
+}
+
+/** Restart into whatever bundle is on disk now. After an update, that is the
+ *  new version: Tauri reads Contents/Info.plist to find the binary on macOS
+ *  (tauri 2.11.5, src/process.rs). Only `restart` is granted to this window;
+ *  the plugin's `exit` is not. */
+export async function restartApp() {
+  await tauri().process.relaunch();
 }
 
 export function onProgress(handler) {

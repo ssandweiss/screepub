@@ -1244,6 +1244,68 @@ describe('what runEngine does with the answer it is handed', () => {
   });
 });
 
+describe('the window knows when the engine is working, and can restart', () => {
+  type Pending = { resolve: (v: string) => void; reject: (e: unknown) => void };
+  const win = globalThis as unknown as { window?: unknown };
+
+  test('whenIdle waits for every engine call, including one that fails', async () => {
+    const app = await import(join(UI, 'app.js'));
+    const pending: Pending[] = [];
+    win.window = {
+      __TAURI__: {
+        core: { invoke: () => new Promise<string>((resolve, reject) => pending.push({ resolve, reject })) },
+      },
+    };
+    try {
+      expect(app.engineBusy()).toBe(false);
+      const first = app.runEngine(['--version', '--json']);
+      const second = app.runEngine(['devices', '--json']).catch(() => 'failed');
+      expect(app.engineBusy()).toBe(true);
+      let idle = false;
+      const waiting = app.whenIdle().then(() => { idle = true; });
+      pending[0].resolve('{"ok":true}');
+      await first;
+      await new Promise((r) => setTimeout(r, 0));
+      expect(idle).toBe(false); // one call is still running
+      pending[1].reject('the engine is not there');
+      expect(await second).toBe('failed');
+      await waiting;
+      expect(idle).toBe(true);
+      expect(app.engineBusy()).toBe(false);
+    } finally {
+      delete win.window;
+    }
+  });
+
+  test('whenIdle answers at once when nothing is running', async () => {
+    const app = await import(join(UI, 'app.js'));
+    let idle = false;
+    await app.whenIdle().then(() => { idle = true; });
+    expect(idle).toBe(true);
+  });
+
+  test('restart is offered only when the process plugin is in this build', async () => {
+    const app = await import(join(UI, 'app.js'));
+    let relaunched = 0;
+    win.window = { __TAURI__: { core: {} } };
+    try {
+      expect(app.restartReady()).toBe(false);
+      win.window = { __TAURI__: { process: { relaunch: async () => { relaunched += 1; } } } };
+      expect(app.restartReady()).toBe(true);
+      await app.restartApp();
+      expect(relaunched).toBe(1);
+    } finally {
+      delete win.window;
+    }
+  });
+
+  test('the window is never given the plugin\'s exit', () => {
+    // process:allow-exit is not granted (capabilities/default.json), and the
+    // window must not reach for it either.
+    expect(read('app.js')).not.toMatch(/process\.exit\(/);
+  });
+});
+
 describe('the Read surface', () => {
   const reader = read('read.js');
 
