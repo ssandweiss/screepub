@@ -118,7 +118,7 @@ describe('the engine gate', () => {
 
 describe('the window page the capture serves', () => {
   const real = readFileSync(join(ROOT, 'desktop', 'ui', 'index.html'), 'utf8');
-  const cfg = { shot: 'result', demoPdf: '/Users/Shared/demo.pdf' };
+  const cfg = { shot: 'result', demoPdf: '/Users/Shared/demo.pdf', token: 't' };
 
   test('it is the window’s own index.html, with the capture scripts inserted before main.js', () => {
     const out = captureIndex(real, cfg);
@@ -145,7 +145,7 @@ describe('the window page the capture serves', () => {
   });
 
   test('a value cannot close the <script> early, or be read as a replace() substitution pattern', () => {
-    const evil = { shot: '</script><script>alert(1)</script>', demoPdf: '/Users/a$&b/demo.pdf' };
+    const evil = { shot: '</script><script>alert(1)</script>', demoPdf: '/Users/a$&b/demo.pdf', token: 't' };
     const out = captureIndex(real, evil);
     expect(out).toContain('/Users/a$&b/demo.pdf');
     expect(out).not.toContain('</script><script>alert');
@@ -206,5 +206,16 @@ describe('the shot list', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('the capture command and Chrome driver typecheck', () => {
+  test('they import without running, so tsc covers them', async () => {
+    // tsconfig.json includes only src/ and tests/; importing these here is
+    // what puts them under `bunx tsc --noEmit`.
+    const cmd = await import('../tools/capture-screens');
+    const cdp = await import('../tools/capture/cdp');
+    expect(typeof cmd.main).toBe('function');
+    expect(cdp.CHROME).toBe('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
   });
 });

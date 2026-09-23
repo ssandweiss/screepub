@@ -16,6 +16,8 @@
 export interface CaptureConfig {
   shot: string;
   demoPdf: string;
+  /** The per-run secret the capture server's /engine requires. */
+  token: string;
 }
 
 const MAIN = '<script type="module" src="main.js"></script>';
