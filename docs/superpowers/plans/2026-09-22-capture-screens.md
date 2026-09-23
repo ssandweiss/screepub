@@ -8,7 +8,7 @@
 
 **Tech Stack:** Bun + TypeScript (`bun test`, `bunx tsc --noEmit`), Python 3 (the fixture generator), Chrome at `/Applications/Google Chrome.app`. No new dependencies.
 
-**Spec:** Part 3 of [docs/superpowers/specs/2026-09-22-readme-site-screens-design.md](../specs/2026-09-22-readme-site-screens-design.md), including its "Amended while planning" section. The machinery facts behind this plan were measured on 2026-09-22 and are in the auto-memory note `headless-chrome-capture`.
+**Spec:** Part 3 of [docs/superpowers/specs/2026-09-22-readme-site-screens-design.md](../specs/2026-09-22-readme-site-screens-design.md), including its "Amended while planning" section. The machinery facts behind this plan were measured on 2026-09-22 with Chrome 153: a Chrome started with a blocking spawn from the process that serves its pages waits forever, because the server cannot answer; `--force-prefers-color-scheme=dark` does nothing, while the protocol's `Emulation.setEmulatedMedia` works; `--screenshot` photographs whatever is on screen when its time budget runs out, a failed state included; and ES modules do not load from `file://`, so the pages are served.
 
 ---
 
@@ -25,12 +25,16 @@
 | `tools/capture/page.ts` | Pure: the window's `index.html` with the capture scripts inserted. |
 | `tools/capture/shots.ts` | Pure: the list of pictures, their sizes, themes and output paths, and write-if-changed. |
 | `tools/capture/cdp.ts` | Launches headless Chrome and speaks its protocol. |
+| `tools/capture/server.ts` | What the page server answers: `desktop/ui/`, `site/` and `tools/capture/` only, the window page, the first-pass pictures, and `/engine` through the gate. Added in review (Task 9). |
+| `tools/capture/run.ts` | One capture run: the marked scratch library it owns, every shot, and the cleanup of everything it made. Added in review (Task 9). |
 | `tools/capture/bridge.js` | Browser: the stand-in for `window.__TAURI__`. |
 | `tools/capture/steps.js` | Browser: drives the window into a shot's state and reports `ready` or `failed`. |
 | `tools/capture/frame.html` | Browser: pass two, the drawn window frame around a pass-one image. |
 | `tools/capture/hero.html` | Browser: the site in a frame, held at the before-and-after. |
 | `tools/capture-screens.ts` | The command: server, gate, library folder, Chrome, every shot, outputs. |
-| `tests/capture.test.ts` | Tests for the three pure modules, and that nothing leaked into `desktop/ui`. |
+| `tests/capture.test.ts` | Tests for the three pure modules, and that nothing leaked into `desktop/ui`. Since the Task 9 review, also the page server and whole runs with a fake browser and engine. |
+| `tests/capture-chrome.test.ts` | The real Chrome driver against a fake Chrome, and a run that fails at once on a server error. Added in review (Task 9). |
+| `tests/fixtures/fake-chrome/chrome.sh` | The fake Chrome: writes the debugging port file, records its profile folder, and waits to be stopped. Added in review (Task 9). |
 
 Nothing in `desktop/ui/` changes. The interface-pass session owns it.
 
@@ -145,23 +149,14 @@ PAGES = PAGES_BEFORE + SITE_PAGES
 
 - [ ] **Step 2: Write pages 1 to 13 into `PAGES_BEFORE`**
 
-Thirteen pages, each a list of rows, each short enough to fit one page. The generator refuses a page over 55 lines, so aim for about 40 laid-out lines a page: roughly four to six short action paragraphs and eight to twelve exchanges. The cast is MARA (40s, station engineer, few words), DELACROIX (50s, her partner on the job, counts things), TEO (20s, has kept the station alone for three weeks), and HALLORAN (relief team lead, heard only on the radio, as `HALLORAN (V.O.)`). Tone matches the site's scene: spare, dry, weather as a character. No real place names.
+Thirteen pages, each a list of rows, each short enough to fit one page. The generator refuses a page over 55 lines, so aim for about 40 laid-out lines a page: roughly four to six short action paragraphs and eight to twelve exchanges. Tone matches the site's scene: spare, dry, weather as a character. No real place names.
 
-| Page | Scene heading (a new scene starts only where one is listed) | What happens |
-| --- | --- | --- |
-| 1 | `EXT. RIDGE ROAD - DAY` | A truck grinds up a switchback. Mara drives; Delacroix navigates with a paper map and counts the bends out loud. They are going up to service a remote weather station and bring its keeper down. |
-| 2 | `EXT. FIELD STATION - DAY` | The station: a prefab hut, a radio mast, a fuel drum, a generator under a tarp. Teo comes out to meet them, thin and too glad to see people. |
-| 3 | (continues) | Teo shows them round too fast. He talks about the sounds the mast makes in wind. Mara checks the generator housing and says nothing about what she finds. |
-| 4 | `INT. FIELD STATION - DAY` | Inside: the cot, the radio, the map with four pins marking the lower stations. Delacroix radios HALLORAN (V.O.), who confirms pickup in two days. |
-| 5 | `EXT. RADIO MAST - DUSK` | Mara climbs the mast to reseat the antenna. Wind. Delacroix below, holding the rope, asking why she took this job. |
-| 6 | (continues) | She answers something that is not an answer. The antenna seats. From the top she sees a light on the far ridge where no station is. She does not mention it. |
-| 7 | `INT. FIELD STATION - EVENING` | Tinned dinner. Teo says the fourth pin, the lowest station, has not answered in nine days. Delacroix wants to know why he did not report it. Teo did; nobody answered that either. |
-| 8 | `EXT. RIDGE - NIGHT` | Delacroix walks out with a torch to the marker cairn for the fourth station's line of sight. The cairn has been rebuilt, carefully, one stone short. |
-| 9 | (continues) | He counts the stones twice. Returns. |
-| 10 | `INT. FIELD STATION - LATER` | Halloran (V.O.) on the radio, breaking up: weather closing in, the relief is delayed. "Nineteen hours, earliest." Delacroix writes the number on the wall. |
-| 11 | `EXT. FIELD STATION - NIGHT` | Teo loads the quad bike, the map rolled under his arm. He will ride down to the fourth station and see. Mara tells him not to. He goes. |
-| 12 | (continues) | His tail light drops out of sight below the ridge. The generator coughs for the first time. |
-| 13 | `EXT. LOWER STATION - NIGHT` | Teo arrives at the fourth station. The door is open. The radio inside is on, tuned to their frequency, and someone has been listening. He keys the handset. |
+**Amended in review (2026-09-22).** The page-by-page outline and cast list
+that stood here drifted from the pages as they were written and reviewed,
+so they are gone rather than kept as a second, wrong copy of the script.
+`tools/field-station-content.py` is the source of truth for the pages and
+the cast. The radio voice was renamed IVERSEN in df2c8c8, because the name
+it was first given was too close to a well-known film character.
 
 Replace `PAGES_BEFORE = []` with the thirteen pages. Keep each speech to one to three short sentences.
 
@@ -1058,8 +1053,7 @@ Create `tools/capture/cdp.ts`:
 //
 // Why not `chrome --screenshot`: it photographs whatever is on screen when
 // its time budget runs out, including a failed state. This waits for the
-// page to say `ready` or `failed` first. Measured 2026-09-22; see the
-// auto-memory note headless-chrome-capture.
+// page to say `ready` or `failed` first. Measured 2026-09-22, Chrome 153.
 
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1168,6 +1162,26 @@ Run: `bunx tsc --noEmit`
 Expected: no output.
 
 ### Task 9: The command
+
+**Superseded in review (2026-09-22, commits c90ffcb and 685f5f9).** The
+command below served the whole repository folder, so run from the main
+checkout it would have served the real scripts in the gitignored root
+`fixtures/` folder, and `.git` with them. At the end it also deleted
+`/Users/Shared/Documents` without knowing whether the run had made it. In
+c90ffcb the server moved to `tools/capture/server.ts`, which serves
+`desktop/ui/`, `site/` and `tools/capture/` and nothing else, and answers
+only requests that name its own host; and the run moved to
+`tools/capture/run.ts`, which marks the scratch library as its own with a
+`.screepub-capture` file, refuses a library it did not mark, removes only
+the folders it made, cleans up on success, failure and interrupt, and
+writes no picture unless every one was taken. In 685f5f9 the marker gained
+the run's pid, so a second run at the same time is refused instead of
+deleting a live run's library, and only a marker whose process is gone is
+cleared as a leftover; and `tests/capture-chrome.test.ts` began running
+the real Chrome driver against a fake Chrome
+(`tests/fixtures/fake-chrome/chrome.sh`), so its failure paths are tested
+without a real Chrome. The code below is kept as the record of what was
+planned.
 
 **Files:**
 - Create: `tools/capture-screens.ts`

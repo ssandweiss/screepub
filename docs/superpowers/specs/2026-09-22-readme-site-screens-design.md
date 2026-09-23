@@ -108,6 +108,8 @@ Images live in `site/img/`, because the Pages workflow deploys `site/` alone.
 
 ## Part 3: the capture tool
 
+Read this with [Amended while planning](#amended-while-planning-2026-09-22-from-measurements) below: it replaces the `tools/screens/` pages and the recorded replay described here.
+
 One command: `bun tools/capture-screens.ts`. No new dependencies.
 
 1. **The script.** `tests/fixtures/field-station.pdf`, committed, made by a

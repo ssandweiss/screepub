@@ -23,7 +23,8 @@ TITLE = [
     (5.0, "the Screepub project"),
 ]
 
-# Pages 1-13: written in Task 1 Step 2, to the outline in the plan.
+# Pages 1-13: written to lead into the site's scene. These rows are the
+# source of truth for the pages and the cast; the plan no longer outlines them.
 PAGES_BEFORE = [
     [  # 1.
         ("scene", "EXT. RIDGE ROAD - DAY"),
