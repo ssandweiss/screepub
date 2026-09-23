@@ -3252,6 +3252,141 @@ describe('what the update label says, and what it remembers', () => {
   });
 });
 
+describe('an update downloads, installs, waits for the engine, then restarts', () => {
+  let update: any;
+  beforeAll(async () => { update = await import(join(UI, 'update.js')); });
+
+  const store = (seed: Record<string, string> = {}) => {
+    const map = new Map(Object.entries(seed));
+    return {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => { map.set(k, String(v)); },
+    };
+  };
+
+  /** A plugin Update object whose download sends the events tauri-plugin-updater
+   *  2.12.0 sends (src/commands.rs: tag "event", content "data", camelCase). */
+  const liveOffer = (version = '0.8.0') => ({
+    outcome: 'offer', version, body: '',
+    update: { version, currentVersion: '0.7.2' },
+  });
+  const installer = (events: unknown[]) => async (_update: unknown, onProgress: (e: unknown) => void) => {
+    for (const event of events) onProgress(event);
+  };
+
+  function deps(over: Record<string, unknown> = {}) {
+    const phases: unknown[] = [];
+    const calls = { check: 0, install: 0, restart: 0 };
+    const base = {
+      offer: liveOffer(),
+      storage: store({ updateOptIn: 'true' }),
+      now: 1,
+      check: async () => { calls.check += 1; return { version: '0.8.0', currentVersion: '0.7.2', body: '' }; },
+      install: async (u: unknown, p: (e: unknown) => void) => {
+        calls.install += 1;
+        await installer([
+          { event: 'Started', data: { contentLength: 1000 } },
+          { event: 'Progress', data: { chunkLength: 400 } },
+          { event: 'Progress', data: { chunkLength: 600 } },
+          { event: 'Finished' },
+        ])(u, p);
+      },
+      busy: () => false,
+      whenIdle: async () => {},
+      restartReady: () => true,
+      restart: async () => { calls.restart += 1; },
+      onPhase: (phase: unknown) => { phases.push(phase); },
+    };
+    return { args: { ...base, ...over }, phases, calls };
+  }
+
+  test('each moment is reported in order, and it ends in a restart', async () => {
+    const { args, phases, calls } = deps();
+    const outcome = await update.installAndRestart(args);
+    expect(outcome.outcome).toBe('restarting');
+    expect(calls.restart).toBe(1);
+    expect(phases.map((p: any) => p?.kind)).toEqual([
+      'downloading', 'downloading', 'downloading', 'downloading', 'installing', 'restarting',
+    ]);
+    const last = phases.filter((p: any) => p.kind === 'downloading').at(-1) as any;
+    expect(update.updateLabel(last)).toBe('Downloading 0.8.0… 100%');
+  });
+
+  test('it waits while the engine is working, and says so', async () => {
+    let release: () => void = () => {};
+    const idle = new Promise<void>((r) => { release = r; });
+    const { args, phases, calls } = deps({ busy: () => true, whenIdle: () => idle });
+    const run = update.installAndRestart(args);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(phases.map((p: any) => p?.kind)).toContain('waiting');
+    expect(calls.restart).toBe(0);
+    release();
+    await run;
+    expect(calls.restart).toBe(1);
+    expect((phases.at(-1) as any).kind).toBe('restarting');
+  });
+
+  test('a label drawn from memory fetches a fresh update first', async () => {
+    // The plugin's Update object lives only as long as the session that
+    // fetched it, so a remembered version has none. The click is the consent
+    // for one request, even with the daily check switched off.
+    const { args, calls } = deps({
+      offer: { outcome: 'offer', version: '0.8.0', body: '', update: null },
+      storage: store({ updateOptIn: 'false' }),
+    });
+    const outcome = await update.installAndRestart(args);
+    expect(calls.check).toBe(1);
+    expect(calls.install).toBe(1);
+    expect(outcome.outcome).toBe('restarting');
+  });
+
+  test('if the fresh check finds nothing newer, nothing is installed', async () => {
+    const s = store({ updateFound: '0.8.0' });
+    const { args, phases, calls } = deps({
+      offer: { outcome: 'offer', version: '0.8.0', body: '', update: null },
+      storage: s,
+      check: async () => null,
+    });
+    const outcome = await update.installAndRestart(args);
+    expect(outcome.outcome).toBe('current');
+    expect(calls.install).toBe(0);
+    expect(phases.at(-1)).toBe(null);
+    expect(update.rememberedOffer(s, '0.7.2')).toBe(null);
+  });
+
+  test('a failed download is reported with its reason, and nothing restarts', async () => {
+    const { args, phases, calls } = deps({
+      install: async () => { throw new Error('signature did not verify'); },
+    });
+    const outcome = await update.installAndRestart(args);
+    expect(outcome.outcome).toBe('error');
+    expect(outcome.message).toContain('signature');
+    expect(calls.restart).toBe(0);
+    const failed = phases.at(-1) as any;
+    expect(failed.kind).toBe('failed');
+    expect(failed.message).toContain('signature');
+    expect(update.updateLabel(failed)).toBe('Update failed. Try again');
+  });
+
+  test('a failed fresh check is a failure, not "nothing newer"', async () => {
+    const { args, phases } = deps({
+      offer: { outcome: 'offer', version: '0.8.0', body: '', update: null },
+      check: async () => { throw 'offline'; },
+    });
+    const outcome = await update.installAndRestart(args);
+    expect(outcome.outcome).toBe('error');
+    expect((phases.at(-1) as any).kind).toBe('failed');
+  });
+
+  test('without the restart plugin it installs and asks for a quit and reopen', async () => {
+    const { args, phases, calls } = deps({ restartReady: () => false });
+    const outcome = await update.installAndRestart(args);
+    expect(outcome.outcome).toBe('installed');
+    expect(calls.restart).toBe(0);
+    expect(update.updateLabel(phases.at(-1))).toBe(update.installedLine('0.8.0'));
+  });
+});
+
 describe('a refused file is no longer a dead end', () => {
   // The Swift app could report a bug from the failure screen, and the report
   // carried the refusal's code with it. The Tauri window could not report

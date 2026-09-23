@@ -188,3 +188,60 @@ export async function runCheck({ manual, storage, now, check }) {
     update,
   };
 }
+
+/** Download, install and restart, saying each moment through onPhase.
+ *
+ *  Every Tauri call is injected, as `check` is for runCheck, so the whole
+ *  order of events runs under `bun test` without a window. Returns what
+ *  happened, so the caller knows what a second click should do:
+ *    restarting  the restart was asked for (the process is on its way out)
+ *    installed   the bundle is swapped but this build cannot restart itself
+ *    current     a fresh check found nothing newer after all
+ *    error       something failed; `message` is for a person */
+export async function installAndRestart({
+  offer, storage, now, check, install, busy, whenIdle, restartReady, restart, onPhase,
+}) {
+  let result = offer;
+  try {
+    // A label drawn from memory has no live Update object: the plugin's
+    // resource lasts only as long as the session that fetched it. The click
+    // is the consent for one fresh request, exactly as the manual button is.
+    if (!result?.update) {
+      result = await runCheck({ manual: true, storage, now, check });
+      if (result.outcome === 'error') throw new Error(result.message);
+      if (result.outcome !== 'offer') {
+        onPhase(null);
+        return { outcome: 'current' };
+      }
+    }
+    const { version } = result;
+    let received = 0;
+    let total = null;
+    onPhase({ kind: 'downloading', version, received, total });
+    await install(result.update, (event) => {
+      if (event?.event === 'Started') total = event.data?.contentLength ?? null;
+      else if (event?.event === 'Progress') received += event.data?.chunkLength ?? 0;
+      else if (event?.event === 'Finished') {
+        onPhase({ kind: 'installing', version });
+        return;
+      }
+      onPhase({ kind: 'downloading', version, received, total });
+    });
+    if (!restartReady()) {
+      onPhase({ kind: 'installed', version });
+      return { outcome: 'installed', version };
+    }
+    // Every engine call is somebody's work: a conversion, a copy to a
+    // Kindle, a settings file half written. Say why the restart is waiting
+    // rather than sitting on "Installing…" with no reason given.
+    if (busy()) onPhase({ kind: 'waiting', version });
+    await whenIdle();
+    onPhase({ kind: 'restarting', version });
+    await restart();
+    return { outcome: 'restarting', version };
+  } catch (err) {
+    const message = String(err?.message ?? err);
+    onPhase({ kind: 'failed', version: result?.version ?? null, message });
+    return { outcome: 'error', message };
+  }
+}
