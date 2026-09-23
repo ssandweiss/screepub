@@ -1,10 +1,12 @@
 // Headless Chrome, driven over the DevTools protocol with Bun's built-in
 // WebSocket. No dependency.
 //
-// Why not `chrome --screenshot`: it photographs whatever is on screen when
-// its time budget runs out, including a failed state. This waits for the
-// page to say `ready` or `failed` first. Measured 2026-09-22; see the
-// auto-memory note headless-chrome-capture.
+// Why not `chrome --screenshot`: given a --virtual-time-budget it does wait
+// for a fetch in flight, but it photographs whatever is on screen when the
+// budget runs out, a failed state included. This waits for the page to say
+// `ready` or `failed` first. Dark mode goes through the protocol as well
+// (Emulation.setEmulatedMedia), because the --force-prefers-color-scheme=dark
+// flag does nothing. Both measured 2026-09-22, Chrome 153.
 //
 // Every way this can go wrong ends with Chrome stopped and its profile
 // folder removed: a launch that fails part-way cleans up before it throws,
@@ -59,7 +61,7 @@ export interface Browser {
 }
 
 /** Resolves true if `p` settles within `ms`, false if it does not. */
-async function settles(p: Promise<unknown>, ms: number): Promise<boolean> {
+export async function settles(p: Promise<unknown>, ms: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<false>((r) => { timer = setTimeout(() => r(false), ms); });
   try {

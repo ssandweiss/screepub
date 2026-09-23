@@ -22,7 +22,7 @@
 
 import { isAbsolute, resolve, sep } from 'node:path';
 // @ts-expect-error -- plain JS module, no types
-import { argv } from '../../desktop/ui/app.js';
+import { FORCE_FLAG, argv } from '../../desktop/ui/app.js';
 
 export interface GateContext {
   /** The one file the capture may convert. */
@@ -65,7 +65,7 @@ export function gateEngineCall(args: readonly string[], ctx: GateContext): GateA
   if (
     isAbsolute(first) &&
     resolve(first) === resolve(ctx.demoPdf) &&
-    same(args, argv.convert(first, { force: args.includes('--force'), optionsJson: opts }))
+    same(args, argv.convert(first, { force: args.includes(FORCE_FLAG), optionsJson: opts }))
   )
     return ALLOW;
 

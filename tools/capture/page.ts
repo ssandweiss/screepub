@@ -3,10 +3,11 @@
 // Served, never copied: a copy would be a second definition of the window's
 // page, and the day the window added a stylesheet the pictures would quietly
 // stop matching the app. So the server reads the real file on every request
-// and inserts three things:
+// and inserts four things:
 //
 //   <base href="/desktop/ui/">       relative URLs resolve as in the app
-//   window.__CAPTURE__ = {...}        which shot, and where the demo PDF is
+//   window.__CAPTURE__ = {...}        which shot, where the demo PDF is, and
+//                                     the run's token for /engine
 //   bridge.js BEFORE main.js          window.__TAURI__ exists when main.js
 //                                     makes its first engine call at boot
 //   steps.js AFTER main.js            drives the window into the shot

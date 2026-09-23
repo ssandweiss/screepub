@@ -19,7 +19,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
-import type { Browser } from './cdp';
+import { type Browser, settles } from './cdp';
 import { makeHandler, type EngineResult } from './server';
 import { type Shot, framedSize, outputsFor, writeIfChanged } from './shots';
 
@@ -63,17 +63,6 @@ interface Running {
 }
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-/** Resolves true if `p` settles within `ms`, false if it does not. */
-async function settles(p: Promise<unknown>, ms: number): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<false>((r) => { timer = setTimeout(() => r(false), ms); });
-  try {
-    return await Promise.race([p.then(() => true, () => true), late]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 /** What a marker says: which capture process made the library, and the
  *  highest folder it made. `made` is trusted only if it names the library
