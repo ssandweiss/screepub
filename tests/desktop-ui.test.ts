@@ -3915,3 +3915,62 @@ describe('the Send page’s KFX block: decisions', () => {
     expect(source).not.toContain("'kfx-status'");
   });
 });
+
+describe('the Send page’s KFX block: wiring', () => {
+  const kfx = read('kfx.js');
+  const send = read('send.js');
+
+  test('the installer is reached only from the button, never on the page’s own initiative', () => {
+    // It downloads third-party code and writes into the reader's Calibre.
+    expect(kfx.match(/argv\.kfxInstall\(\)/g)?.length).toBe(1);
+    const install = kfx.slice(kfx.indexOf('async function install('));
+    expect(install.slice(0, install.indexOf('\n}'))).toContain('argv.kfxInstall()');
+    // `install` is handed to a click and never called directly. The
+    // lookbehind skips its own definition, `async function install()`.
+    expect(kfx).toContain('onclick: install');
+    expect(kfx.match(/(?<!function )\binstall\(\)/g)).toBe(null);
+  });
+
+  test('one probe at a time, and the focus listener goes when the page does', () => {
+    expect(kfx).toContain('argv.kfxStatus()');
+    const probe = kfx.slice(kfx.indexOf('async function probe('));
+    expect(probe.slice(0, 200)).toMatch(/if \(probing/);
+    const hidden = /export function kfxHidden\(\) \{([\s\S]*?)\n\}/.exec(kfx);
+    expect(hidden, 'kfx.js exports no kfxHidden()').not.toBe(null);
+    expect(hidden![1]).toContain("removeEventListener('focus'");
+  });
+
+  test('send.js mounts the block and tells it when the page comes and goes', () => {
+    expect(send).toContain("from './kfx.js'");
+    expect(send).toMatch(/mountKfx\(/);
+    const show = /export function show\(\) \{([\s\S]*?)\n\}/.exec(send);
+    expect(show![1]).toContain('kfxShown()');
+    const hide = /export function hide\(\) \{([\s\S]*?)\n\}/.exec(send);
+    expect(hide![1]).toContain('kfxHidden()');
+  });
+
+  test('the block is mounted only once its node is in the page', () => {
+    // kfx.js refuses to draw into a node that is not connected (a stale
+    // node from an earlier draw() must stay dead), so mounting before the
+    // append would draw nothing until the next redraw.
+    const draw = send.slice(send.indexOf('\nfunction draw('));
+    const body = draw.slice(0, draw.indexOf('\n}'));
+    const appended = body.indexOf('kfxNode,\n');
+    expect(appended, 'draw() never appends kfxNode').toBeGreaterThan(-1);
+    expect(body.indexOf('mountKfx(')).toBeGreaterThan(appended);
+  });
+
+  test('a send and an install never overlap', () => {
+    // A plugin swapped out under a running KFX conversion is not a case
+    // worth finding out about.
+    const sendTo = send.slice(send.indexOf('async function sendTo('));
+    expect(sendTo.slice(0, 200)).toMatch(/if \(sending \|\| kfxInstalling\(\)\) return;/);
+    const install = kfx.slice(kfx.indexOf('async function install('));
+    expect(install.slice(0, 300)).toMatch(/hooks\?\.isSending\?\.\(\)/);
+    // The poll keeps running through an install (it stops only for a send),
+    // so a row it draws mid-install must be born disabled like the rest, or
+    // it offers a button that silently does nothing.
+    const row = send.slice(send.indexOf('function deviceRow('));
+    expect(row.slice(0, row.indexOf('\n}'))).toContain('disabled: kfxInstalling()');
+  });
+});

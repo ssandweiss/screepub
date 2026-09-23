@@ -17,6 +17,7 @@
 import { runEngine, argv } from './app.js';
 import { settingsFrom } from './tune.js';
 import { el, clear, text } from './dom.js';
+import { mountKfx, kfxShown, kfxHidden, kfxDevicesChanged, kfxRedraw, kfxInstalling } from './kfx.js';
 
 // ---------------------------------------------------------------- decisions
 
@@ -381,11 +382,13 @@ export function show() {
   // forever with nothing holding its handle.
   clearInterval(poll);
   poll = setInterval(refresh, POLL_MS);
+  kfxShown();
 }
 
 export function hide() {
   clearInterval(poll);
   poll = null;
+  kfxHidden();
 }
 
 function draw() {
@@ -421,6 +424,8 @@ function draw() {
   statusLine = el('p', { class: 'caption send-status', role: 'status' }, '');
   artifactNote = el('p', { class: 'caption send-artifact' }, '');
   artifactNote.hidden = true;
+  const kfxNode = el('section', { class: 'kfx-setup', 'aria-label': 'Best Kindle quality' });
+  kfxNode.hidden = true;
 
   pane.append(
     el('h2', { class: 'slug' }, 'Send to a reader'),
@@ -428,7 +433,14 @@ function draw() {
     list,
     statusLine,
     artifactNote,
+    kfxNode,
   );
+  // After the append: kfx.js draws only into a node that is in the page.
+  mountKfx(kfxNode, {
+    isSending: () => sending,
+    devices: () => drawn,
+    onBusy: (on) => { for (const button of buttons()) button.disabled = on; },
+  });
 }
 
 async function refresh() {
@@ -452,6 +464,7 @@ async function refresh() {
   // would take the focus off a button someone had just tabbed to.
   if (drawn !== null && sameDevices(drawn, devices)) return;
   drawn = devices;
+  kfxDevicesChanged();
   clear(list);
   if (devices.length === 0) {
     drawEmpty();
@@ -502,7 +515,12 @@ function readerRow(reader, platform) {
 
 function deviceRow(device) {
   const caveat = caveatFor(device, navigator.platform);
-  const button = el('button', { type: 'button', class: 'btn btn-brad' }, sendLabel(device));
+  // The poll keeps running through a KFX install (it stops only for a send),
+  // so a reader plugged in mid-install gets a row here; its button starts
+  // out as dead as the others, and the install's end brings them all back.
+  const button = el('button', {
+    type: 'button', class: 'btn btn-brad', disabled: kfxInstalling(),
+  }, sendLabel(device));
   button.addEventListener('click', () => sendTo(device));
   return el('div', { class: 'device-row' },
     el('div', { class: 'device-what' },
@@ -541,8 +559,9 @@ async function ensureSettings() {
 }
 
 async function sendTo(device) {
-  if (sending) return;
+  if (sending || kfxInstalling()) return;
   sending = true;
+  kfxRedraw();
   const mine = era;
   /** Another script was opened while this send was in flight. */
   const stale = () => era !== mine;
@@ -591,6 +610,7 @@ async function sendTo(device) {
   } finally {
     sending = false;
     for (const button of buttons()) button.disabled = false;
+    kfxRedraw();
   }
 }
 

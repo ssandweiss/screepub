@@ -142,3 +142,152 @@ export function afterInstall(answer, previous) {
   }
   return { setup: previous, line: failedLine(answer), bad: true, justInstalled: false };
 }
+
+// ------------------------------------------------------------------ drawing
+
+/** The node the block lives in, and what send.js lends it. */
+let host = null;
+/** { isSending(), devices(), onBusy(busy) } */
+let hooks = null;
+/** The last checklist the engine gave. About the MACHINE, not the script,
+ *  so it survives send.js redrawing the page for a new script. */
+let setup = null;
+let justInstalled = false;
+let installingNow = false;
+let probing = false;
+let statusNode = null;
+let status = { line: '', bad: false };
+
+/** Draw into `node` from now on. Called from send.js's draw(), which
+ *  rebuilds the page whenever the script changes. */
+export function mountKfx(node, options) {
+  host = node;
+  hooks = options;
+  draw();
+}
+
+/** The Send page came into view: ask the engine, and ask again whenever the
+ *  window gets the focus back (the reader went to install Calibre and came
+ *  back). */
+export function kfxShown() {
+  justInstalled = false;
+  status = { line: '', bad: false };
+  window.addEventListener('focus', onFocus);
+  probe();
+}
+
+export function kfxHidden() {
+  window.removeEventListener('focus', onFocus);
+}
+
+/** send.js's device list changed; the block may now matter, or not. */
+export function kfxDevicesChanged() {
+  draw();
+}
+
+/** A send started or finished; the Install button follows. */
+export function kfxRedraw() {
+  draw();
+}
+
+/** True while an install runs, so send.js can refuse to start a send. */
+export function kfxInstalling() {
+  return installingNow;
+}
+
+function onFocus() {
+  probe();
+}
+
+async function probe() {
+  if (probing || installingNow) return;
+  probing = true;
+  try {
+    setup = setupFrom(await runEngine(argv.kfxStatus()));
+  } catch {
+    // Advice, not a feature: a probe that failed draws nothing.
+    setup = null;
+  } finally {
+    probing = false;
+  }
+  draw();
+}
+
+function busy() {
+  return installingNow || hooks?.isSending?.() === true;
+}
+
+function draw() {
+  if (host === null || !host.isConnected) return;
+  clear(host);
+  statusNode = null;
+  if (!showSetup(setup, hooks?.devices?.() ?? null, justInstalled)) {
+    host.hidden = true;
+    return;
+  }
+  host.hidden = false;
+  statusNode = el('p', { class: 'caption send-status', role: 'status' }, '');
+  host.append(
+    el('p', { class: 'state-label' }, HEADING),
+    el('p', { class: 'prose' }, setup.summary),
+    el('div', { class: 'devices' }, ...setup.steps.map(stepRow)),
+    statusNode,
+  );
+  say(status);
+}
+
+function stepRow(step) {
+  return el('div', { class: 'device-row' },
+    el('div', { class: 'device-what' }, el('p', { class: 'device-name' }, step.name)),
+    control(controlFor(step, busy())),
+  );
+}
+
+function control(c) {
+  if (c.type === 'link') {
+    return el('button', {
+      type: 'button', class: 'btn btn-outline', onclick: () => follow(c.url),
+    }, c.label);
+  }
+  if (c.type === 'install') {
+    return el('button', {
+      type: 'button', class: 'btn btn-brad', disabled: c.disabled, onclick: install,
+    }, installingNow ? 'Installing…' : c.label);
+  }
+  return el('p', { class: 'reader-status' }, c.text);
+}
+
+async function follow(url) {
+  if (await openUrl(url)) return;
+  status = { line: linkFailedLine(url), bad: true };
+  say(status);
+}
+
+async function install() {
+  if (installingNow || hooks?.isSending?.() === true) return;
+  installingNow = true;
+  hooks?.onBusy?.(true);
+  status = { line: INSTALLING, bad: false };
+  draw();
+  let outcome;
+  try {
+    outcome = afterInstall(await runEngine(argv.kfxInstall()), setup);
+  } catch (err) {
+    // runEngine throws only when the engine could not run or broke its
+    // contract; its message is already written for a person.
+    outcome = afterInstall({ ok: false, error: { message: err?.message } }, setup);
+  } finally {
+    installingNow = false;
+    hooks?.onBusy?.(false);
+  }
+  setup = outcome.setup;
+  justInstalled = outcome.justInstalled;
+  status = { line: outcome.line, bad: outcome.bad };
+  draw();
+}
+
+function say(next) {
+  if (statusNode === null) return;
+  text(statusNode, next.line);
+  statusNode.classList.toggle('bad', next.bad);
+}
