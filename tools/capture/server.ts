@@ -47,6 +47,9 @@ export interface HandlerOptions {
   refused: string[];
   /** Each engine run that exited non-zero or printed nothing. */
   failed: string[];
+  /** Each path answered 404, so a page that never says ready can be
+   *  explained by the file it asked for and did not get. */
+  notFound: string[];
 }
 
 /** The only folders served, relative to the repository. */
@@ -111,6 +114,11 @@ export function makeHandler(o: HandlerOptions): (req: Request) => Promise<Respon
     return say(answer, 200);
   }
 
+  const missing = (path: string) => {
+    o.notFound.push(path);
+    return say('', 404);
+  };
+
   return async (req) => {
     if (req.headers.get('host') !== o.host) return say('capture: wrong host', 403);
     const url = new URL(req.url);
@@ -132,7 +140,7 @@ export function makeHandler(o: HandlerOptions): (req: Request) => Promise<Respon
       // A bare name this run could have written, never a path.
       const name = url.pathname.slice('/pass-one/'.length);
       const file = join(o.passOne, name);
-      if (!PASS_ONE_NAME.test(name) || !isFile(file)) return say('', 404);
+      if (!PASS_ONE_NAME.test(name) || !isFile(file)) return missing(url.pathname);
       return new Response(Bun.file(file), { headers: { 'content-type': 'image/png' } });
     }
 
@@ -145,9 +153,9 @@ export function makeHandler(o: HandlerOptions): (req: Request) => Promise<Respon
     } catch {
       return say('capture: a malformed path', 400);
     }
-    if (!SERVED.some((p) => rel.startsWith(p))) return say('', 404);
+    if (!SERVED.some((p) => rel.startsWith(p))) return missing(url.pathname);
     const file = join(o.repoDir, rel);
-    if (!isFile(file)) return say('', 404);
+    if (!isFile(file)) return missing(url.pathname);
     return new Response(Bun.file(file), { headers: { 'content-type': typeOf(file) } });
   };
 }

@@ -8,9 +8,11 @@
 // its own so one failure cannot skip the rest, and a cleanup failure is
 // reported after the error that ended the run, never instead of it.
 //
-// Nothing is written to the repository until every picture has been taken
-// and no engine call was refused or failed, so a run that dies half-way
-// leaves the committed pictures exactly as they were.
+// Nothing is written to the repository until every picture has been taken,
+// no engine call was refused or failed, and the page server hit no error,
+// so a run that dies half-way leaves the committed pictures exactly as they
+// were. The library's marker names the run's pid, so two runs at once
+// cannot delete each other's library.
 
 import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync,
@@ -73,28 +75,41 @@ async function settles(p: Promise<unknown>, ms: number): Promise<boolean> {
   }
 }
 
-/** The highest folder a marker says the tool made, if the marker is the
- *  tool's and names the library itself or a folder above it. A marker is
- *  never trusted to point anywhere else. */
-function madeBy(marker: string, library: string): string | null {
+/** What a marker says: which capture process made the library, and the
+ *  highest folder it made. `made` is trusted only if it names the library
+ *  itself or a folder above it, never anywhere else. */
+function readMarker(marker: string, library: string): { pid: number | null; made: string | null } {
   try {
-    const { made } = JSON.parse(readFileSync(marker, 'utf8')) as { made?: unknown };
-    if (typeof made === 'string' && (made === library || library.startsWith(made + sep))) return made;
+    const { pid, made } = JSON.parse(readFileSync(marker, 'utf8')) as { pid?: unknown; made?: unknown };
+    return {
+      pid: typeof pid === 'number' && Number.isInteger(pid) && pid > 0 ? pid : null,
+      made: typeof made === 'string' && (made === library || library.startsWith(made + sep)) ? made : null,
+    };
   } catch {
-    // An unreadable marker still marks the library as the tool's; it just
-    // cannot vouch for anything above it.
+    return { pid: null, made: null };
   }
-  return null;
 }
 
-/** Make the demo library and mark it as the tool's. Returns the highest
- *  folder the tool made on the way (the library itself, or a Documents
- *  folder above it), which is as far up as cleanup may ever go.
+/** Whether a process is running. EPERM means it is, as somebody else. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+/** Make the demo library and mark it as this process's. Returns the
+ *  highest folder the tool made on the way (the library itself, or a
+ *  Documents folder above it), which is as far up as cleanup may ever go.
  *
- *  A library that is already there is removed only if it carries the
- *  marker, which means an interrupted run left it; whatever that run made
- *  above it is then this run's to remove too. An unmarked one is refused. */
-export function claimLibrary(library: string): string {
+ *  A library that is already there is removed only if its marker names a
+ *  capture process that no longer exists: an interrupted run left it, and
+ *  whatever that run made above it is then this run's to remove too. A
+ *  marker naming a live process is a capture still running, and two runs
+ *  must not delete each other's library. Anything else is refused. */
+export function claimLibrary(library: string, pid: number = process.pid): string {
   let inherited: string | null = null;
   if (existsSync(library)) {
     const marker = join(library, MARKER);
@@ -104,13 +119,23 @@ export function claimLibrary(library: string): string {
           `(it has no ${MARKER}). It is not the tool's to touch; move it and rerun.`,
       );
     }
-    inherited = madeBy(marker, library);
+    const found = readMarker(marker, library);
+    if (found.pid === null) {
+      throw new CaptureError(
+        `capture: ${library} has a ${MARKER} that names no capture pid, so there is no telling ` +
+          'whether a capture is still using it. If none is running, remove the folder and rerun.',
+      );
+    }
+    if (alive(found.pid)) {
+      throw new CaptureError(`capture pid ${found.pid} is using ${library}. Let it finish, or stop it, and rerun.`);
+    }
+    inherited = found.made;
     rmSync(library, { recursive: true, force: true });
   }
   const made = mkdirSync(library, { recursive: true }) ?? library;
   // Both are the library or a folder above it, so the shorter is higher.
   const top = inherited !== null && inherited.length < made.length ? inherited : made;
-  writeFileSync(join(library, MARKER), `${JSON.stringify({ made: top })}\n`);
+  writeFileSync(join(library, MARKER), `${JSON.stringify({ pid, made: top })}\n`);
   return top;
 }
 
@@ -137,14 +162,24 @@ function emptyLibrary(library: string): void {
   }
 }
 
-function engineRunner(engine: string[], library: string, running: Set<Running>) {
+function engineRunner(engine: string[], library: string, running: Set<Running>, closing: () => boolean) {
   return async (args: string[]): Promise<EngineResult> => {
-    const proc = Bun.spawn([...engine, ...args], {
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...process.env, SCREEPUB_LIBRARY: library },
-    });
+    // Once cleanup has begun, no engine starts: cleanup stops the engines it
+    // knows about, and one started after that would outlive it and make the
+    // library again. Answered like an engine that could not start, which the
+    // server turns into a 500.
+    if (closing()) return { code: null, stdout: '', stderr: 'capture: cleaning up, so no new engine calls' };
+    let proc;
+    try {
+      proc = Bun.spawn([...engine, ...args], {
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...process.env, SCREEPUB_LIBRARY: library },
+      });
+    } catch (e) {
+      return { code: null, stdout: '', stderr: `capture: could not start the engine: ${messageOf(e)}` };
+    }
     running.add(proc);
     try {
       // Both streams at once. A pipe nobody reads fills up, and an engine
@@ -191,8 +226,11 @@ export async function runCapture(o: RunOptions): Promise<void> {
   let server: ReturnType<typeof Bun.serve> | null = null;
   let browser: Browser | null = null;
 
+  let closing = false;
   let cleaning: Promise<string[]> | null = null;
   const cleanup = () => (cleaning ??= (async () => {
+    // First, before anything can await: no engine may start from here on.
+    closing = true;
     const errors: string[] = [];
     const step = async (what: string, fn: () => unknown) => {
       try {
@@ -204,7 +242,11 @@ export async function runCapture(o: RunOptions): Promise<void> {
     // In this order: nothing may write into the library after it is removed.
     await step('stop the engine', () => stopEngines(running));
     await step('close Chrome', () => browser?.close());
-    await step('stop the page server', () => server?.stop(true));
+    await step('stop the page server', async () => {
+      if (server !== null && !(await settles(Promise.resolve(server.stop(true)), 5_000))) {
+        throw new Error('it did not stop within 5 s');
+      }
+    });
     await step(`remove ${o.library}`, () => rmSync(o.library, { recursive: true, force: true }));
     await step('remove the first-pass pictures', () => {
       if (passOne !== null) rmSync(passOne, { recursive: true, force: true });
@@ -220,14 +262,40 @@ export async function runCapture(o: RunOptions): Promise<void> {
     const token = crypto.randomUUID();
     const refused: string[] = [];
     const failed: string[] = [];
+    const notFound: string[] = [];
+    const serverErrors: string[] = [];
     let handle: (req: Request) => Promise<Response> = async () => new Response('', { status: 503 });
-    server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: (req) => handle(req) });
+    server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      // A handler that throws would otherwise get Bun's own error page, a
+      // 67 KB HTML document the window cannot use, and the page would sit
+      // there until the capture timed out saying nothing useful. Written
+      // down instead, so the capture fails at once and names it.
+      fetch: (req) => handle(req).catch((e: unknown) => {
+        serverErrors.push(messageOf(e));
+        return new Response('', { status: 500 });
+      }),
+    });
     const host = `127.0.0.1:${server.port}`;
     handle = makeHandler({
       repoDir: o.repoDir, passOne, token, library: o.library, demoPdf: o.demoPdf, host,
-      runEngine: engineRunner(o.engine, o.library, running), refused, failed,
+      runEngine: engineRunner(o.engine, o.library, running, () => closing), refused, failed, notFound,
     });
     const base = `http://${host}`;
+    const serverFailure = () => (serverErrors.length === 0 ? null : `the page server failed: ${serverErrors.join('; ')}`);
+    /** One capture's checks: fail at once on a server error, and if it
+     *  times out, name the files the server could not find for it. */
+    const checks = () => {
+      const since = notFound.length;
+      return {
+        failure: serverFailure,
+        explain: () => {
+          const mine = notFound.slice(since);
+          return mine.length === 0 ? '' : `the page server could not find ${mine.join(', ')}`;
+        },
+      };
+    };
 
     browser = await o.launch();
     // Once a run, so a release can tell "Chrome changed" from "the window did".
@@ -240,7 +308,7 @@ export async function runCapture(o: RunOptions): Promise<void> {
         if (shot.kind === 'site') {
           png = await browser.capture({
             url: `${base}/tools/capture/hero.html`,
-            width: shot.width, height: shot.height, theme, transparent: false,
+            width: shot.width, height: shot.height, theme, transparent: false, ...checks(),
           });
         } else {
           // Every window shot starts from the same empty library, whatever
@@ -249,13 +317,13 @@ export async function runCapture(o: RunOptions): Promise<void> {
           emptyLibrary(o.library);
           const one = await browser.capture({
             url: `${base}/capture/window.html?shot=${shot.name}`,
-            width: shot.width, height: shot.height, theme, transparent: false,
+            width: shot.width, height: shot.height, theme, transparent: false, ...checks(),
           });
           const name = `${shot.name}-${theme}.png`;
           writeFileSync(join(passOne, name), one);
           png = await browser.capture({
             url: `${base}/tools/capture/frame.html?img=/pass-one/${name}&w=${shot.width}&h=${shot.height}`,
-            ...framedSize(shot), theme, transparent: true,
+            ...framedSize(shot), theme, transparent: true, ...checks(),
           });
         }
         for (const out of outputsFor(shot, theme)) pictures.push([out, png]);
@@ -263,6 +331,9 @@ export async function runCapture(o: RunOptions): Promise<void> {
     }
 
     await settleEngines(running);
+    if (serverErrors.length > 0) {
+      throw new CaptureError(`capture: the page server failed:\n  ${serverErrors.join('\n  ')}`);
+    }
     if (refused.length > 0) {
       throw new CaptureError(`capture: the window made engine calls the gate refused:\n  ${refused.join('\n  ')}`);
     }

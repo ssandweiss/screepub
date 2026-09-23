@@ -41,10 +41,18 @@ export interface CaptureOptions {
   height: number;
   theme: 'light' | 'dark';
   transparent: boolean;
+  /** Asked on every poll: a sentence here fails the capture at once, the
+   *  way a page server that has already failed should, rather than after
+   *  the whole wait. */
+  failure?: () => string | null;
+  /** Added to a timeout's message: what might explain the page never
+   *  saying ready (the files the server could not find, say). */
+  explain?: () => string;
+  timeoutMs?: number;
 }
 
 export interface Browser {
-  /** What Chrome calls itself, e.g. HeadlessChrome/153.0.0.0. */
+  /** What Chrome calls itself, e.g. Chrome/153.0.8010.53. */
   version: string;
   capture(opts: CaptureOptions): Promise<Uint8Array>;
   close(): Promise<void>;
@@ -227,7 +235,9 @@ export async function launch(chrome: string = CHROME): Promise<Browser> {
 
     return {
       version: product,
-      async capture({ url, width, height, theme, transparent }) {
+      async capture({
+        url, width, height, theme, transparent, failure, explain, timeoutMs = CAPTURE_TIMEOUT_MS,
+      }) {
         await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false });
         await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
         await cdp.send('Emulation.setDefaultBackgroundColorOverride',
@@ -243,7 +253,9 @@ export async function launch(chrome: string = CHROME): Promise<Browser> {
 
         const start = Date.now();
         let state = '';
-        while (Date.now() - start < CAPTURE_TIMEOUT_MS) {
+        while (Date.now() - start < timeoutMs) {
+          const failed = failure?.() ?? null;
+          if (failed !== null) throw new Error(`capture failed at ${url}: ${failed}`);
           let r: { result?: { value?: string } };
           try {
             r = await cdp.send('Runtime.evaluate', {
@@ -264,8 +276,9 @@ export async function launch(chrome: string = CHROME): Promise<Browser> {
           await Bun.sleep(100);
         }
         if (state !== 'ready') {
-          throw new Error(`capture timed out at ${url} after ${CAPTURE_TIMEOUT_MS / 1000} s ` +
-            `(last state: ${state || 'none'})`);
+          const why = explain?.() ?? '';
+          throw new Error(`capture timed out at ${url} after ${timeoutMs / 1000} s ` +
+            `(last state: ${state || 'none'})${why === '' ? '' : `; ${why}`}`);
         }
         const shot = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as { data: string };
         return new Uint8Array(Buffer.from(shot.data, 'base64'));

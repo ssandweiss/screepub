@@ -250,13 +250,14 @@ describe('the capture server', () => {
     let answer: EngineResult = { code: 0, stdout: '{"ok":true}\n', stderr: '' };
     const refused: string[] = [];
     const failed: string[] = [];
+    const notFound: string[] = [];
     const library = '/Users/Shared/Documents/Screepub';
     const handle = makeHandler({
       repoDir: repo, passOne, token: 'secret', library,
       demoPdf: join(repo, 'tests', 'fixtures', 'field-station.pdf'),
       host: '127.0.0.1:4321',
       runEngine: async (args) => { calls.push(args); return answer; },
-      refused, failed,
+      refused, failed, notFound,
     });
     const get = (path: string, headers: Record<string, string> = {}) =>
       handle(new Request(`http://127.0.0.1:4321${path}`, { headers: { host: '127.0.0.1:4321', ...headers } }));
@@ -267,7 +268,7 @@ describe('the capture server', () => {
         body: typeof args === 'string' ? args : JSON.stringify({ args }),
       }));
     return {
-      dir, repo, library, calls, refused, failed, get, engine,
+      dir, repo, library, calls, refused, failed, notFound, get, engine,
       answer: (a: EngineResult) => { answer = a; },
       done: () => rmSync(dir, { recursive: true, force: true }),
     };
@@ -302,6 +303,10 @@ describe('the capture server', () => {
       }
       const bad = await s.get('/site/%E0%A4%A');
       expect(bad.status).toBe(400);
+      // Every 404 is written down, so a capture that times out can say
+      // which file the page asked for and did not get.
+      expect(s.notFound).toContain('/.git/HEAD');
+      expect(s.notFound).toContain('/..%2fScreepub-old%2fx');
     } finally { s.done(); }
   });
 
@@ -389,6 +394,7 @@ describe('the capture server', () => {
       expect((await s.get('/pass-one/drop-light.png')).status).toBe(200);
       expect((await s.get('/pass-one/..%2f..%2fScreepub%2fpackage.json')).status).toBe(404);
       expect((await s.get('/pass-one/missing-light.png')).status).toBe(404);
+      expect(s.notFound).toContain('/pass-one/missing-light.png');
     } finally { s.done(); }
   });
 });
@@ -516,18 +522,99 @@ describe('a capture run cleans up after itself, whatever happens', () => {
     } finally { s.done(); }
   });
 
+  /** A pid that belonged to a process a moment ago and to nothing now. */
+  async function deadPid(): Promise<number> {
+    const p = Bun.spawn(['true']);
+    await p.exited;
+    return p.pid;
+  }
+
   test('a library left by an interrupted run is cleared on the next start, and what it created goes too', async () => {
     const s = scene();
     try {
-      // An interrupted run: it created Documents and the library, marked
-      // the library, and never got to clean up.
-      claimLibrary(s.library);
+      // An interrupted run whose process is gone: it created Documents and
+      // the library, marked the library, and never got to clean up.
+      claimLibrary(s.library, await deadPid());
       writeFileSync(join(s.library, 'half-a-book.epub'), 'x');
       const boom = new Error('no Chrome today');
       expect(await thrown(s.run({ launch: async () => { throw boom; } }))).toBe(boom);
       expect(existsSync(s.library)).toBe(false);
       expect(existsSync(s.documents)).toBe(false);
     } finally { s.done(); }
+  });
+
+  test('a library a capture that is still running is using is refused, naming its pid', async () => {
+    const s = scene();
+    try {
+      // Marked by this very process, which is certainly alive.
+      claimLibrary(s.library, process.pid);
+      writeFileSync(join(s.library, 'book-in-progress.epub'), 'x');
+      let launched = false;
+      const err = await thrown(s.run({
+        launch: async () => { launched = true; return fakeBrowser(async () => PNG); },
+      }));
+      expect(err).toBeInstanceOf(CaptureError);
+      expect((err as Error).message).toContain(`capture pid ${process.pid} is using ${s.library}`);
+      expect(launched).toBe(false);
+      expect(readdirSync(s.library).sort()).toEqual([MARKER, 'book-in-progress.epub'].sort());
+    } finally { s.done(); }
+  });
+
+  test('a marker that does not say whose it is is refused rather than guessed at', async () => {
+    const s = scene();
+    try {
+      mkdirSync(s.library, { recursive: true });
+      writeFileSync(join(s.library, MARKER), '{"made":"/"}\n');
+      const err = await thrown(s.run({}));
+      expect(err).toBeInstanceOf(CaptureError);
+      expect((err as Error).message).toContain('pid');
+      expect(readdirSync(s.library)).toEqual([MARKER]);
+    } finally { s.done(); }
+  });
+
+  test('cleanup refuses an engine call made while it runs, instead of waiting on it', async () => {
+    const s = scene();
+    // A stand-in engine that runs until it is stopped, named so it can be
+    // found afterwards.
+    const ENGINE = ['/bin/sh', '-c', 'exec sleep 29.371'];
+    const running = () => Bun.spawnSync(['pgrep', '-f', 'sleep 29.371']).stdout.toString().trim();
+    try {
+      let post: (() => Promise<Response>) | null = null;
+      let duringCleanup: { status: number; body: string } | null = null;
+      const boom = new Error('capture failed');
+      const browser: Browser = {
+        version: 'FakeChrome/1.0',
+        async capture({ url }) {
+          if (!url.includes('/capture/window.html')) return PNG;
+          // What the window does at boot: ask the engine for its version.
+          const html = await (await fetch(url)).text();
+          const token = /"token":"([^"]+)"/.exec(html)![1]!;
+          post = () => fetch(new URL('/engine', url), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-capture-token': token },
+            body: JSON.stringify({ args: argv.version() }),
+          });
+          void post().catch(() => {});
+          while (running() === '') await Bun.sleep(10);
+          throw boom;
+        },
+        // Chrome closes AFTER the engines are stopped, so a page still alive
+        // at this point can post a new call. It must be refused, not run.
+        async close() {
+          const r = await post!();
+          duringCleanup = { status: r.status, body: await r.text() };
+        },
+      };
+      const shots = SHOTS.filter((x) => x.name === 'drop');
+      const err = await thrown(s.run({ shots, engine: ENGINE, launch: async () => browser }));
+      expect(err).toBe(boom);
+      expect(duringCleanup!).toEqual({ status: 500, body: expect.stringContaining('cleaning up') });
+      expect(running()).toBe('');
+      expect(existsSync(s.library)).toBe(false);
+    } finally {
+      for (const pid of running().split('\n').filter(Boolean)) process.kill(Number(pid));
+      s.done();
+    }
   });
 
   test('a library the tool did not make is refused and left exactly as it was', async () => {

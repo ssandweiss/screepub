@@ -17,9 +17,12 @@
 // any folder above it that it had to create. tools/capture/run.ts has the
 // details.
 //
-// Exit codes: 0 done; 1 failed (nothing written); 2 no Chrome, so nothing
-// was retaken (a release warns about that rather than stopping); 130 or
-// 143 interrupted, after cleaning up.
+// Exit codes: 0 done. 1 failed: if a picture could not be taken, or an
+// engine call was refused or failed, or the page server hit an error,
+// nothing was written; if only the cleanup afterwards failed, the pictures
+// WERE written and the message says what could not be cleaned up. 2 no
+// Chrome, so nothing was retaken (a release warns about that rather than
+// stopping). 130 or 143 interrupted, after cleaning up; nothing written.
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
