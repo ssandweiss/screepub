@@ -4,11 +4,12 @@ import { readFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// The three committed fixtures are generated, not hand-made, and
-// tools/make-fixture.py is about to grow a fourth kind that shares its
-// layout and PDF-emission code. Without this, a refactor could silently
-// change screenplay.pdf and every integration test would quietly start
-// asserting against different input.
+// The committed fixtures are generated, not hand-made, and every kind in
+// tools/make-fixture.py shares its layout and PDF-emission code. Without
+// this, a refactor for one kind could silently change screenplay.pdf and
+// every integration test would quietly start asserting against different
+// input. (torture.pdf is not pinned here; its placement is checked through
+// --emit-layout instead.)
 //
 // python3 is a REAL dependency of this suite, deliberately. No
 // skip-if-missing guard: this repo already fixed the case where integration
