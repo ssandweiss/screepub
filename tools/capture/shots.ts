@@ -28,6 +28,21 @@ export const SHOTS: Shot[] = [
   { name: 'read', kind: 'window', width: 860, height: 620, themes: ['light', 'dark'], site: false },
 ];
 
+/** The margin pass two draws around a window picture, in CSS pixels: room
+ *  for the frame's shadow, deeper below than above. tools/capture/frame.html
+ *  says the same numbers in its `.pad` rule, and a test holds the two
+ *  together, because a mismatch clips the shadow or leaves a strip of
+ *  nothing along one edge. */
+export const FRAME_PAD = { top: 44, right: 56, bottom: 68, left: 56 } as const;
+
+/** The page size pass two is captured at: the window plus the frame. */
+export function framedSize(shot: Shot): { width: number; height: number } {
+  return {
+    width: shot.width + FRAME_PAD.left + FRAME_PAD.right,
+    height: shot.height + FRAME_PAD.top + FRAME_PAD.bottom,
+  };
+}
+
 export function outputsFor(shot: Shot, theme: Theme): string[] {
   const file = `${shot.name}-${theme}.png`;
   const out = [`assets/screens/${file}`];

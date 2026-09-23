@@ -1,12 +1,15 @@
 // The capture tool's pure parts. The picture-taking itself needs Chrome and
 // runs in /release; everything that DECIDES something is tested here.
 import { describe, test, expect } from 'bun:test';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Browser } from '../tools/capture/cdp';
 import { gateEngineCall } from '../tools/capture/gate';
 import { captureIndex } from '../tools/capture/page';
-import { SHOTS, outputsFor, writeIfChanged } from '../tools/capture/shots';
+import { CaptureError, MARKER, claimLibrary, cleanupErrorsOf, runCapture, type RunOptions } from '../tools/capture/run';
+import { makeHandler, type EngineResult } from '../tools/capture/server';
+import { FRAME_PAD, SHOTS, framedSize, outputsFor, writeIfChanged } from '../tools/capture/shots';
 // @ts-expect-error -- plain JS module, no types
 import { argv } from '../desktop/ui/app.js';
 
@@ -217,5 +220,359 @@ describe('the capture command and Chrome driver typecheck', () => {
     const cdp = await import('../tools/capture/cdp');
     expect(typeof cmd.main).toBe('function');
     expect(cdp.CHROME).toBe('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+  });
+});
+
+describe('the capture server', () => {
+  // A throwaway repository with the files a careless static server would
+  // hand out: the gitignored REAL screenplays, git's own files, the package
+  // manifest, and a sibling folder whose name starts with the repo's.
+  function scene() {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-capture-test-'));
+    const repo = join(dir, 'Screepub');
+    const put = (rel: string, body: string) => {
+      mkdirSync(join(repo, rel, '..'), { recursive: true });
+      writeFileSync(join(repo, rel), body);
+    };
+    put('desktop/ui/index.html', readFileSync(join(ROOT, 'desktop', 'ui', 'index.html'), 'utf8'));
+    put('desktop/ui/main.js', '// main');
+    put('site/index.html', '<!doctype html><title>site</title>');
+    put('tools/capture/steps.js', '// steps');
+    put('fixtures/real-script.pdf', 'A REAL SCREENPLAY');
+    put('.git/HEAD', 'ref: refs/heads/main');
+    put('package.json', '{}');
+    mkdirSync(join(dir, 'Screepub-old'), { recursive: true });
+    writeFileSync(join(dir, 'Screepub-old', 'x'), 'not served');
+    const passOne = join(dir, 'pass-one');
+    mkdirSync(passOne);
+    writeFileSync(join(passOne, 'drop-light.png'), 'PNG');
+    const calls: string[][] = [];
+    let answer: EngineResult = { code: 0, stdout: '{"ok":true}\n', stderr: '' };
+    const refused: string[] = [];
+    const failed: string[] = [];
+    const library = '/Users/Shared/Documents/Screepub';
+    const handle = makeHandler({
+      repoDir: repo, passOne, token: 'secret', library,
+      demoPdf: join(repo, 'tests', 'fixtures', 'field-station.pdf'),
+      host: '127.0.0.1:4321',
+      runEngine: async (args) => { calls.push(args); return answer; },
+      refused, failed,
+    });
+    const get = (path: string, headers: Record<string, string> = {}) =>
+      handle(new Request(`http://127.0.0.1:4321${path}`, { headers: { host: '127.0.0.1:4321', ...headers } }));
+    const engine = (args: unknown, headers: Record<string, string> = { 'x-capture-token': 'secret' }) =>
+      handle(new Request('http://127.0.0.1:4321/engine', {
+        method: 'POST',
+        headers: { host: '127.0.0.1:4321', 'content-type': 'application/json', ...headers },
+        body: typeof args === 'string' ? args : JSON.stringify({ args }),
+      }));
+    return {
+      dir, repo, library, calls, refused, failed, get, engine,
+      answer: (a: EngineResult) => { answer = a; },
+      done: () => rmSync(dir, { recursive: true, force: true }),
+    };
+  }
+
+  test('it serves the window, the site and the capture scripts', async () => {
+    const s = scene();
+    try {
+      for (const [path, type] of [
+        ['/desktop/ui/main.js', 'text/javascript'],
+        ['/site/index.html', 'text/html'],
+        ['/tools/capture/steps.js', 'text/javascript'],
+      ] as const) {
+        const r = await s.get(path);
+        expect(`${path} ${r.status}`).toBe(`${path} 200`);
+        expect(r.headers.get('content-type')).toContain(type);
+      }
+    } finally { s.done(); }
+  });
+
+  test('it serves nothing outside the window, the site and the capture scripts', async () => {
+    const s = scene();
+    try {
+      // Every one of these exists on disk, so a 404 is the rule, not luck.
+      for (const path of [
+        '/fixtures/real-script.pdf', '/.git/HEAD', '/package.json',
+        '/..%2fScreepub-old%2fx', '/site/..%2f..%2ffixtures%2freal-script.pdf',
+        '/site/%2e%2e/package.json', '/site/', '/site', '/desktop/ui',
+      ]) {
+        const r = await s.get(path);
+        expect(`${path} ${r.status}`).toBe(`${path} 404`);
+      }
+      const bad = await s.get('/site/%E0%A4%A');
+      expect(bad.status).toBe(400);
+    } finally { s.done(); }
+  });
+
+  test('a request for any other host is refused, so a rebound name cannot reach it', async () => {
+    const s = scene();
+    try {
+      expect((await s.get('/site/index.html', { host: 'evil.example:4321' })).status).toBe(403);
+      expect((await s.get('/site/index.html', { host: 'localhost:4321' })).status).toBe(403);
+      const r = await s.engine(argv.version(), { host: 'evil.example:4321', 'x-capture-token': 'secret' });
+      expect(r.status).toBe(403);
+      expect(s.calls).toEqual([]);
+    } finally { s.done(); }
+  });
+
+  test('/engine needs the run token, and refuses what the gate refuses, recording it', async () => {
+    const s = scene();
+    try {
+      expect((await s.engine(argv.version(), {})).status).toBe(403);
+      expect((await s.engine(argv.version(), { 'x-capture-token': 'guess' })).status).toBe(403);
+      expect(s.calls).toEqual([]);
+      const r = await s.engine(argv.devices());
+      expect(r.status).toBe(403);
+      expect(await r.text()).toContain('devices --json');
+      expect(s.refused).toEqual([expect.stringContaining('devices --json')]);
+      expect(s.calls).toEqual([]);
+      expect((await s.engine('not json')).status).toBe(400);
+      expect((await s.engine([1, 2])).status).toBe(400);
+      const get = await s.get('/engine', { 'x-capture-token': 'secret' });
+      expect(get.status).toBe(405);
+    } finally { s.done(); }
+  });
+
+  test('an allowed call runs the engine with exactly its arguments and returns its answer', async () => {
+    const s = scene();
+    try {
+      const r = await s.engine(argv.version());
+      expect(r.status).toBe(200);
+      expect(await r.text()).toBe('{"ok":true}');
+      expect(s.calls).toEqual([argv.version()]);
+      expect(s.failed).toEqual([]);
+    } finally { s.done(); }
+  });
+
+  test('an engine that prints nothing is a 500 carrying what it said on stderr, as sidecar.rs does', async () => {
+    const s = scene();
+    try {
+      s.answer({ code: 1, stdout: '', stderr: 'TypeError: boom\n' });
+      const r = await s.engine(argv.version());
+      expect(r.status).toBe(500);
+      expect(await r.text()).toContain('TypeError: boom');
+      expect(s.failed).toEqual([expect.stringContaining('TypeError: boom')]);
+    } finally { s.done(); }
+  });
+
+  test('an engine that exits non-zero WITH an answer is passed through, as sidecar.rs does, and recorded', async () => {
+    // sidecar.rs: an engine error exits 1 and prints a perfectly good error
+    // object, which the window draws as its refusal. The run still fails.
+    const s = scene();
+    try {
+      s.answer({ code: 1, stdout: '{"ok":false,"error":{"code":"scanned"}}', stderr: 'no text\n' });
+      const r = await s.engine(argv.version());
+      expect(r.status).toBe(200);
+      expect(await r.text()).toContain('"scanned"');
+      expect(s.failed).toEqual([expect.stringContaining('exited with 1')]);
+    } finally { s.done(); }
+  });
+
+  test('the window page is served only for a window shot, carrying the run token', async () => {
+    const s = scene();
+    try {
+      expect((await s.get('/capture/window.html?shot=hero')).status).toBe(400);
+      expect((await s.get('/capture/window.html?shot=nope')).status).toBe(400);
+      expect((await s.get('/capture/window.html')).status).toBe(400);
+      const r = await s.get('/capture/window.html?shot=result');
+      expect(r.status).toBe(200);
+      const html = await r.text();
+      expect(html).toContain('"token":"secret"');
+      expect(html).toContain('/tools/capture/bridge.js');
+    } finally { s.done(); }
+  });
+
+  test('pass-one pictures are served by bare name only', async () => {
+    const s = scene();
+    try {
+      expect((await s.get('/pass-one/drop-light.png')).status).toBe(200);
+      expect((await s.get('/pass-one/..%2f..%2fScreepub%2fpackage.json')).status).toBe(404);
+      expect((await s.get('/pass-one/missing-light.png')).status).toBe(404);
+    } finally { s.done(); }
+  });
+});
+
+describe('a capture run cleans up after itself, whatever happens', () => {
+  const PNG = new Uint8Array([137, 80, 78, 71]);
+
+  function fakeBrowser(capture: (url: string) => Promise<Uint8Array>, events: string[] = [],
+    close: () => Promise<void> = async () => {}): Browser {
+    return {
+      version: 'FakeChrome/1.0',
+      capture: ({ url }) => capture(url),
+      close: async () => { events.push('closed'); await close(); },
+    };
+  }
+
+  // Every path is under a temp folder. bun test never touches /Users/Shared.
+  function scene(opts: { documents?: boolean } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), 'screepub-capture-test-'));
+    const documents = join(dir, 'Documents');
+    if (opts.documents) mkdirSync(documents);
+    const tmp = join(dir, 'tmp');
+    mkdirSync(tmp);
+    const lines: string[] = [];
+    const library = join(documents, 'Screepub');
+    const run = (over: Partial<RunOptions>) => runCapture({
+      shots: SHOTS,
+      repoDir: ROOT,
+      demoPdf: join(ROOT, 'tests', 'fixtures', 'field-station.pdf'),
+      library,
+      engine: ['false'],
+      outDir: join(dir, 'out'),
+      tmp,
+      log: (line) => lines.push(line),
+      launch: async () => fakeBrowser(async () => PNG),
+      ...over,
+    });
+    return {
+      documents, library, tmp, lines, run,
+      out: join(dir, 'out'),
+      done: () => rmSync(dir, { recursive: true, force: true }),
+    };
+  }
+
+  async function thrown(p: Promise<unknown>): Promise<unknown> {
+    try { await p; } catch (e) { return e; }
+    throw new Error('expected the run to throw');
+  }
+
+  test('Chrome failing to start leaves nothing behind, and its error is the one thrown', async () => {
+    const s = scene();
+    try {
+      const boom = new Error('no Chrome today');
+      expect(await thrown(s.run({ launch: async () => { throw boom; } }))).toBe(boom);
+      expect(existsSync(s.library)).toBe(false);
+      // The run created Documents, so the run removes it.
+      expect(existsSync(s.documents)).toBe(false);
+      expect(readdirSync(s.tmp)).toEqual([]);
+    } finally { s.done(); }
+  });
+
+  test('a Documents folder that was there before the run is still there after it', async () => {
+    const s = scene({ documents: true });
+    try {
+      const boom = new Error('no Chrome today');
+      expect(await thrown(s.run({ launch: async () => { throw boom; } }))).toBe(boom);
+      expect(existsSync(s.library)).toBe(false);
+      expect(existsSync(s.documents)).toBe(true);
+    } finally { s.done(); }
+  });
+
+  test('a capture that fails part-way writes no picture, closes Chrome, and throws the capture error', async () => {
+    const s = scene();
+    try {
+      const events: string[] = [];
+      const boom = new Error('capture failed at the read shot');
+      let n = 0;
+      const browser = fakeBrowser(async () => { if (++n === 6) throw boom; return PNG; }, events);
+      expect(await thrown(s.run({ launch: async () => browser }))).toBe(boom);
+      expect(events).toEqual(['closed']);
+      expect(existsSync(s.out)).toBe(false);
+      expect(existsSync(s.library)).toBe(false);
+      expect(existsSync(s.documents)).toBe(false);
+      expect(readdirSync(s.tmp)).toEqual([]);
+    } finally { s.done(); }
+  });
+
+  test('a failure while cleaning up is reported after the original error, never instead of it', async () => {
+    const s = scene();
+    try {
+      const boom = new Error('capture failed');
+      const browser = fakeBrowser(async () => { throw boom; }, [],
+        async () => { throw new Error('Chrome would not die'); });
+      const err = await thrown(s.run({ launch: async () => browser }));
+      expect(err).toBe(boom);
+      expect(cleanupErrorsOf(err)).toEqual([expect.stringContaining('Chrome would not die')]);
+      // The steps after the one that failed still ran.
+      expect(existsSync(s.library)).toBe(false);
+      expect(readdirSync(s.tmp)).toEqual([]);
+    } finally { s.done(); }
+  });
+
+  test('a whole run writes every picture, and each window shot starts from an empty library', async () => {
+    const s = scene();
+    try {
+      const seen: string[][] = [];
+      const browser = fakeBrowser(async (url) => {
+        if (url.includes('/capture/window.html')) {
+          seen.push(readdirSync(s.library));
+          // What a conversion leaves behind, which the next shot must not see.
+          mkdirSync(join(s.library, 'field-station'), { recursive: true });
+          writeFileSync(join(s.library, 'field-station', 'field-station.epub'), 'book');
+        }
+        return PNG;
+      });
+      await s.run({ launch: async () => browser });
+      expect(seen.length).toBe(6);
+      for (const entries of seen) expect(entries).toEqual([MARKER]);
+      const all = SHOTS.flatMap((shot) => shot.themes.flatMap((t) => outputsFor(shot, t)));
+      for (const out of all) expect([...readFileSync(join(s.out, out))]).toEqual([...PNG]);
+      expect(s.lines[0]).toContain('FakeChrome/1.0');
+      expect(s.lines.slice(1).sort()).toEqual(all.map((out) => `written  ${out}`).sort());
+      expect(existsSync(s.library)).toBe(false);
+      expect(existsSync(s.documents)).toBe(false);
+    } finally { s.done(); }
+  });
+
+  test('a library left by an interrupted run is cleared on the next start, and what it created goes too', async () => {
+    const s = scene();
+    try {
+      // An interrupted run: it created Documents and the library, marked
+      // the library, and never got to clean up.
+      claimLibrary(s.library);
+      writeFileSync(join(s.library, 'half-a-book.epub'), 'x');
+      const boom = new Error('no Chrome today');
+      expect(await thrown(s.run({ launch: async () => { throw boom; } }))).toBe(boom);
+      expect(existsSync(s.library)).toBe(false);
+      expect(existsSync(s.documents)).toBe(false);
+    } finally { s.done(); }
+  });
+
+  test('a library the tool did not make is refused and left exactly as it was', async () => {
+    const s = scene();
+    try {
+      mkdirSync(s.library, { recursive: true });
+      writeFileSync(join(s.library, 'my-real-book.epub'), 'mine');
+      let launched = false;
+      const err = await thrown(s.run({
+        launch: async () => { launched = true; return fakeBrowser(async () => PNG); },
+      }));
+      expect(err).toBeInstanceOf(CaptureError);
+      expect((err as Error).message).toContain('already exists');
+      expect(launched).toBe(false);
+      expect(readdirSync(s.library)).toEqual(['my-real-book.epub']);
+      expect(readdirSync(s.tmp)).toEqual([]);
+    } finally { s.done(); }
+  });
+});
+
+describe('the pieces that must agree with each other', () => {
+  test('the frame page pads the window by exactly what the command sizes pass two for', () => {
+    const html = readFileSync(join(ROOT, 'tools', 'capture', 'frame.html'), 'utf8');
+    const m = html.match(/\.pad\s*\{\s*padding:\s*(\d+)px\s+(\d+)px\s+(\d+)px;\s*\}/);
+    expect(m).not.toBeNull();
+    const [top, sides, bottom] = m!.slice(1).map(Number);
+    expect({ top, right: sides, bottom, left: sides }).toEqual({ ...FRAME_PAD });
+    const drop = SHOTS.find((x) => x.name === 'drop')!;
+    expect(framedSize(drop)).toEqual({ width: 860 + 56 + 56, height: 620 + 44 + 68 });
+  });
+
+  test('the step runner has a step for every window shot, and nothing else', () => {
+    const steps = readFileSync(join(ROOT, 'tools', 'capture', 'steps.js'), 'utf8');
+    const block = steps.match(/const SHOTS = \{([\s\S]*?)\n\};/);
+    expect(block).not.toBeNull();
+    const names = [...block![1]!.matchAll(/^ {2}async (\w+)\(\)/gm)].map((m) => m[1]).sort();
+    expect(names).toEqual(SHOTS.filter((x) => x.kind === 'window').map((x) => x.name).sort());
+  });
+
+  test('the window still draws the version stamp the step runner hides', () => {
+    // Renamed, the stamp would stay visible and every picture would change
+    // every release. steps.js also fails the capture if .rev-stamp is gone.
+    const frame = readFileSync(join(ROOT, 'desktop', 'ui', 'frame.js'), 'utf8');
+    expect(frame).toContain("class: 'rev-stamp'");
+    const steps = readFileSync(join(ROOT, 'tools', 'capture', 'steps.js'), 'utf8');
+    expect(steps).toContain('.rev-stamp');
   });
 });

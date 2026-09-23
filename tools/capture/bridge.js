@@ -39,7 +39,11 @@ window.__TAURI__ = {
         });
         const text = await response.text();
         if (!response.ok) {
-          fail(`engine call refused: ${text}`);
+          // 403 is the gate (or the token) saying no; anything else is the
+          // engine itself failing, which must not read as a refusal.
+          fail(response.status === 403
+            ? `engine call refused: ${text}`
+            : `engine call failed (${response.status}): ${text}`);
           throw text;
         }
         return text;
