@@ -73,16 +73,20 @@ describe('the engine gate', () => {
   // checks that -o lands in the library, allows every one of these.
   const REFUSALS: [string, string[]][] = [
     ['a flag smuggled onto a convert after --library',
-      [D, '--json', '--library', '--fountain', '/Users/me/real.fountain']],
+      [...argv.convert(D), '--fountain', '/Users/me/real.fountain']],
     ['a second flag smuggled onto a convert after --library',
-      [D, '--json', '--progress', '--preview-inline', '--library', '--preview-html', '/anywhere.html']],
-    ['--output instead of -o', [D, '--json', '--output', '/x.epub']],
-    ['--output= form', [D, '--json', '--output=/x.epub']],
-    ['-o glued to its value', [D, '--json', '-o/x.epub']],
+      [...argv.convert(D), '--preview-html', '/anywhere.html']],
+    ['--output instead of -o', [...argv.convert(D), '--output', '/x.epub']],
+    ['--output= form', [...argv.convert(D), '--output=/x.epub']],
+    ['-o glued to its value', [...argv.convert(D), '-o/x.epub']],
     ['a repeated -o', [F, '--json', '--preview-inline', '-o', E, '-o', '/x.epub', '--options-json', '{}']],
+    // The point of this one IS that it is missing --progress/--preview-inline/
+    // --library, so it stays a hand-written short call rather than a full
+    // argv.convert() plus an addition.
     ['a convert without --library, which would write into tests/fixtures', [D, '--json']],
-    ['an unknown flag after --library',
-      [D, '--json', '--progress', '--preview-inline', '--library', '--options', '/any/file']],
+    ['an unknown flag after --library', [...argv.convert(D), '--options', '/any/file']],
+    ['a flag smuggled onto a reconvert after --options-json',
+      [...argv.reconvert(F, E, '{}'), '--output=/x.epub']],
     ['a .. escape out of the library', argv.settings(`${ctx.library}/../../../Users/me/x.fountain`)],
     ['a relative demo path', argv.convert('tests/fixtures/field-station.pdf')],
     ['a relative settings path', argv.settings('field-station/x.fountain')],

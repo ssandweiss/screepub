@@ -13,9 +13,12 @@
 // gate is taught to recognise it, because nothing here can guess whether an
 // unfamiliar value is safe.
 //
-// Pure. tests/capture.test.ts builds both its allowed and its refused cases
-// with the window's own argv builders, so the gate is checked against the
-// real contract rather than a copy of it.
+// Pure. tests/capture.test.ts builds its allowed cases, and most of its
+// refused ones, by taking a call straight from the window's own argv
+// builders and, for a refusal, adding the one bad flag or path the label
+// names; the rest of the refused cases are calls no argv builder makes at
+// all (a missing constant flag, an unknown verb). Either way the gate is
+// checked against the real contract, not a copy of it.
 
 import { isAbsolute, resolve, sep } from 'node:path';
 // @ts-expect-error -- plain JS module, no types
