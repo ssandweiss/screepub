@@ -167,6 +167,14 @@ runEngine(argv.version()).then(
 // flow.boot() is the once-a-day check the README promises: it redraws what an
 // earlier check found, then asks the server only if the reader said yes to
 // the question on the Convert page, and at most once a day (update.js).
-flow.subscribe((phase) => frame.setUpdateLabel(updateLabel(phase), { actionable: labelActionable(phase) }));
+flow.subscribe((phase) => {
+  const words = updateLabel(phase);
+  frame.setUpdateLabel(words, { actionable: labelActionable(phase) });
+  // The label can hide out from under the keyboard: a fresh check saying
+  // "nothing newer" while the reader was standing on it (Tabbed to it, or
+  // just clicked it) would otherwise drop focus to the body with no way
+  // back in one Tab press.
+  if (words === null && document.activeElement?.id === 'rev-update') restoreFocus();
+});
 frame.onUpdateClick(() => flow.start());
 flow.boot();

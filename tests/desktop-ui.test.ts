@@ -1305,9 +1305,9 @@ describe('the window knows when the engine is working, and can restart', () => {
     // "idle" between two calls of the SAME job. Real invoke() calls answer
     // on their own timer, not a manually-resolved Promise, so this drives
     // app.runEngine for real through three awaited calls that each answer
-    // after setTimeout(10ms): the same shape send.js's settings/export/send
-    // chain has (send.js:534, 560, 576), with whenIdle() asked right after
-    // the chain starts, not after it finishes.
+    // after setTimeout(10ms): the same shape send.js's sendTo() chain has
+    // (settings via ensureSettings(), then export, then send), with
+    // whenIdle() asked right after the chain starts, not after it finishes.
     const app = await import(join(UI, 'app.js'));
     await app.whenIdle(); // start from a genuinely idle baseline
     const log: string[] = [];
@@ -1414,6 +1414,81 @@ describe('the window knows when the engine is working, and can restart', () => {
       .replace(/\/\/.*$/gm, ' ');
     expect(code).not.toContain('Date.now()');
     expect(code).toContain('performance.now()');
+  });
+});
+
+describe('the real flow and the real runEngine, driven together end to end', () => {
+  // Every other update-flow.js test hands createUpdateFlow its own fakes.
+  // This one drives the actual exported singleton (`flow`) against a
+  // stubbed window.__TAURI__ and a stubbed localStorage, with a real
+  // engine call held open through app.js's OWN runEngine/whenIdle, to prove
+  // the two files actually agree once wired together rather than only in
+  // each one's own fakes.
+  //
+  // Only offerFound() and start() are called on the singleton, never
+  // boot(): boot() runs once ever (createUpdateFlow's own `booted` guard),
+  // this module is imported once per test process and shared with every
+  // other test that imports it, and a boot() here would both be silently
+  // ignored by a later legitimate boot() and could plant a phase ahead of
+  // whatever another test expects of the untouched singleton.
+  test('relaunch waits for the held engine call to finish, plus the quiet period, not just for the call to end', async () => {
+    const app = await import(join(UI, 'app.js'));
+    const { flow } = await import(join(UI, 'update-flow.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+
+    let relaunched = 0;
+    let releaseHeld: () => void = () => {};
+    const held = new Promise<string>((resolve) => { releaseHeld = () => resolve('{"ok":true}'); });
+    const fakeUpdate = {
+      version: '9.9.9',
+      currentVersion: '0.0.0',
+      body: 'test notes',
+      downloadAndInstall: async (onEvent: (e: unknown) => void) => {
+        onEvent({ event: 'Started', data: { contentLength: 1000 } });
+        onEvent({ event: 'Progress', data: { chunkLength: 1000 } });
+        onEvent({ event: 'Finished' });
+      },
+      close: async () => {},
+    };
+    const g = globalThis as unknown as { window?: unknown; localStorage?: unknown };
+    g.window = {
+      __TAURI__: {
+        // Only the held call goes through this: the offer already carries a
+        // live `update`, so installAndRestart never re-checks or re-reads
+        // storage on this path.
+        core: { invoke: () => held },
+        updater: { check: async () => fakeUpdate },
+        process: { relaunch: async () => { relaunched += 1; } },
+      },
+    };
+    const stored = new Map<string, string>();
+    g.localStorage = {
+      getItem: (k: string) => stored.get(k) ?? null,
+      setItem: (k: string, v: string) => { stored.set(k, String(v)); },
+    };
+    try {
+      const heldCall = app.runEngine(['send', 'held.epub', '--json']);
+      expect(app.engineBusy()).toBe(true);
+
+      flow.offerFound({ outcome: 'offer', version: '9.9.9', body: 'test notes', update: fakeUpdate });
+      const run = flow.start();
+      await new Promise((r) => setTimeout(r, 0)); // let start() reach whenIdle()
+      expect(relaunched).toBe(0);
+
+      releaseHeld();
+      await heldCall.catch(() => {});
+      await new Promise((r) => setTimeout(r, 0)); // let runEngine's finally settle()
+      // The held call has ENDED, but the quiet period has not: this is
+      // exactly the gap a single-macrotask idle check would miss.
+      expect(relaunched).toBe(0);
+
+      await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+      await run;
+      expect(relaunched).toBe(1);
+    } finally {
+      delete g.window;
+      delete g.localStorage;
+    }
   });
 });
 
@@ -4920,6 +4995,20 @@ describe('a newer version is a label you can click, not a dot you can miss', () 
     expect(rule).toContain('cursor: default');
     const main = read('main.js');
     expect(main).toContain('labelActionable(phase)');
+  });
+
+  test('the keyboard does not fall off the edge when the label hides under it', () => {
+    // A fresh check that says "nothing newer" hides the label (words go
+    // null). If the reader had just Tabbed to it, or clicked it and it
+    // resolved before they moved on, the keyboard was standing on an
+    // element that is now `hidden`, which drops focus to the body with no
+    // way back in one Tab press. The label needs a stable handle so
+    // main.js can tell whether it was the one holding focus.
+    expect(frame).toMatch(/class:\s*'rev-update',[\s\S]*?id:\s*'rev-update'/);
+    const main = read('main.js');
+    const subscriber = main.slice(main.indexOf('flow.subscribe'), main.indexOf('frame.onUpdateClick'));
+    expect(subscriber).toMatch(/document\.activeElement\?\.id === 'rev-update'/);
+    expect(subscriber).toMatch(/document\.activeElement\?\.id === 'rev-update'\)\s*restoreFocus\(\)/);
   });
 });
 

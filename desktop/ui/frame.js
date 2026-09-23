@@ -167,6 +167,11 @@ export function mountFrame(root) {
   const updateLabel = el('button', {
     type: 'button',
     class: 'rev-update',
+    // A stable handle, not for styling: main.js checks
+    // document.activeElement against this id so it can put the keyboard
+    // back somewhere real when the label hides out from under it (a fresh
+    // check saying "nothing newer" while the reader was standing on it).
+    id: 'rev-update',
     hidden: true,
     onclick: () => { for (const handler of updateHandlers) handler(); },
   });

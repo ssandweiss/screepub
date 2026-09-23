@@ -59,9 +59,11 @@ people will never turn it on and never hear about an update.
 - The brass dot (`.rev-new::before` in `style.css`, `frame.updateWaiting`) is
   removed. In its place, a separate button beside the stamp: **"Update to
   0.7.3"**, set in the stamp's own type (structure face, fine size, letter
-  spaced, upper case) in the brass accent. The stamp itself is unchanged and
-  still opens the release notes, which already show what the server said
-  about the new version.
+  spaced, upper case), ink with a brass rule under it rather than brass
+  text: brass on the paper does not reach a readable contrast, so the
+  accent is the rule, the same mark the open tab carries. The stamp itself
+  is unchanged and still opens the release notes, which already show what
+  the server said about the new version.
 - **Remembered across launches.** Today a found update lives in memory only
   (`setPending`), so quitting and reopening on the same day, when the
   once-a-day throttle skips the check, loses it. A found offer now also

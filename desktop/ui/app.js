@@ -75,16 +75,16 @@ let idleWaiters = [];
 
 // Idle means no counted engine call has been RUNNING for this long, not
 // merely that the count last touched zero. A reviewer reproduced the bug a
-// single macrotask left open: send.js runs settings, export and send as an
-// AWAITED CHAIN (send.js:534, 560, 576), and tune.js runs a save then a
-// rebuild the same way (tune.js:743, 766); the next call in either chain
-// starts again within microtasks of the one before it finishing, so the
-// count touches zero BETWEEN two calls that belong to the same job, not just
-// after the job ends. 500 ms covers that gap.
+// single macrotask left open: send.js's sendTo() runs settings (via its own
+// ensureSettings()), export and send as an AWAITED CHAIN, and tune.js's
+// flush() runs a save then a rebuild the same way; the next call in either
+// chain starts again within microtasks of the one before it finishing, so
+// the count touches zero BETWEEN two calls that belong to the same job, not
+// just after the job ends. 500 ms covers that gap.
 //
 // It does NOT cover every knob move. tune.js debounces a change behind its
-// own 300 ms settle timer (SETTLE_MS, tune.js:411; schedule(), tune.js:714)
-// before the change ever reaches the engine as a save. That debounce is
+// own 300 ms settle timer (SETTLE_MS; schedule()) before the change ever
+// reaches the engine as a save. That debounce is
 // covered only for a knob moved DURING a save, or within the 200 ms after
 // one ends: only then has the 300 ms timer fired, and the engine call it
 // produces started, by the time this quiet period would otherwise expire. A

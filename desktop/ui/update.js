@@ -216,8 +216,8 @@ export async function runCheck({ manual, storage, now, check }) {
  *  order of events runs under `bun test` without a window. app.js's
  *  updateInstall closes the plugin's Update object after any attempt,
  *  succeeded or not, so a retry from here must fetch a fresh one rather than
- *  reuse `offer.update` — pass `offer: { ...offer, update: null }` (a later
- *  task, the retry button, depends on that rule). Returns what happened, so
+ *  reuse `offer.update` — pass `offer: { ...offer, update: null }`
+ *  (update-flow.js's start() depends on that rule). Returns what happened, so
  *  the caller knows what a second click should do. Every outcome but
  *  `current` also carries `offer`: the one actually used, which can differ
  *  from the one passed in (a label drawn from memory has no live Update

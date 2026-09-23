@@ -509,9 +509,11 @@ showed neither installed. `await document.fonts.load(...)` and then read the
 - **No auto-update.** Notes says so on the surface. *(True until
   2026-09-21. Both halves exist now: the transport half is the overlay
   section above and `docs/superpowers/plans/2026-09-21-updater-transport.md`,
-  and the window half is `desktop/ui/update.js`, off by default with a
-  switch beside the version number. The first release to carry them is what
-  makes it live.)*
+  and the window half is `desktop/ui/update.js`: a one-time question under
+  the drop area asks whether to check once a day (off until answered), a
+  found update draws as a clickable label beside the version number, and
+  installing it restarts the window automatically once the engine is idle.
+  The first release to carry them is what makes it live.)*
 
 ### Known, open, and found by running it — and fixed in 13b (task 13, 2026-09-14)
 
