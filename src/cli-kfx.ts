@@ -8,8 +8,11 @@ import { installKfxPlugin, kfxStatus, type KfxInstallResult, type KfxStatus } fr
 import { kfxSetup, type KfxSetup, type KfxStep } from './export/kfx-setup';
 
 /** Injectable seams, defaulted to the real thing, so a test can drive every
- *  outcome without a Calibre, and without ever installing into a real one. */
-export interface KfxDeps {
+ *  outcome without a Calibre, and without ever installing into a real one.
+ *  Named KfxCommandDeps, not KfxDeps: src/export/kfx.ts already exports a
+ *  different KfxDeps (toKfx's seams), and an auto-import could pick the
+ *  wrong one. */
+export interface KfxCommandDeps {
   status?: () => Promise<KfxStatus>;
   install?: () => Promise<KfxInstallResult>;
   platform?: string;
@@ -23,7 +26,7 @@ export interface KfxInstallAnswer {
   setup: KfxSetup;
 }
 
-export async function kfxStatusCommand(deps: KfxDeps = {}): Promise<KfxSetup> {
+export async function kfxStatusCommand(deps: KfxCommandDeps = {}): Promise<KfxSetup> {
   const status = await (deps.status ?? kfxStatus)();
   return kfxSetup(status, deps.platform ?? hostPlatform);
 }
@@ -32,7 +35,7 @@ export async function kfxStatusCommand(deps: KfxDeps = {}): Promise<KfxSetup> {
  *  fresh checklist and the window needs no second call. NEVER call this on
  *  the program's own initiative: it fetches third-party code and writes into
  *  the user's Calibre, so only an explicit request reaches it. */
-export async function kfxInstallCommand(deps: KfxDeps = {}): Promise<KfxInstallAnswer> {
+export async function kfxInstallCommand(deps: KfxCommandDeps = {}): Promise<KfxInstallAnswer> {
   const result = await (deps.install ?? (() => installKfxPlugin()))();
   if (!result.ok || !result.version) {
     throw new CliError(

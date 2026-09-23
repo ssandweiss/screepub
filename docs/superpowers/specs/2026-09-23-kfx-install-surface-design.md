@@ -122,20 +122,29 @@ Rules:
 Handlers return values and never print, like `cli-export.ts`.
 
 ```ts
-export interface KfxDeps {
+export interface KfxCommandDeps {
   status?: () => Promise<KfxStatus>;          // default kfxStatus
   install?: () => Promise<KfxInstallResult>;  // default installKfxPlugin
   platform?: string;                          // default process.platform
 }
-export async function kfxStatusCommand(deps?: KfxDeps): Promise<KfxSetup>;
-export async function kfxInstallCommand(deps?: KfxDeps):
+export async function kfxStatusCommand(deps?: KfxCommandDeps): Promise<KfxSetup>;
+export async function kfxInstallCommand(deps?: KfxCommandDeps):
   Promise<{ version: string; removed: string[]; setup: KfxSetup }>;
 ```
+
+Named `KfxCommandDeps`, not `KfxDeps`: `src/export/kfx.ts` already exports a
+different `KfxDeps` (`toKfx`'s seams), and an auto-import could pick the
+wrong one.
 
 `kfxInstallCommand` runs the installer, throws
 `CliError('kfx-install-failed', reason)` on `{ ok: false }`, and on success
 probes the status AGAIN so the answer carries the fresh checklist. The
 window then needs no second call.
+
+When the plugin index or the download cannot be reached, the installer
+reports `could not reach Calibre's plugin index. Check the internet
+connection, then try again.` rather than Python's own exception text
+(`src/export/kfx.ts` marks both fetches).
 
 ### The verbs, in `src/cli.ts` and `src/cli-devices.ts`
 

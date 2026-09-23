@@ -399,4 +399,46 @@ describe('installKfxPlugin', () => {
     expect(r.ok).toBe(false);
     expect(r.reason).toMatch(/size mismatch/);
   });
+
+  // The most likely reason either network fetch (the index, or the zip
+  // itself) fails is the user being offline, and unwrapped that arrives as
+  // raw urllib/http exception text: no user should have to parse
+  // "<urlopen error [Errno 8] nodename nor servname provided>". The snippet
+  // marks both fetches and tags the result 'offline': true; this is the
+  // friendly sentence installKfxPlugin reports instead.
+  test("an unreachable plugin index gets a friendly sentence, not urlopen's own text", async () => {
+    const r = await installKfxPlugin(async () => ({
+      code: 0,
+      stdout: `SCREEPUB_RESULT ${JSON.stringify({
+        ok: false,
+        error: '<urlopen error [Errno 8] nodename nor servname provided>',
+        offline: true,
+      })}\n`,
+      stderr: '',
+    }), TOOL);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe(
+      "could not reach Calibre's plugin index. Check the internet connection, then try again.",
+    );
+    expect(r.reason).not.toContain('urlopen');
+  });
+
+  // Pinning the PYTHON shape: nothing here runs the snippet (it needs a real
+  // calibre-debug), so the only way to catch an except clause ordered wrong
+  // is to read the source. Python tries except clauses top to bottom, and
+  // Unreachable IS an Exception, so if the generic `except Exception as e:`
+  // came first it would swallow every offline failure silently and 'offline'
+  // would never reach installKfxPlugin's parsing above.
+  test('INSTALL_SNIPPET catches Unreachable before the generic exception', async () => {
+    const src = await Bun.file(join(import.meta.dir, '..', 'src', 'export', 'kfx.ts')).text();
+    const unreachableCatch = src.indexOf('except Unreachable as e:');
+    // The LAST `except Exception as e:` is the outer, catch-all clause; the
+    // two earlier ones belong to the fetches themselves, which re-raise as
+    // Unreachable rather than print.
+    const genericCatch = src.lastIndexOf('except Exception as e:');
+    expect(unreachableCatch).toBeGreaterThan(-1);
+    expect(genericCatch).toBeGreaterThan(-1);
+    expect(unreachableCatch).toBeLessThan(genericCatch);
+    expect(src).toContain("'offline': True");
+  });
 });

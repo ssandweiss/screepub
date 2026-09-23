@@ -29,11 +29,17 @@ describe('kfxInstallCommand', () => {
   test('success reports the version, the removed forks, and a FRESH checklist', async () => {
     // The status is probed again after the install, so the answer the window
     // redraws from is the one Calibre now reports, not the one from before.
-    const probes: KfxStatus[] = [allThere];
+    // The fake status answers according to whether the install has actually
+    // happened yet, so a mutant that probes BEFORE installing is caught by a
+    // wrong answer (missingPlugin, not allThere), not just a call count.
+    let done = false;
     let probed = 0;
     const answer = await kfxInstallCommand({
-      install: async (): Promise<KfxInstallResult> => ({ ok: true, version: '2.20.1', removed: ['KFX Output (fork)'] }),
-      status: async () => { probed += 1; return probes.shift()!; },
+      install: async (): Promise<KfxInstallResult> => {
+        done = true;
+        return { ok: true, version: '2.20.1', removed: ['KFX Output (fork)'] };
+      },
+      status: async () => { probed += 1; return done ? allThere : missingPlugin; },
       platform: 'darwin',
     });
     expect(probed).toBe(1);
@@ -53,23 +59,14 @@ describe('kfxInstallCommand', () => {
 
   test('a failure is a kfx-install-failed CliError carrying Calibre’s reason', async () => {
     let probed = 0;
-    const run = kfxInstallCommand({
+    const err = await kfxInstallCommand({
       install: async () => ({ ok: false, reason: 'downloaded 10 bytes, index says 20' }),
       status: async () => { probed += 1; return missingPlugin; },
       platform: 'darwin',
-    });
-    await expect(run).rejects.toBeInstanceOf(CliError);
-    try {
-      await kfxInstallCommand({
-        install: async () => ({ ok: false, reason: 'downloaded 10 bytes, index says 20' }),
-        status: async () => missingPlugin,
-        platform: 'darwin',
-      });
-    } catch (err) {
-      const e = err as CliError;
-      expect(e.code).toBe('kfx-install-failed');
-      expect(e.message).toBe('could not install the KFX plugin: downloaded 10 bytes, index says 20');
-    }
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect((err as CliError).code).toBe('kfx-install-failed');
+    expect((err as CliError).message).toBe('could not install the KFX plugin: downloaded 10 bytes, index says 20');
     // No point probing after a failure: nothing changed that the caller
     // does not already have.
     expect(probed).toBe(0);

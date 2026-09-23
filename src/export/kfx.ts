@@ -199,6 +199,14 @@ try:
     from calibre.gui2.dialogs.plugin_updater import INDEX_URL
     from calibre.customize.ui import (
         add_plugin, initialized_plugins, output_format_plugins, remove_plugin)
+
+    # Raised only around the two NETWORK fetches below, so the outer except
+    # clauses can tell "could not reach the index or the zip" (most likely:
+    # offline) apart from every other way this can fail, and report the
+    # first one as one plain sentence instead of raw urllib/http text.
+    class Unreachable(Exception):
+        pass
+
     # Clear FORKS first. A variant registers the same internal package
     # (calibre_plugins.kfx_output) under a different plugin NAME, so calibre
     # happily holds both and the new plugin's code then imports the fork's
@@ -219,12 +227,19 @@ try:
         if n in outs and 'KFX Output' in n and n != 'KFX Output':
             remove_plugin(p)
             removed.append(n)
-    idx = json.loads(bz2.decompress(get_https_resource_securely(INDEX_URL)).decode('utf-8'))
+    try:
+        idx_raw = get_https_resource_securely(INDEX_URL)
+    except Exception as e:
+        raise Unreachable(str(e))
+    idx = json.loads(bz2.decompress(idx_raw).decode('utf-8'))
     meta = idx.get('KFX Output')
     if meta is None:
         raise RuntimeError('KFX Output is not in calibre\\'s plugin index')
-    data = urllib.request.urlopen(
-        'https://plugins.calibre-ebook.com/' + meta['file'], timeout=120).read()
+    try:
+        data = urllib.request.urlopen(
+            'https://plugins.calibre-ebook.com/' + meta['file'], timeout=120).read()
+    except Exception as e:
+        raise Unreachable(str(e))
     if len(data) != meta['size']:
         raise RuntimeError('downloaded %d bytes, index says %d' % (len(data), meta['size']))
     if '__init__.py' not in zipfile.ZipFile(io.BytesIO(data)).namelist():
@@ -237,6 +252,8 @@ try:
         os.unlink(path)
     print('SCREEPUB_RESULT ' + json.dumps(
         {'ok': True, 'version': '.'.join(map(str, meta['version'])), 'removed': removed}))
+except Unreachable as e:
+    print('SCREEPUB_RESULT ' + json.dumps({'ok': False, 'error': str(e), 'offline': True}))
 except Exception as e:
     print('SCREEPUB_RESULT ' + json.dumps({'ok': False, 'error': str(e)}))
 `;
@@ -290,10 +307,16 @@ export async function installKfxPlugin(
   }
   try {
     const parsed = JSON.parse(line.slice('SCREEPUB_RESULT '.length)) as {
-      ok?: boolean; version?: string; error?: string; removed?: string[];
+      ok?: boolean; version?: string; error?: string; removed?: string[]; offline?: boolean;
     };
     if (parsed.ok && parsed.version) {
       return { ok: true, version: parsed.version, removed: parsed.removed ?? [] };
+    }
+    if (parsed.offline) {
+      return {
+        ok: false,
+        reason: "could not reach Calibre's plugin index. Check the internet connection, then try again.",
+      };
     }
     return { ok: false, reason: parsed.error ?? 'calibre reported a failure with no reason' };
   } catch {
