@@ -485,7 +485,12 @@ describe('human output', () => {
     });
     const lines = setupLines(setup);
     expect(lines[2]).toBe('  Kindle Previewer  not available: Amazon does not make it for Linux');
-    expect(lines[3]).toBe('  KFX plugin        not installed: Install Calibre first');
+    expect(lines[3]).toBe('  KFX plugin        not available: Of no use without Kindle Previewer');
+    const mac = await kfxStatusCommand({
+      status: async () => ({ calibre: false, previewer: false, pluginInstalled: false, ready: false }),
+      platform: 'darwin',
+    });
+    expect(setupLines(mac)[3]).toBe('  KFX plugin        not installed: Install Calibre first');
   });
 
   test('install: the version, each removed fork, then the summary', () => {
