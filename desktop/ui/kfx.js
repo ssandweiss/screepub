@@ -78,11 +78,15 @@ export function kindleRelevant(devices) {
 }
 
 /** Whether the block is drawn at all. A ready machine sees nothing, except
- *  right after an install, when the success line needs somewhere to stand. */
-export function showSetup(setup, devices, justInstalled) {
+ *  right after an install, when the success line needs somewhere to stand.
+ *  While an install runs, and right after it, the block stays up whatever
+ *  is connected: the Installing line and then the result answer what the
+ *  reader pressed, and a Kobo plugged in meanwhile does not change that. */
+export function showSetup(setup, devices, justInstalled, installing = false) {
   if (setup === null || setup === undefined || !setup.possible) return false;
+  if (installing === true || justInstalled === true) return true;
   if (!kindleRelevant(devices)) return false;
-  return !setup.ready || justInstalled === true;
+  return !setup.ready;
 }
 
 /** What stands to the right of one step. `busy` is true while a send or an
@@ -223,6 +227,11 @@ function onFocus() {
 
 async function probe() {
   if (probing || installingNow) return;
+  // send.js's no-script and blocked states never mount the block (the last
+  // host, if any, is detached), and an answer there would be drawn nowhere.
+  // show() draws before kfxShown(), so on the page with readers the host is
+  // in place by the time this runs.
+  if (host === null || !host.isConnected) return;
   probing = true;
   const mine = installs;
   let next;
@@ -256,7 +265,7 @@ function draw() {
   // Rebuilding the rows throws away whatever control the keyboard stood
   // on, so where it stood is noted first and handed back after.
   const focused = host.contains(document.activeElement) ? document.activeElement : null;
-  if (!showSetup(setup, hooks?.devices?.() ?? null, justInstalled)) {
+  if (!showSetup(setup, hooks?.devices?.() ?? null, justInstalled, installingNow)) {
     host.hidden = true;
     if (focused !== null) giveBackFocus(null);
     return;
@@ -315,15 +324,20 @@ async function install() {
   if (installingNow || hooks?.isSending?.() === true) return;
   installingNow = true;
   installs += 1;
-  hooks?.onBusy?.(true);
-  status = { line: INSTALLING, bad: false };
-  draw();
   let outcome;
+  // Everything after the flag goes inside the try, the busy hook and the
+  // first draw included: only the finally clears installingNow, and a flag
+  // left standing would make send.js refuse every send until a restart.
   try {
+    hooks?.onBusy?.(true);
+    status = { line: INSTALLING, bad: false };
+    draw();
     outcome = afterInstall(await runEngine(argv.kfxInstall()), setup);
   } catch (err) {
     // runEngine throws only when the engine could not run or broke its
-    // contract; its message is already written for a person.
+    // contract; its message is already written for a person. A throw from
+    // the busy hook or the first draw lands here too, before the engine is
+    // asked anything.
     outcome = afterInstall({ ok: false, error: { message: err?.message } }, setup);
   } finally {
     installingNow = false;

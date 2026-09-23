@@ -206,6 +206,12 @@ import bz2, io, json, os, tempfile, urllib.request, zipfile
 class Unreachable(Exception):
     pass
 
+# Older copies cleared to make room. Bound here, beside Unreachable and for
+# the same reason, so BOTH failure lines below can report it: add_plugin
+# failing after the clearing loop has already taken a copy out, and the
+# caller must be able to say which.
+removed = []
+
 try:
     from calibre.utils.https import get_https_resource_securely
     from calibre.gui2.dialogs.plugin_updater import INDEX_URL
@@ -219,9 +225,11 @@ try:
     meta = idx.get('KFX Output')
     if meta is None:
         raise RuntimeError('KFX Output is not in calibre\\'s plugin index')
+    # Built OUTSIDE the try below: an index entry with no 'file' is a broken
+    # index, not a lost connection, and must not be reported as one.
+    zip_url = 'https://plugins.calibre-ebook.com/' + meta['file']
     try:
-        data = urllib.request.urlopen(
-            'https://plugins.calibre-ebook.com/' + meta['file'], timeout=120).read()
+        data = urllib.request.urlopen(zip_url, timeout=120).read()
     except Exception as e:
         raise Unreachable(str(e))
     if len(data) != meta['size']:
@@ -240,12 +248,13 @@ try:
     # which is the companion metadata writer shipping in the same zip, and
     # deleted it; it survived only because add_plugin put it back.
     #
-    # It runs after the download and its checks, so a failed or offline
-    # install leaves whatever was there untouched.
+    # It runs after the download and its checks, so every failure up to this
+    # point, offline included, leaves whatever was there untouched. From
+    # here on it no longer holds: if add_plugin fails below, a copy may
+    # already be gone, which is why both failure lines report 'removed'.
     outs = set()
     for p in output_format_plugins():
         outs.add(getattr(p, 'name', ''))
-    removed = []
     for p in list(initialized_plugins()):
         n = getattr(p, 'name', '')
         if n in outs and 'KFX Output' in n and n != 'KFX Output':
@@ -260,9 +269,10 @@ try:
     print('SCREEPUB_RESULT ' + json.dumps(
         {'ok': True, 'version': '.'.join(map(str, meta['version'])), 'removed': removed}))
 except Unreachable as e:
-    print('SCREEPUB_RESULT ' + json.dumps({'ok': False, 'error': str(e), 'offline': True}))
+    print('SCREEPUB_RESULT ' + json.dumps(
+        {'ok': False, 'error': str(e), 'offline': True, 'removed': removed}))
 except Exception as e:
-    print('SCREEPUB_RESULT ' + json.dumps({'ok': False, 'error': str(e)}))
+    print('SCREEPUB_RESULT ' + json.dumps({'ok': False, 'error': str(e), 'removed': removed}))
 `;
 
 export interface KfxInstallResult {
@@ -274,7 +284,10 @@ export interface KfxInstallResult {
   /** Conflicting KFX forks cleared to make room. Usually empty; non-empty
    *  for anyone upgrading from the Swift app's vendored copy, which
    *  installs under a different NAME and would otherwise break conversion
-   *  outright. Worth surfacing: we removed something they installed. */
+   *  outright. Worth surfacing: we removed something they installed.
+   *  Carried on a FAILURE too, whenever Calibre's answer was read: a fork is
+   *  cleared before add_plugin runs, so an add_plugin that then fails leaves
+   *  the reader with one copy fewer than they had. */
   removed?: string[];
 }
 
@@ -316,16 +329,20 @@ export async function installKfxPlugin(
     const parsed = JSON.parse(line.slice('SCREEPUB_RESULT '.length)) as {
       ok?: boolean; version?: string; error?: string; removed?: string[]; offline?: boolean;
     };
+    const removed = parsed.removed ?? [];
     if (parsed.ok && parsed.version) {
-      return { ok: true, version: parsed.version, removed: parsed.removed ?? [] };
+      return { ok: true, version: parsed.version, removed };
     }
     if (parsed.offline) {
+      // Either fetch: the index, or the plugin's own zip. So the sentence
+      // names the site both come from, not just the index.
       return {
         ok: false,
-        reason: "Calibre's plugin index could not be reached. Check the internet connection, then try again.",
+        reason: "Calibre's plugin site could not be reached. Check the internet connection, then try again.",
+        removed,
       };
     }
-    return { ok: false, reason: parsed.error ?? 'calibre reported a failure with no reason' };
+    return { ok: false, reason: parsed.error ?? 'calibre reported a failure with no reason', removed };
   } catch {
     return { ok: false, reason: `could not read calibre's answer: ${line.slice(0, 200)}` };
   }

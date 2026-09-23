@@ -50,10 +50,17 @@ export async function kfxInstallCommand(deps: KfxCommandDeps = {}): Promise<KfxI
   }
   const result = await (deps.install ?? (() => installKfxPlugin()))();
   if (!result.ok || !result.version) {
-    throw new CliError(
-      'kfx-install-failed',
-      `could not install the KFX plugin: ${result.reason ?? 'Calibre did not say why'}`,
-    );
+    let message = `could not install the KFX plugin: ${result.reason ?? 'Calibre did not say why'}`;
+    // The one failure that changes the reader's Calibre: an older copy was
+    // cleared to make room, and then add_plugin failed. This message is all
+    // the terminal or the window's status line shows, so the names go in it.
+    const removed = result.removed ?? [];
+    if (removed.length > 0) {
+      if (!/[.!?]$/.test(message)) message += '.';
+      message += ` An older copy was removed before the failure: ${removed.join(', ')}.`
+        + ' Try again, or reinstall it in Calibre.';
+    }
+    throw new CliError('kfx-install-failed', message);
   }
   const setup = await kfxStatusCommand(deps);
   return { version: result.version, removed: result.removed ?? [], setup };

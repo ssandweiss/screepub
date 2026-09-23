@@ -3687,7 +3687,7 @@ describe('the Send page’s KFX block: decisions', () => {
     checklistFrom: (value: unknown) => Setup | null;
     setupFrom: (answer: unknown) => Setup | null;
     kindleRelevant: (devices: unknown) => boolean;
-    showSetup: (setup: Setup | null, devices: unknown, justInstalled: boolean) => boolean;
+    showSetup: (setup: Setup | null, devices: unknown, justInstalled: boolean, installing?: boolean) => boolean;
     controlFor: (step: Setup['steps'][number], busy: boolean) =>
       | { type: 'status'; text: string }
       | { type: 'link'; label: string; url: string }
@@ -3830,7 +3830,22 @@ describe('the Send page’s KFX block: decisions', () => {
     expect(kfx.showSetup(null, [], true)).toBe(false);
     expect(kfx.showSetup({ ...notReady, possible: false }, [], false)).toBe(false);
     expect(kfx.showSetup(notReady, [kobo], false)).toBe(false);
+    expect(kfx.showSetup(notReady, [kobo], false, false)).toBe(false);
     expect(kfx.showSetup(notReady, null, false)).toBe(false);
+  });
+
+  test('an install running or just finished keeps the block up, whatever is connected', () => {
+    // The reader pressed Install, then plugged in a Kobo (or unplugged the
+    // Kindle). The Installing line and then the result are the answer to
+    // what they pressed, so they stay where they were said.
+    expect(kfx.showSetup(notReady, [kobo], false, true)).toBe(true);
+    expect(kfx.showSetup(ready, [kobo], true)).toBe(true);
+    expect(kfx.showSetup(ready, [kobo], true, false)).toBe(true);
+    expect(kfx.showSetup(notReady, null, false, true)).toBe(true);
+    // Still nothing to stand on without a checklist, or where KFX is not
+    // possible at all.
+    expect(kfx.showSetup(null, [kobo], true, true)).toBe(false);
+    expect(kfx.showSetup({ ...notReady, possible: false }, [kobo], true, true)).toBe(false);
   });
 
   test('each step’s control says what to do, and install waits for a send', () => {
@@ -4044,6 +4059,39 @@ describe('the Send page’s KFX block: wiring, second pass', () => {
     expect(redraw).toBeLessThan(sendTo.indexOf('await '));
   });
 
+  test('a throw before the engine is asked cannot leave an install stuck on', () => {
+    // installingNow refuses every send until it is cleared, and only the
+    // finally clears it. So everything after the flag is set, the busy hook
+    // and the first draw included, runs inside the try that finally closes.
+    const install = body(kfx, 'async function install(');
+    const set = install.indexOf('installingNow = true');
+    const opened = install.indexOf('try {');
+    const asked = install.indexOf('await ');
+    expect(opened).toBeGreaterThan(set);
+    // No call at all between setting the flag and opening the try.
+    expect(install.slice(set, opened)).not.toContain('(');
+    for (const step of ['hooks?.onBusy?.(true)', 'status = { line: INSTALLING', 'draw()']) {
+      const at = install.indexOf(step);
+      expect(at, `install() has no ${step} inside its try`).toBeGreaterThan(opened);
+      expect(at).toBeLessThan(asked);
+    }
+  });
+
+  test('no probe for a block that is not in the page', () => {
+    // The no-script and blocked states never mount the block, and a
+    // kfx-status run per show and per focus would answer nobody.
+    const probe = body(kfx, 'async function probe(');
+    const guard = probe.indexOf('if (host === null || !host.isConnected) return;');
+    expect(guard, 'probe() runs with no block to draw into').toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(probe.indexOf('probing = true'));
+    expect(guard).toBeLessThan(probe.indexOf('await '));
+    // send.js mounts the block (draw) before saying the page is shown, or
+    // the first probe on a real page would find no host and never run.
+    const show = body(send, 'export function show(');
+    expect(show.indexOf('draw()')).toBeGreaterThan(-1);
+    expect(show.indexOf('draw()')).toBeLessThan(show.indexOf('kfxShown()'));
+  });
+
   test('the device list, the send flag and the busy hook reach the block', () => {
     // The body, not the file: the import line alone names kfxDevicesChanged.
     const refresh = body(send, 'async function refresh(');
@@ -4181,6 +4229,7 @@ describe('the Send page’s KFX block: what a reader sees across redraws', () =>
     kfxShown: () => void;
     kfxHidden: () => void;
     kfxRedraw: () => void;
+    kfxInstalling: () => boolean;
   };
   const g = globalThis as unknown as { window?: unknown; document?: unknown };
   afterEach(() => {
@@ -4343,5 +4392,54 @@ describe('the Send page’s KFX block: what a reader sees across redraws', () =>
     await w.answer('kfx-status', status(true, false, true));
     expect(w.labels()).toEqual(['Get Kindle Previewer']);
     expect(w.statusNode()!.textContent).toBe('');
+  });
+
+  test('a busy hook that throws cannot leave the install flag on', async () => {
+    // While kfxInstalling() is true, send.js refuses every send; stuck on,
+    // it would refuse them until the window restarted.
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    w.kfx.mountKfx(w.host, {
+      isSending: () => false,
+      devices: () => [],
+      onBusy: (on: boolean) => { if (on) throw new Error('the page broke'); },
+      restoreFocus: () => undefined,
+    });
+    w.button('Install').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(w.kfx.kfxInstalling()).toBe(false);
+    expect(w.statusNode()!.textContent).toBe('the page broke');
+    expect(w.labels()).toEqual(['Install']);
+  });
+
+  test('a Kobo plugged in mid-install does not take the install’s lines away', async () => {
+    const w = await world();
+    let devices: unknown[] = [];
+    w.kfx.mountKfx(w.host, {
+      isSending: () => false,
+      devices: () => devices,
+      onBusy: () => undefined,
+      restoreFocus: () => undefined,
+    });
+    await w.answer('kfx-status', status(true, true, false));
+    w.button('Install').click();
+    devices = [{ id: '/m/KOBOe', kind: 'kobo', name: 'Kobo', volume: '/m/KOBOe' }];
+    w.kfx.kfxRedraw(); // send.js's device poll redraws the block the same way
+    expect(w.host.hidden).toBe(false);
+    expect(w.statusNode()!.textContent).toBe(w.kfx.INSTALLING);
+    await w.answer('kfx-install', installed(true, true));
+    expect(w.host.hidden).toBe(false);
+    expect(w.statusNode()!.textContent).toBe(INSTALLED_READY);
+  });
+
+  test('a block no longer in the page asks the engine nothing', async () => {
+    // send.js's no-script and blocked states leave the last block's node
+    // detached; a show or a focus must not spend a kfx-status run on it.
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    w.doc.body.removeChild(w.host);
+    w.regainFocus();
+    w.kfx.kfxShown();
+    await expect(w.answer('kfx-status', status(true, true, false))).rejects.toThrow('nothing asked');
   });
 });

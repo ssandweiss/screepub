@@ -147,11 +147,22 @@ plugin would have nothing to drive), reusing `kfx-setup.ts`'s
 Linux/this-system wording.
 
 When the plugin index or the download cannot be reached, the installer
-reports `Calibre's plugin index could not be reached. Check the internet
+reports `Calibre's plugin site could not be reached. Check the internet
 connection, then try again.` rather than Python's own exception text
-(`src/export/kfx.ts` marks both fetches). `kfx-install` prefixes it with
-`could not install the KFX plugin: `, which is why the reason does not
-also open with "could not".
+(`src/export/kfx.ts` marks both fetches, and only the fetches: the zip's
+URL is built from the index entry before the marked download, so an entry
+with no file is reported as the error it is, not as being offline).
+`kfx-install` prefixes it with `could not install the KFX plugin: `, which
+is why the reason does not also open with "could not".
+
+Every failure up to the fork-clearing step leaves the reader's Calibre as it
+was. After it, one can still happen: `add_plugin` failing once an older copy
+is already gone. So both of the installer's failure lines carry `removed`,
+and when it is not empty `kfxInstallCommand` ends its message with ` An older
+copy was removed before the failure: <names>. Try again, or reinstall it in
+Calibre.` (a full stop goes in first when the reason does not end a sentence).
+The message is the whole of what the terminal and the window's status line
+show, so the names travel in it.
 
 ### The verbs, in `src/cli.ts` and `src/cli-devices.ts`
 
@@ -168,7 +179,12 @@ also open with "could not".
   (`installed`, or the fix: the URL for a link, `run screepub kfx-install`
   for install, the `why` otherwise). For `kfx-install`: `installed the KFX
   plugin <version>`, one `removed an older copy: <name>` line per removed
-  fork, then the summary.
+  fork, then the full checklist, the same lines `kfx-status` prints. The
+  summary alone would end on "...needs the three free tools below" with
+  nothing below it on a machine still missing Kindle Previewer. Before the
+  download, `installing the KFX plugin from Calibre's plugin index...` goes
+  to stderr, and only where `kfxPossible` is true: elsewhere the refusal
+  comes first and that line would stand over it.
 - `USAGE` lists both commands; each verb has its own `--help`.
 
 ## The window
@@ -196,10 +212,15 @@ Decisions:
 - `kindleRelevant(devices)`: true when nothing is connected or any
   connected device is a Kindle. With only a Kobo plugged in, Kindle advice
   is noise.
-- `showSetup(setup, devices, justInstalled)`: true when `setup` is not null,
-  `setup.possible`, `kindleRelevant(devices)`, and either `!setup.ready` or
-  `justInstalled`. So a ready machine sees nothing, except the success line
-  right after an install.
+- `showSetup(setup, devices, justInstalled, installing = false)`: while an
+  install runs or has just finished (`installing || justInstalled`), true
+  whenever `setup` is not null and `setup.possible`, whatever is connected:
+  the Installing line and then the result answer what the reader pressed,
+  and a Kobo plugged in meanwhile does not take them away. Otherwise true
+  when `setup` is not null, `setup.possible`, `kindleRelevant(devices)` and
+  `!setup.ready`. So a ready machine sees nothing, except the success line
+  right after an install. `draw()` passes the running install as
+  `installing`.
 - `installedLine(version, removed, ready)`: `Installed the KFX plugin
   2.20.1.`, plus `Kindles now get KFX.` when `ready` (the CHECKED checklist's
   own field, never the engine's raw, unvalidated `answer.setup.ready`), plus
@@ -259,16 +280,24 @@ Lifecycle:
   and otherwise to `ctx.restoreFocus()`, `focus.js`'s plan for the page.
 - Leaving the page and coming back mid-install keeps the `INSTALLING` line.
 - Not drawn in the no-script or blocked states; only on the page that lists
-  readers.
+  readers. Not probed there either: a probe returns at once when the
+  block's node is missing or no longer in the page. `send.js`'s `show()`
+  draws the page before it calls `kfxShown()`, so on the page with readers
+  the node is in place when the first probe runs.
 - A send and an install never overlap. The install button is disabled while
   a send runs, and `sendTo` returns early while an install runs. An install
   disables the connected readers' Send buttons, and a Send button drawn
   during one starts disabled: the device poll pauses only for a send, so a
   reader plugged in mid-install still gets a row. A plugin swapped out
   under a running KFX conversion is not a case worth finding out about.
-- The updater's restart (Screeepub 1's branch) waits on an in-flight counter
-  inside `runEngine`, so an install in progress already holds the restart
-  off. Nothing to add here for that.
+- An install that cannot start cleanly cannot leave the block stuck on.
+  The busy hook and the first draw run inside the same `try` whose
+  `finally` clears the installing flag, so a throw from either shows as a
+  failed install instead of refusing every send until a restart.
+- The updater's restart should wait on an in-flight counter inside
+  `runEngine`, which would hold the restart off while an install runs. That
+  counter comes with the other session's update branch (Screeepub 1), once
+  it lands; this branch's `runEngine` has none, and nothing here adds one.
 
 ### `desktop/ui/send.js`
 
@@ -305,10 +334,15 @@ The ADR's grant list gets a dated amendment line recording the new doors.
   plugin × platform (darwin, win32, linux) against the rules above, and no
   em dash in any string `kfxSetup` can produce.
 - `tests/cli-kfx.test.ts`: handlers with fake status and installer (success,
-  failure, removed forks, fresh status after install). Spawned CLI only for
-  `--help`, the usage refusals, and `kfx-status --json` (read-only). **No
-  spawned test may be able to reach the real installer**: it would change
-  the Calibre on whatever machine runs the suite.
+  failure, removed forks, removed-then-failed, fresh status after install).
+  Spawned CLI only for `--help`, `kfx-status --json` (read-only), and the
+  usage refusals for `kfx-status` alone. `kfx-install`'s refusals are pinned
+  in the SOURCE instead: one branch serves both verbs, its foreign list
+  names each other verb's flag, and every refusal comes before either
+  handler call. **No spawned test may be able to reach the real
+  installer**: it would change the Calibre on whatever machine runs the
+  suite, and a spawned refusal test is one deleted refusal away from doing
+  exactly that.
 - `tests/desktop-ui.test.ts`: the argv builders (the list test pins the
   set), and every `kfx.js` decision.
 - `tests/desktop-shell.test.ts`: the opener test above.

@@ -24,6 +24,7 @@ import { updateDecisionCommand, updateShouldCheckCommand } from './cli-update';
 import { settingsCommand } from './cli-settings';
 import { exportCommand } from './cli-export';
 import { kfxInstallCommand, kfxStatusCommand, installLines, setupLines } from './cli-kfx';
+import { kfxPossible } from './export/kfx-setup';
 import type { ListDevicesOptions } from './device/list';
 
 const USAGE = `screepub — screenplay PDF → reflowable EPUB3 (via Fountain)
@@ -549,8 +550,12 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       }
 
       // A person at a terminal waits several seconds for a download; say so
-      // on stderr, where it cannot disturb the one JSON line on stdout.
-      if (!jsonMode) console.error("installing the KFX plugin from Calibre's plugin index...");
+      // on stderr, where it cannot disturb the one JSON line on stdout. Only
+      // where an install can run at all: elsewhere kfxInstallCommand refuses
+      // before installing, and this line would stand over that refusal.
+      if (!jsonMode && kfxPossible(process.platform)) {
+        console.error("installing the KFX plugin from Calibre's plugin index...");
+      }
       const installed = await kfxInstallCommand();
       if (jsonMode) {
         console.log(JSON.stringify({ ok: true, ...installed }));
