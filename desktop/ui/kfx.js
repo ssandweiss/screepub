@@ -172,6 +172,8 @@ let probing = false;
  *  `era`. */
 let installs = 0;
 let status = { line: '', bad: false };
+/** Whether the Send page is on screen, between kfxShown() and kfxHidden(). */
+let shown = false;
 
 /** Draw into `node` from now on. Called from send.js's draw(), which
  *  rebuilds the page whenever the script changes, so each call brings a
@@ -187,6 +189,11 @@ export function mountKfx(node, options) {
   clear(host);
   host.append(el('p', { class: 'state-label' }, HEADING), parts.summary, parts.rows, parts.status);
   draw();
+  // A script can arrive while Send already shows its no-script state. The
+  // show's probe found nowhere to draw and asked nothing, so this mount is
+  // the first chance to ask. Once the machine is known, a remount for a new
+  // script asks nothing: the checklist is about the computer, not the script.
+  if (shown && setup === null) probe();
 }
 
 /** The Send page came into view: ask the engine, and ask again whenever the
@@ -198,11 +205,13 @@ export function kfxShown() {
     justInstalled = false;
     status = { line: '', bad: false };
   }
+  shown = true;
   window.addEventListener('focus', onFocus);
   probe();
 }
 
 export function kfxHidden() {
+  shown = false;
   window.removeEventListener('focus', onFocus);
 }
 

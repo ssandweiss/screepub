@@ -4442,4 +4442,37 @@ describe('the Send page’s KFX block: what a reader sees across redraws', () =>
     w.kfx.kfxShown();
     await expect(w.answer('kfx-status', status(true, true, false))).rejects.toThrow('nothing asked');
   });
+
+  test('a block mounted while the page is showing asks, if nothing has answered yet', async () => {
+    // A script can arrive while Send already shows its no-script state. The
+    // show's probe was skipped (there was nowhere to draw), so the mount that
+    // follows has to ask, or the block stays hidden until the next focus.
+    const w = await world();
+    await w.answer('kfx-status', { ok: false, error: { code: 'internal', message: 'x' } });
+    w.doc.body.removeChild(w.host);
+    w.kfx.kfxShown();
+    const next = w.doc.createElement('section');
+    w.doc.body.append(next);
+    const hooks = { isSending: () => false, devices: () => [], onBusy: () => undefined };
+    w.kfx.mountKfx(next, hooks);
+    await w.answer('kfx-status', status(true, true, false));
+    expect(next.hidden).toBe(false);
+    expect(next.querySelectorAll('button').map((b) => b.textContent)).toEqual(['Install']);
+    // Once the machine is known, a remount for a new script asks nothing:
+    // the checklist is about the computer, not the script.
+    const again = w.doc.createElement('section');
+    w.doc.body.append(again);
+    w.kfx.mountKfx(again, hooks);
+    await expect(w.answer('kfx-status', status(true, true, false))).rejects.toThrow('nothing asked');
+  });
+
+  test('a mount on a page that is not showing asks nothing', async () => {
+    const w = await world();
+    await w.answer('kfx-status', { ok: false, error: { code: 'internal', message: 'x' } });
+    w.kfx.kfxHidden();
+    const next = w.doc.createElement('section');
+    w.doc.body.append(next);
+    w.kfx.mountKfx(next, { isSending: () => false, devices: () => [], onBusy: () => undefined });
+    await expect(w.answer('kfx-status', status(true, true, false))).rejects.toThrow('nothing asked');
+  });
 });

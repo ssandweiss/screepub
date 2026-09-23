@@ -271,7 +271,10 @@ Lifecycle:
   to the window moves neither the focus nor the status line; one that
   differs clears the status line and the just-installed flag, then
   redraws. A probe that was already out when an install began is dropped
-  (an install counter, the same shape as `send.js`'s `era`).
+  (an install counter, the same shape as `send.js`'s `era`). A block
+  mounted while the page is showing, with no checklist yet (a script that
+  arrived while Send showed its no-script state), probes once; a remount
+  for a new script on a known machine asks nothing.
 - The heading, summary and `role="status"` line are built once per host,
   in `mountKfx`. A redraw refills the summary and rebuilds only the rows,
   so the live region exists before its words change.
