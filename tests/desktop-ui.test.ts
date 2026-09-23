@@ -3294,20 +3294,28 @@ describe('the update check asks once, stamps first, and never guesses', () => {
     // preference was a switch connected to no wire. The README promised "one
     // request a day" for behaviour that never ran. A feature that exists in
     // three modules and no caller is indistinguishable from an absent one.
-    const main = read('main.js');
-    expect(main).toContain('runCheck');
-    expect(main).toMatch(/manual:\s*false/);
+    const flow = read('update-flow.js');
+    expect(flow).toContain('runCheck');
+    expect(flow).toMatch(/manual:\s*false/);
+    expect(read('main.js')).toContain('flow.boot()');
   });
 
-  test('the mark on the stamp points at a sheet that has the news', () => {
-    // The ordering bug this exists to prevent, found by driving the live
-    // window and not by any unit test: the notes sheet is built ONCE at boot
-    // and the launch check resolves afterwards, so reading the held offer
-    // during mount reads null. The dot appeared on the stamp and the sheet
-    // it pointed at said nothing. A late answer needs a seam to arrive
-    // through, and the caller has to use it.
-    expect(read('notes-surface.js')).toContain('export function updateFound');
-    expect(read('main.js')).toContain('notes.updateFound');
+  test('the label and the release notes follow one flow', () => {
+    // The ordering bug the old seam existed for (the notes sheet is built at
+    // boot and the launch check answers later) is now the flow's job: both
+    // subscribe, and a late answer reaches both the same way.
+    const main = read('main.js');
+    expect(main).toContain('flow.subscribe');
+    expect(main).toContain('frame.setUpdateLabel');
+    expect(main).toContain('frame.onUpdateClick');
+    const notes = read('notes-surface.js');
+    expect(notes).toContain('flow.subscribe');
+    expect(notes).toContain('flow.start()');
+    // Nobody but the flow installs anything.
+    for (const name of ['main.js', 'notes-surface.js']) {
+      expect(`${name} installs directly: ${read(name).includes('updateInstall')}`)
+        .toBe(`${name} installs directly: false`);
+    }
   });
 
   test('without a restart, it asks for a quit and reopen', () => {
@@ -4554,6 +4562,51 @@ describe('a newer version is a label you can click, not a dot you can miss', () 
     expect(foot).toContain('position: absolute');
     const stamp = css.match(/\.rev-stamp\s*\{[^}]*\}/)?.[0] ?? '';
     expect(stamp).not.toContain('position: absolute');
+  });
+});
+
+describe('the Convert page asks once whether to look for new versions', () => {
+  test('the question is short, plain and has no em dash', async () => {
+    const { ASK } = await import(join(UI, 'convert.js'));
+    expect(ASK).toEqual({
+      question: 'Check for new versions once a day?',
+      yes: 'Turn on',
+      no: 'No thanks',
+    });
+    for (const words of Object.values(ASK)) expect(String(words)).not.toContain('—');
+  });
+
+  test('it sits under the well, and only when update.js says to ask', () => {
+    const convert = read('convert.js');
+    expect(convert).toContain('ctx.updates?.shouldAsk()');
+    expect(convert).toContain("class: 'well-ask'");
+    // Answering hands the keyboard back: the button that had it is gone.
+    expect(convert).toMatch(/line\.remove\(\);\s*ctx\.restoreFocus\(\);/);
+    const main = read('main.js');
+    expect(main).toContain('shouldAsk(flow.usable(), localStorage)');
+    expect(main).toContain('flow.answer(on)');
+  });
+
+  test('it is styled quietly, in the window\'s own tokens', () => {
+    const rule = read('surfaces.css').match(/\.well-ask\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(rule).toContain('color: var(--ink-muted)');
+  });
+});
+
+describe('the release notes redraw one Install button and one body, not a new one per offer', () => {
+  // The plan's first draft of this block built a fresh <p> and a fresh
+  // button on every offer() call, so a version that repeats (the remembered
+  // stub, then the live check confirming it) appended a SECOND body and a
+  // second Install button rather than redrawing the first. Both are built
+  // once, up front, and hidden until there is something to say.
+  test('exactly one Install button, and the body is redrawn with text()', () => {
+    const notes = read('notes-surface.js');
+    expect(notes.match(/btn-brad/g)?.length).toBe(1);
+    expect(notes).toContain("el('button', { type: 'button', class: 'btn btn-brad btn-small', hidden: true }");
+    expect(notes).toContain("el('p', { class: 'prose update-body', hidden: true }");
+    expect(notes).toMatch(/text\(body,\s*phase\.body/);
+    // Not appended per offer: say.after(...) built a new paragraph each time.
+    expect(notes).not.toContain('say.after(');
   });
 });
 

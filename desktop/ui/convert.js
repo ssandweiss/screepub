@@ -54,6 +54,14 @@ export const WELL = {
   limits: 'Needs selectable text, not a scan.',
 };
 
+/** The one-time update question under the well, in the reader's words.
+ *  Nothing is sent before it is answered (update.js, shouldAsk). */
+export const ASK = {
+  question: 'Check for new versions once a day?',
+  yes: 'Turn on',
+  no: 'No thanks',
+};
+
 /** The one guard a reader can meaningfully overrule. The others describe a
  *  file the engine genuinely cannot read, and offering an override on them
  *  would be a lie dressed as a button. */
@@ -296,6 +304,23 @@ export function reset() {
   drawWell();
 }
 
+/** The question, if there is one to ask. It removes itself once answered and
+ *  hands the keyboard back, because the button that had it is gone. */
+function askLine() {
+  if (!ctx.updates?.shouldAsk()) return null;
+  const answer = (on) => {
+    ctx.updates.answer(on);
+    line.remove();
+    ctx.restoreFocus();
+  };
+  const line = el('p', { class: 'well-ask' },
+    el('span', { class: 'well-ask-question' }, ASK.question),
+    el('button', { type: 'button', class: 'btn-quiet', onclick: () => answer(true) }, ASK.yes),
+    el('button', { type: 'button', class: 'btn-quiet', onclick: () => answer(false) }, ASK.no),
+  );
+  return line;
+}
+
 function drawWell() {
   clear(pane);
   chooseButton = el('button', { type: 'button', class: 'well-btn', onclick: choose },
@@ -315,6 +340,9 @@ function drawWell() {
     el('h1', { class: 'wordmark' }, WORDMARK),
     well,
   );
+  // Not passed to append() directly: append(null) would print "null".
+  const ask = askLine();
+  if (ask) pane.append(ask);
   pane.dataset.state = 'idle';
   // The code belongs to the refusal that set it, not to the pane. Left in
   // place it would ride along on the next success — a `data-state="done"`

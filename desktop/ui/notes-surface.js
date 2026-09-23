@@ -5,10 +5,9 @@
 // library. Everything here is built with el(); nothing is ever markup.
 import { RELEASE } from './notes.js';
 import { el, text } from './dom.js';
-import { updaterReady, updateCheck, updateInstall } from './app.js';
-import {
-  updatesPossible, readState, rememberAnswer, runCheck, installedLine, pendingUpdate,
-} from './update.js';
+import { updateCheck } from './app.js';
+import { readState, rememberAnswer, runCheck, updateLabel } from './update.js';
+import { flow } from './update-flow.js';
 
 /** What the surface decides: which sections have anything to show. The
  *  generator now throws rather than shipping a heading with zero bullets
@@ -28,21 +27,6 @@ function noteItem(item) {
     ? el('p', { class: 'note-item' },
         el('strong', { class: 'note-lead' }, item.lead), ` ${item.body}`)
     : el('p', { class: 'note-item' }, item.body);
-}
-
-// The sheet is built ONCE, at boot, and the launch check resolves after
-// that. So a pending offer cannot be read during mount — it is not there
-// yet. This is the seam that lets the answer arrive late, and it exists
-// because the first version read pendingUpdate() at build time and silently
-// showed nothing: the dot appeared on the stamp and the sheet it pointed at
-// had no news in it.
-let statusEl = null;
-let checkButton = null;
-
-/** A launch check found something, after this surface was already drawn. */
-export function updateFound(result) {
-  if (statusEl === null || checkButton === null) return;
-  offer(statusEl, checkButton, result);
 }
 
 export function mount(pane) {
@@ -66,14 +50,15 @@ export function mount(pane) {
  *  preference does not exist yet, and waiting for it would hold the updater
  *  behind engine work it does not need.
  *
- *  Absent entirely unless the plugin is linked AND the platform is one the
- *  published manifest covers. A control whose only outcome is an error is
- *  worse than no control, and this sheet is read by people who have just
- *  been told what version they are running — the worst possible audience for
- *  a button that says "could not check". */
+ *  Absent entirely unless updates can happen in this build and on this
+ *  platform (update-flow.js, usable). A control whose only outcome is an
+ *  error is worse than no control.
+ *
+ *  It follows the same flow as the label beside the stamp, so the two never
+ *  describe the same update differently, and a launch check that answers
+ *  after this sheet was built still reaches it. */
 function updateBlock() {
-  const platform = navigator.userAgentData?.platform ?? navigator.platform;
-  if (!updaterReady() || !updatesPossible(platform)) {
+  if (!flow.usable()) {
     // The fallback that shipped before any of this: say where releases live
     // rather than leave someone guessing.
     return el('p', { class: 'caption' },
@@ -83,12 +68,6 @@ function updateBlock() {
 
   const say = el('p', { class: 'caption update-status', role: 'status' }, '');
   const state = readState(localStorage);
-  statusEl = say;
-  // Held from the launch check, if it found something. Shown without asking
-  // the server again: the answer is already in hand, and a second request
-  // the moment somebody opens the notes would break the once-a-day promise
-  // that made the first one acceptable.
-  const waiting = pendingUpdate();
 
   const auto = el('input', {
     type: 'checkbox',
@@ -104,12 +83,11 @@ function updateBlock() {
 
   const button = el('button', { type: 'button', class: 'btn btn-outline btn-small' },
     'Check for updates');
-  checkButton = button;
   button.addEventListener('click', async () => {
     button.disabled = true;
     text(say, 'Looking…');
     // manual: pressing the button IS the consent for this one request, so it
-    // runs whatever the toggle says.
+    // runs whatever the switch says.
     const result = await runCheck({
       manual: true, storage: localStorage, now: Date.now(), check: updateCheck,
     });
@@ -119,7 +97,20 @@ function updateBlock() {
       text(say, `Screepub ${RELEASE.version} is the newest there is.`);
       return;
     }
-    offer(say, button, result);
+    // The flow's own phase redraws everything below, including `say`, so
+    // there is nothing left for this handler to set.
+    flow.offerFound(result);
+  });
+
+  // One body and one Install button, built up front and hidden until an
+  // offer, so a version that repeats (the remembered stub, then the live
+  // check confirming it) redraws these rather than appending a second body
+  // and a second Install button beside the first.
+  const body = el('p', { class: 'prose update-body', hidden: true }, '');
+  const install = el('button', { type: 'button', class: 'btn btn-brad btn-small', hidden: true }, '');
+  install.addEventListener('click', () => {
+    install.disabled = true;
+    flow.start();
   });
 
   const block = el('section', { class: 'notes-section update-block' },
@@ -131,39 +122,29 @@ function updateBlock() {
         + 'but the request itself.')),
     el('div', { class: 'read-ways' }, button),
     say,
+    body,
+    install,
   );
-  // The launch check already found one. Present it straight away rather than
-  // making somebody press a button to be told what the app has known since
-  // startup.
-  if (waiting) offer(say, button, waiting);
-  return block;
-}
 
-/** There is a newer one. Name it, show what the server said about it, and
- *  make installing a second deliberate act rather than a consequence of
- *  having pressed Check. */
-function offer(say, button, result) {
-  text(say, `Screepub ${result.version} is available.`);
-  const install = el('button', { type: 'button', class: 'btn btn-brad btn-small' },
-    `Install ${result.version}`);
-  install.addEventListener('click', async () => {
-    install.disabled = true;
-    button.disabled = true;
-    text(say, 'Downloading…');
-    try {
-      await updateInstall(result.update, (event) => {
-        if (event?.event === 'Started') text(say, 'Downloading…');
-        if (event?.event === 'Finished') text(say, 'Installing…');
-      });
-      // The plugin swaps the bundle and stops. It does not relaunch on
-      // macOS, and a one-click restart is another crate and another
-      // permission, so this asks rather than pretends.
-      text(say, installedLine(result.version));
-    } catch (err) {
-      text(say, String(err?.message ?? err));
-      install.disabled = false;
-      button.disabled = false;
+  flow.subscribe((phase) => {
+    if (phase === null) {
+      body.hidden = true;
+      install.hidden = true;
+      return;
     }
+    if (phase.kind === 'offer') {
+      text(say, `Screepub ${phase.version} is available.`);
+      text(body, phase.body ?? '');
+      body.hidden = !phase.body;
+      text(install, `Install ${phase.version}`);
+      install.hidden = false;
+      install.disabled = false;
+      return;
+    }
+    // Every later moment is the label's words, except a failure, which gets
+    // the full reason here: this is where someone looks for it.
+    text(say, phase.kind === 'failed' ? phase.message : updateLabel(phase));
+    install.disabled = phase.kind !== 'failed';
   });
-  say.after(el('p', { class: 'prose update-body' }, result.body || ''), install);
+  return block;
 }
