@@ -3439,6 +3439,10 @@ describe('what the update label says, and what it remembers', () => {
     expect(update.labelActionable({ kind: 'restarting' })).toBe(false);
     expect(update.labelActionable({ kind: 'failed', message: 'x' })).toBe(true);
     expect(update.labelActionable({ kind: 'installed', version: '1' })).toBe(false);
+    // A retry's re-emitted offer (update-flow.js, start()): the fresh check
+    // it triggers is still running, nothing is confirmed, so a click would
+    // do nothing yet either.
+    expect(update.labelActionable({ kind: 'offer', version: '1', retrying: true })).toBe(false);
   });
 });
 
@@ -3833,6 +3837,78 @@ describe('one update run, one moment, heard by the label and the notes alike', (
     expect(no.calls.check).toBe(0);
     expect(no.s.dump().updateOptIn).toBe('false');
     expect(no.s.dump().updateAsked).toBe('true');
+  });
+
+  test('checkAnswered does exactly what launchCheck does with a result: offer or "nothing newer"', async () => {
+    // The bug: the notes' manual "Check for updates" used to handle an
+    // offer/current result itself, bypassing the flow entirely. On
+    // "nothing newer" it cleared the remembered version and said "newest
+    // there is" in the notes, but the flow's OWN `offer` and `phase` were
+    // untouched — so the label still said "Update to X" and the notes'
+    // Install button stayed enabled with the launch check's live handle: a
+    // click would install a release the server had just withdrawn.
+    // checkAnswered is the one place a result becomes a phase, used by
+    // both launchCheck and the manual button now.
+    const s = store({ updateOptIn: 'true', updateAsked: 'true' });
+    const { flow, seen } = make({ storage: s });
+    flow.checkAnswered({ version: '0.8.0', currentVersion: '0.7.2', body: 'notes', outcome: 'offer' });
+    expect((seen.at(-1) as any).kind).toBe('offer');
+    expect((seen.at(-1) as any).version).toBe('0.8.0');
+    expect(flow.currentOffer()?.version).toBe('0.8.0');
+  });
+
+  test('checkAnswered("current") clears an offer the LABEL is showing, not just the notes\' own message', async () => {
+    const { flow, seen } = make();
+    flow.offerFound({ outcome: 'offer', version: '0.8.0', body: 'notes', update: { version: '0.8.0' } });
+    expect((seen.at(-1) as any).kind).toBe('offer');
+    flow.checkAnswered({ outcome: 'current' });
+    // The phase every subscriber hears (the label AND the notes) goes null
+    // together: there is no way for one to still say "Update to 0.8.0"
+    // while the other says "is the newest there is".
+    expect(seen.at(-1)).toBe(null);
+    expect(flow.currentOffer()).toBe(null);
+  });
+
+  test('checkAnswered("current") while a run is under way does not erase what is actually installing', async () => {
+    // Mirrors launchCheck's own `&& !running` guard: a manual click's
+    // result answering for a DIFFERENT, now-stale check must not clear the
+    // offer a run already in flight (started from the label, say) is
+    // actually using.
+    let release: () => void = () => {};
+    const idle = new Promise<void>((r) => { release = r; });
+    const { flow, seen } = make({ busy: () => true, whenIdle: () => idle });
+    flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } });
+    const run = flow.start();
+    await new Promise((r) => setTimeout(r, 0));
+    flow.checkAnswered({ outcome: 'current' });
+    expect((seen.at(-1) as any).kind).toBe('waiting');
+    expect(flow.currentOffer()).not.toBe(null);
+    release();
+    await run;
+  });
+
+  test('checkAnswered is what launchCheck itself now calls, so boot and answer(true) go through the same door', () => {
+    expect(flowMod.flow.checkAnswered).toBeInstanceOf(Function);
+    const src = read('update-flow.js');
+    expect(src).toMatch(/async function launchCheck\(\)\s*\{[\s\S]*?checkAnswered\(result\)/);
+  });
+
+  test('in notesView terms: the withdrawn-release bug stays fixed end to end', async () => {
+    // Reproduces the exact report: an offer is on screen (Install enabled,
+    // holding a live Update handle), a manual check answers "current".
+    // checkAnswered clears the flow's own offer and phase; notesView, fed
+    // the resulting null phase with drewOffer already true, is what turns
+    // that into "is the newest there is" with Install hidden and disabled
+    // — the same object the label beside the stamp reads too.
+    const notesMod = await import(join(UI, 'notes-surface.js'));
+    const { RELEASE } = await import(join(UI, 'notes.js'));
+    const { flow, seen } = make();
+    flow.offerFound({ outcome: 'offer', version: '0.8.0', body: 'notes', update: { version: '0.8.0' } });
+    flow.checkAnswered({ outcome: 'current' });
+    expect(seen.at(-1)).toBe(null);
+    const view = notesMod.notesView(null, { drewOffer: true });
+    expect(view.say).toBe(`Screepub ${RELEASE.version} is the newest there is.`);
+    expect(view.install).toEqual({ text: '', hidden: true, disabled: true });
   });
 
   test('two clicks run one update', async () => {
@@ -4263,6 +4339,22 @@ describe('the release notes switch actually shows what it is set to', () => {
     const main = read('main.js');
     expect(main).toMatch(/notes\.show\(\);\s*\n\s*notesSheet\.showModal\(\);/);
   });
+
+  test('flipping it on checks at once, the same way the Convert question does', () => {
+    // rememberAnswer alone stamped the answer but never ran a check: someone
+    // who turns it on from the release notes on a release day had to wait
+    // for tomorrow's throttle to lift rather than hear about it this
+    // session, unlike the identical question under the drop well
+    // (convert.js's askLine, main.js's ctx.updates.answer), which already
+    // goes through flow.answer for exactly this reason.
+    const notes = read('notes-surface.js');
+    const onchange = notes.slice(notes.indexOf('id: \'update-auto\''), notes.indexOf('});\n  autoCheckbox'));
+    expect(onchange).toContain('flow.answer(event.target.checked)');
+    expect(onchange).not.toContain('rememberAnswer(');
+    // The status line's own words are unchanged.
+    expect(notes).toContain('Screepub will look once a day, and only for this file.');
+    expect(notes).toContain('Screepub will not look on its own.');
+  });
 });
 
 describe('"Check for updates" does not race the flow\'s own run', () => {
@@ -4275,6 +4367,43 @@ describe('"Check for updates" does not race the flow\'s own run', () => {
     // and clear the remembered offer out from under it.
     const notes = read('notes-surface.js');
     expect(notes).toMatch(/button\.disabled\s*=\s*checkDisabled/);
+  });
+});
+
+describe('"Check for updates" hands an offer or "nothing newer" to the flow, not just to itself', () => {
+  test('the manual handler calls flow.checkAnswered for offer and current, and still reports its own errors', () => {
+    const notes = read('notes-surface.js');
+    const handler = notes.slice(
+      notes.indexOf("button.addEventListener('click'"),
+      notes.indexOf('// One body and one Install button'),
+    );
+    expect(handler).toContain('flow.checkAnswered(result)');
+    // Errors are still this handler's own: checkAnswered has no branch for
+    // them (launchCheck does not report them either — see update-flow.js),
+    // and a manual press is exactly where a person asked and is owed one.
+    expect(handler).toMatch(/result\.outcome === 'error'.*\{\s*text\(say, result\.message\); return; \}/);
+    // Neither offer nor "nothing newer" is handled directly any more: that
+    // was the bug (the label and the flow's own `offer` never heard about
+    // it, so a click on a withdrawn release's stale Update-to label, or its
+    // enabled Install button in the notes, still installed it).
+    expect(handler).not.toContain('flow.offerFound(result)');
+    expect(handler).not.toMatch(/is the newest there is/);
+  });
+
+  test('a "current" answer to the very first check this session still says so', () => {
+    // notesView's null-after-offer wording is gated on drewOffer (its own
+    // doc comment): a null phase before any offer is the block's own IDLE
+    // state, and leaves `say` alone. A manual press that has never drawn an
+    // offer would otherwise leave `say` stuck on "Looking…" forever once
+    // checkAnswered(result) turns a "current" answer into that same null
+    // phase. The press itself is reason enough to speak, so the handler
+    // marks drewOffer true before the request even goes out.
+    const notes = read('notes-surface.js');
+    const handler = notes.slice(
+      notes.indexOf("button.addEventListener('click'"),
+      notes.indexOf('// One body and one Install button'),
+    );
+    expect(handler).toContain('drewOffer = true;');
   });
 });
 

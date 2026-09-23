@@ -69,10 +69,17 @@ export function createUpdateFlow(deps) {
     else setPhase(phase);
   }
 
-  async function launchCheck() {
-    const result = await runCheck({
-      manual: false, storage: deps.storage(), now: deps.now(), check: deps.check,
-    });
+  /** Turn a runCheck() result into a phase. The one door BOTH the launch
+   *  check and the notes' manual button use, so an offer or a "nothing
+   *  newer" always reaches the flow's own `offer` and `phase` — which the
+   *  label beside the stamp and the release notes both read. Before this
+   *  was one function, the manual button decided offer/current for ITSELF:
+   *  on "nothing newer" it cleared the remembered version and said "is the
+   *  newest there is" in the notes, but never told the flow, so the label
+   *  kept saying "Update to X" and the notes' own Install button stayed
+   *  enabled, holding the launch check's live handle — a click would have
+   *  installed a release the server had just withdrawn. */
+  function checkAnswered(result) {
     if (result.outcome === 'offer') {
       offerFound(result);
     } else if (result.outcome === 'current' && !running) {
@@ -82,6 +89,17 @@ export function createUpdateFlow(deps) {
       offer = null;
       setPhase(null);
     }
+    // 'skipped' and 'error' say nothing here. The launch check's caller
+    // already treats both as silent (see launchCheck's own comment); the
+    // manual button's caller reports an error itself, because there
+    // somebody asked.
+  }
+
+  async function launchCheck() {
+    const result = await runCheck({
+      manual: false, storage: deps.storage(), now: deps.now(), check: deps.check,
+    });
+    checkAnswered(result);
     // 'skipped' and 'error' say nothing. The launch check is Screepub's
     // errand, not the reader's, and a startup that shouts about the network
     // is worse than one that quietly tries again tomorrow. The manual button
@@ -100,6 +118,7 @@ export function createUpdateFlow(deps) {
 
     currentOffer: () => offer,
     offerFound,
+    checkAnswered,
 
     /** At launch: redraw what an earlier check found, then run today's check
      *  (which runCheck skips unless the reader said yes, and at most once a

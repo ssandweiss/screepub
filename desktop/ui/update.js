@@ -137,14 +137,19 @@ export function updateLabel(phase) {
   }
 }
 
-/** Whether the label beside the stamp is something a click would actually
- *  act on. True only for 'offer' (starts the run) and 'failed' (retries
- *  it): every other moment is already under way, so a click on it would do
- *  nothing, and a label that still LOOKS clickable then is a small lie.
+/** Whether the label beside the stamp (and the notes' own Install button,
+ *  which uses this too — one rule decides both) is something a click would
+ *  actually act on. True for 'offer' and 'failed', which start or retry the
+ *  run — EXCEPT a retrying 'offer': that is a retry's own re-emit, made
+ *  while its fresh check (installAndRestart's, since the failed attempt
+ *  cleared `update`) is still in flight, and nothing is confirmed yet.
+ *  Every other moment is already under way, so a click on it would do
+ *  nothing, and a control that still LOOKS clickable then is a small lie.
  *  frame.js uses this to mark the label inert (aria-disabled, a default
- *  cursor) rather than leave it looking like a button that does nothing. */
+ *  cursor). */
 export function labelActionable(phase) {
-  return phase?.kind === 'offer' || phase?.kind === 'failed';
+  if (phase?.kind === 'offer') return !phase.retrying;
+  return phase?.kind === 'failed';
 }
 
 /** What to tell someone when the bundle has been swapped and this build

@@ -6,7 +6,7 @@
 import { RELEASE } from './notes.js';
 import { el, text } from './dom.js';
 import { updateCheck } from './app.js';
-import { readState, rememberAnswer, runCheck, updateLabel } from './update.js';
+import { readState, runCheck, updateLabel, labelActionable } from './update.js';
 import { flow } from './update-flow.js';
 
 /** What the surface decides: which sections have anything to show. The
@@ -62,11 +62,11 @@ export function notesView(phase, state) {
     return {
       say: `Screepub ${phase.version} is available.`,
       body: { text: phase.body ?? '', hidden: !phase.body },
-      // A retry leaving 'failed' re-emits its own 'offer' phase, marked
-      // retrying, while installAndRestart's fresh check is still in
-      // flight (update-flow.js). Nothing is confirmed yet, so Install
+      // labelActionable is the same rule the label beside the stamp uses
+      // (update.js): false for a retry's re-emitted offer, made while
+      // installAndRestart's fresh check is still in flight, so Install
       // must not look ready to click again.
-      install: { text: `Install ${phase.version}`, hidden: false, disabled: Boolean(phase.retrying) },
+      install: { text: `Install ${phase.version}`, hidden: false, disabled: !labelActionable(phase) },
       checkDisabled: false,
     };
   }
@@ -85,7 +85,7 @@ export function notesView(phase, state) {
   return {
     say: phase.kind === 'failed' ? phase.message : updateLabel(phase),
     body: { text: body, hidden: !body },
-    install: { text: `Install ${version}`, hidden: false, disabled: phase.kind !== 'failed' },
+    install: { text: `Install ${version}`, hidden: false, disabled: !labelActionable(phase) },
     checkDisabled,
   };
 }
@@ -155,7 +155,11 @@ function updateBlock() {
     id: 'update-auto',
     checked: state.optedIn,
     onchange: (event) => {
-      rememberAnswer(localStorage, event.target.checked);
+      // flow.answer, not rememberAnswer directly, the same as the identical
+      // question under the drop well (convert.js's askLine): turning it ON
+      // checks at once, so someone who opts in here on a release day hears
+      // about it this session rather than waiting for tomorrow's throttle.
+      flow.answer(event.target.checked);
       text(say, event.target.checked
         ? 'Screepub will look once a day, and only for this file.'
         : 'Screepub will not look on its own.');
@@ -168,6 +172,11 @@ function updateBlock() {
   button.addEventListener('click', async () => {
     button.disabled = true;
     text(say, 'Looking…');
+    // A manual press is itself reason enough to speak, even if this session
+    // has never drawn an offer: a "current" answer must not leave `say`
+    // stuck on "Looking…" because notesView's null-after-offer wording is
+    // gated on an offer having been drawn (see its own doc comment).
+    drewOffer = true;
     // manual: pressing the button IS the consent for this one request, so it
     // runs whatever the switch says.
     const result = await runCheck({
@@ -178,13 +187,17 @@ function updateBlock() {
     // restores to whatever it currently wants rather than fight it.
     button.disabled = checkDisabled;
     if (result.outcome === 'error') { text(say, result.message); return; }
-    if (result.outcome !== 'offer') {
-      text(say, `Screepub ${RELEASE.version} is the newest there is.`);
-      return;
-    }
-    // The flow's own phase redraws everything below, including `say`, so
-    // there is nothing left for this handler to set.
-    flow.offerFound(result);
+    // Offer or "nothing newer": checkAnswered is the one door BOTH the
+    // launch check and this button use to turn a result into a phase, so
+    // the flow's own `offer` hears about it too. Before this, a "nothing
+    // newer" answer here cleared the remembered version and said so in the
+    // notes, but left the label beside the stamp saying "Update to X" and
+    // the notes' own Install button enabled, holding the launch check's
+    // live handle — a click would have installed a release the server had
+    // just withdrawn. The resulting phase (an offer, or null) redraws
+    // everything below through flow.subscribe, including `say`, so there
+    // is nothing left for this handler itself to set.
+    flow.checkAnswered(result);
   });
 
   // One body and one Install button, built up front and hidden until an
