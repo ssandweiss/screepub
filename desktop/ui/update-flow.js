@@ -169,16 +169,29 @@ export function createUpdateFlow(deps) {
       running = false;
       if (offer !== attempted) {
         // A newer offer replaced this one while the run was under way: the
-        // run that just finished was for `attempted`, not this one, so its
-        // outcome — a failure, or "nothing newer" answering `attempted`'s
-        // OWN check — must not be shown in its place. Show what a click
-        // would actually install now, and keep storage agreeing with the
-        // screen: installAndRestart's own fresh check may just have
-        // forgotten the remembered version because ITS check found nothing
-        // newer, which is no longer true of what is on screen. The live
-        // Update handle this offer holds is left untouched either way —
-        // clearing it would throw away a resource nobody used, and cost
-        // the next start() an extra request it did not need.
+        // run that just finished was for `attempted` (or, if
+        // installAndRestart ran its own fresh check, for outcome.offer
+        // instead), not this one, so its outcome — a failure, or "nothing
+        // newer" answering that check — must not be shown in its place.
+        // Show what a click would actually install now, and keep storage
+        // agreeing with the screen: installAndRestart's own fresh check may
+        // just have forgotten the remembered version because ITS check
+        // found nothing newer, which is no longer true of what is on
+        // screen. The live Update handle this offer holds is left untouched
+        // either way — clearing it would throw away a resource nobody used,
+        // and cost the next start() an extra request it did not need.
+        //
+        // EXCEPTION: a launch check can answer with the very version a
+        // click is installing right now (the launch check answers the same
+        // 0.8.0 while a click's install of 0.8.0 is running, and that
+        // install fails). Showing "Update to 0.8.0" the instant the failure
+        // lands would erase it before the reader ever saw why it failed, so
+        // a same-version offer after an error leaves the failed phase on
+        // screen. `offer` already points at the newer object either way, so
+        // "Try again" uses its live handle instead of triggering a fresh
+        // check.
+        const attemptedVersion = (outcome.offer ?? attempted).version;
+        if (outcome.outcome === 'error' && offer.version === attemptedVersion) return;
         setPhase({ kind: 'offer', version: offer.version, body: offer.body ?? '' });
         rememberFound(deps.storage(), offer.version);
         return;

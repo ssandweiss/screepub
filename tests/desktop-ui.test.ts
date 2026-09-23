@@ -3907,6 +3907,32 @@ describe('one update run, one moment, heard by the label and the notes alike', (
     expect(calls.check).toBe(0);
   });
 
+  test('a same-version offer landing mid-run does not erase the failure it just caused', async () => {
+    // A reviewer's last finding: a launch check can answer with the very
+    // version a click is installing right now (the launch check answered
+    // the same 0.8.0 while a click's install of 0.8.0 was running, and the
+    // install failed). Before the fix, offerFound's newer object reached the
+    // newer-offer branch below on version alone, and replaced the failed
+    // phase with "Update to 0.8.0" the instant the install's catch block
+    // set it, so the reader never saw why it failed.
+    let failInstall: (e: unknown) => void = () => {};
+    const pending = new Promise((_resolve, reject) => { failInstall = reject; });
+    const { flow, seen } = make({
+      install: async () => { await pending; },
+    });
+    flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } });
+    const run = flow.start();
+    await new Promise((r) => setTimeout(r, 0)); // let start() reach the pending install
+    const sameVersion = { outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } };
+    flow.offerFound(sameVersion);
+    failInstall(new Error('interrupted'));
+    await run;
+    expect((seen.at(-1) as any).kind).toBe('failed');
+    // `offer` still moved to the newer object, so a "Try again" uses its
+    // live handle rather than triggering a fresh check.
+    expect(flow.currentOffer()).toBe(sameVersion);
+  });
+
   test('a newer offer mid-run survives a fresh check that answers "nothing newer" for the run it interrupted', async () => {
     let answer: (v: unknown) => void = () => {};
     const s = store({ updateOptIn: 'true', updateAsked: 'true' });
