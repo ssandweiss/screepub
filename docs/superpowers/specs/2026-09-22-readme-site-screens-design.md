@@ -192,9 +192,12 @@ how.
   markers put it, not as scene one. It ends on FADE OUT, so Field Station
   is about 18 pages, not 25.
 - **The demo library is `/Users/Shared/Documents/Screepub`**, because the
-  result screen prints the book's full path. That folder exists on every
-  Mac, needs no username, and reads naturally. The tool refuses to run if
-  it already exists, and removes it afterwards.
+  result screen prints the book's full path. It needs no username and
+  reads naturally. `/Users/Shared/Documents` is NOT on every Mac (it was
+  missing on the one the tool was built on), so the tool creates it if
+  needed and removes only what it created: the library, which it marks as
+  its own, and the Documents folder only if the run made it and it is
+  empty. It refuses to run if an unmarked library is already there.
 
 ## Part 4: version-free download names
 
