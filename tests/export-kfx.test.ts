@@ -441,4 +441,51 @@ describe('installKfxPlugin', () => {
     expect(unreachableCatch).toBeLessThan(genericCatch);
     expect(src).toContain("'offline': True");
   });
+
+  async function installSnippetText(): Promise<string> {
+    const src = await Bun.file(join(import.meta.dir, '..', 'src', 'export', 'kfx.ts')).text();
+    const start = src.indexOf('const INSTALL_SNIPPET');
+    const end = src.indexOf('`;', start) + '`;'.length;
+    return src.slice(start, end);
+  }
+
+  // `class Unreachable` has to be defined OUTSIDE the try, before it, not as
+  // the first thing inside it (the first cut's mistake). If anything raises
+  // before that line would have run -- one of the `from calibre...` imports,
+  // say, on some future calibre that moves INDEX_URL -- Python evaluates
+  // `except Unreachable as e:` against a name that was never bound: a
+  // NameError while handling the original exception, no SCREEPUB_RESULT
+  // line at all, and a raw traceback instead of the JSON contract every
+  // caller of installKfxPlugin relies on. Defining it at module level, ahead
+  // of the try, means it exists no matter what fails or when.
+  test('class Unreachable is defined before the snippet’s first try:, not inside it', async () => {
+    const snippet = await installSnippetText();
+    const classIdx = snippet.indexOf('class Unreachable');
+    const tryIdx = snippet.indexOf('try:');
+    expect(classIdx).toBeGreaterThan(-1);
+    expect(tryIdx).toBeGreaterThan(-1);
+    expect(classIdx).toBeLessThan(tryIdx);
+  });
+
+  // The fork-clearing block used to run BEFORE the network fetches. Offline,
+  // that meant a user upgrading from the Swift app's vendored fork got their
+  // working fork removed with nothing installed in its place: KFX conversion
+  // breaks outright, worse than doing nothing. So every fetch and every
+  // check on what it returned (the index, `meta is None`, the zip, the size
+  // check, the `__init__.py` check) has to pass before `remove_plugin` runs,
+  // and that has to happen before `add_plugin` installs the replacement.
+  test('forks are cleared only after the download and its checks pass, not before', async () => {
+    const snippet = await installSnippetText();
+    const urlopenIdx = snippet.indexOf('urlopen(');
+    const initCheckIdx = snippet.indexOf("'__init__.py' not in");
+    const removeIdx = snippet.indexOf('remove_plugin(p)');
+    const addPluginIdx = snippet.indexOf('add_plugin(path)');
+    expect(urlopenIdx).toBeGreaterThan(-1);
+    expect(initCheckIdx).toBeGreaterThan(-1);
+    expect(removeIdx).toBeGreaterThan(-1);
+    expect(addPluginIdx).toBeGreaterThan(-1);
+    expect(removeIdx).toBeGreaterThan(urlopenIdx);
+    expect(removeIdx).toBeGreaterThan(initCheckIdx);
+    expect(removeIdx).toBeLessThan(addPluginIdx);
+  });
 });
