@@ -3,7 +3,10 @@
 // The handlers are tested in process with a fake probe and a fake installer.
 // NOTHING in this file may reach the real installer: it downloads a plugin
 // and writes it into the Calibre of whatever machine runs the suite.
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, afterAll } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   kfxStatusCommand,
   kfxInstallCommand,
@@ -12,6 +15,32 @@ import {
 } from '../src/cli-kfx';
 import { CliError } from '../src/cli-errors';
 import type { KfxInstallResult, KfxStatus } from '../src/export/kfx';
+import { resolveCommand, VERBS } from '../src/cli-devices';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-cli-kfx-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+
+const ROOT = new URL('..', import.meta.url).pathname;
+
+/** Spawn the real CLI. CALIBRE_CONFIG_DIRECTORY points Calibre at a
+ *  throwaway config inside SCRATCH, so if a refusal below ever regressed and
+ *  let `kfx-install` through, it would install into that folder and not into
+ *  the Calibre of the machine running the suite. Verified 2026-09-23: with
+ *  this set, kfxStatus() reads the scratch config and the real one is not
+ *  touched. */
+async function runCli(args: string[]) {
+  const proc = Bun.spawn(['bun', `${ROOT}src/cli.ts`, ...args], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, CALIBRE_CONFIG_DIRECTORY: join(SCRATCH, 'calibre-config') },
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { stdout, stderr, exitCode };
+}
 
 const missingPlugin: KfxStatus = { calibre: true, previewer: true, pluginInstalled: false, ready: false };
 const allThere: KfxStatus = { calibre: true, previewer: true, pluginInstalled: true, ready: true };
@@ -138,5 +167,97 @@ describe('human output', () => {
     for (const line of [...setupLines(setup), ...installLines({ version: '1', removed: ['x'], setup })]) {
       expect(line.includes('—')).toBe(false);
     }
+  });
+});
+
+describe('the verbs', () => {
+  test('both are verbs, and a file of either name still converts', () => {
+    expect(VERBS as readonly string[]).toContain('kfx-status');
+    expect(VERBS as readonly string[]).toContain('kfx-install');
+    expect(resolveCommand(['kfx-install'], () => false)).toEqual({ kind: 'verb', verb: 'kfx-install', args: [] });
+    expect(resolveCommand(['kfx-install'], () => true)).toEqual({ kind: 'convert' });
+  });
+
+  test('kfx-status --json is one object with the checklist', async () => {
+    // Read-only: it probes and prints. Whatever this machine has, the shape
+    // is the contract.
+    const { stdout, exitCode } = await runCli(['kfx-status', '--json']);
+    expect(exitCode).toBe(0);
+    const answer = JSON.parse(stdout);
+    expect(answer.ok).toBe(true);
+    expect(typeof answer.ready).toBe('boolean');
+    expect(typeof answer.possible).toBe('boolean');
+    expect(typeof answer.summary).toBe('string');
+    expect(answer.steps.map((s: { id: string }) => s.id)).toEqual(['calibre', 'previewer', 'plugin']);
+  });
+
+  test('kfx-status prints the summary for a person', async () => {
+    const { stdout, exitCode } = await runCli(['kfx-status']);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('Kindles get');
+    expect(stdout).toContain('KFX plugin');
+  });
+
+  test('each verb has its own --help, naming itself and not the conversion flags', async () => {
+    for (const verb of ['kfx-status', 'kfx-install']) {
+      const { stdout, exitCode } = await runCli([verb, '--json', '--help']);
+      expect(exitCode).toBe(0);
+      const { usage } = JSON.parse(stdout);
+      expect(usage).toContain(`screepub ${verb}`);
+      expect(usage).not.toContain('--mobi');
+    }
+  });
+
+  test('the main usage lists both', async () => {
+    const { stdout } = await runCli(['--help']);
+    expect(stdout).toContain('screepub kfx-status');
+    expect(stdout).toContain('screepub kfx-install');
+  });
+
+  // Refused BEFORE anything runs. For kfx-install that order is the whole
+  // point: a mistyped command must not reach the network or anyone's Calibre.
+  const FOREIGN: [string[], string][] = [
+    [['--device', 'x'], '--device'],
+    [['--set', '{}'], '--set'],
+    [['--for', 'kindle'], '--for'],
+    [['--fountain', '/x.fountain'], '--fountain'],
+    [['--options-json', '{}'], '--options-json'],
+    [['--offered', '1.0'], '--offered'],
+    [['--opted-in'], '--opted-in'],
+  ];
+
+  for (const verb of ['kfx-status', 'kfx-install']) {
+    test(`${verb} refuses every other verb's flags as usage errors`, async () => {
+      for (const [flags, name] of FOREIGN) {
+        const { stdout, exitCode } = await runCli([verb, ...flags, '--json']);
+        const answer = JSON.parse(stdout);
+        expect(`${verb} ${name}: ${exitCode} ${answer.ok} ${answer.error?.code}`)
+          .toBe(`${verb} ${name}: 1 false usage`);
+        expect(answer.error.message).toContain(name);
+      }
+    });
+
+    test(`${verb} takes no arguments`, async () => {
+      const { stdout, exitCode } = await runCli([verb, 'extra', '--json']);
+      expect(exitCode).toBe(1);
+      const answer = JSON.parse(stdout);
+      expect(answer.error.code).toBe('usage');
+      expect(answer.error.message).toBe(`${verb} takes no arguments (got "extra")`);
+    });
+  }
+});
+
+describe('kfx-install refuses before it installs', () => {
+  test('in the source, every refusal comes before the installer is called', async () => {
+    // The spawned refusals above prove each refusal FIRES. This proves the
+    // ORDER without ever letting the installer run: in cli.ts's kfx branch,
+    // the last refusal is written above the first call to kfxInstallCommand.
+    const source = await Bun.file(`${ROOT}src/cli.ts`).text();
+    const branch = source.slice(source.indexOf("verb === 'kfx-status' || verb === 'kfx-install'"));
+    const installed = branch.indexOf('kfxInstallCommand(');
+    const lastRefusal = branch.lastIndexOf("fail({ code: 'usage'", installed);
+    expect(installed).toBeGreaterThan(-1);
+    expect(lastRefusal).toBeGreaterThan(-1);
+    expect(lastRefusal).toBeLessThan(installed);
   });
 });

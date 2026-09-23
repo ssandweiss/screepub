@@ -23,6 +23,7 @@ import { resolveCommand, devicesCommand, sendCommand, VERBS, type Verb } from '.
 import { updateDecisionCommand, updateShouldCheckCommand } from './cli-update';
 import { settingsCommand } from './cli-settings';
 import { exportCommand } from './cli-export';
+import { kfxInstallCommand, kfxStatusCommand, installLines, setupLines } from './cli-kfx';
 import type { ListDevicesOptions } from './device/list';
 
 const USAGE = `screepub — screenplay PDF → reflowable EPUB3 (via Fountain)
@@ -74,6 +75,8 @@ Commands:
                                             read/write a script's own settings
   screepub export <file.epub> [--for kindle|epub] [--json]
                                             the file you would put on a reader
+  screepub kfx-status [--json]              can this computer make KFX for a Kindle?
+  screepub kfx-install [--json]             install the KFX plugin into Calibre (online)
   screepub update-decision --offered <v> --current <v> [--json]
                                             should this update be offered? (offline)
   screepub update-should-check [--opted-in] [--last-checked <ms>] [--json]
@@ -149,6 +152,36 @@ Options:
   -h, --help             show this help
 `;
 
+const KFX_STATUS_USAGE = `screepub kfx-status: can this computer make KFX for a Kindle?
+
+Usage:
+  screepub kfx-status [--json]
+
+A Kindle gets its best rendering from a KFX file, and making one needs three
+free tools: Calibre, Amazon's Kindle Previewer, and the KFX Output plugin
+inside Calibre. This says which are installed, where to get the missing ones,
+and what a Kindle gets until then. Reads only; works offline.
+
+Options:
+  --json                 machine-readable result on stdout (for the app)
+  -h, --help             show this help
+`;
+
+const KFX_INSTALL_USAGE = `screepub kfx-install: install the KFX plugin into Calibre
+
+Usage:
+  screepub kfx-install [--json]
+
+Downloads the current KFX Output plugin from Calibre's own plugin index and
+installs it with Calibre's own installer, replacing any older copy. Needs
+Calibre, and the internet. Kindle Previewer is not installed by this: it is
+Amazon's, and \`screepub kfx-status\` says where to get it.
+
+Options:
+  --json                 machine-readable result on stdout (for the app)
+  -h, --help             show this help
+`;
+
 const UPDATE_DECISION_USAGE = `screepub update-decision — should this update be offered?
 
 Usage:
@@ -191,6 +224,8 @@ function verbUsage(verb: Verb): string {
   if (verb === 'devices') return DEVICES_USAGE;
   if (verb === 'settings') return SETTINGS_USAGE;
   if (verb === 'export') return EXPORT_USAGE;
+  if (verb === 'kfx-status') return KFX_STATUS_USAGE;
+  if (verb === 'kfx-install') return KFX_INSTALL_USAGE;
   if (verb === 'update-decision') return UPDATE_DECISION_USAGE;
   if (verb === 'update-should-check') return UPDATE_SHOULD_CHECK_USAGE;
   return SEND_USAGE;
@@ -478,6 +513,48 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
         return;
       }
       console.log(answer.check ? 'check' : 'do not check');
+      return;
+    }
+
+    if (verb === 'kfx-status' || verb === 'kfx-install') {
+      // Every refusal comes BEFORE anything runs. For kfx-install that order
+      // is the point: a mistyped command must not reach the network or the
+      // user's Calibre. tests/cli-kfx.test.ts pins the order in this source.
+      const foreign: [unknown, string, string][] = [
+        [values.device, '--device', 'send'],
+        [values.set, '--set', 'settings'],
+        [values.for, '--for', 'export'],
+        [values.fountain, '--fountain', 'export'],
+        [values['options-json'], '--options-json', 'export'],
+      ];
+      for (const [value, flag, owner] of foreign) {
+        if (value !== undefined) {
+          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
+        }
+      }
+      if (positionals.length > 0) {
+        fail({ code: 'usage', message: `${verb} takes no arguments (got "${positionals[0]}")` });
+      }
+
+      if (verb === 'kfx-status') {
+        const setup = await kfxStatusCommand();
+        if (jsonMode) {
+          console.log(JSON.stringify({ ok: true, ...setup }));
+          return;
+        }
+        for (const line of setupLines(setup)) console.log(line);
+        return;
+      }
+
+      // A person at a terminal waits several seconds for a download; say so
+      // on stderr, where it cannot disturb the one JSON line on stdout.
+      if (!jsonMode) console.error("installing the KFX plugin from Calibre's plugin index...");
+      const installed = await kfxInstallCommand();
+      if (jsonMode) {
+        console.log(JSON.stringify({ ok: true, ...installed }));
+        return;
+      }
+      for (const line of installLines(installed)) console.log(line);
       return;
     }
 
