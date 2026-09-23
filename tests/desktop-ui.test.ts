@@ -3586,6 +3586,202 @@ describe('an update downloads, installs, waits for the engine, then restarts', (
   });
 });
 
+describe('one update run, one moment, heard by the label and the notes alike', () => {
+  let flowMod: any;
+  beforeAll(async () => { flowMod = await import(join(UI, 'update-flow.js')); });
+
+  function make(over: Record<string, unknown> = {}) {
+    // `s` already resolves over.storage (a STORE, not a function) if given.
+    // `...over` must come before the explicit `storage: () => s` below, or a
+    // caller's raw store object would overwrite that wrapper directly and
+    // every deps.storage() call downstream would throw "not a function".
+    const s = (over.storage as ReturnType<typeof store>) ?? store({ updateOptIn: 'true', updateAsked: 'true' });
+    const calls = { check: 0, install: 0, restart: 0 };
+    const flow = flowMod.createUpdateFlow({
+      usable: () => true,
+      now: () => 1,
+      check: async () => { calls.check += 1; return null; },
+      install: async () => { calls.install += 1; },
+      busy: () => false,
+      whenIdle: async () => {},
+      restartReady: () => true,
+      restart: async () => { calls.restart += 1; },
+      currentVersion: '0.7.2',
+      ...over,
+      storage: () => s,
+    });
+    const seen: unknown[] = [];
+    flow.subscribe((phase: unknown) => seen.push(phase));
+    return { flow, s, calls, seen };
+  }
+
+  test('a remembered version is drawn at launch, before today\'s check answers', async () => {
+    let answer: (v: unknown) => void = () => {};
+    const { flow, seen } = make({
+      storage: store({ updateOptIn: 'true', updateAsked: 'true', updateFound: '0.8.0' }),
+      check: () => new Promise((r) => { answer = r; }),
+    });
+    const booting = flow.boot();
+    expect((seen.at(-1) as any)?.kind).toBe('offer');
+    expect((seen.at(-1) as any)?.version).toBe('0.8.0');
+    answer({ version: '0.8.0', currentVersion: '0.7.2', body: '' });
+    await booting;
+    expect(flow.currentOffer()?.update).toBeTruthy(); // the live object replaced the remembered one
+  });
+
+  test('a build that has caught up forgets the remembered version and draws nothing', async () => {
+    const s = store({ updateOptIn: 'false', updateAsked: 'true', updateFound: '0.7.2' });
+    const { flow, seen } = make({ storage: s });
+    await flow.boot();
+    expect(seen.every((p) => p === null)).toBe(true);
+    expect(s.dump().updateFound).toBe('');
+  });
+
+  test('where updates cannot happen, boot touches nothing', async () => {
+    const s = store({ updateFound: '0.8.0' });
+    const { flow, calls, seen } = make({ usable: () => false, storage: s });
+    await flow.boot();
+    expect(calls.check).toBe(0);
+    expect(seen.every((p) => p === null)).toBe(true);
+    expect(s.dump().updateFound).toBe('0.8.0');
+  });
+
+  test('a check that answers "nothing newer" takes a remembered label down', async () => {
+    const { flow, seen } = make({
+      storage: store({ updateOptIn: 'true', updateAsked: 'true', updateFound: '0.8.0' }),
+      check: async () => null,
+    });
+    await flow.boot();
+    expect(seen.at(-1)).toBe(null);
+    expect(flow.currentOffer()).toBe(null);
+  });
+
+  test('saying yes checks at once; saying no sends nothing', async () => {
+    const yes = make({ storage: store() });
+    await yes.flow.answer(true);
+    expect(yes.calls.check).toBe(1);
+    expect(yes.s.dump().updateOptIn).toBe('true');
+    expect(yes.s.dump().updateAsked).toBe('true');
+
+    const no = make({ storage: store() });
+    await no.flow.answer(false);
+    expect(no.calls.check).toBe(0);
+    expect(no.s.dump().updateOptIn).toBe('false');
+    expect(no.s.dump().updateAsked).toBe('true');
+  });
+
+  test('two clicks run one update', async () => {
+    const { flow, calls } = make();
+    flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } });
+    await Promise.all([flow.start(), flow.start()]);
+    expect(calls.install).toBe(1);
+    expect(calls.restart).toBe(1);
+  });
+
+  test('after a failed install, trying again fetches a fresh update', async () => {
+    let installs = 0;
+    const { flow, calls, seen } = make({
+      install: async () => { installs += 1; if (installs === 1) throw new Error('interrupted'); },
+      // The plan's own version of this fake did not increment `calls.check`,
+      // which made the assertions below true no matter how many times it
+      // ran. Counting it is what makes this test actually prove a retry
+      // asked the server again, matching every other `check` fake in this
+      // file.
+      check: async () => { calls.check += 1; return { version: '0.8.0', currentVersion: '0.7.2', body: '' }; },
+    });
+    flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } });
+    await flow.start();
+    expect((seen.at(-1) as any).kind).toBe('failed');
+    expect(calls.check).toBe(0);
+    await flow.start();
+    // The first Update object was closed by the failed attempt, so the retry
+    // asked the server for a new one.
+    expect(calls.check).toBe(1);
+    expect(installs).toBe(2);
+    expect((seen.at(-1) as any).kind).toBe('restarting');
+  });
+
+  test('a new offer does not interrupt a run already under way', async () => {
+    let release: () => void = () => {};
+    const idle = new Promise<void>((r) => { release = r; });
+    const { flow, seen } = make({ busy: () => true, whenIdle: () => idle });
+    flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } });
+    const run = flow.start();
+    await new Promise((r) => setTimeout(r, 0));
+    flow.offerFound({ outcome: 'offer', version: '0.8.1', body: '', update: { version: '0.8.1' } });
+    expect((seen.at(-1) as any).kind).toBe('waiting');
+    release();
+    await run;
+  });
+
+  test('a broken subscriber does not stop the others from hearing it, or stop the run', async () => {
+    // A reviewer's concern: one subscriber's bug (a typo in frame.js, say)
+    // must not silence the OTHER subscriber, and must not turn a restart
+    // that would otherwise succeed into a reported failure.
+    const { flow, calls } = make();
+    flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } });
+    let heard = 0;
+    flow.subscribe(() => {
+      heard += 1;
+      // Not on the very first call: that one fires synchronously inside
+      // subscribe() itself, before the run even starts.
+      if (heard > 1) throw new Error('broken subscriber');
+    });
+    const seenGood: unknown[] = [];
+    flow.subscribe((phase: unknown) => seenGood.push(phase));
+    await flow.start();
+    expect(calls.restart).toBe(1);
+    expect(seenGood.some((p: any) => p?.kind === 'restarting')).toBe(true);
+  });
+
+  test('an exception starting the run does not leave `running` stuck true', async () => {
+    // Without a finally, `running` stays true forever the moment the one
+    // run throws before installAndRestart can return an outcome (start()
+    // never reaches its own `running = false`), and every later start()
+    // becomes a silent no-op. A storage accessor that throws once stands in
+    // for anything that could fail on the way in — real localStorage can
+    // throw in a private window — and is independent of the subscriber
+    // guard above: it never reaches onPhase at all. make()'s `storage`
+    // override always wraps a STORE, not a function, so this flow is built
+    // directly rather than through make().
+    let storageCalls = 0;
+    const goodStorage = store({ updateOptIn: 'true' });
+    const calls = { check: 0, install: 0, restart: 0 };
+    const flow = flowMod.createUpdateFlow({
+      usable: () => true,
+      storage: () => {
+        storageCalls += 1;
+        if (storageCalls === 1) throw new Error('storage unavailable');
+        return goodStorage;
+      },
+      now: () => 1,
+      check: async () => { calls.check += 1; return null; },
+      install: async () => { calls.install += 1; },
+      busy: () => false,
+      whenIdle: async () => {},
+      restartReady: () => true,
+      restart: async () => { calls.restart += 1; },
+      currentVersion: '0.7.2',
+    });
+    flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } });
+    const failure = await flow.start().catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(Error);
+    // If `running` were stuck true, this would silently do nothing and
+    // `calls.restart` would stay 0.
+    await flow.start();
+    expect(calls.restart).toBe(1);
+  });
+
+  test('the window\'s flow is built lazily, so importing it needs no window', () => {
+    // localStorage and navigator are read when a method runs, not at import:
+    // otherwise this module could not be imported by bun test at all.
+    expect(typeof flowMod.flow.boot).toBe('function');
+    const src = read('update-flow.js');
+    expect(src).toContain('storage: () => localStorage');
+    expect(src).not.toMatch(/__TAURI__/); // app.js is the only file that touches Tauri
+  });
+});
+
 describe('a refused file is no longer a dead end', () => {
   // The Swift app could report a bug from the failure screen, and the report
   // carried the refusal's code with it. The Tauri window could not report
