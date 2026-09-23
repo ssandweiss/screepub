@@ -8,10 +8,13 @@
 # it: `port`, holding the fake server's port (read from a file because
 # Bun.spawn does not pass on environment variables set at run time), and,
 # for a Chrome that cannot start, `die`, which makes it exit 3 at once.
+# Either way it first writes `profile` there, the --user-data-dir it was
+# given, so the test can check that exact folder is gone afterwards.
 here="$(dirname "$0")"
-if [ -e "$here/die" ]; then exit 3; fi
 for a in "$@"; do
   case "$a" in --user-data-dir=*) profile="${a#--user-data-dir=}";; esac
 done
+printf '%s\n' "$profile" > "$here/profile"
+if [ -e "$here/die" ]; then exit 3; fi
 printf '%s\n/devtools/browser/fake\n' "$(cat "$here/port")" > "$profile/DevToolsActivePort"
 exec sleep 60

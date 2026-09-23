@@ -1,5 +1,9 @@
-// The capture tool's pure parts. The picture-taking itself needs Chrome and
-// runs in /release; everything that DECIDES something is tested here.
+// The capture tool without Chrome: the pure parts (the gate, the page, the
+// shot list), the page server driven with plain Requests, and whole runs
+// with a fake browser and a stand-in engine, down to what each one leaves
+// behind. The Chrome driver is tested against a fake Chrome in
+// capture-chrome.test.ts. Real Chrome runs only when someone runs
+// `bun tools/capture-screens.ts`; /release does not call it yet.
 import { describe, test, expect } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -575,9 +579,13 @@ describe('a capture run cleans up after itself, whatever happens', () => {
   test('cleanup refuses an engine call made while it runs, instead of waiting on it', async () => {
     const s = scene();
     // A stand-in engine that runs until it is stopped, named so it can be
-    // found afterwards.
-    const ENGINE = ['/bin/sh', '-c', 'exec sleep 29.371'];
-    const running = () => Bun.spawnSync(['pgrep', '-f', 'sleep 29.371']).stdout.toString().trim();
+    // found afterwards: by a duration no other run of this suite uses, so
+    // a second `bun test` at the same time (another worktree, a release's
+    // preflight) is never found here, and never killed below.
+    const seconds = `29.${process.pid}${String(Math.floor(Math.random() * 1e6)).padStart(6, '0')}`;
+    const ENGINE = ['/bin/sh', '-c', `exec sleep ${seconds}`];
+    const running = () =>
+      Bun.spawnSync(['pgrep', '-f', `sleep ${seconds.replace('.', '\\.')}$`]).stdout.toString().trim();
     try {
       let post: (() => Promise<Response>) | null = null;
       let duringCleanup: { status: number; body: string } | null = null;

@@ -5,7 +5,9 @@
 // dies at start, one that lists no page, a connection that drops) are
 // exercised without a real Chrome or /Users/Shared. A few seconds.
 import { afterEach, describe, test, expect } from 'bun:test';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launch } from '../tools/capture/cdp';
@@ -15,8 +17,6 @@ import { SHOTS } from '../tools/capture/shots';
 const ROOT = join(import.meta.dir, '..');
 const SCRIPT = join(ROOT, 'tests', 'fixtures', 'fake-chrome', 'chrome.sh');
 const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
-
-const profiles = () => new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('screepub-capture-chrome-')));
 
 interface Fake {
   /** /json/list answers with the page (default) or, false, with none. */
@@ -93,7 +93,16 @@ function fakeChrome(o: Fake = {}, { die = false } = {}) {
     server.stop(true);
     rmSync(dir, { recursive: true, force: true });
   });
-  return { chrome, log };
+  /** The run removed the profile it launched this fake with. That exact
+   *  folder, which the fake wrote down, not "no new profile anywhere in the
+   *  temp folder": a real capture or another worktree's suite running at
+   *  the same time makes profiles there too. */
+  const expectProfileGone = () => {
+    const profile = readFileSync(join(dir, 'profile'), 'utf8').trim();
+    expect(profile).toStartWith(join(tmpdir(), 'screepub-capture-chrome-'));
+    expect(existsSync(profile)).toBe(false);
+  };
+  return { chrome, log, expectProfileGone };
 }
 
 const SHOT = { url: 'http://127.0.0.1:1/page', width: 10, height: 10, theme: 'light' as const, transparent: false };
@@ -109,7 +118,6 @@ async function rejection(p: Promise<unknown>): Promise<Error> {
 
 describe('the Chrome driver, against a fake Chrome', () => {
   test('a Chrome that lists no page gets one opened, and a ready page is photographed', async () => {
-    const before = profiles();
     const fake = fakeChrome({ listed: false });
     const browser = await launch(fake.chrome);
     try {
@@ -119,11 +127,10 @@ describe('the Chrome driver, against a fake Chrome', () => {
     } finally {
       await browser.close();
     }
-    expect([...profiles()].filter((p) => !before.has(p))).toEqual([]);
+    fake.expectProfileGone();
   });
 
   test('a connection dropped on navigate fails the capture at once, and close still cleans up', async () => {
-    const before = profiles();
     const fake = fakeChrome({ dropOn: 'Page.navigate' });
     const browser = await launch(fake.chrome);
     const start = Date.now();
@@ -133,21 +140,19 @@ describe('the Chrome driver, against a fake Chrome', () => {
     expect(err.message).toContain('Page.navigate');
     expect(err.message).toContain('connection closed');
     await browser.close();
-    expect([...profiles()].filter((p) => !before.has(p))).toEqual([]);
+    fake.expectProfileGone();
   });
 
   test('a Chrome that exits at start fails the launch at once, naming it, and leaves no profile', async () => {
-    const before = profiles();
     const fake = fakeChrome({}, { die: true });
     const start = Date.now();
     const err = await rejection(launch(fake.chrome));
     expect(Date.now() - start).toBeLessThan(3000);
     expect(err.message).toContain('exited (3) before it opened its debugging port');
-    expect([...profiles()].filter((p) => !before.has(p))).toEqual([]);
+    fake.expectProfileGone();
   });
 
   test('a failure the caller reports ends the wait at once; a timeout names what the server lacked', async () => {
-    const before = profiles();
     const fake = fakeChrome({ state: 'working' });
     const browser = await launch(fake.chrome);
     try {
@@ -166,7 +171,7 @@ describe('the Chrome driver, against a fake Chrome', () => {
     } finally {
       await browser.close();
     }
-    expect([...profiles()].filter((p) => !before.has(p))).toEqual([]);
+    fake.expectProfileGone();
   });
 });
 
@@ -184,7 +189,6 @@ describe('a capture run, against a fake Chrome', () => {
     const tmp = join(dir, 'tmp');
     mkdirSync(tmp);
 
-    const before = profiles();
     // A real Chrome loads the page it is sent to; so does this fake.
     const fake = fakeChrome({ state: 'working', navigate: (url) => fetch(url).then((r) => r.text()) });
     const start = Date.now();
@@ -204,6 +208,6 @@ describe('a capture run, against a fake Chrome', () => {
     expect(err.message).not.toContain('timed out');
     expect(readdirSync(tmp)).toEqual([]);
     expect(readdirSync(dir).sort()).toEqual(['repo', 'tmp']);
-    expect([...profiles()].filter((p) => !before.has(p))).toEqual([]);
+    fake.expectProfileGone();
   });
 });
