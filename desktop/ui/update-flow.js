@@ -9,15 +9,17 @@ import {
   updaterReady, updateCheck, updateInstall, engineBusy, whenIdle, restartReady, restartApp,
 } from './app.js';
 import {
-  updatesPossible, runCheck, rememberAnswer, rememberedOffer, forgetFound, installAndRestart,
+  updatesPossible, runCheck, rememberAnswer, rememberedOffer, rememberFound, forgetFound,
+  installAndRestart,
 } from './update.js';
 import { RELEASE } from './notes.js';
 
 /** 'restarting' and 'installed' are final: the process is on its way out, or
- *  there is nothing left for a second click to do. Every other outcome —
- *  INCLUDING none at all, when a run failed before installAndRestart could
- *  report anything — is not, and start() below has exactly one place that
- *  asks. */
+ *  there is nothing left for a second click to do. start() below calls this
+ *  once, right after installAndRestart returns. A failure caught before
+ *  installAndRestart could run at all never reaches it: nothing was
+ *  returned to ask about, so that path always counts as non-final and
+ *  resets `running` directly. */
 function isFinalOutcome(outcome) {
   return outcome?.outcome === 'restarting' || outcome?.outcome === 'installed';
 }
@@ -127,6 +129,16 @@ export function createUpdateFlow(deps) {
       if (running || offer === null) return;
       running = true;
       const attempted = offer;
+      // A retry from a 'failed' phase must not sit on that stale text while
+      // installAndRestart's own fresh check (triggered because a failed
+      // attempt clears `update`) is in flight: show what is about to be
+      // attempted at once, synchronously, so a re-emit mid-check
+      // (offerFound, from an unrelated background check landing at the
+      // same moment) has something honest to repeat instead of the last
+      // failure.
+      if (phase?.kind === 'failed') {
+        setPhase({ kind: 'offer', version: attempted.version, body: attempted.body ?? '' });
+      }
       let outcome;
       try {
         outcome = await installAndRestart({
@@ -150,19 +162,27 @@ export function createUpdateFlow(deps) {
         // got to run, so nothing was actually attempted: `offer` (and
         // whatever live Update handle it holds) is left exactly as it was.
         running = false;
-        if (offer === attempted) {
-          setPhase({ kind: 'failed', version: attempted.version, message: String(err?.message ?? err) });
-        }
+        setPhase({ kind: 'failed', version: attempted.version, message: String(err?.message ?? err) });
         return;
       }
-      if (!isFinalOutcome(outcome)) running = false;
       if (isFinalOutcome(outcome)) return;
-      // A newer offer already replaced this one while the run was under
-      // way: that offer (and whatever live Update handle it holds) was
-      // never attempted, so leave it alone here — clearing its `update`
-      // would throw away a resource nobody used, and cost the next start()
-      // an extra request it did not need.
-      if (offer !== attempted) return;
+      running = false;
+      if (offer !== attempted) {
+        // A newer offer replaced this one while the run was under way: the
+        // run that just finished was for `attempted`, not this one, so its
+        // outcome — a failure, or "nothing newer" answering `attempted`'s
+        // OWN check — must not be shown in its place. Show what a click
+        // would actually install now, and keep storage agreeing with the
+        // screen: installAndRestart's own fresh check may just have
+        // forgotten the remembered version because ITS check found nothing
+        // newer, which is no longer true of what is on screen. The live
+        // Update handle this offer holds is left untouched either way —
+        // clearing it would throw away a resource nobody used, and cost
+        // the next start() an extra request it did not need.
+        setPhase({ kind: 'offer', version: offer.version, body: offer.body ?? '' });
+        rememberFound(deps.storage(), offer.version);
+        return;
+      }
       if (outcome.outcome === 'current') { offer = null; return; }
       // app.js closes the Update object after any attempt, so a retry has
       // to fetch a fresh one (installAndRestart does, when `update` is
@@ -177,7 +197,8 @@ export function createUpdateFlow(deps) {
 /** The window's one flow, built at import — RELEASE.version is read here
  *  too, since notes.js is pure data and that is safe at import time. What
  *  is NOT read at import: storage (localStorage), navigator, the clock
- *  (Date.now/performance.now) and every Tauri call. Each of those is a
+ *  (Date.now — app.js is the one that also needs performance.now, for its
+ *  own quiet-period tracking) and every Tauri call. Each of those is a
  *  closure here, called only when a method runs, so importing this file
  *  needs no window and bun test can do it directly. */
 export const flow = createUpdateFlow({

@@ -235,12 +235,19 @@ export async function installAndRestart({
     // resource lasts only as long as the session that fetched it. The click
     // is the consent for one fresh request, exactly as the manual button is.
     if (!result?.update) {
-      result = await runCheck({ manual: true, storage, now, check });
-      if (result.outcome === 'error') throw new Error(result.message);
-      if (result.outcome !== 'offer') {
+      // Kept separate from `result` until it is known to be an offer.
+      // Offline is this app's NORMAL case (built for a Kindle that is often
+      // disconnected): a failed fresh check must leave `result` naming the
+      // REMEMBERED offer, not the error object that answered instead — or
+      // the catch below reports a failure with no version, and the offer
+      // it returns loses its own version and body entirely.
+      const fresh = await runCheck({ manual: true, storage, now, check });
+      if (fresh.outcome === 'error') throw new Error(fresh.message);
+      if (fresh.outcome !== 'offer') {
         emit(null);
         return { outcome: 'current' };
       }
+      result = fresh;
     }
     const { version } = result;
     let received = 0;
