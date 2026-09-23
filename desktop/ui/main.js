@@ -1,7 +1,7 @@
 // Boots the window: the frame, the five surfaces, the keyboard, and the one
 // line that proves the engine is there.
 import { runEngine, argv, onFileDrag, onDialogClosed } from './app.js';
-import { shouldAsk, updateLabel } from './update.js';
+import { shouldAsk, updateLabel, labelActionable } from './update.js';
 import { flow } from './update-flow.js';
 import { mountFrame } from './frame.js';
 import { stopAfterDialog } from './focus.js';
@@ -161,6 +161,6 @@ runEngine(argv.version()).then(
 // flow.boot() is the once-a-day check the README promises: it redraws what an
 // earlier check found, then asks the server only if the reader said yes to
 // the question on the Convert page, and at most once a day (update.js).
-flow.subscribe((phase) => frame.setUpdateLabel(updateLabel(phase)));
+flow.subscribe((phase) => frame.setUpdateLabel(updateLabel(phase), { actionable: labelActionable(phase) }));
 frame.onUpdateClick(() => flow.start());
 flow.boot();

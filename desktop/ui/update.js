@@ -137,6 +137,16 @@ export function updateLabel(phase) {
   }
 }
 
+/** Whether the label beside the stamp is something a click would actually
+ *  act on. True only for 'offer' (starts the run) and 'failed' (retries
+ *  it): every other moment is already under way, so a click on it would do
+ *  nothing, and a label that still LOOKS clickable then is a small lie.
+ *  frame.js uses this to mark the label inert (aria-disabled, a default
+ *  cursor) rather than leave it looking like a button that does nothing. */
+export function labelActionable(phase) {
+  return phase?.kind === 'offer' || phase?.kind === 'failed';
+}
+
 /** What to tell someone when the bundle has been swapped and this build
  *  cannot restart itself: no process plugin, or the plugin's restart() was
  *  refused (installAndRestart falls back here rather than call that a
@@ -249,10 +259,15 @@ export async function installAndRestart({
       }
       result = fresh;
     }
-    const { version } = result;
+    // `body` rides along on 'downloading' too, not just 'offer': a retry's
+    // own fresh check (above) can find a NEWER version with different
+    // release notes than whatever was last offered, and the release notes
+    // block needs the new body the moment downloading starts, not only
+    // after Finished.
+    const { version, body } = result;
     let received = 0;
     let total = null;
-    emit({ kind: 'downloading', version, received, total });
+    emit({ kind: 'downloading', version, received, total, body });
     await install(result.update, (event) => {
       if (event?.event === 'Started') total = event.data?.contentLength ?? null;
       else if (event?.event === 'Progress') received += event.data?.chunkLength ?? 0;
@@ -260,7 +275,7 @@ export async function installAndRestart({
         emit({ kind: 'installing', version });
         return;
       }
-      emit({ kind: 'downloading', version, received, total });
+      emit({ kind: 'downloading', version, received, total, body });
     });
     if (!restartReady()) {
       emit({ kind: 'installed', version });

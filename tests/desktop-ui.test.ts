@@ -3426,6 +3426,20 @@ describe('what the update label says, and what it remembers', () => {
       expect(update.updateLabel(phase)).not.toContain('—');
     }
   });
+
+  test('the label looks clickable only where a click would do something', () => {
+    // 'offer' starts the run; 'failed' retries it. Every other moment is
+    // already under way, so clicking it (or the label just looking like
+    // it could be clicked) would be a lie.
+    expect(update.labelActionable(null)).toBe(false);
+    expect(update.labelActionable({ kind: 'offer', version: '1' })).toBe(true);
+    expect(update.labelActionable({ kind: 'downloading', version: '1' })).toBe(false);
+    expect(update.labelActionable({ kind: 'installing' })).toBe(false);
+    expect(update.labelActionable({ kind: 'waiting' })).toBe(false);
+    expect(update.labelActionable({ kind: 'restarting' })).toBe(false);
+    expect(update.labelActionable({ kind: 'failed', message: 'x' })).toBe(true);
+    expect(update.labelActionable({ kind: 'installed', version: '1' })).toBe(false);
+  });
 });
 
 describe('an update downloads, installs, waits for the engine, then restarts', () => {
@@ -3500,6 +3514,23 @@ describe('an update downloads, installs, waits for the engine, then restarts', (
       'Installing…',
       'Restarting…',
     ]);
+  });
+
+  test('downloading names its own body, not whatever was offered before', async () => {
+    // A retry's own fresh check (triggered when a failed attempt clears
+    // `update`) can find a NEWER version with different release notes than
+    // what was last offered. The release notes block needs the new body
+    // the moment downloading starts, not only after Finished.
+    const { args, phases } = deps({
+      offer: {
+        outcome: 'offer', version: '0.8.0', body: 'fresh notes',
+        update: { version: '0.8.0', currentVersion: '0.7.2' },
+      },
+    });
+    await update.installAndRestart(args);
+    const downloading = phases.filter((p: any) => p.kind === 'downloading');
+    expect(downloading.length).toBeGreaterThan(0);
+    for (const phase of downloading) expect((phase as any).body).toBe('fresh notes');
   });
 
   test('it waits while the engine is working, and says so', async () => {
@@ -3851,6 +3882,10 @@ describe('one update run, one moment, heard by the label and the notes alike', (
     expect((seen.at(-1) as any).kind).toBe('offer');
     expect((seen.at(-1) as any).version).toBe('0.8.0');
     expect((seen.at(-1) as any).body).toBe('notes');
+    // Marked, so a subscriber (notes-surface.js) can keep Install disabled
+    // for this specific moment: the fresh check is running and nothing
+    // yet to click has actually been confirmed.
+    expect((seen.at(-1) as any).retrying).toBe(true);
     answer({ version: '0.8.0', currentVersion: '0.7.2', body: 'notes' });
     await retry;
   });
@@ -4589,6 +4624,17 @@ describe('a newer version is a label you can click, not a dot you can miss', () 
     expect(foot).toContain('position: absolute');
     const stamp = css.match(/\.rev-stamp\s*\{[^}]*\}/)?.[0] ?? '';
     expect(stamp).not.toContain('position: absolute');
+  });
+
+  test('the label stops looking clickable once a click would do nothing', () => {
+    // "Update to 0.8.0" is a real button; "Downloading 0.8.0… 40%" only
+    // looks like one unless the frame is told otherwise.
+    expect(frame).toMatch(/setUpdateLabel:\s*\(words,\s*\{\s*actionable\s*\}/);
+    expect(frame).toContain('aria-disabled');
+    const rule = css.match(/\.rev-update-inert\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(rule).toContain('cursor: default');
+    const main = read('main.js');
+    expect(main).toContain('labelActionable(phase)');
   });
 });
 

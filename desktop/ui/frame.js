@@ -236,10 +236,18 @@ export function mountFrame(root) {
     /** Called when the reader asks what changed in this version. */
     onRev: (handler) => revHandlers.push(handler),
     /** What the label beside the stamp says, or null to take it down. The
-     *  words are update.js's (updateLabel); the frame only shows them. */
-    setUpdateLabel: (words) => {
+     *  words are update.js's (updateLabel); whether it is actually
+     *  clickable right now is update.js's too (labelActionable) — most
+     *  moments ("Downloading 0.8.0… 40%") are already under way, and a
+     *  label that still looks like a button then is a small lie. Inert
+     *  moments get aria-disabled and a class that drops the pointer cursor;
+     *  the frame only shows what it is told. */
+    setUpdateLabel: (words, { actionable } = {}) => {
       updateLabel.textContent = words ?? '';
       updateLabel.hidden = words === null || words === undefined;
+      updateLabel.classList.toggle('rev-update-inert', !actionable);
+      if (actionable) updateLabel.removeAttribute('aria-disabled');
+      else updateLabel.setAttribute('aria-disabled', 'true');
     },
     /** Called when the reader clicks the label. */
     onUpdateClick: (handler) => updateHandlers.push(handler),

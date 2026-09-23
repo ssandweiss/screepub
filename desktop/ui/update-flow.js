@@ -137,7 +137,12 @@ export function createUpdateFlow(deps) {
       // same moment) has something honest to repeat instead of the last
       // failure.
       if (phase?.kind === 'failed') {
-        setPhase({ kind: 'offer', version: attempted.version, body: attempted.body ?? '' });
+        // `retrying: true` marks this specific re-emit: the fresh check
+        // this triggers (installAndRestart's own, since the failed attempt
+        // cleared `update`) is running and nothing has been confirmed yet,
+        // so a subscriber (notes-surface.js) must not treat this moment as
+        // ready to click again.
+        setPhase({ kind: 'offer', version: attempted.version, body: attempted.body ?? '', retrying: true });
       }
       let outcome;
       try {

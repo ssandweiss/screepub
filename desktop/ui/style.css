@@ -238,6 +238,9 @@ body {
   cursor: pointer;
 }
 .rev-update:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+/* Most moments ("Downloading 0.8.0… 40%") are already under way: a click
+ * would do nothing, so the label stops looking like a button that would. */
+.rev-update-inert { cursor: default; }
 
 /* A dead engine, ABOVE the stamp rather than instead of it. The stamp answers
  * "which build is this?", and that question is worth more when the engine is
