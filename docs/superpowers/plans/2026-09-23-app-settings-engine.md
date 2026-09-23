@@ -14,7 +14,7 @@
 
 ## Ground rules for every task
 
-- Worktree: `/Users/CWP_MBP_SGS2/Documents/CODING_PROJECTS/Projects/02_Darkwell/Screepub/.claude/worktrees/parity-c-gear`, branch `parity-c-gear`. Absolute paths; never `cd` to the main checkout or to other worktrees. (Piece B is being built at the same time in `.claude/worktrees/epic-neumann-254843` on `parity-b-routes`; do not touch it.)
+- Your own worktree, branch `parity-c-gear`. Absolute paths; never `cd` to the main checkout or to other worktrees. (Piece B is being built at the same time by another session in `.claude/worktrees/epic-neumann-254843` on `parity-b-routes`; do not touch it.)
 - TDD: failing test first, see it fail for the stated reason, implement, pass. `bunx tsc --noEmit` clean before each commit.
 - **No em dash (`—`) in any string a person reads** that you add. Colons, periods, commas.
 - **No test may read or write the real app settings file or the real library.** Set `SCREEPUB_CONFIG_DIR` and `SCREEPUB_LIBRARY` (or pass explicit paths) into the test file's SCRATCH folder. Beware: `libraryRoot()` checks `SCREEPUB_LIBRARY` FIRST, so a test of the chosen-folder branch must leave `SCREEPUB_LIBRARY` unset in the env object it passes and supply the settings path explicitly.
@@ -83,9 +83,25 @@ Give each touched handler an injectable settings path (a deps field or option) s
 
 ---
 
+### Task 3b: `screepub reveal <path> [--json]`
+
+The owner decided (2026-09-23) that the engine, not the window, reveals files, because the window's reveal permission is a fixed path and the library can now move.
+
+**Performer** `src/reveal.ts`: `revealFile(path, platform = process.platform, open: Opener = spawnOpener)`. Argv: darwin `['open', '-R', path]`; win32 `['explorer', '/select,' + path]` (explorer exits 1 even on success, so its exit code is ignored); elsewhere `['xdg-open', dirname(path)]`. A non-zero exit (except explorer) throws an Error naming the path and the tool's stderr. The `Opener` type is `(argv: string[]) => Promise<{ code: number; stderr: string }>`; piece B builds the same shape in `src/export/route-perform.ts` on its own branch: define it locally here (a one-line type), do not import from B.
+
+**Handler** in `src/cli-app-settings.ts` or a small `src/cli-reveal.ts`: the path must be absolute (`usage`) and exist (`unreadable`), checked before anything opens. Answer `{ revealed: path }`.
+
+**CLI:** `VERBS` gains `reveal`; usage line `screepub reveal <file> [--json]  show a file in the system's file manager`; own `--help`; exactly one positional; refuses every other flag. Human output: nothing on success (exit 0).
+
+**Tests:** argv per platform with a fake opener; explorer exit 1 is success, `open` exit 1 is an error; relative and missing paths refused with zero opener calls; spawned refusals and `--help` only (never a real reveal).
+
+- [ ] Commit "screepub reveal: the file manager opens on the file, wherever the library is".
+
+---
+
 ### Task 4: Docs and the whole suite
 
-- `README.md` "The library" section: the chosen folder and its precedence (`SCREEPUB_LIBRARY` > chosen > default), app defaults and their place in the precedence, the `app-settings` verb, and where the settings file lives per platform.
+- `README.md` "The library" section: the `reveal` verb in one line, and the chosen folder and its precedence (`SCREEPUB_LIBRARY` > chosen > default), app defaults and their place in the precedence, the `app-settings` verb, and where the settings file lives per platform.
 - `docs/formatting-options-log.md`: one dated line that app defaults now sit between the shipped defaults and a script's sidecar (read its format first).
 - `bun test` and `bunx tsc --noEmit` green; em-dash check over the branch diff clean.
 - [ ] Commit "Docs: the library folder and app defaults".
