@@ -141,6 +141,11 @@ wrong one.
 probes the status AGAIN so the answer carries the fresh checklist. The
 window then needs no second call.
 
+Before calling the installer at all, it refuses the same way where
+`kfxPossible(platform)` is false (Amazon ships no Kindle Previewer, so the
+plugin would have nothing to drive), reusing `kfx-setup.ts`'s
+Linux/this-system wording.
+
 When the plugin index or the download cannot be reached, the installer
 reports `could not reach Calibre's plugin index. Check the internet
 connection, then try again.` rather than Python's own exception text

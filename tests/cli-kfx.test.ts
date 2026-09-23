@@ -4,7 +4,7 @@
 // NOTHING in this file may reach the real installer: it downloads a plugin
 // and writes it into the Calibre of whatever machine runs the suite.
 import { describe, test, expect, afterAll } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -41,6 +41,90 @@ async function runCli(args: string[]) {
   ]);
   return { stdout, stderr, exitCode };
 }
+
+const KFX_BRANCH_START = "if (verb === 'kfx-status' || verb === 'kfx-install')";
+const KFX_BRANCH_END = "if (verb === 'settings')";
+const REFUSAL = "fail({ code: 'usage'";
+
+function countOccurrences(haystack: string, needle: string): number {
+  let count = 0;
+  let at = haystack.indexOf(needle);
+  while (at !== -1) {
+    count += 1;
+    at = haystack.indexOf(needle, at + needle.length);
+  }
+  return count;
+}
+
+/** How many usage refusals sit before and after each KFX handler call, in
+ *  cli.ts's kfx-status/kfx-install branch. Shared by the source-order test
+ *  below (which asserts on every field, so a refusal moved OR deleted fails
+ *  it) and REFUSALS_FIRST (needed synchronously, before any test runs, to
+ *  decide whether the spawned kfx-install refusal tests may run at all).
+ *
+ *  `branch.lastIndexOf(needle, installed) < installed`, the previous form of
+ *  the source test, can only ever be true: lastIndexOf never returns a
+ *  position past the second argument. It proved "some refusal precedes the
+ *  install call", never "every refusal does", so a refusal moved BELOW
+ *  kfxInstallCommand( or deleted outright still passed it. Counting on each
+ *  side of the call catches both. */
+function checkKfxRefusalOrder(source: string): {
+  branchFound: boolean;
+  installedIndex: number;
+  statusIndex: number;
+  refusalsBeforeInstalled: number;
+  refusalsAfterInstalled: number;
+  refusalsBeforeStatus: number;
+  refusalsAfterStatus: number;
+} {
+  const start = source.indexOf(KFX_BRANCH_START);
+  const end = start === -1 ? -1 : source.indexOf(KFX_BRANCH_END, start + 1);
+  if (start === -1 || end === -1) {
+    return {
+      branchFound: false,
+      installedIndex: -1,
+      statusIndex: -1,
+      refusalsBeforeInstalled: -1,
+      refusalsAfterInstalled: -1,
+      refusalsBeforeStatus: -1,
+      refusalsAfterStatus: -1,
+    };
+  }
+  const branch = source.slice(start, end);
+  const installedIndex = branch.indexOf('kfxInstallCommand(');
+  const statusIndex = branch.indexOf('kfxStatusCommand(');
+  return {
+    branchFound: true,
+    installedIndex,
+    statusIndex,
+    refusalsBeforeInstalled: installedIndex === -1 ? -1 : countOccurrences(branch.slice(0, installedIndex), REFUSAL),
+    refusalsAfterInstalled: installedIndex === -1 ? -1 : countOccurrences(branch.slice(installedIndex), REFUSAL),
+    refusalsBeforeStatus: statusIndex === -1 ? -1 : countOccurrences(branch.slice(0, statusIndex), REFUSAL),
+    refusalsAfterStatus: statusIndex === -1 ? -1 : countOccurrences(branch.slice(statusIndex), REFUSAL),
+  };
+}
+
+function refusalsComeFirst(check: ReturnType<typeof checkKfxRefusalOrder>): boolean {
+  return (
+    check.branchFound &&
+    check.installedIndex !== -1 &&
+    check.statusIndex !== -1 &&
+    check.refusalsBeforeInstalled === 2 &&
+    check.refusalsAfterInstalled === 0 &&
+    check.refusalsBeforeStatus === 2 &&
+    check.refusalsAfterStatus === 0
+  );
+}
+
+// Computed synchronously (readFileSync, not the async Bun.file the test
+// below uses) because test.skipIf needs its answer at registration time,
+// before any test body runs. A reordering that breaks this fails the
+// source-order test below LOUDLY; it must never instead let the spawned
+// kfx-install refusal tests quietly run against a branch that cannot be
+// trusted to refuse before installing.
+const REFUSALS_FIRST = refusalsComeFirst(
+  checkKfxRefusalOrder(readFileSync(`${ROOT}src/cli.ts`, 'utf8')),
+);
 
 const missingPlugin: KfxStatus = { calibre: true, previewer: true, pluginInstalled: false, ready: false };
 const allThere: KfxStatus = { calibre: true, previewer: true, pluginInstalled: true, ready: true };
@@ -119,6 +203,28 @@ describe('kfxInstallCommand', () => {
       );
     }
   });
+
+  test('refuses BEFORE installing where Amazon makes no Kindle Previewer, and never calls the installer', async () => {
+    const cases: [string, string][] = [
+      ['linux', 'Linux'],
+      ['freebsd', 'this system'],
+    ];
+    for (const [platform, system] of cases) {
+      let installCalls = 0;
+      const err = await kfxInstallCommand({
+        install: async () => { installCalls += 1; return { ok: true, version: '2.20.1' }; },
+        status: async () => allThere,
+        platform,
+      }).catch((e) => e);
+      expect(err).toBeInstanceOf(CliError);
+      expect((err as CliError).code).toBe('kfx-install-failed');
+      expect((err as CliError).message).toBe(
+        `the KFX plugin is of no use here: it drives Kindle Previewer, which Amazon does not make for ${system}`,
+      );
+      // The point of refusing FIRST: the fake installer must never run.
+      expect(installCalls).toBe(0);
+    }
+  });
 });
 
 describe('human output', () => {
@@ -150,16 +256,23 @@ describe('human output', () => {
     expect(setupLines(mac)[3]).toBe('  KFX plugin        not installed: Install Calibre first');
   });
 
-  test('install: the version, each removed fork, then the summary', () => {
-    expect(installLines({
-      version: '2.20.1',
-      removed: ['KFX Output (fork)'],
-      setup: { ready: true, possible: true, summary: 'S.', steps: [] },
-    })).toEqual([
-      'installed the KFX plugin 2.20.1',
-      'removed an older copy: KFX Output (fork)',
-      'S.',
-    ]);
+  test('install: the version, each removed fork, then the FULL checklist', async () => {
+    // A real setup (not `steps: []`), for a machine that just installed the
+    // plugin but is still missing Kindle Previewer: the summary alone ends
+    // on "...needs the three free tools below" with no "below" to point at,
+    // since installLines is the last thing printed. The checklist itself
+    // has to follow it.
+    const setup = await kfxStatusCommand({
+      status: async () => ({ calibre: true, previewer: false, pluginInstalled: true, ready: false }),
+      platform: 'darwin',
+    });
+    const lines = installLines({ version: '2.20.1', removed: ['KFX Output (fork)'], setup });
+    expect(lines[0]).toBe('installed the KFX plugin 2.20.1');
+    expect(lines[1]).toBe('removed an older copy: KFX Output (fork)');
+    expect(lines.slice(2)).toEqual(setupLines(setup));
+    expect(lines).toContain(
+      '  Kindle Previewer  not installed: https://kdp.amazon.com/en_US/help/topic/G202131170',
+    );
   });
 
   test('no line carries an em dash', async () => {
@@ -191,11 +304,18 @@ describe('the verbs', () => {
     expect(answer.steps.map((s: { id: string }) => s.id)).toEqual(['calibre', 'previewer', 'plugin']);
   });
 
-  test('kfx-status prints the summary for a person', async () => {
+  test('kfx-status prints the summary for a person, not JSON', async () => {
     const { stdout, exitCode } = await runCli(['kfx-status']);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain('Kindles get');
-    expect(stdout).toContain('KFX plugin');
+    const firstLine = stdout.split('\n')[0] ?? '';
+    // Also true of the JSON: `{"ok":true,...,"summary":"Kindles get..."}`
+    // contains "Kindles get" too, so that alone would pass for either mode.
+    // The first line's shape, and the absence of any `{`, is what actually
+    // distinguishes the person-readable form from --json.
+    expect(
+      firstLine.startsWith('Kindles get') || firstLine.startsWith('Amazon does not make'),
+    ).toBe(true);
+    expect(stdout).not.toContain('{');
   });
 
   test('each verb has its own --help, naming itself and not the conversion flags', async () => {
@@ -227,7 +347,15 @@ describe('the verbs', () => {
   ];
 
   for (const verb of ['kfx-status', 'kfx-install']) {
-    test(`${verb} refuses every other verb's flags as usage errors`, async () => {
+    // kfx-install's copies of these two tests are skipped when the source
+    // test below cannot confirm every refusal precedes both handler calls:
+    // a reordering must fail that test loudly, and never instead lead this
+    // suite into spawning the real installer via a refusal that no longer
+    // refuses. kfx-status carries no such risk (its handler never installs
+    // anything), so it always runs.
+    const t = verb === 'kfx-install' ? test.skipIf(!REFUSALS_FIRST) : test;
+
+    t(`${verb} refuses every other verb's flags as usage errors`, async () => {
       for (const [flags, name] of FOREIGN) {
         const { stdout, exitCode } = await runCli([verb, ...flags, '--json']);
         const answer = JSON.parse(stdout);
@@ -237,7 +365,7 @@ describe('the verbs', () => {
       }
     });
 
-    test(`${verb} takes no arguments`, async () => {
+    t(`${verb} takes no arguments`, async () => {
       const { stdout, exitCode } = await runCli([verb, 'extra', '--json']);
       expect(exitCode).toBe(1);
       const answer = JSON.parse(stdout);
@@ -248,16 +376,24 @@ describe('the verbs', () => {
 });
 
 describe('kfx-install refuses before it installs', () => {
-  test('in the source, every refusal comes before the installer is called', async () => {
+  test('in the source, every refusal comes before either handler is called', async () => {
     // The spawned refusals above prove each refusal FIRES. This proves the
-    // ORDER without ever letting the installer run: in cli.ts's kfx branch,
-    // the last refusal is written above the first call to kfxInstallCommand.
+    // ORDER without ever letting the installer run. checkKfxRefusalOrder
+    // (shared with REFUSALS_FIRST above) counts refusals on each side of
+    // both handler calls, rather than asking only whether SOME refusal
+    // precedes the LAST one: a refusal moved below a call, or deleted
+    // outright, shows up here as a wrong count instead of slipping through.
     const source = await Bun.file(`${ROOT}src/cli.ts`).text();
-    const branch = source.slice(source.indexOf("verb === 'kfx-status' || verb === 'kfx-install'"));
-    const installed = branch.indexOf('kfxInstallCommand(');
-    const lastRefusal = branch.lastIndexOf("fail({ code: 'usage'", installed);
-    expect(installed).toBeGreaterThan(-1);
-    expect(lastRefusal).toBeGreaterThan(-1);
-    expect(lastRefusal).toBeLessThan(installed);
+    const check = checkKfxRefusalOrder(source);
+    expect(check.branchFound).toBe(true);
+    expect(check.installedIndex).toBeGreaterThan(-1);
+    expect(check.statusIndex).toBeGreaterThan(-1);
+    // Neither handler call has a refusal written after it.
+    expect(check.refusalsAfterInstalled).toBe(0);
+    expect(check.refusalsAfterStatus).toBe(0);
+    // Both refusals (the foreign-flag loop, the positional check) sit
+    // before each handler call.
+    expect(check.refusalsBeforeInstalled).toBe(2);
+    expect(check.refusalsBeforeStatus).toBe(2);
   });
 });

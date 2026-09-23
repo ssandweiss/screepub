@@ -5,7 +5,7 @@
 import { platform as hostPlatform } from 'node:process';
 import { CliError } from './cli-errors';
 import { installKfxPlugin, kfxStatus, type KfxInstallResult, type KfxStatus } from './export/kfx';
-import { kfxSetup, type KfxSetup, type KfxStep } from './export/kfx-setup';
+import { kfxPossible, kfxSetup, systemName, type KfxSetup, type KfxStep } from './export/kfx-setup';
 
 /** Injectable seams, defaulted to the real thing, so a test can drive every
  *  outcome without a Calibre, and without ever installing into a real one.
@@ -34,8 +34,20 @@ export async function kfxStatusCommand(deps: KfxCommandDeps = {}): Promise<KfxSe
 /** Install or update the plugin, then probe again so the answer carries the
  *  fresh checklist and the window needs no second call. NEVER call this on
  *  the program's own initiative: it fetches third-party code and writes into
- *  the user's Calibre, so only an explicit request reaches it. */
+ *  the user's Calibre, so only an explicit request reaches it.
+ *
+ *  Refuses BEFORE calling the installer where Amazon makes no Kindle
+ *  Previewer at all (kfxPossible false): the plugin exists to drive
+ *  Previewer, so installing it there would add a tool nothing on that
+ *  machine can ever use. */
 export async function kfxInstallCommand(deps: KfxCommandDeps = {}): Promise<KfxInstallAnswer> {
+  const platform = deps.platform ?? hostPlatform;
+  if (!kfxPossible(platform)) {
+    throw new CliError(
+      'kfx-install-failed',
+      `the KFX plugin is of no use here: it drives Kindle Previewer, which Amazon does not make for ${systemName(platform)}`,
+    );
+  }
   const result = await (deps.install ?? (() => installKfxPlugin()))();
   if (!result.ok || !result.version) {
     throw new CliError(
@@ -62,11 +74,15 @@ export function setupLines(setup: KfxSetup): string[] {
   return [setup.summary, ...setup.steps.map((s) => `  ${s.name.padEnd(width)}  ${stepState(s)}`)];
 }
 
-/** `kfx-install` for a person. */
+/** `kfx-install` for a person: the version, each removed fork, then the FULL
+ *  checklist, not just its summary. The summary alone, on a machine that
+ *  just installed the plugin but still lacks Kindle Previewer, ends on
+ *  "...needs the three free tools below" with nothing printed below it,
+ *  since this is the last thing `kfx-install` prints. */
 export function installLines(answer: KfxInstallAnswer): string[] {
   return [
     `installed the KFX plugin ${answer.version}`,
     ...answer.removed.map((name) => `removed an older copy: ${name}`),
-    answer.setup.summary,
+    ...setupLines(answer.setup),
   ];
 }

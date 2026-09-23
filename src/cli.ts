@@ -76,7 +76,7 @@ Commands:
   screepub export <file.epub> [--for kindle|epub] [--json]
                                             the file you would put on a reader
   screepub kfx-status [--json]              can this computer make KFX for a Kindle?
-  screepub kfx-install [--json]             install the KFX plugin into Calibre (online)
+  screepub kfx-install [--json]             add the KFX plugin to Calibre (online)
   screepub update-decision --offered <v> --current <v> [--json]
                                             should this update be offered? (offline)
   screepub update-should-check [--opted-in] [--last-checked <ms>] [--json]
@@ -160,7 +160,7 @@ Usage:
 A Kindle gets its best rendering from a KFX file, and making one needs three
 free tools: Calibre, Amazon's Kindle Previewer, and the KFX Output plugin
 inside Calibre. This says which are installed, where to get the missing ones,
-and what a Kindle gets until then. Reads only; works offline.
+and what a Kindle gets until then. Installs nothing; works offline.
 
 Options:
   --json                 machine-readable result on stdout (for the app)
@@ -175,7 +175,9 @@ Usage:
 Downloads the current KFX Output plugin from Calibre's own plugin index and
 installs it with Calibre's own installer, replacing any older copy. Needs
 Calibre, and the internet. Kindle Previewer is not installed by this: it is
-Amazon's, and \`screepub kfx-status\` says where to get it.
+Amazon's, and \`screepub kfx-status\` says where to get it. Refuses, before
+touching Calibre, on a system Amazon makes no Kindle Previewer for: the
+plugin would have nothing to drive there.
 
 Options:
   --json                 machine-readable result on stdout (for the app)

@@ -62,7 +62,11 @@ export function kfxPossible(platform: string): boolean {
   return platform === 'darwin' || platform === 'win32';
 }
 
-function systemName(platform: string): string {
+/** "Linux" on Linux, "this system" everywhere else Amazon makes no Kindle
+ *  Previewer for. Exported so cli-kfx.ts's install-time refusal names the
+ *  same system kfxSetup's own checklist would, from one place rather than a
+ *  second copy of the choice. */
+export function systemName(platform: string): string {
   return platform === 'linux' ? 'Linux' : 'this system';
 }
 
