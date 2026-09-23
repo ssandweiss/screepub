@@ -1,15 +1,18 @@
 import { test, expect, afterAll } from 'bun:test';
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { listDevices } from '../src/device/list';
 import type { ConnectedDevice } from '../src/device/types';
 
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-device-list-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+
 /** A mount parent holding one Kobo, built in a temp dir. No real mount is
  * ever read: the root is injected, exactly as piece A's enumerateVolumes
  * allows. */
 function mountRootWithKobo(): string {
-  const root = mkdtempSync(join(tmpdir(), 'screepub-mounts-'));
+  const root = mkdtempSync(join(SCRATCH, 'mounts-'));
   mkdirSync(join(root, 'KOBOeReader', '.kobo'), { recursive: true });
   return root;
 }
@@ -49,7 +52,7 @@ test('a reMarkable that answers is appended after the mounted devices', async ()
 });
 
 test('nothing connected is an empty list, not an error', async () => {
-  const empty = mkdtempSync(join(tmpdir(), 'screepub-mounts-'));
+  const empty = mkdtempSync(join(SCRATCH, 'mounts-'));
   expect(await listDevices({ roots: [empty], remarkableEndpoint: silent.url })).toEqual([]);
 });
 

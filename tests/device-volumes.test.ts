@@ -1,14 +1,17 @@
-import { test, expect } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { afterAll, test, expect } from 'bun:test';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { platform } from 'node:process';
 import { volumeRoots, enumerateVolumes, mountedDevices, rootIsItselfAVolume } from '../src/device/volumes';
 
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-device-volumes-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+
 /** A fake mount root holding several "volumes", so enumeration is tested by
  * injection and never against whatever is really plugged into this machine. */
 function mountRoot(volumes: Record<string, string[]>): string {
-  const root = mkdtempSync(join(tmpdir(), 'screepub-mounts-'));
+  const root = mkdtempSync(join(SCRATCH, 'mounts-'));
   for (const [name, subdirs] of Object.entries(volumes)) {
     mkdirSync(join(root, name), { recursive: true });
     for (const sub of subdirs) mkdirSync(join(root, name, sub), { recursive: true });
@@ -25,7 +28,7 @@ test('enumerate lists the directories under an injected root', () => {
 test('enumerate ignores files and missing roots', () => {
   const root = mountRoot({ Kindle: ['documents'] });
   writeFileSync(join(root, 'loose-file.txt'), 'x');
-  const found = enumerateVolumes([root, join(tmpdir(), 'screepub-no-such-root')]);
+  const found = enumerateVolumes([root, join(SCRATCH, 'no-such-root')]);
   expect(found.map((p) => basename(p))).toEqual(['Kindle']);
 });
 

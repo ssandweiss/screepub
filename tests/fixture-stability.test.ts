@@ -1,8 +1,11 @@
-import { describe, test, expect } from 'bun:test';
+import { afterAll, describe, test, expect } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-fixture-stability-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 // The committed fixtures are generated, not hand-made, and every kind in
 // tools/make-fixture.py shares its layout and PDF-emission code. Without
@@ -28,7 +31,7 @@ describe('committed fixtures regenerate byte-identically', () => {
 
   for (const [kind, committed] of Object.entries(COMMITTED)) {
     test(kind, () => {
-      const dir = mkdtempSync(join(tmpdir(), 'screepub-fixture-'));
+      const dir = mkdtempSync(join(SCRATCH, 'fixture-'));
       const out = join(dir, `${kind}.pdf`);
       const run = spawnSync('python3', ['tools/make-fixture.py', kind, out], {
         encoding: 'utf8',

@@ -9,9 +9,15 @@
 // really a 404 page, or a public key that is really an empty string,
 // must be refused by name rather than discovered by a user whose update
 // fails with "signature could not be decoded".
-import { describe, test, expect } from 'bun:test';
+import { afterAll, describe, test, expect } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parsePublicKeyBox, parseSignatureBox } from '../tools/update-signature';
 import { FAKE_KEY_ID, fakePublicKeyBox, fakeSignatureBox, keyIdHex } from './signature-box';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-update-signature-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 describe('a .sig file', () => {
   test('a well-formed box is read, and reports the key that made it', () => {
@@ -101,10 +107,7 @@ describe('a public key', () => {
     // config. A tag whose app trusts no key ships an updater that can
     // never accept a release, which is the thing ADR 2026-09-21 says
     // v0.6.1 must not do.
-    const { mkdtempSync, writeFileSync } = await import('node:fs');
-    const { tmpdir } = await import('node:os');
-    const { join } = await import('node:path');
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-pubkey-gate-'));
+    const dir = mkdtempSync(join(SCRATCH, 'pubkey-gate-'));
     const run = async (conf: unknown) => {
       const path = join(dir, 'tauri.conf.json');
       writeFileSync(path, JSON.stringify(conf));

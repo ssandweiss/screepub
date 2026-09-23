@@ -16,15 +16,12 @@ import {
 import { SIDECAR_TARGETS, sidecarTargetFor, sidecarFileName } from '../tools/sidecar-targets';
 import type { Spawn } from '../tools/build-cli';
 
-const tmps: string[] = [];
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-build-sidecar-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+
 function tmpOut(): string {
-  const d = mkdtempSync(join(tmpdir(), 'screepub-sidecar-'));
-  tmps.push(d);
-  return d;
+  return mkdtempSync(join(SCRATCH, 'sidecar-'));
 }
-afterAll(() => {
-  for (const d of tmps) rmSync(d, { recursive: true, force: true });
-});
 
 describe('parseSidecarArgs', () => {
   test('--host resolves the running machine', () => {
@@ -288,7 +285,7 @@ describe('the universal macOS sidecar', () => {
   });
 
   test('a lipo that exits non-zero fails loudly, carrying its stderr', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-lipo-'));
+    const dir = mkdtempSync(join(SCRATCH, 'lipo-'));
     try {
       expect(() =>
         lipoUniversalSidecar(dir, () => ({ exitCode: 1, stdout: '', stderr: 'lipo: no such file' })),
@@ -302,7 +299,7 @@ describe('the universal macOS sidecar', () => {
     // The failure this check exists for. Shipping it would hand every Intel
     // user an arm64 app inside something labelled universal, and the old
     // updater would install it without complaint.
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-lipo-'));
+    const dir = mkdtempSync(join(SCRATCH, 'lipo-'));
     try {
       expect(() =>
         lipoUniversalSidecar(dir, () => {
@@ -316,7 +313,7 @@ describe('the universal macOS sidecar', () => {
   });
 
   test('a real fat binary is accepted and its path returned', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-lipo-'));
+    const dir = mkdtempSync(join(SCRATCH, 'lipo-'));
     try {
       const out = lipoUniversalSidecar(dir, () => {
         writeFileSync(join(dir, 'screepub-engine-universal-apple-darwin'), fatBytes());
@@ -329,7 +326,7 @@ describe('the universal macOS sidecar', () => {
   });
 
   test('lipo exiting 0 while writing nothing is refused, not returned', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-lipo-'));
+    const dir = mkdtempSync(join(SCRATCH, 'lipo-'));
     try {
       expect(() =>
         lipoUniversalSidecar(dir, () => ({ exitCode: 0, stdout: '', stderr: '' })),

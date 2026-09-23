@@ -1,5 +1,5 @@
-import { test, expect, test as bunTest } from 'bun:test';
-import { accessSync, constants, mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync } from 'node:fs';
+import { afterAll, test, expect, test as bunTest } from 'bun:test';
+import { accessSync, constants, mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { platform } from 'node:process';
@@ -13,6 +13,9 @@ import {
   CalibreMissingError,
 } from '../src/export/calibre';
 import { convertFountain } from '../src/convert';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-export-calibre-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 test('the format guards are exactly the device-verified trio', () => {
   // Device-verified 2026-07-29. Calibre would otherwise insert a page break
@@ -48,7 +51,7 @@ const describesPathScan = platform !== 'darwin';
 
 test('calibreTool discovers an executable found on PATH', () => {
   if (!describesPathScan) return;
-  const dir = mkdtempSync(join(tmpdir(), 'screepub-calibre-path-'));
+  const dir = mkdtempSync(join(SCRATCH, 'calibre-path-'));
   const name = platform === 'win32' ? 'screepub-fake-calibre-tool.exe' : 'screepub-fake-calibre-tool';
   const fake = join(dir, name);
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
@@ -65,7 +68,7 @@ test('calibreTool discovers an executable found on PATH', () => {
 
 test('calibreTool refuses a same-named file on PATH that is not executable', () => {
   if (!describesPathScan) return;
-  const dir = mkdtempSync(join(tmpdir(), 'screepub-calibre-path-'));
+  const dir = mkdtempSync(join(SCRATCH, 'calibre-path-'));
   const name = platform === 'win32' ? 'screepub-fake-calibre-tool2.exe' : 'screepub-fake-calibre-tool2';
   const fake = join(dir, name);
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
@@ -107,7 +110,7 @@ test('toKepub converts to .kepub then renames to .kepub.epub (fake ebook-convert
   if (!describesPathScan) return;
   if (calibreTool('ebook-convert')) return; // never shadow a real install
 
-  const toolDir = mkdtempSync(join(tmpdir(), 'screepub-calibre-fake-'));
+  const toolDir = mkdtempSync(join(SCRATCH, 'calibre-fake-'));
   const name = platform === 'win32' ? 'ebook-convert.exe' : 'ebook-convert';
   const fakeTool = join(toolDir, name);
   const argvLog = join(toolDir, 'argv.log');
@@ -120,7 +123,7 @@ test('toKepub converts to .kepub then renames to .kepub.epub (fake ebook-convert
   const originalPath = process.env.PATH;
   process.env.PATH = `${toolDir}${delimiter}${originalPath ?? ''}`;
   try {
-    const workDir = mkdtempSync(join(tmpdir(), 'screepub-calibre-work-'));
+    const workDir = mkdtempSync(join(SCRATCH, 'calibre-work-'));
     const epub = join(workDir, 'book.epub');
     writeFileSync(epub, 'fake epub bytes');
     const rawKepub = join(workDir, 'book.kepub');
@@ -149,7 +152,7 @@ test('toKepub converts to .kepub then renames to .kepub.epub (fake ebook-convert
 });
 
 async function minimalEpub(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), 'screepub-test-'));
+  const dir = mkdtempSync(join(SCRATCH, 'test-'));
   const epub = join(dir, 'book.epub');
   const result = await convertFountain('Title: Test\n\nINT. ROOM - DAY\n\nA line of action.\n');
   writeFileSync(epub, result.epub);

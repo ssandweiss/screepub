@@ -1,14 +1,17 @@
-import { test, expect } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { afterAll, test, expect } from 'bun:test';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { copyToDevice, NoVolumeError } from '../src/device/transfer';
 import type { ConnectedDevice } from '../src/device/types';
 
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-device-transfer-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+
 /** Mirrors kit-check's tempDir(): a uniquely-rooted directory whose own name
  * is the "volume name" under test. */
 function volume(name: string, subdirs: string[] = []): string {
-  const dir = join(mkdtempSync(join(tmpdir(), 'screepub-test-')), name);
+  const dir = join(mkdtempSync(join(SCRATCH, 'test-')), name);
   mkdirSync(dir, { recursive: true });
   for (const sub of subdirs) mkdirSync(join(dir, sub), { recursive: true });
   return dir;

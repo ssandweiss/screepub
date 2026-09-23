@@ -1,5 +1,5 @@
-import { describe, test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync } from 'node:fs';
+import { afterAll, describe, test, expect } from 'bun:test';
+import { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { platform } from 'node:process';
@@ -14,6 +14,9 @@ import {
   KfxToolchainNotReadyError,
 } from '../src/export/kfx';
 import { calibreTool, CALIBRE_FORMAT_GUARDS } from '../src/export/calibre';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-export-kfx-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 test('Kindle Previewer is never found on Linux — Amazon ships no build', () => {
   if (platform === 'linux') expect(previewerPath()).toBeNull();
@@ -67,7 +70,7 @@ test('toKfx refuses outright when Calibre is absent', async () => {
   // hardware pass in piece C. What IS testable everywhere is that it fails
   // honestly rather than reporting success with no file.
   if (calibreTool('ebook-convert')) return;
-  await expect(toKfx(join(tmpdir(), 'screepub-nonexistent.epub'))).rejects.toThrow(
+  await expect(toKfx(join(SCRATCH, 'nonexistent.epub'))).rejects.toThrow(
     'ebook-convert was not found',
   );
 });
@@ -91,7 +94,7 @@ test('kfxSibling matches the extension case-insensitively', () => {
 // Linux. Everything else — argv, the scratch file, the rename — is real.
 
 function fakeEbookConvert(): { tool: string; argvLog: string; workDir: string } {
-  const toolDir = mkdtempSync(join(tmpdir(), 'screepub-kfx-fake-'));
+  const toolDir = mkdtempSync(join(SCRATCH, 'kfx-fake-'));
   const name = platform === 'win32' ? 'ebook-convert.exe' : 'ebook-convert';
   const tool = join(toolDir, name);
   const argvLog = join(toolDir, 'argv.log');
@@ -99,7 +102,7 @@ function fakeEbookConvert(): { tool: string; argvLog: string; workDir: string } 
   // to write — mimicking ebook-convert's own file creation.
   writeFileSync(tool, `#!/bin/sh\nfor a in "$@"; do echo "$a"; done > "${argvLog}"\ntouch "$2"\n`);
   chmodSync(tool, 0o755);
-  const workDir = mkdtempSync(join(tmpdir(), 'screepub-kfx-work-'));
+  const workDir = mkdtempSync(join(SCRATCH, 'kfx-work-'));
   return { tool, argvLog, workDir };
 }
 
@@ -164,7 +167,7 @@ function withFakeCustomize(pluginListing: string, run: (dir: string) => Promise<
   return async () => {
     if (!describesPathScan) return;
     if (calibreTool('calibre-customize')) return; // never shadow a real install
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-kfx-customize-'));
+    const dir = mkdtempSync(join(SCRATCH, 'kfx-customize-'));
     const name = platform === 'win32' ? 'calibre-customize.exe' : 'calibre-customize';
     const fake = join(dir, name);
     writeFileSync(fake, `#!/bin/sh\ncat <<'EOF'\n${pluginListing}\nEOF\n`);

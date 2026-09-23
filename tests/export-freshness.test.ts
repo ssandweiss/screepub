@@ -1,11 +1,14 @@
-import { test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync, utimesSync } from 'node:fs';
+import { afterAll, test, expect } from 'bun:test';
+import { mkdtempSync, writeFileSync, utimesSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { needsRegeneration } from '../src/export/freshness';
 
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-export-freshness-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+
 function pair(artifactAge: number | null, epubAge: number | null) {
-  const dir = mkdtempSync(join(tmpdir(), 'screepub-test-'));
+  const dir = mkdtempSync(join(SCRATCH, 'test-'));
   const epub = join(dir, 'book.epub');
   const artifact = join(dir, 'book.mobi');
   const now = Date.now() / 1000;
@@ -45,5 +48,5 @@ test('an unreadable EPUB makes a present artifact stale, not fresh', () => {
   // distant past instead, a deleted or unmounted EPUB would compare as older
   // than everything and a stale artifact would be reported fresh.
   const { artifact } = pair(10, 100);
-  expect(needsRegeneration(artifact, join(tmpdir(), 'screepub-does-not-exist.epub'))).toBe(true);
+  expect(needsRegeneration(artifact, join(SCRATCH, 'does-not-exist.epub'))).toBe(true);
 });
