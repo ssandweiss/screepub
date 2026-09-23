@@ -15,6 +15,7 @@ bun src/cli.ts <pdf>        # convert (see --help; --json is the app contract)
 app/build-app.sh            # engine sidecar + SwiftUI app → app/dist/Screepub.app
 (cd app && swift run -c release kit-check)   # Swift-side behavior checks
 epubcheck <out.epub>        # validate output (brew-installed)
+bun tools/capture-screens.ts   # retake README + site pictures (needs Chrome; macOS)
 ```
 
 ## Architecture
