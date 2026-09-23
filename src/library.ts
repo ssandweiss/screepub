@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, join, posix, resolve, win32 } from 'node:path';
+import { appSettingsPath, readAppSettings } from './settings/app';
 
 /** Names this folder's script, so a second PDF with the same stem cannot
  * quietly overwrite the first one's book. One file per script folder.
@@ -78,10 +79,19 @@ function xdgDocuments(home: string, env: Env): string | null {
  * SCREEPUB_LIBRARY wins everywhere. It is the seam the tests use — no test
  * may write into a real home directory, and without an override there is no
  * way to exercise this at all — and it is the escape hatch for anyone who
- * keeps their scripts somewhere else. */
+ * keeps their scripts somewhere else.
+ *
+ * Next in line is the folder the user chose in the app (piece C), read from
+ * the app settings file's `libraryPath`. It loses to SCREEPUB_LIBRARY on
+ * purpose: the env var is the one override a test or a script author can
+ * always reach, and it would be a strange escape hatch if a saved app
+ * setting could override it back. `settingsPath` lets a test point that
+ * read at a scratch file instead of the real one; production leaves it
+ * unset and reads the real file through `appSettingsPath()`. */
 export function libraryRoot(
   platform: NodeJS.Platform = process.platform,
   env: Env = process.env,
+  settingsPath?: string,
 ): string {
   const override = (env.SCREEPUB_LIBRARY ?? '').trim();
   if (override !== '') return resolve(override);
@@ -92,6 +102,18 @@ export function libraryRoot(
   // is computed for a platform other than the one asking, which is exactly
   // the case a test can reach and a user cannot.
   const path = platform === 'win32' ? win32 : posix;
+
+  // The chosen folder wins over the platform default, but only when it is
+  // usable: a relative path, an empty or whitespace-only string, or a value
+  // that is not a string at all (readAppSettings already turns a missing
+  // file, unreadable file or corrupt JSON into `{}`, so `chosen` is simply
+  // `undefined` in all of those cases) all fall through rather than being
+  // honoured halfway. Absolute is judged by the PLATFORM's own rule, same
+  // reasoning as `path` above: a stored `C:\Books` is a real folder on
+  // win32 and gibberish on posix.
+  const chosen = readAppSettings(settingsPath ?? appSettingsPath(platform, env)).libraryPath;
+  if (typeof chosen === 'string' && path.isAbsolute(chosen)) return path.resolve(chosen);
+
   const home = env.HOME || env.USERPROFILE || homedir();
   // macOS and Windows both keep Documents at a fixed path under the home
   // directory. macOS localizes only the DISPLAY name, so ~/Documents is

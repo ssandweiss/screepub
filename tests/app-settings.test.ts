@@ -1,8 +1,10 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appSettingsPath, readAppSettings, writeAppSettings } from '../src/settings/app';
+
+const ROOT = new URL('..', import.meta.url).pathname;
 
 // Every path this file writes to is under here. No test may write the real
 // app-settings file: that is exactly what SCREEPUB_CONFIG_DIR is for.
@@ -145,6 +147,44 @@ describe('writing app settings', () => {
     const path = join(scratchDir('write'), 'settings.json');
     const result = writeAppSettings({ lastRoute: 'kindle' }, path);
     expect(result).toEqual(JSON.parse(readFileSync(path, 'utf8')));
+  });
+});
+
+describe('the test-run guard: no test can reach the real settings file', () => {
+  // bunfig.toml preloads tests/isolate-app-settings.ts before any test
+  // file runs, which sets SCREEPUB_CONFIG_DIR unless a developer already
+  // set it themselves. These two tests pin that both halves of the promise
+  // hold: this process sees the guard, and so does a child it spawns.
+  test('SCREEPUB_CONFIG_DIR is set, and it does not resolve to the real settings file', () => {
+    expect((process.env.SCREEPUB_CONFIG_DIR ?? '').trim()).not.toBe('');
+    // What appSettingsPath() sees on an ordinary call, with process.env as
+    // production code would read it.
+    const guarded = appSettingsPath();
+    // The real per-platform location, computed the same way but WITHOUT
+    // the guard. os.homedir() reads the account's actual home directory
+    // regardless of SCREEPUB_CONFIG_DIR, which is a different variable.
+    const real = appSettingsPath(process.platform, { HOME: homedir() });
+    expect(guarded).not.toBe(real);
+  });
+
+  test('a spawned CLI child inherits the same guarded path', async () => {
+    // Most of this suite spawns `bun src/cli.ts` with no `env` option at
+    // all, which picks up whatever bun itself started with, not a runtime
+    // mutation of process.env in this process (see .env.test's comment for
+    // why the two differ). That file is what makes this pass, not
+    // tests/isolate-app-settings.ts alone.
+    const proc = Bun.spawn(
+      ['bun', '-e', "console.log(require('./src/settings/app.ts').appSettingsPath())"],
+      { cwd: ROOT, stdout: 'pipe', stderr: 'pipe' },
+    );
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    expect(stderr).toBe('');
+    expect(exitCode).toBe(0);
+    expect(stdout.trim()).toBe(appSettingsPath());
   });
 });
 

@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+# Not a secret: the value is a fixed, harmless guard path (see the file
+# itself and tests/isolate-app-settings.ts). bun test auto-loads it.
+!.env.test
 .mcp.json
 *.pem
 *.key

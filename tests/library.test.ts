@@ -5,6 +5,7 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, win32 } from 'node:path';
 import { adoptSidecar, libraryOutput, libraryRoot } from '../src/library';
+import { writeAppSettings } from '../src/settings/app';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const FIXTURES = new URL('./fixtures/', import.meta.url).pathname;
@@ -188,6 +189,93 @@ describe('the Documents folder a Linux user actually has', () => {
     const home = homeWithUserDirs('XDG_DOCUMENTS_DIR="$HOME/Documenten"\n');
     expect(libraryRoot('darwin', { HOME: home })).toBe(join(home, 'Documents', 'Screepub'));
     expect(libraryRoot('win32', { HOME: home })).toBe(win32.join(home, 'Documents', 'Screepub'));
+  });
+});
+
+describe('the library folder the user chose in the app', () => {
+  // This HOME does not exist either, same reasoning as above: nothing here
+  // may depend on, or touch, a real home directory.
+  const HOME = '/home/ada';
+
+  /** A settings file under SCRATCH holding exactly `libraryPath`, plus
+   * whatever other keys a real settings.json might carry, proving the
+   * read only ever looks at the one key it needs. */
+  function settingsFileWith(libraryPath: unknown): string {
+    const path = join(scratch('settings'), 'settings.json');
+    writeAppSettings({ lastRoute: 'kindle', libraryPath }, path);
+    return path;
+  }
+
+  test('SCREEPUB_LIBRARY beats a stored folder', () => {
+    // The owner's precedence, checked in the order it is decided: the env
+    // override still wins even when the settings file has an opinion.
+    const settingsPath = settingsFileWith('/chosen/lib');
+    expect(libraryRoot('linux', { HOME, SCREEPUB_LIBRARY: '/env/lib' }, settingsPath))
+      .toBe('/env/lib');
+  });
+
+  test('a stored absolute folder beats the platform default, on darwin', () => {
+    const settingsPath = settingsFileWith('/Volumes/Scripts');
+    expect(libraryRoot('darwin', { HOME }, settingsPath)).toBe('/Volumes/Scripts');
+  });
+
+  test('a stored absolute folder beats the platform default, on win32', () => {
+    // A win32-flavoured absolute path, judged by win32's own isAbsolute,
+    // not posix's, which would call "C:\\Books" relative and fall through.
+    const settingsPath = settingsFileWith('C:\\Books');
+    expect(libraryRoot('win32', { USERPROFILE: 'C:\\Users\\Ada' }, settingsPath))
+      .toBe('C:\\Books');
+  });
+
+  test('a relative stored path falls through to the default', () => {
+    const settingsPath = settingsFileWith('Scripts');
+    expect(libraryRoot('linux', { HOME }, settingsPath)).toBe(join(HOME, 'Documents', 'Screepub'));
+  });
+
+  test('a stored number falls through to the default', () => {
+    // libraryPath is only ever meant to be a string; a stray number (a
+    // hand-edited settings.json, say) must not make it through isAbsolute.
+    const settingsPath = settingsFileWith(7);
+    expect(libraryRoot('linux', { HOME }, settingsPath)).toBe(join(HOME, 'Documents', 'Screepub'));
+  });
+
+  test('an empty stored path falls through to the default', () => {
+    const settingsPath = settingsFileWith('');
+    expect(libraryRoot('linux', { HOME }, settingsPath)).toBe(join(HOME, 'Documents', 'Screepub'));
+  });
+
+  test('a whitespace-only stored path falls through to the default', () => {
+    const settingsPath = settingsFileWith('   ');
+    expect(libraryRoot('linux', { HOME }, settingsPath)).toBe(join(HOME, 'Documents', 'Screepub'));
+  });
+
+  test('a missing settings file falls through to the default', () => {
+    const settingsPath = join(scratch('settings'), 'never-written', 'settings.json');
+    expect(libraryRoot('linux', { HOME }, settingsPath)).toBe(join(HOME, 'Documents', 'Screepub'));
+  });
+
+  test('a corrupt (not JSON) settings file falls through to the default', () => {
+    const dir = scratch('settings');
+    const path = join(dir, 'settings.json');
+    writeFileSync(path, 'this is not json');
+    expect(libraryRoot('linux', { HOME }, path)).toBe(join(HOME, 'Documents', 'Screepub'));
+  });
+
+  test('libraryOutput lands under the stored folder when a settings path is injected', () => {
+    // The plumbing a real conversion would use: resolve libraryRoot once,
+    // with the settings path a test controls, and hand its answer to
+    // libraryOutput as the `root` it already accepts. No new parameter.
+    const chosen = scratch('chosen-library');
+    const settingsPath = settingsFileWith(chosen);
+    const scripts = scratch('scripts');
+    const pdfPath = join(scripts, 'Bright Angel.pdf');
+    writeFileSync(pdfPath, 'not really a pdf');
+
+    const root = libraryRoot('linux', { HOME }, settingsPath);
+    expect(root).toBe(chosen);
+    const output = libraryOutput(pdfPath, root);
+    expect(output).toBe(join(chosen, 'Bright Angel', 'Bright Angel'));
+    expect(existsSync(join(chosen, 'Bright Angel', 'source.json'))).toBe(true);
   });
 });
 
