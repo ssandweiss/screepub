@@ -104,6 +104,8 @@ describe('the engine gate', () => {
     ['update-decision', ['update-decision', '--offered', '1', '--current', '0']],
     ['update-should-check', ['update-should-check', '--json']],
     ['extra args on version', ['--version', '--json', '--debug']],
+    ['kfx-status: the Send page is never captured', argv.kfxStatus()],
+    ['kfx-install: a capture must never install anything', argv.kfxInstall()],
   ];
 
   test('it refuses any call whose whole shape the window would not actually produce', () => {

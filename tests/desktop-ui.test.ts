@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, test, expect } from 'bun:test
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { kfxSetup } from '../src/export/kfx-setup';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-desktop-ui-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
@@ -234,10 +235,12 @@ describe('the engine contract lives in exactly one file', () => {
       exportFull: argv.export('/s/script.epub', {
         forFormat: 'azw3', fountain: '/s/script.fountain', optionsJson: '{"a":1}',
       }),
+      kfxStatus: argv.kfxStatus(),
+      kfxInstall: argv.kfxInstall(),
     };
     // Every builder the interface promises is exercised above.
     expect(Object.keys(argv).sort()).toEqual(
-      ['convert', 'devices', 'export', 'reconvert', 'send', 'settings', 'version'].sort(),
+      ['convert', 'devices', 'export', 'kfxInstall', 'kfxStatus', 'reconvert', 'send', 'settings', 'version'].sort(),
     );
     for (const [name, args] of Object.entries(built)) {
       expect(`${name} has --json: ${args.includes('--json')}`).toBe(`${name} has --json: true`);
@@ -247,6 +250,12 @@ describe('the engine contract lives in exactly one file', () => {
         `${name} args: `,
       );
     }
+  });
+
+  test('the KFX builders are exactly the two verbs, with nothing else on them', async () => {
+    const { argv } = await import(join(UI, 'app.js'));
+    expect(argv.kfxStatus()).toEqual(['kfx-status', '--json']);
+    expect(argv.kfxInstall()).toEqual(['kfx-install', '--json']);
   });
 
   test('an optional flag brings its value and an absent one brings nothing', async () => {
@@ -5169,5 +5178,805 @@ describe('the drop well states one guard, not two', () => {
     // app says what it is.
     const { WORDMARK } = await wellCopy();
     expect(WORDMARK).toBe('Screepub');
+  });
+});
+
+describe('the Send page’s KFX block: decisions', () => {
+  type Setup = {
+    ready: boolean; possible: boolean; summary: string;
+    steps: { id: string; name: string; installed: boolean; fix: unknown }[];
+  };
+  type KfxModule = {
+    HEADING: string; INSTALLED: string; INSTALLING: string; NO_REASON: string;
+    checklistFrom: (value: unknown) => Setup | null;
+    setupFrom: (answer: unknown) => Setup | null;
+    kindleRelevant: (devices: unknown) => boolean;
+    showSetup: (setup: Setup | null, devices: unknown, justInstalled: boolean, installing?: boolean) => boolean;
+    controlFor: (step: Setup['steps'][number], busy: boolean) =>
+      | { type: 'status'; text: string }
+      | { type: 'link'; label: string; url: string }
+      | { type: 'install'; label: string; disabled: boolean };
+    installedLine: (version: unknown, removed: unknown, ready: unknown) => string;
+    failedLine: (answer: unknown) => string;
+    linkFailedLine: (url: string) => string;
+    afterInstall: (answer: unknown, previous: Setup | null) =>
+      { setup: Setup | null; line: string; bad: boolean; justInstalled: boolean };
+  };
+  let kfx: KfxModule;
+  beforeAll(async () => { kfx = (await import(join(UI, 'kfx.js'))) as KfxModule; });
+
+  const notReady: Setup = {
+    ready: false,
+    possible: true,
+    summary: 'Kindles get AZW3 for now. KFX looks better, and needs the three free tools below.',
+    steps: [
+      { id: 'calibre', name: 'Calibre', installed: true, fix: null },
+      {
+        id: 'previewer', name: 'Kindle Previewer', installed: false,
+        fix: { kind: 'link', label: 'Get Kindle Previewer', url: 'https://kdp.amazon.com/en_US/help/topic/G202131170' },
+      },
+      { id: 'plugin', name: 'KFX plugin', installed: false, fix: { kind: 'install', label: 'Install' } },
+    ],
+  };
+  const ready: Setup = {
+    ready: true, possible: true, summary: 'Kindles get KFX, the best quality Screepub can make.',
+    steps: notReady.steps.map((s) => ({ ...s, installed: true, fix: null })),
+  };
+  const kindle = { id: '/m/Kindle', kind: 'kindle', name: 'Kindle', volume: '/m/Kindle' };
+  const kobo = { id: '/m/KOBOe', kind: 'kobo', name: 'Kobo', volume: '/m/KOBOe' };
+
+  test('the validator accepts every checklist a real engine can build, for every platform', () => {
+    // The worst possible gap in the validator below: reject exactly the
+    // calibre-missing branch, and the suite stays green because none of the
+    // hand-written fixtures above happen to cover it. This walks every
+    // status the probe can report, on every platform kfx-setup.ts branches
+    // on (8 combinations x 3 platforms = 24, 16 of them on a platform where
+    // KFX is possible), and proves checklistFrom() and setupFrom() round-trip
+    // every one of the engine's own real answers rather than just the
+    // fixtures this file typed out by hand.
+    for (const platform of ['darwin', 'win32', 'linux']) {
+      for (const calibre of [true, false]) {
+        for (const previewer of [true, false]) {
+          for (const pluginInstalled of [true, false]) {
+            const status = {
+              calibre, previewer, pluginInstalled,
+              ready: calibre && previewer && pluginInstalled,
+            };
+            const setup = kfxSetup(status, platform);
+            expect(kfx.checklistFrom(setup)).toEqual(setup);
+            expect(kfx.setupFrom({ ok: true, ...setup })).toEqual(setup);
+          }
+        }
+      }
+    }
+  });
+
+  test('the engine’s answer is taken whole, or not at all', () => {
+    expect(kfx.setupFrom({ ok: true, ...notReady })).toEqual(notReady);
+    expect(kfx.setupFrom({ ok: false, error: { code: 'x', message: 'y' } })).toBe(null);
+    expect(kfx.setupFrom(null)).toBe(null);
+    // A broken contract draws nothing: this block is advice, and a reader
+    // cannot act on "the probe answered strangely".
+    expect(kfx.checklistFrom({ ...notReady, steps: notReady.steps.slice(0, 2) })).toBe(null);
+    expect(kfx.checklistFrom({ ...notReady, summary: 7 })).toBe(null);
+    expect(kfx.checklistFrom({ ...notReady, possible: 'yes' })).toBe(null);
+    const badLink = structuredClone(notReady);
+    (badLink.steps[1] as { fix: unknown }).fix = { kind: 'link', label: 'Get it' };
+    expect(kfx.checklistFrom(badLink)).toBe(null);
+    const unknownKind = structuredClone(notReady);
+    (unknownKind.steps[2] as { fix: unknown }).fix = { kind: 'teleport', label: 'Go' };
+    expect(kfx.checklistFrom(unknownKind)).toBe(null);
+    const fixWhileInstalled = structuredClone(notReady);
+    (fixWhileInstalled.steps[0] as { fix: unknown }).fix = { kind: 'install', label: 'Install' };
+    expect(kfx.checklistFrom(fixWhileInstalled)).toBe(null);
+    // Steps in the wrong order: the contract is calibre, then previewer,
+    // then plugin, in that sequence, not merely those three ids as a set.
+    const swapped = structuredClone(notReady);
+    swapped.steps = [swapped.steps[1], swapped.steps[0], swapped.steps[2]];
+    expect(kfx.checklistFrom(swapped)).toBe(null);
+    // Four steps: one too many.
+    const extraStep = structuredClone(notReady);
+    extraStep.steps.push({ id: 'plugin', name: 'KFX plugin', installed: true, fix: null });
+    expect(kfx.checklistFrom(extraStep)).toBe(null);
+    // ok: false, or no ok at all: setupFrom refuses before it ever looks at
+    // the shape, however well-formed the rest of the object is.
+    expect(kfx.setupFrom({ ok: false, ...notReady })).toBe(null);
+    expect(kfx.setupFrom(notReady)).toBe(null);
+    expect(kfx.checklistFrom({ ...notReady, ready: 'no' })).toBe(null);
+    const blankName = structuredClone(notReady);
+    (blankName.steps[0] as { name: string }).name = '   ';
+    expect(kfx.checklistFrom(blankName)).toBe(null);
+    const blankInstallLabel = structuredClone(notReady);
+    (blankInstallLabel.steps[2] as { fix: unknown }).fix = { kind: 'install', label: '  ' };
+    expect(kfx.checklistFrom(blankInstallLabel)).toBe(null);
+    const blankAfterWhy = structuredClone(notReady);
+    (blankAfterWhy.steps[2] as { fix: unknown }).fix = { kind: 'after', why: '' };
+    expect(kfx.checklistFrom(blankAfterWhy)).toBe(null);
+  });
+
+  test('a fix is rebuilt clean: no extra key the engine happened to attach survives', () => {
+    const withExtraLink = structuredClone(notReady);
+    (withExtraLink.steps[1] as { fix: Record<string, unknown> }).fix = {
+      kind: 'link', label: 'Get Kindle Previewer',
+      url: 'https://kdp.amazon.com/en_US/help/topic/G202131170', extra: 'x',
+    };
+    expect(kfx.checklistFrom(withExtraLink)?.steps[1].fix).toEqual({
+      kind: 'link', label: 'Get Kindle Previewer',
+      url: 'https://kdp.amazon.com/en_US/help/topic/G202131170',
+    });
+    const withExtraInstall = structuredClone(notReady);
+    (withExtraInstall.steps[2] as { fix: Record<string, unknown> }).fix = {
+      kind: 'install', label: 'Install', extra: 'x',
+    };
+    expect(kfx.checklistFrom(withExtraInstall)?.steps[2].fix).toEqual({ kind: 'install', label: 'Install' });
+    const withExtraAfter = structuredClone(notReady);
+    (withExtraAfter.steps[2] as { fix: Record<string, unknown> }).fix = {
+      kind: 'after', why: 'Install Calibre first', extra: 'x',
+    };
+    expect(kfx.checklistFrom(withExtraAfter)?.steps[2].fix).toEqual({ kind: 'after', why: 'Install Calibre first' });
+  });
+
+  test('Kindle advice is for Kindles: shown with a Kindle, or nothing, connected', () => {
+    expect(kfx.kindleRelevant([])).toBe(true);
+    expect(kfx.kindleRelevant([kindle])).toBe(true);
+    expect(kfx.kindleRelevant([kobo, kindle])).toBe(true);
+    expect(kfx.kindleRelevant([kobo])).toBe(false);
+    // Before the first device poll answers, the list is unknown, and the
+    // block waits rather than flashing up and vanishing a moment later.
+    expect(kfx.kindleRelevant(null)).toBe(false);
+  });
+
+  test('shown only when it helps', () => {
+    expect(kfx.showSetup(notReady, [], false)).toBe(true);
+    expect(kfx.showSetup(ready, [], false)).toBe(false);
+    // Right after an install the success line needs somewhere to stand.
+    expect(kfx.showSetup(ready, [], true)).toBe(true);
+    expect(kfx.showSetup(null, [], true)).toBe(false);
+    expect(kfx.showSetup({ ...notReady, possible: false }, [], false)).toBe(false);
+    expect(kfx.showSetup(notReady, [kobo], false)).toBe(false);
+    expect(kfx.showSetup(notReady, [kobo], false, false)).toBe(false);
+    expect(kfx.showSetup(notReady, null, false)).toBe(false);
+  });
+
+  test('an install running or just finished keeps the block up, whatever is connected', () => {
+    // The reader pressed Install, then plugged in a Kobo (or unplugged the
+    // Kindle). The Installing line and then the result are the answer to
+    // what they pressed, so they stay where they were said.
+    expect(kfx.showSetup(notReady, [kobo], false, true)).toBe(true);
+    expect(kfx.showSetup(ready, [kobo], true)).toBe(true);
+    expect(kfx.showSetup(ready, [kobo], true, false)).toBe(true);
+    expect(kfx.showSetup(notReady, null, false, true)).toBe(true);
+    // Still nothing to stand on without a checklist, or where KFX is not
+    // possible at all.
+    expect(kfx.showSetup(null, [kobo], true, true)).toBe(false);
+    expect(kfx.showSetup({ ...notReady, possible: false }, [kobo], true, true)).toBe(false);
+  });
+
+  test('each step’s control says what to do, and install waits for a send', () => {
+    expect(kfx.controlFor(notReady.steps[0], false)).toEqual({ type: 'status', text: kfx.INSTALLED });
+    expect(kfx.controlFor(notReady.steps[1], true)).toEqual({
+      type: 'link', label: 'Get Kindle Previewer', url: 'https://kdp.amazon.com/en_US/help/topic/G202131170',
+    });
+    expect(kfx.controlFor(notReady.steps[2], false)).toEqual({ type: 'install', label: 'Install', disabled: false });
+    expect(kfx.controlFor(notReady.steps[2], true)).toEqual({ type: 'install', label: 'Install', disabled: true });
+    expect(kfx.controlFor(
+      { id: 'plugin', name: 'KFX plugin', installed: false, fix: { kind: 'after', why: 'Install Calibre first' } },
+      false,
+    )).toEqual({ type: 'status', text: 'Install Calibre first' });
+  });
+
+  test('success names the version, whether Kindles now get KFX, and any forks removed', () => {
+    expect(kfx.installedLine('2.20.1', [], true)).toBe('Installed the KFX plugin 2.20.1. Kindles now get KFX.');
+    expect(kfx.installedLine('2.20.1', [], false)).toBe('Installed the KFX plugin 2.20.1.');
+    expect(kfx.installedLine('2.20.1', ['KFX Output (fork)'], true))
+      .toBe('Installed the KFX plugin 2.20.1. Kindles now get KFX. Removed an older copy: KFX Output (fork).');
+    expect(kfx.installedLine('2.20.1', ['KFX Output (fork)', 'Old KFX'], true))
+      .toBe('Installed the KFX plugin 2.20.1. Kindles now get KFX. Removed older copies: KFX Output (fork), Old KFX.');
+  });
+
+  test('a failure shows the engine’s own sentence, or a stand-in', () => {
+    expect(kfx.failedLine({ ok: false, error: { code: 'kfx-install-failed', message: 'could not install the KFX plugin: offline' } }))
+      .toBe('could not install the KFX plugin: offline');
+    expect(kfx.failedLine({ ok: false })).toBe(kfx.NO_REASON);
+    expect(kfx.failedLine(null)).toBe(kfx.NO_REASON);
+  });
+
+  test('a link that will not open still tells the reader where it goes', () => {
+    expect(kfx.linkFailedLine('https://calibre-ebook.com/download_osx'))
+      .toBe('Could not open the page. It is at https://calibre-ebook.com/download_osx');
+  });
+
+  test('afterInstall: success redraws from the fresh checklist and keeps the block up', () => {
+    const out = kfx.afterInstall({ ok: true, version: '2.20.1', removed: [], setup: ready }, notReady);
+    expect(out).toEqual({
+      setup: ready, line: 'Installed the KFX plugin 2.20.1. Kindles now get KFX.', bad: false, justInstalled: true,
+    });
+  });
+
+  test('afterInstall: a success with a broken checklist keeps the old one rather than blanking', () => {
+    const out = kfx.afterInstall({ ok: true, version: '2.20.1', removed: [], setup: { nonsense: true } }, notReady);
+    expect(out.setup).toEqual(notReady);
+    expect(out.bad).toBe(false);
+  });
+
+  test('afterInstall: a malformed checklist is never credited with readiness the validator refused', () => {
+    // The bug this guards: reading `answer.setup.ready` straight off the
+    // engine's raw object would still say "Kindles now get KFX." even
+    // though checklistFrom() just rejected that same object and the block
+    // fell back to a previous checklist that is NOT ready.
+    const out = kfx.afterInstall(
+      { ok: true, version: '2.20.1', removed: [], setup: { ready: true, nonsense: true } },
+      notReady,
+    );
+    expect(out.setup).toEqual(notReady);
+    expect(out.line).toBe('Installed the KFX plugin 2.20.1.');
+  });
+
+  test('afterInstall: success needs a version of its own, or it counts as a failure', () => {
+    const out = kfx.afterInstall({ ok: true, removed: [], setup: ready }, notReady);
+    expect(out.bad).toBe(true);
+  });
+
+  test('afterInstall: a refusal keeps the checklist and shows the reason in alarm', () => {
+    const out = kfx.afterInstall({ ok: false, error: { code: 'kfx-install-failed', message: 'nope' } }, notReady);
+    expect(out).toEqual({ setup: notReady, line: 'nope', bad: true, justInstalled: false });
+  });
+
+  test('no copy in kfx.js carries an em dash', () => {
+    expect(read('kfx.js').includes('—')).toBe(false);
+  });
+
+  test('kfx.js holds no engine flag and no Tauri call of its own', () => {
+    const source = read('kfx.js');
+    expect(source).not.toContain("'--json'");
+    expect(source).not.toContain('__TAURI__');
+    expect(source).not.toContain("'kfx-install'");
+    expect(source).not.toContain("'kfx-status'");
+  });
+});
+
+describe('the Send page’s KFX block: wiring', () => {
+  const kfx = read('kfx.js');
+  const send = read('send.js');
+
+  test('the installer is reached only from the button, never on the page’s own initiative', () => {
+    // It downloads third-party code and writes into the reader's Calibre.
+    expect(kfx.match(/argv\.kfxInstall\(\)/g)?.length).toBe(1);
+    const install = kfx.slice(kfx.indexOf('async function install('));
+    expect(install.slice(0, install.indexOf('\n}'))).toContain('argv.kfxInstall()');
+    // `install` is handed to a click and never called directly. The
+    // lookbehind skips its own definition, `async function install()`.
+    expect(kfx).toContain('onclick: install');
+    expect(kfx.match(/(?<!function )\binstall\(\)/g)).toBe(null);
+  });
+
+  test('one probe at a time, and the focus listener goes when the page does', () => {
+    expect(kfx).toContain('argv.kfxStatus()');
+    const probe = kfx.slice(kfx.indexOf('async function probe('));
+    expect(probe.slice(0, 200)).toMatch(/if \(probing/);
+    const hidden = /export function kfxHidden\(\) \{([\s\S]*?)\n\}/.exec(kfx);
+    expect(hidden, 'kfx.js exports no kfxHidden()').not.toBe(null);
+    expect(hidden![1]).toContain("removeEventListener('focus'");
+  });
+
+  test('send.js mounts the block and tells it when the page comes and goes', () => {
+    expect(send).toContain("from './kfx.js'");
+    expect(send).toMatch(/mountKfx\(/);
+    const show = /export function show\(\) \{([\s\S]*?)\n\}/.exec(send);
+    expect(show![1]).toContain('kfxShown()');
+    const hide = /export function hide\(\) \{([\s\S]*?)\n\}/.exec(send);
+    expect(hide![1]).toContain('kfxHidden()');
+  });
+
+  test('the block is mounted only once its node is in the page', () => {
+    // kfx.js refuses to draw into a node that is not connected (a stale
+    // node from an earlier draw() must stay dead), so mounting before the
+    // append would draw nothing until the next redraw.
+    const draw = send.slice(send.indexOf('\nfunction draw('));
+    const body = draw.slice(0, draw.indexOf('\n}'));
+    const appended = body.indexOf('kfxNode,\n');
+    expect(appended, 'draw() never appends kfxNode').toBeGreaterThan(-1);
+    expect(body.indexOf('mountKfx(')).toBeGreaterThan(appended);
+  });
+
+  test('a send and an install never overlap', () => {
+    // A plugin swapped out under a running KFX conversion is not a case
+    // worth finding out about.
+    const sendTo = send.slice(send.indexOf('async function sendTo('));
+    expect(sendTo.slice(0, 200)).toMatch(/if \(sending \|\| kfxInstalling\(\)\) return;/);
+    const install = kfx.slice(kfx.indexOf('async function install('));
+    expect(install.slice(0, 300)).toMatch(/hooks\?\.isSending\?\.\(\)/);
+    // The poll keeps running through an install (it stops only for a send),
+    // so a row it draws mid-install must be born disabled like the rest, or
+    // it offers a button that silently does nothing.
+    const row = send.slice(send.indexOf('function deviceRow('));
+    expect(row.slice(0, row.indexOf('\n}'))).toContain('disabled: kfxInstalling()');
+  });
+});
+
+describe('the Send page’s KFX block: wiring, second pass', () => {
+  const kfx = read('kfx.js');
+  const send = read('send.js');
+  /** A function's own body, from its head to the first unindented `}`. */
+  const body = (source: string, head: string) => {
+    const from = source.indexOf(head);
+    expect(from, `no ${head.trim()}`).toBeGreaterThan(-1);
+    const rest = source.slice(from);
+    return rest.slice(0, rest.indexOf('\n}'));
+  };
+
+  test('a probe that was out when an install began is thrown away', () => {
+    // Same shape as send.js's `era`. The counter is read before the await
+    // and checked after it, before the answer is used for anything.
+    const probe = body(kfx, 'async function probe(');
+    const captured = probe.indexOf('const mine = installs;');
+    const awaited = probe.indexOf('await ');
+    const checked = probe.indexOf('if (mine !== installs) return;');
+    expect(captured, 'probe() does not capture the install counter').toBeGreaterThan(-1);
+    expect(captured).toBeLessThan(awaited);
+    expect(checked, 'probe() does not check the install counter').toBeGreaterThan(awaited);
+    expect(checked).toBeLessThan(probe.indexOf('setup = '));
+    const install = body(kfx, 'async function install(');
+    expect(install.indexOf('installs += 1')).toBeGreaterThan(install.indexOf('installingNow = true'));
+  });
+
+  test('a routine re-probe changes nothing, and a changed one clears the old line', () => {
+    const probe = body(kfx, 'async function probe(');
+    const same = probe.indexOf('JSON.stringify(next) === JSON.stringify(setup)');
+    expect(same, 'probe() redraws even when nothing changed').toBeGreaterThan(-1);
+    expect(same).toBeLessThan(probe.lastIndexOf('draw()'));
+    const after = probe.slice(same);
+    expect(after).toContain('justInstalled = false');
+    expect(after).toMatch(/status = \{ line: '', bad: false \}/);
+  });
+
+  test('coming back to the page mid-install keeps the line that says so', () => {
+    const shown = body(kfx, 'export function kfxShown(');
+    expect(shown).toMatch(/if \(!installingNow\) \{\s*justInstalled = false;/);
+    expect(shown).toContain("window.addEventListener('focus', onFocus)");
+  });
+
+  test('one status node per host, and the keyboard is put back after a redraw', () => {
+    const mount = body(kfx, 'export function mountKfx(');
+    const draw = body(kfx, '\nfunction draw(');
+    expect(kfx.match(/role: 'status'/g)?.length).toBe(1);
+    expect(mount).toContain("role: 'status'");
+    expect(draw).not.toContain('clear(host)');
+    const had = draw.indexOf('host.contains(document.activeElement)');
+    expect(had, 'draw() never asks where the focus was').toBeGreaterThan(-1);
+    expect(had).toBeLessThan(draw.indexOf('clear('));
+    expect(kfx).toContain('hooks?.restoreFocus?.()');
+    expect(send).toContain('restoreFocus: () => ctx.restoreFocus()');
+  });
+
+  test('send.js names the block with kfx.js’s own heading', () => {
+    expect(send).toMatch(/import \{[^}]*\bHEADING\b[^}]*\} from '\.\/kfx\.js'/);
+    expect(send).toContain("'aria-label': HEADING");
+    expect(send).not.toContain("'Best Kindle quality'");
+  });
+
+  test('a redraw that throws cannot leave a send stuck on', () => {
+    // Inside the try, so the finally that clears `sending` covers it.
+    const sendTo = body(send, 'async function sendTo(');
+    const redraw = sendTo.indexOf('kfxRedraw()');
+    expect(redraw).toBeGreaterThan(sendTo.indexOf('try {'));
+    expect(redraw).toBeLessThan(sendTo.indexOf('await '));
+  });
+
+  test('a throw before the engine is asked cannot leave an install stuck on', () => {
+    // installingNow refuses every send until it is cleared, and only the
+    // finally clears it. So everything after the flag is set, the busy hook
+    // and the first draw included, runs inside the try that finally closes.
+    const install = body(kfx, 'async function install(');
+    const set = install.indexOf('installingNow = true');
+    const opened = install.indexOf('try {');
+    const asked = install.indexOf('await ');
+    expect(opened).toBeGreaterThan(set);
+    // No call at all between setting the flag and opening the try.
+    expect(install.slice(set, opened)).not.toContain('(');
+    for (const step of ['hooks?.onBusy?.(true)', 'status = { line: INSTALLING', 'draw()']) {
+      const at = install.indexOf(step);
+      expect(at, `install() has no ${step} inside its try`).toBeGreaterThan(opened);
+      expect(at).toBeLessThan(asked);
+    }
+  });
+
+  test('no probe for a block that is not in the page', () => {
+    // The no-script and blocked states never mount the block, and a
+    // kfx-status run per show and per focus would answer nobody.
+    const probe = body(kfx, 'async function probe(');
+    const guard = probe.indexOf('if (host === null || !host.isConnected) return;');
+    expect(guard, 'probe() runs with no block to draw into').toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(probe.indexOf('probing = true'));
+    expect(guard).toBeLessThan(probe.indexOf('await '));
+    // send.js mounts the block (draw) before saying the page is shown, or
+    // the first probe on a real page would find no host and never run.
+    const show = body(send, 'export function show(');
+    expect(show.indexOf('draw()')).toBeGreaterThan(-1);
+    expect(show.indexOf('draw()')).toBeLessThan(show.indexOf('kfxShown()'));
+  });
+
+  test('the device list, the send flag and the busy hook reach the block', () => {
+    // The body, not the file: the import line alone names kfxDevicesChanged.
+    const refresh = body(send, 'async function refresh(');
+    const assigned = refresh.indexOf('drawn = devices;');
+    expect(assigned).toBeGreaterThan(-1);
+    const told = refresh.indexOf('kfxDevicesChanged()');
+    expect(told).toBeGreaterThan(assigned);
+    // After the rows as well: a block that hides while it holds the focus
+    // hands it to the page's first stop, which should be the new Send
+    // button and not the pane (seen in a browser, 2026-09-23).
+    expect(told).toBeGreaterThan(refresh.indexOf('drawEmpty()'));
+    expect(told).toBeGreaterThan(refresh.indexOf('list.append(deviceRow(device))'));
+    expect(send).toContain('isSending: () => sending');
+    expect(send).toContain('onBusy: (on) => { for (const button of buttons()) button.disabled = on; }');
+  });
+});
+
+describe('the Send page’s KFX block: what a reader sees across redraws', () => {
+  // A stub document just big enough for dom.js and for what kfx.js asks of
+  // a node. Its one piece of real behaviour is the one these tests are
+  // about: activeElement falls back to the body when the focused node is
+  // detached, disabled or inside something hidden, as a browser's focus
+  // fixup does. The engine is a queue of unanswered calls the test answers
+  // in whatever order it wants, which is how the races are staged.
+  class StubNode {
+    childNodes: StubNode[] = [];
+    parentNode: StubNode | null = null;
+    attrs = new Map<string, string>();
+    listeners = new Map<string, ((event: unknown) => void)[]>();
+    hidden = false;
+    disabled = false;
+    className = '';
+    data = '';
+    constructor(readonly tagName: string, readonly doc: StubDocument) {}
+    get firstChild() { return this.childNodes[0] ?? null; }
+    append(...nodes: (StubNode | string)[]) {
+      for (const each of nodes) {
+        const node = typeof each === 'string' ? this.doc.createTextNode(each) : each;
+        node.parentNode?.removeChild(node);
+        node.parentNode = this;
+        this.childNodes.push(node);
+      }
+    }
+    removeChild(node: StubNode) {
+      this.childNodes.splice(this.childNodes.indexOf(node), 1);
+      node.parentNode = null;
+      return node;
+    }
+    get textContent(): string {
+      return this.tagName === '#text' ? this.data : this.childNodes.map((c) => c.textContent).join('');
+    }
+    set textContent(value: string) {
+      if (this.tagName === '#text') { this.data = value; return; }
+      for (const child of this.childNodes) child.parentNode = null;
+      this.childNodes = [];
+      if (value !== '') this.append(value);
+    }
+    setAttribute(name: string, value: string) { this.attrs.set(name, value); }
+    getAttribute(name: string) { return this.attrs.get(name) ?? null; }
+    get dataset(): Record<string, string> {
+      return Object.fromEntries([...this.attrs].filter(([k]) => k.startsWith('data-'))
+        .map(([k, v]) => [k.slice(5).replace(/-(\w)/g, (_, c: string) => c.toUpperCase()), v]));
+    }
+    get classList() {
+      const names = () => this.className.split(/\s+/).filter(Boolean);
+      return {
+        contains: (name: string) => names().includes(name),
+        toggle: (name: string, on: boolean) => {
+          const rest = names().filter((n) => n !== name);
+          this.className = (on ? [...rest, name] : rest).join(' ');
+          return on;
+        },
+      };
+    }
+    addEventListener(type: string, fn: (event: unknown) => void) {
+      this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
+    }
+    click() {
+      if (this.disabled) return;
+      for (const fn of this.listeners.get('click') ?? []) fn({ type: 'click' });
+    }
+    get isConnected(): boolean {
+      let node: StubNode = this;
+      while (node.parentNode !== null) node = node.parentNode;
+      return node === this.doc.body;
+    }
+    contains(other: StubNode | null): boolean {
+      for (let node = other; node !== null; node = node.parentNode) if (node === this) return true;
+      return false;
+    }
+    closest(selector: string): StubNode | null {
+      if (selector !== '[hidden]') throw new Error(`the stub has no closest(${selector})`);
+      for (let node: StubNode | null = this; node !== null; node = node.parentNode) {
+        if (node.hidden) return node;
+      }
+      return null;
+    }
+    /** A bare tag name only, which is all anything here asks for. */
+    querySelectorAll(tag: string): StubNode[] {
+      const found: StubNode[] = [];
+      const walk = (node: StubNode) => {
+        for (const child of node.childNodes) {
+          if (child.tagName === tag.toUpperCase()) found.push(child);
+          walk(child);
+        }
+      };
+      walk(this);
+      return found;
+    }
+    focus() {
+      if (this.isConnected && !this.disabled && this.closest('[hidden]') === null) this.doc.focused = this;
+    }
+  }
+  class StubDocument {
+    body: StubNode;
+    focused: StubNode | null = null;
+    constructor() { this.body = new StubNode('BODY', this); }
+    createElement(tag: string) { return new StubNode(tag.toUpperCase(), this); }
+    createTextNode(value: string) {
+      const node = new StubNode('#text', this);
+      node.data = value;
+      return node;
+    }
+    get activeElement() {
+      const node = this.focused;
+      if (node === null || !node.isConnected || node.disabled || node.closest('[hidden]') !== null) {
+        return this.body;
+      }
+      return node;
+    }
+  }
+  type KfxDrawing = {
+    INSTALLING: string;
+    mountKfx: (node: StubNode, hooks: unknown) => void;
+    kfxShown: () => void;
+    kfxHidden: () => void;
+    kfxRedraw: () => void;
+    kfxInstalling: () => boolean;
+  };
+  const g = globalThis as unknown as { window?: unknown; document?: unknown };
+  afterEach(() => {
+    delete g.window;
+    delete g.document;
+  });
+
+  const machine = (calibre: boolean, previewer: boolean, plugin: boolean) => ({
+    calibre, previewer, pluginInstalled: plugin, ready: calibre && previewer && plugin,
+  });
+  const status = (calibre: boolean, previewer: boolean, plugin: boolean) =>
+    ({ ok: true, ...kfxSetup(machine(calibre, previewer, plugin), 'darwin') });
+  const installed = (calibre: boolean, previewer: boolean) =>
+    ({ ok: true, version: '2.20.1', removed: [], setup: kfxSetup(machine(calibre, previewer, true), 'darwin') });
+  const INSTALLED_READY = 'Installed the KFX plugin 2.20.1. Kindles now get KFX.';
+
+  let fresh = 0;
+  async function world() {
+    const doc = new StubDocument();
+    const focusListeners = new Set<() => void>();
+    const pending: { verb: string; resolve: (stdout: string) => void }[] = [];
+    g.document = doc;
+    g.window = {
+      addEventListener: (type: string, fn: () => void) => { if (type === 'focus') focusListeners.add(fn); },
+      removeEventListener: (type: string, fn: () => void) => { if (type === 'focus') focusListeners.delete(fn); },
+      __TAURI__: {
+        core: {
+          invoke: (_cmd: string, { args }: { args: string[] }) =>
+            new Promise<string>((resolve) => pending.push({ verb: args[0], resolve })),
+        },
+        opener: { openUrl: async () => undefined },
+      },
+    };
+    // A module of its own per test: kfx.js keeps the machine's state at
+    // module level, on purpose, and one test's must not leak into the next.
+    fresh += 1;
+    const kfx = (await import(`${join(UI, 'kfx.js')}?redraws-${fresh}`)) as KfxDrawing;
+    const host = doc.createElement('section');
+    host.hidden = true;
+    doc.body.append(host);
+    const w = {
+      doc,
+      kfx,
+      host,
+      restored: 0,
+      mount() {
+        kfx.mountKfx(host, {
+          isSending: () => false,
+          devices: () => [],
+          onBusy: () => undefined,
+          restoreFocus: () => { w.restored += 1; },
+        });
+      },
+      async answer(verb: string, value: unknown) {
+        const at = pending.findIndex((p) => p.verb === verb);
+        if (at < 0) throw new Error(`nothing asked the engine for ${verb}`);
+        pending.splice(at, 1)[0].resolve(JSON.stringify(value));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      },
+      regainFocus() { for (const fn of [...focusListeners]) fn(); },
+      buttons: () => host.querySelectorAll('button'),
+      button(label: string) {
+        const found = w.buttons().find((b) => b.textContent === label);
+        if (found === undefined) throw new Error(`no ${label} button: ${w.buttons().map((b) => b.textContent)}`);
+        return found;
+      },
+      labels: () => w.buttons().map((b) => b.textContent),
+      statusNode() {
+        const all: StubNode[] = [];
+        const walk = (node: StubNode) => { for (const c of node.childNodes) { all.push(c); walk(c); } };
+        walk(host);
+        return all.find((node) => node.getAttribute('role') === 'status') ?? null;
+      },
+    };
+    w.mount();
+    w.kfx.kfxShown();
+    return w;
+  }
+
+  test('one status line for the life of the block, so a screen reader hears it change', async () => {
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    const line = w.statusNode();
+    expect(line).not.toBe(null);
+    w.button('Install').click();
+    expect(w.statusNode()).toBe(line);
+    expect(line!.textContent).toBe(w.kfx.INSTALLING);
+    await w.answer('kfx-install', installed(true, true));
+    expect(w.statusNode()).toBe(line);
+    expect(line!.textContent).toBe(INSTALLED_READY);
+  });
+
+  test('a routine re-probe on coming back changes nothing on screen', async () => {
+    const w = await world();
+    await w.answer('kfx-status', status(true, false, false));
+    const get = w.button('Get Kindle Previewer');
+    get.focus();
+    w.regainFocus();
+    await w.answer('kfx-status', status(true, false, false));
+    expect(get.isConnected).toBe(true);
+    expect(w.doc.activeElement).toBe(get);
+  });
+
+  test('when the rows do change, the keyboard goes back to the same step', async () => {
+    // The reader went to get Kindle Previewer; Calibre turned up meanwhile.
+    const w = await world();
+    await w.answer('kfx-status', status(false, false, false));
+    w.button('Get Kindle Previewer').focus();
+    w.regainFocus();
+    await w.answer('kfx-status', status(true, false, false));
+    const now = w.doc.activeElement;
+    expect(now.textContent).toBe('Get Kindle Previewer');
+    expect(now.isConnected).toBe(true);
+    expect(w.restored).toBe(0);
+  });
+
+  test('when that control is gone, the page’s own plan takes the keyboard', async () => {
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    const install = w.button('Install');
+    install.focus();
+    install.click();
+    // "Installing…" is disabled, so it cannot hold the focus.
+    expect(w.labels()).toEqual(['Installing…']);
+    expect(w.restored).toBe(1);
+  });
+
+  test('a probe still out when an install finishes cannot undo it', async () => {
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    w.regainFocus(); // a probe goes out...
+    w.button('Install').click(); // ...and the install starts behind it
+    await w.answer('kfx-install', installed(true, true));
+    await w.answer('kfx-status', status(true, true, false)); // the stale one lands last
+    expect(w.labels()).toEqual([]);
+    expect(w.statusNode()!.textContent).toBe(INSTALLED_READY);
+  });
+
+  test('leaving and coming back mid-install keeps the line that says so', async () => {
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    w.button('Install').click();
+    w.kfx.kfxHidden();
+    w.kfx.kfxShown();
+    w.kfx.kfxRedraw();
+    expect(w.statusNode()!.textContent).toBe(w.kfx.INSTALLING);
+  });
+
+  test('a success line stays for an unchanged machine and goes when it changes', async () => {
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    w.button('Install').click();
+    await w.answer('kfx-install', installed(true, true));
+    w.regainFocus();
+    await w.answer('kfx-status', status(true, true, true));
+    expect(w.statusNode()!.textContent).toBe(INSTALLED_READY);
+    // Kindle Previewer was removed since: "Kindles now get KFX." is no
+    // longer true, and must not stand over a Get button.
+    w.regainFocus();
+    await w.answer('kfx-status', status(true, false, true));
+    expect(w.labels()).toEqual(['Get Kindle Previewer']);
+    expect(w.statusNode()!.textContent).toBe('');
+  });
+
+  test('a busy hook that throws cannot leave the install flag on', async () => {
+    // While kfxInstalling() is true, send.js refuses every send; stuck on,
+    // it would refuse them until the window restarted.
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    w.kfx.mountKfx(w.host, {
+      isSending: () => false,
+      devices: () => [],
+      onBusy: (on: boolean) => { if (on) throw new Error('the page broke'); },
+      restoreFocus: () => undefined,
+    });
+    w.button('Install').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(w.kfx.kfxInstalling()).toBe(false);
+    expect(w.statusNode()!.textContent).toBe('the page broke');
+    expect(w.labels()).toEqual(['Install']);
+  });
+
+  test('a Kobo plugged in mid-install does not take the install’s lines away', async () => {
+    const w = await world();
+    let devices: unknown[] = [];
+    w.kfx.mountKfx(w.host, {
+      isSending: () => false,
+      devices: () => devices,
+      onBusy: () => undefined,
+      restoreFocus: () => undefined,
+    });
+    await w.answer('kfx-status', status(true, true, false));
+    w.button('Install').click();
+    devices = [{ id: '/m/KOBOe', kind: 'kobo', name: 'Kobo', volume: '/m/KOBOe' }];
+    w.kfx.kfxRedraw(); // send.js's device poll redraws the block the same way
+    expect(w.host.hidden).toBe(false);
+    expect(w.statusNode()!.textContent).toBe(w.kfx.INSTALLING);
+    await w.answer('kfx-install', installed(true, true));
+    expect(w.host.hidden).toBe(false);
+    expect(w.statusNode()!.textContent).toBe(INSTALLED_READY);
+  });
+
+  test('a block no longer in the page asks the engine nothing', async () => {
+    // send.js's no-script and blocked states leave the last block's node
+    // detached; a show or a focus must not spend a kfx-status run on it.
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    w.doc.body.removeChild(w.host);
+    w.regainFocus();
+    w.kfx.kfxShown();
+    await expect(w.answer('kfx-status', status(true, true, false))).rejects.toThrow('nothing asked');
+  });
+
+  test('a block mounted while the page is showing asks, if nothing has answered yet', async () => {
+    // A script can arrive while Send already shows its no-script state. The
+    // show's probe was skipped (there was nowhere to draw), so the mount that
+    // follows has to ask, or the block stays hidden until the next focus.
+    const w = await world();
+    await w.answer('kfx-status', { ok: false, error: { code: 'internal', message: 'x' } });
+    w.doc.body.removeChild(w.host);
+    w.kfx.kfxShown();
+    const next = w.doc.createElement('section');
+    w.doc.body.append(next);
+    const hooks = { isSending: () => false, devices: () => [], onBusy: () => undefined };
+    w.kfx.mountKfx(next, hooks);
+    await w.answer('kfx-status', status(true, true, false));
+    expect(next.hidden).toBe(false);
+    expect(next.querySelectorAll('button').map((b) => b.textContent)).toEqual(['Install']);
+    // Once the machine is known, a remount for a new script asks nothing:
+    // the checklist is about the computer, not the script.
+    const again = w.doc.createElement('section');
+    w.doc.body.append(again);
+    w.kfx.mountKfx(again, hooks);
+    await expect(w.answer('kfx-status', status(true, true, false))).rejects.toThrow('nothing asked');
+  });
+
+  test('a mount on a page that is not showing asks nothing', async () => {
+    const w = await world();
+    await w.answer('kfx-status', { ok: false, error: { code: 'internal', message: 'x' } });
+    w.kfx.kfxHidden();
+    const next = w.doc.createElement('section');
+    w.doc.body.append(next);
+    w.kfx.mountKfx(next, { isSending: () => false, devices: () => [], onBusy: () => undefined });
+    await expect(w.answer('kfx-status', status(true, true, false))).rejects.toThrow('nothing asked');
   });
 });
