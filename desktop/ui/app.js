@@ -96,8 +96,8 @@ export const ENGINE_QUIET_MS = 500;
 
 // performance.now() when a counted call last finished. -Infinity so a
 // whenIdle() asked before anything has ever run resolves at once, the same
-// as one asked long after everything has. performance.now() rather than the
-// wall clock: it is monotonic, so a clock sync, DST, or the system clock
+// as one asked long after everything has. performance.now() rather than
+// Date.now(): it is monotonic, so a clock sync, DST, or the system clock
 // changing cannot make this go negative or huge and either hold a restart
 // off forever or release it early.
 let lastEnded = -Infinity;

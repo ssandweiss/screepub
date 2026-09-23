@@ -24,13 +24,15 @@ export function createUpdateFlow(deps) {
     for (const listener of listeners) {
       try {
         listener(phase);
-      } catch {
+      } catch (err) {
         // One subscriber's bug (a typo in frame.js, say) must not silence
         // every OTHER subscriber, and must not turn a restart that would
         // otherwise succeed into a reported failure: this fires from deep
         // inside installAndRestart's own try/catch (update.js), so an
         // uncaught throw here does not stop at "that listener didn't hear
-        // it" — it can end the whole run.
+        // it" — it can end the whole run. Logged rather than swallowed
+        // outright, so a broken listener still leaves something to debug.
+        console.error('update-flow.js: a subscriber threw', err);
       }
     }
   }

@@ -1405,10 +1405,15 @@ describe('the window knows when the engine is working, and can restart', () => {
     // Date.now() jumps: a clock sync, DST, or someone changing the system
     // clock could make (Date.now() - lastEnded) go negative or huge, either
     // holding a restart off forever or releasing it early. performance.now()
-    // cannot jump like that.
-    const src = read('app.js');
-    expect(src).not.toContain('Date.now()');
-    expect(src).toContain('performance.now()');
+    // cannot jump like that. Comments are stripped first (as the Tune
+    // surface's `engine` helper does above) so an honest future comment
+    // that merely mentions Date.now() cannot fail this: the claim is about
+    // CODE.
+    const code = read('app.js')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/.*$/gm, ' ');
+    expect(code).not.toContain('Date.now()');
+    expect(code).toContain('performance.now()');
   });
 });
 
@@ -3683,10 +3688,10 @@ describe('one update run, one moment, heard by the label and the notes alike', (
     const { flow, calls, seen } = make({
       install: async () => { installs += 1; if (installs === 1) throw new Error('interrupted'); },
       // The plan's own version of this fake did not increment `calls.check`,
-      // which made the assertions below true no matter how many times it
-      // ran. Counting it is what makes this test actually prove a retry
-      // asked the server again, matching every other `check` fake in this
-      // file.
+      // which left `toBe(0)` below meaningless and `toBe(1)` impossible: the
+      // test failed whatever the code did. Counting it is what makes this
+      // test actually prove a retry asked the server again, matching every
+      // other `check` fake in this file.
       check: async () => { calls.check += 1; return { version: '0.8.0', currentVersion: '0.7.2', body: '' }; },
     });
     flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } });
@@ -3717,7 +3722,10 @@ describe('one update run, one moment, heard by the label and the notes alike', (
   test('a broken subscriber does not stop the others from hearing it, or stop the run', async () => {
     // A reviewer's concern: one subscriber's bug (a typo in frame.js, say)
     // must not silence the OTHER subscriber, and must not turn a restart
-    // that would otherwise succeed into a reported failure.
+    // that would otherwise succeed into a reported failure. setPhase logs a
+    // broken listener with console.error rather than swallowing it outright
+    // (so there is still something to debug from), which this test captures
+    // instead of letting it print noise — and checks it actually fired.
     const { flow, calls } = make();
     flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update: { version: '0.8.0' } });
     let heard = 0;
@@ -3729,9 +3737,18 @@ describe('one update run, one moment, heard by the label and the notes alike', (
     });
     const seenGood: unknown[] = [];
     flow.subscribe((phase: unknown) => seenGood.push(phase));
-    await flow.start();
+    const logged: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => { logged.push(args); };
+    try {
+      await flow.start();
+    } finally {
+      console.error = originalError;
+    }
     expect(calls.restart).toBe(1);
     expect(seenGood.some((p: any) => p?.kind === 'restarting')).toBe(true);
+    expect(logged.length).toBeGreaterThan(0);
+    expect(String(logged[0]?.[0])).toContain('a subscriber threw');
   });
 
   test('an exception starting the run does not leave `running` stuck true', async () => {
