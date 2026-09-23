@@ -144,6 +144,12 @@ against a ceiling of 200.
 > allow-list to write: its scope is the single endpoint in `tauri.conf.json`
 > (this repository's `releases/latest/download/latest.json`), and
 > `tests/desktop-shell.test.ts` pins that to one URL. Still two commands.
+>
+> On 2026-09-23 `allow-open-url` gained three exact URLs, Calibre's macOS
+> and Windows download pages and Amazon's Kindle Previewer page, for the
+> KFX checklist on the Send page (parity piece D). Exact strings and no
+> wildcard: the opener matches the raw URL as a glob, so a `*` would also
+> match `/`. Still two commands.
 
 ### The updater archive is a release artifact, not a build artifact
 

@@ -62,6 +62,14 @@ granted "open anything"; it is granted the bug tracker, Amazon's two
 pages, and the library. Write the scopes with the permissions, not
 afterwards.
 
+**Amended 2026-09-23 (parity piece D).** `opener:allow-open-url` gained
+three exact URLs: Calibre's macOS and Windows download pages and Amazon's
+Kindle Previewer page, so the Send page's KFX checklist can link to what it
+says is missing. Approved by the owner the same day. Same test as every
+grant here: a door, not an opinion. What to link is decided by
+`src/export/kfx-setup.ts`, and `tests/desktop-shell.test.ts` holds that
+file's links and this grant to the same three strings.
+
 What this buys, and it is six of the nine gaps the audit found: Apple
 Books, Send-to-Kindle, email-to-Kindle, save-a-copy, Report a Bug, and
 Show in Finder.

@@ -323,6 +323,8 @@ one file a library listing should skip.
 ```bash
 bun src/cli.ts devices [--json]                          # list connected e-readers
 bun src/cli.ts send <file> [--device <id>] [--json]      # send an existing file to one
+bun src/cli.ts kfx-status [--json]                       # can this computer make KFX for a Kindle?
+bun src/cli.ts kfx-install [--json]                      # install the KFX plugin into Calibre (online)
 ```
 
 `devices` lists every reader it can reach: USB-mounted Kindle, Kobo and
@@ -334,6 +336,14 @@ the docked tablet, which accepts **only PDF and EPUB** (anything else is
 refused before a byte moves). With one reader connected `--device` is
 optional; with several it is required, and `devices` prints the ids it
 accepts.
+
+A Kindle gets its best rendering from KFX, which needs three free tools:
+Calibre, Amazon's Kindle Previewer, and the KFX Output plugin inside
+Calibre. `kfx-status` says which are installed and where to get the rest;
+`kfx-install` installs the plugin from Calibre's own plugin index. Amazon
+makes no Kindle Previewer for Linux, so `kfx-install` does not work there.
+Until all three are there, a Kindle gets AZW3 (with Calibre) or the
+engine's MOBI. The desktop app shows the same checklist on its Send page.
 
 The same hardware caveat as everywhere else applies here: only the Kindle
 route has been run on a real device. Kobo, tolino and reMarkable are built and

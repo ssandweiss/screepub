@@ -21,7 +21,9 @@ export interface JsonError {
     | 'unsupported-file'
     // Settings and export verbs (piece D). Same contract, same stdout rule.
     | 'bad-settings'
-    | 'export-failed';
+    | 'export-failed'
+    // The KFX plugin install (parity piece D). Same contract, same stdout rule.
+    | 'kfx-install-failed';
   message: string;
 }
 

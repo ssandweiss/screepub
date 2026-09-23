@@ -17,6 +17,8 @@ export const VERBS = [
   'export',
   'update-decision',
   'update-should-check',
+  'kfx-status',
+  'kfx-install',
 ] as const;
 export type Verb = (typeof VERBS)[number];
 

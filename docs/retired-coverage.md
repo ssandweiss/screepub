@@ -51,8 +51,9 @@ the Tauri app, and no test covering any of them. `Decision` is what was
 SETTLED on 2026-09-14; `Built` is what exists. They were being read as the
 same thing for a week. See [the parity audit](parity-audit.md), which also
 names four features this table does not: the feedback and Report-a-Bug
-links, Show in Finder, the unreachable KFX plugin installer, and the
-gear's three settings.
+links, Show in Finder, the KFX plugin installer, and the gear's three
+settings. The installer was written but unreachable until 2026-09-23, when
+piece D gave it a CLI verb and a button (see its row below).
 
 | Section | Checks | Decision (SETTLED 2026-09-14) | Built? | In one line |
 | --- | --- | --- | --- | --- |
@@ -66,7 +67,7 @@ gear's three settings.
 | `update-error-descriptions` | 11 | `port` | **no** | The window side, per the contract sent to the interface-pass session 2026-09-21: a rejection from `check()` is a message, never "up to date". |
 | `self-update-installer` | 26 | **`replaced`** (was `port`), 2026-09-21 | n/a | Tauri's updater plugin does the swap and verifies its own signature. Install-time codesign pinning is the accepted loss: see below. |
 | `release-notes-parsing` | 21 | `accept-loss` | yes, in kind | Of the Swift assertions only. The feature is replaced in kind and nothing is lost. |
-| `kfx-install-plugin` | not a kit-check section | **`replaced`** (was `accept-loss`) | engine yes, **UNREACHABLE** | Detection ports; installation is a 485 KB GPL-3 binary and a packaging decision. |
+| `kfx-install-plugin` | not a kit-check section | **`replaced`** (was `accept-loss`) | **yes**, 2026-09-23 | Calibre's own plugin index and installer replace the vendored zip; `screepub kfx-install` and the Send page's Install button reach it (piece D). |
 
 **2026-09-21, owner-approved: install-time codesign pinning is given up.**
 This table said the pinning "has to survive whatever shape" the updater
@@ -389,11 +390,20 @@ third-party code over a network, so it sits behind an explicit request. It
 is also the only thing in the engine that needs a network at all, which the
 USB-first context in CLAUDE.md otherwise rules out.
 
-**What a user loses.** One step of setup. KFX is the best Kindle format
-Screepub can produce, and today the app can put the plugin into the user's
-Calibre for them; after F3 they would install it through Calibre's own plugin
-browser first. The ladder still detects it and still falls back to AZW3/MOBI,
-so nothing breaks — it is friction, not failure.
+**What a user loses.** As of 2026-09-23 (piece D), not the install step.
+This said they would have to install the plugin through Calibre's own
+plugin browser after F3; that is no longer so. The Tauri app puts it into
+the user's Calibre for them, as the Swift app did: `screepub kfx-install`
+from a terminal, or the Install button in the Send page's "Best Kindle
+quality" block, which also links to the Calibre and Kindle Previewer
+download pages. See
+[the spec](superpowers/specs/2026-09-23-kfx-install-surface-design.md).
+
+One real difference remains: the Swift app installed its bundled copy
+offline, and this fetches the plugin from Calibre's index, so installing
+needs the internet. The ladder still detects the plugin and still falls
+back to AZW3/MOBI without it, so an offline machine that lacks the plugin
+loses KFX, not the book.
 
 **Either way `THIRD-PARTY-NOTICES.md` must be corrected**: it cites two paths
 inside `app/Packages/KFXKit` that would stop existing. That is F3 acceptance

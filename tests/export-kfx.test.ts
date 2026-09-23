@@ -399,4 +399,168 @@ describe('installKfxPlugin', () => {
     expect(r.ok).toBe(false);
     expect(r.reason).toMatch(/size mismatch/);
   });
+
+  // A failure AFTER the fork-clearing step (add_plugin itself failing) has
+  // already taken an older copy out. That is the one failure that changes
+  // the reader's Calibre, so the names travel with it: the caller has to be
+  // able to say what is now missing.
+  test('a failure after an older copy was cleared still names what was removed', async () => {
+    const r = await installKfxPlugin(async () => ({
+      code: 0,
+      stdout: `SCREEPUB_RESULT ${JSON.stringify({
+        ok: false,
+        error: 'add_plugin failed',
+        removed: ['KFX Output (Fix Traditional Chinese)'],
+      })}\n`,
+      stderr: '',
+    }), TOOL);
+    expect(r).toEqual({
+      ok: false,
+      reason: 'add_plugin failed',
+      removed: ['KFX Output (Fix Traditional Chinese)'],
+    });
+  });
+
+  test('a failure before anything was cleared reports an empty removed list', async () => {
+    const r = await installKfxPlugin(async () => ({
+      code: 0,
+      stdout: `SCREEPUB_RESULT ${JSON.stringify({ ok: false, error: 'size mismatch', removed: [] })}\n`,
+      stderr: '',
+    }), TOOL);
+    expect(r.ok).toBe(false);
+    expect(r.removed).toEqual([]);
+  });
+
+  // The most likely reason either network fetch (the index, or the zip
+  // itself) fails is the user being offline, and unwrapped that arrives as
+  // raw urllib/http exception text: no user should have to parse
+  // "<urlopen error [Errno 8] nodename nor servname provided>". The snippet
+  // marks both fetches and tags the result 'offline': true; this is the
+  // friendly sentence installKfxPlugin reports instead. It names the SITE,
+  // not the index: the second fetch is the plugin's zip, and a failed zip
+  // download used to be reported as an unreachable index.
+  test("an unreachable plugin site gets a friendly sentence, not urlopen's own text", async () => {
+    const r = await installKfxPlugin(async () => ({
+      code: 0,
+      stdout: `SCREEPUB_RESULT ${JSON.stringify({
+        ok: false,
+        error: '<urlopen error [Errno 8] nodename nor servname provided>',
+        offline: true,
+      })}\n`,
+      stderr: '',
+    }), TOOL);
+    expect(r.ok).toBe(false);
+    // Its own sentence, because cli-kfx.ts puts "could not install the KFX
+    // plugin: " in front of it: a reason that also began "could not reach"
+    // read as a stutter.
+    expect(r.reason).toBe(
+      "Calibre's plugin site could not be reached. Check the internet connection, then try again.",
+    );
+    expect(r.reason).not.toContain('urlopen');
+  });
+
+  // Pinning the PYTHON shape: nothing here runs the snippet (it needs a real
+  // calibre-debug), so the only way to catch an except clause ordered wrong
+  // is to read the source. Python tries except clauses top to bottom, and
+  // Unreachable IS an Exception, so if the generic `except Exception as e:`
+  // came first it would swallow every offline failure silently and 'offline'
+  // would never reach installKfxPlugin's parsing above.
+  test('INSTALL_SNIPPET catches Unreachable before the generic exception', async () => {
+    const src = await Bun.file(join(import.meta.dir, '..', 'src', 'export', 'kfx.ts')).text();
+    const unreachableCatch = src.indexOf('except Unreachable as e:');
+    // The LAST `except Exception as e:` is the outer, catch-all clause; the
+    // two earlier ones belong to the fetches themselves, which re-raise as
+    // Unreachable rather than print.
+    const genericCatch = src.lastIndexOf('except Exception as e:');
+    expect(unreachableCatch).toBeGreaterThan(-1);
+    expect(genericCatch).toBeGreaterThan(-1);
+    expect(unreachableCatch).toBeLessThan(genericCatch);
+    expect(src).toContain("'offline': True");
+  });
+
+  async function installSnippetText(): Promise<string> {
+    const src = await Bun.file(join(import.meta.dir, '..', 'src', 'export', 'kfx.ts')).text();
+    const start = src.indexOf('const INSTALL_SNIPPET');
+    const end = src.indexOf('`;', start) + '`;'.length;
+    return src.slice(start, end);
+  }
+
+  // `class Unreachable` has to be defined OUTSIDE the try, before it, not as
+  // the first thing inside it (the first cut's mistake). If anything raises
+  // before that line would have run -- one of the `from calibre...` imports,
+  // say, on some future calibre that moves INDEX_URL -- Python evaluates
+  // `except Unreachable as e:` against a name that was never bound: a
+  // NameError while handling the original exception, no SCREEPUB_RESULT
+  // line at all, and a raw traceback instead of the JSON contract every
+  // caller of installKfxPlugin relies on. Defining it at module level, ahead
+  // of the try, means it exists no matter what fails or when.
+  test('class Unreachable is defined before the snippet’s first try:, not inside it', async () => {
+    const snippet = await installSnippetText();
+    const classIdx = snippet.indexOf('class Unreachable');
+    const tryIdx = snippet.indexOf('try:');
+    expect(classIdx).toBeGreaterThan(-1);
+    expect(tryIdx).toBeGreaterThan(-1);
+    expect(classIdx).toBeLessThan(tryIdx);
+  });
+
+  // The fork-clearing block used to run BEFORE the network fetches. Offline,
+  // that meant a user upgrading from the Swift app's vendored fork got their
+  // working fork removed with nothing installed in its place: KFX conversion
+  // breaks outright, worse than doing nothing. So every fetch and every
+  // check on what it returned (the index, `meta is None`, the zip, the size
+  // check, the `__init__.py` check) has to pass before `remove_plugin` runs,
+  // and that has to happen before `add_plugin` installs the replacement.
+  test('forks are cleared only after the download and its checks pass, not before', async () => {
+    const snippet = await installSnippetText();
+    const urlopenIdx = snippet.indexOf('urlopen(');
+    const initCheckIdx = snippet.indexOf("'__init__.py' not in");
+    const removeIdx = snippet.indexOf('remove_plugin(p)');
+    const addPluginIdx = snippet.indexOf('add_plugin(path)');
+    expect(urlopenIdx).toBeGreaterThan(-1);
+    expect(initCheckIdx).toBeGreaterThan(-1);
+    expect(removeIdx).toBeGreaterThan(-1);
+    expect(addPluginIdx).toBeGreaterThan(-1);
+    expect(removeIdx).toBeGreaterThan(urlopenIdx);
+    expect(removeIdx).toBeGreaterThan(initCheckIdx);
+    expect(removeIdx).toBeLessThan(addPluginIdx);
+  });
+
+  // Only the network call may sit inside the try that turns a failure into
+  // 'offline'. The zip's URL is built from the index entry, and an entry
+  // with no 'file' raises a KeyError: built inside that try, it was
+  // reported as "could not be reached", which sends the reader to check a
+  // connection that is fine.
+  test('the zip URL is built before the try that marks a failed download as offline', async () => {
+    const snippet = await installSnippetText();
+    const urlopenIdx = snippet.indexOf('urlopen(');
+    const innerTry = snippet.lastIndexOf('try:', urlopenIdx);
+    const built = snippet.indexOf("'https://plugins.calibre-ebook.com/' + meta['file']");
+    expect(built, 'the zip URL is not built from the index entry').toBeGreaterThan(-1);
+    expect(innerTry).toBeGreaterThan(-1);
+    expect(built).toBeLessThan(innerTry);
+    // Nothing but the fetch between that try and its except.
+    const guarded = snippet.slice(innerTry, snippet.indexOf('except', innerTry));
+    expect(guarded).not.toContain('meta[');
+  });
+
+  // `removed` exists before anything can fail, so BOTH failure lines can
+  // carry it: an add_plugin that fails after the fork-clearing loop has
+  // already taken an older copy out, and the caller must be told which.
+  // At module level, before the try, for the same reason as
+  // `class Unreachable`: a name first bound inside the try is unbound in an
+  // except clause reached before that line ran.
+  test('removed = [] is bound once, before the snippet’s first try:, and both failures report it', async () => {
+    const snippet = await installSnippetText();
+    expect(snippet.match(/removed = \[\]/g)?.length).toBe(1);
+    const bound = snippet.indexOf('removed = []');
+    expect(bound).toBeLessThan(snippet.indexOf('try:'));
+    for (const clause of ['except Unreachable as e:', 'except Exception as e:\n    print(']) {
+      const at = snippet.lastIndexOf(clause);
+      expect(at, `no ${clause}`).toBeGreaterThan(bound);
+      const next = snippet.indexOf('\nexcept', at + 1);
+      const handler = snippet.slice(at, next === -1 ? undefined : next);
+      expect(handler).toContain('SCREEPUB_RESULT');
+      expect(handler, `${clause} does not report removed`).toContain("'removed': removed");
+    }
+  });
 });

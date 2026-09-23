@@ -17,6 +17,9 @@
 import { runEngine, argv } from './app.js';
 import { settingsFrom } from './tune.js';
 import { el, clear, text } from './dom.js';
+import {
+  HEADING, mountKfx, kfxShown, kfxHidden, kfxDevicesChanged, kfxRedraw, kfxInstalling,
+} from './kfx.js';
 
 // ---------------------------------------------------------------- decisions
 
@@ -381,11 +384,13 @@ export function show() {
   // forever with nothing holding its handle.
   clearInterval(poll);
   poll = setInterval(refresh, POLL_MS);
+  kfxShown();
 }
 
 export function hide() {
   clearInterval(poll);
   poll = null;
+  kfxHidden();
 }
 
 function draw() {
@@ -421,6 +426,8 @@ function draw() {
   statusLine = el('p', { class: 'caption send-status', role: 'status' }, '');
   artifactNote = el('p', { class: 'caption send-artifact' }, '');
   artifactNote.hidden = true;
+  const kfxNode = el('section', { class: 'kfx-setup', 'aria-label': HEADING });
+  kfxNode.hidden = true;
 
   pane.append(
     el('h2', { class: 'slug' }, 'Send to a reader'),
@@ -428,7 +435,17 @@ function draw() {
     list,
     statusLine,
     artifactNote,
+    kfxNode,
   );
+  // After the append: kfx.js draws only into a node that is in the page.
+  mountKfx(kfxNode, {
+    isSending: () => sending,
+    devices: () => drawn,
+    onBusy: (on) => { for (const button of buttons()) button.disabled = on; },
+    // Its redraws hand the keyboard back through the same plan as every
+    // other surface's (focus.js), when a control it held is gone.
+    restoreFocus: () => ctx.restoreFocus(),
+  });
 }
 
 async function refresh() {
@@ -453,11 +470,11 @@ async function refresh() {
   if (drawn !== null && sameDevices(drawn, devices)) return;
   drawn = devices;
   clear(list);
-  if (devices.length === 0) {
-    drawEmpty();
-    return;
-  }
-  for (const device of devices) list.append(deviceRow(device));
+  if (devices.length === 0) drawEmpty();
+  else for (const device of devices) list.append(deviceRow(device));
+  // After the rows, not before: a KFX block that hides now while it held
+  // the keyboard hands it to the page's first stop, which should be a row.
+  kfxDevicesChanged();
 }
 
 /** Nothing connected is an ANSWER, not an error — the same position
@@ -502,7 +519,12 @@ function readerRow(reader, platform) {
 
 function deviceRow(device) {
   const caveat = caveatFor(device, navigator.platform);
-  const button = el('button', { type: 'button', class: 'btn btn-brad' }, sendLabel(device));
+  // The poll keeps running through a KFX install (it stops only for a send),
+  // so a reader plugged in mid-install gets a row here; its button starts
+  // out as dead as the others, and the install's end brings them all back.
+  const button = el('button', {
+    type: 'button', class: 'btn btn-brad', disabled: kfxInstalling(),
+  }, sendLabel(device));
   button.addEventListener('click', () => sendTo(device));
   return el('div', { class: 'device-row' },
     el('div', { class: 'device-what' },
@@ -541,7 +563,7 @@ async function ensureSettings() {
 }
 
 async function sendTo(device) {
-  if (sending) return;
+  if (sending || kfxInstalling()) return;
   sending = true;
   const mine = era;
   /** Another script was opened while this send was in flight. */
@@ -549,6 +571,8 @@ async function sendTo(device) {
   for (const button of buttons()) button.disabled = true;
   artifactNote.hidden = true;
   try {
+    // Inside the try, so a redraw that threw could never leave `sending` on.
+    kfxRedraw();
     await ensureSettings();
     if (stale()) return;
     const script = ctx.state.script;
@@ -591,6 +615,7 @@ async function sendTo(device) {
   } finally {
     sending = false;
     for (const button of buttons()) button.disabled = false;
+    kfxRedraw();
   }
 }
 
