@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test';
+import { afterAll, describe, test, expect } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, chmodSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
@@ -30,6 +30,9 @@ import {
   type Target,
   type Floors,
 } from '../tools/build-cli';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-build-cli-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 /** A header with the exact bytes a real executable of that shape carries,
  *  and zeros elsewhere. Built by hand rather than by copying a 100 MB
@@ -149,7 +152,7 @@ describe('detectBinaryFormat', () => {
 
 describe('readBinaryFormat', () => {
   test('reads the format off disk, including a 0-byte file', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-fmt-'));
+    const dir = mkdtempSync(join(SCRATCH, 'fmt-'));
     try {
       writeFileSync(join(dir, 'arm'), elfHeader(0xb7));
       writeFileSync(join(dir, 'empty'), new Uint8Array(0));
@@ -296,7 +299,7 @@ describe('parseBuildArgs', () => {
 
 describe('assertPackageVersion', () => {
   function repoWith(version: unknown): string {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-pkg-'));
+    const dir = mkdtempSync(join(SCRATCH, 'pkg-'));
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'screepub', version }));
     return dir;
   }
@@ -356,7 +359,7 @@ describe('compileArgv', () => {
 
 describe('compileTarget', () => {
   test('runs bun from the repo root and returns the path bun WROTE', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-compile-'));
+    const dir = mkdtempSync(join(SCRATCH, 'compile-'));
     try {
       const seen: { argv: string[]; cwd: string }[] = [];
       const fake = (argv: string[], cwd: string) => {
@@ -377,7 +380,7 @@ describe('compileTarget', () => {
   });
 
   test('a failed compile throws, naming the target and bun stderr', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-compile-'));
+    const dir = mkdtempSync(join(SCRATCH, 'compile-'));
     try {
       const fake = () => ({ exitCode: 1, stderr: 'error: unknown target\n' });
       expect(() => compileTarget(TARGETS[1]!, dir, fake, '/repo')).toThrow(/linux-arm64/);
@@ -398,7 +401,7 @@ describe('compileTarget (a real bun build)', () => {
   // output's actual header format matches what the target table predicts.
   // A mocked spawn cannot answer either question; only a real compile can.
   test('a real cross-compiled linux-x64 binary really is ELF x86-64', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-realbuild-'));
+    const dir = mkdtempSync(join(SCRATCH, 'realbuild-'));
     try {
       const target = TARGETS.find((t) => t.id === 'linux-x64')!;
       const out = compileTarget(target, dir);
@@ -410,7 +413,7 @@ describe('compileTarget (a real bun build)', () => {
   }, 20000);
 
   test('bun appends .exe only for the windows target, and the result is a real PE binary', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-realbuild-'));
+    const dir = mkdtempSync(join(SCRATCH, 'realbuild-'));
     try {
       const target = TARGETS.find((t) => t.id === 'windows-x64')!;
       const out = compileTarget(target, dir);
@@ -432,7 +435,7 @@ describe('reading an archive back', () => {
    *  the 512-byte walk is genuinely exercised rather than accidentally
    *  right for a single small entry. */
   function scratchTarGz(): { dir: string; archive: string; big: Uint8Array } {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-tar-'));
+    const dir = mkdtempSync(join(SCRATCH, 'tar-'));
     const stage = join(dir, 'stage');
     mkdirSync(stage, { recursive: true });
     const big = new Uint8Array(1500);
@@ -487,7 +490,7 @@ describe('reading an archive back', () => {
   });
 
   test('zipEntries round-trips a name, bytes and the executable bit', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-zip-'));
+    const dir = mkdtempSync(join(SCRATCH, 'zip-'));
     try {
       const JSZip = (await import('jszip')).default;
       const payload = new Uint8Array(1500);
@@ -517,7 +520,7 @@ describe('packageTarget', () => {
   /** Stage a small stand-in binary exactly where compileTarget would have
    *  left one, so packaging is tested without a 100 MB compile. */
   function stage(target: Target, bytes: Uint8Array): string {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-pack-'));
+    const dir = mkdtempSync(join(SCRATCH, 'pack-'));
     mkdirSync(buildDir(target, dir), { recursive: true });
     writeFileSync(binaryPath(target, dir), bytes);
     return dir;
@@ -598,7 +601,7 @@ describe('verifyArtifact', () => {
   }
 
   async function built(payload: Uint8Array): Promise<string> {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-verify-'));
+    const dir = mkdtempSync(join(SCRATCH, 'verify-'));
     mkdirSync(buildDir(target, dir), { recursive: true });
     writeFileSync(binaryPath(target, dir), payload);
     await packageTarget(target, dir);
@@ -720,7 +723,7 @@ describe('verifyArtifact', () => {
 
 describe('SHA256SUMS', () => {
   function withFiles(): { dir: string; names: string[] } {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-sums-'));
+    const dir = mkdtempSync(join(SCRATCH, 'sums-'));
     const names = ['screepub-cli-windows-x64.zip', 'screepub-cli-linux-x64.tar.gz'];
     writeFileSync(join(dir, names[0]!), 'windows bytes');
     writeFileSync(join(dir, names[1]!), 'linux bytes');
@@ -842,7 +845,7 @@ describe('SHA256SUMS', () => {
 
 describe('buildAll', () => {
   test('refuses to build a version package.json does not name', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-all-'));
+    const dir = mkdtempSync(join(SCRATCH, 'all-'));
     try {
       await expect(
         buildAll({ version: '99.0.0', outDir: dir, only: ['linux-x64'] }),
@@ -872,8 +875,9 @@ describe('the repo will not accidentally commit an artifact', () => {
 
 describe('the tool runs from a command line', () => {
   // A path that provably does not exist yet, so "it was never created" is a
-  // real assertion rather than an accident of what /tmp happens to hold.
-  const NEVER = join(tmpdir(), `screepub-never-${process.pid}-${Date.now()}`);
+  // real assertion rather than an accident of what /tmp happens to hold:
+  // nothing but this file writes inside its own fresh SCRATCH.
+  const NEVER = join(SCRATCH, 'never');
 
   test('a missing --version fails with a message and a non-zero exit', () => {
     const proc = Bun.spawnSync(['bun', 'tools/build-cli.ts', '--out', NEVER], {

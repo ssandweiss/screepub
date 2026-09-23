@@ -1,5 +1,5 @@
-import { test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, utimesSync } from 'node:fs';
+import { afterAll, test, expect } from 'bun:test';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, utimesSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
@@ -7,8 +7,11 @@ import { mobiSibling, availableFormats, freshKindleArtifact, CannotRegenerateErr
 import { kfxSibling, KfxToolchainNotReadyError } from '../src/export/kfx';
 import { CalibreMissingError, CalibreFailedError } from '../src/export/calibre';
 
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-export-artifact-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+
 function scratch(): string {
-  return mkdtempSync(join(tmpdir(), 'screepub-test-'));
+  return mkdtempSync(join(SCRATCH, 'test-'));
 }
 
 test('the MOBI sibling shares the EPUB directory and stem', () => {

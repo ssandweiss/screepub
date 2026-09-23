@@ -1,12 +1,15 @@
-import { test, expect } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { afterAll, test, expect } from 'bun:test';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { DEFAULT_FORMAT_OPTIONS, type FormatOptions } from '../src/options';
 import { sidecarPath, loadScriptSettings, saveScriptSettings } from '../src/settings/sidecar';
 
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-sidecar-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+
 function library(): string {
-  const dir = join(mkdtempSync(join(tmpdir(), 'screepub-test-')), 'library');
+  const dir = join(mkdtempSync(join(SCRATCH, 'test-')), 'library');
   mkdirSync(dir, { recursive: true });
   return dir;
 }

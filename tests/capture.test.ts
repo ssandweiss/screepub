@@ -4,7 +4,7 @@
 // behind. The Chrome driver is tested against a fake Chrome in
 // capture-chrome.test.ts. Real Chrome runs only when someone runs
 // `bun tools/capture-screens.ts`; /release does not call it yet.
-import { describe, test, expect } from 'bun:test';
+import { afterAll, describe, test, expect } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +16,9 @@ import { makeHandler, type EngineResult } from '../tools/capture/server';
 import { FRAME_PAD, SHOTS, framedSize, outputsFor, writeIfChanged } from '../tools/capture/shots';
 // @ts-expect-error -- plain JS module, no types
 import { argv } from '../desktop/ui/app.js';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-capture-test-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 // Every path below is built off the file's own location, not the working
 // directory the suite happens to be launched from.
@@ -203,7 +206,7 @@ describe('the shot list', () => {
   });
 
   test('a file is written only when its bytes differ', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-capture-'));
+    const dir = mkdtempSync(join(SCRATCH, 'write-'));
     try {
       const path = join(dir, 'x.png');
       expect(writeIfChanged(path, new Uint8Array([1, 2, 3]))).toBe('written');
@@ -232,7 +235,7 @@ describe('the capture server', () => {
   // hand out: the gitignored REAL screenplays, git's own files, the package
   // manifest, and a sibling folder whose name starts with the repo's.
   function scene() {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-capture-test-'));
+    const dir = mkdtempSync(join(SCRATCH, 'scene-'));
     const repo = join(dir, 'Screepub');
     const put = (rel: string, body: string) => {
       mkdirSync(join(repo, rel, '..'), { recursive: true });
@@ -417,7 +420,7 @@ describe('a capture run cleans up after itself, whatever happens', () => {
 
   // Every path is under a temp folder. bun test never touches /Users/Shared.
   function scene(opts: { documents?: boolean } = {}) {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-capture-test-'));
+    const dir = mkdtempSync(join(SCRATCH, 'scene-'));
     const documents = join(dir, 'Documents');
     if (opts.documents) mkdirSync(documents);
     const tmp = join(dir, 'tmp');

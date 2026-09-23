@@ -1,11 +1,14 @@
-import { test, expect } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { afterAll, test, expect } from 'bun:test';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { replaceFile } from '../src/replace-file';
 
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-replace-file-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+
 function temp(name: string): string {
-  const dir = join(mkdtempSync(join(tmpdir(), 'screepub-test-')), name);
+  const dir = join(mkdtempSync(join(SCRATCH, 'test-')), name);
   mkdirSync(dir, { recursive: true });
   return dir;
 }

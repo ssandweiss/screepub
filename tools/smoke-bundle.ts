@@ -35,6 +35,7 @@ import {
   openSync,
   readdirSync,
   readSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -332,6 +333,9 @@ export function smokeBuiltBundles(
 }
 
 if (import.meta.main) {
+  // exitCode, never process.exit(): exit() ends the process on the spot and
+  // the finally that removes the work folder would never run.
+  let work: string | undefined;
   try {
     const { values } = parseArgs({
       args: Bun.argv.slice(2),
@@ -348,7 +352,7 @@ if (import.meta.main) {
     if (!expected) throw new Error('smoke-bundle: --expect-version <version> is required');
     const repo = join(import.meta.dir, '..');
     const fixture = values.fixture ?? join(repo, 'tests', 'fixtures', 'screenplay.pdf');
-    const work = mkdtempSync(join(tmpdir(), 'screepub-bundle-smoke-'));
+    work = mkdtempSync(join(tmpdir(), 'screepub-bundle-smoke-'));
 
     if (values.built) {
       // --built is what CI runs: whatever this runner's own `cargo tauri
@@ -368,6 +372,8 @@ if (import.meta.main) {
     }
   } catch (err) {
     console.error((err as Error).message);
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    if (work) rmSync(work, { recursive: true, force: true });
   }
 }

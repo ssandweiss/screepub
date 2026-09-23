@@ -10,7 +10,7 @@ afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 /** A mount parent with one Kobo in it. Injected through SCREEPUB_VOLUME_ROOTS
  * so the spawned CLI never enumerates this machine's real mounts. */
 function mountRootWithKobo(): string {
-  const root = mkdtempSync(join(tmpdir(), 'screepub-mounts-'));
+  const root = mkdtempSync(join(SCRATCH, 'mounts-'));
   mkdirSync(join(root, 'KOBOeReader', '.kobo'), { recursive: true });
   return root;
 }
@@ -24,7 +24,7 @@ afterAll(() => silent.stop(true));
  * default — mounts here, the tablet at SILENT_URL — so no test in this file
  * can read a real mount or reach the real reMarkable USB address, whatever it
  * asks the CLI to do. A caller that cares passes its own roots. */
-const NO_MOUNTS = mkdtempSync(join(tmpdir(), 'screepub-empty-'));
+const NO_MOUNTS = mkdtempSync(join(SCRATCH, 'empty-'));
 
 async function runCli(args: string[], env: Record<string, string> = {}, cwd = ROOT) {
   const proc = Bun.spawn(['bun', `${ROOT}src/cli.ts`, ...args], {
@@ -72,7 +72,7 @@ describe('screepub devices', () => {
 
   test('nothing connected is ok:true with an empty list and exit 0', async () => {
     const { stdout, exitCode } = await runCli(['devices', '--json'], {
-      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(tmpdir(), 'screepub-empty-')),
+      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(SCRATCH, 'empty-')),
     });
     // An empty list is an answer, not an error: an implementation that
     // reported no-devices here (as `send` correctly does) fails on BOTH.
@@ -92,7 +92,7 @@ describe('screepub devices', () => {
 
   test('human output says so when nothing is connected', async () => {
     const { stdout, exitCode } = await runCli(['devices'], {
-      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(tmpdir(), 'screepub-empty-')),
+      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(SCRATCH, 'empty-')),
     });
     expect(exitCode).toBe(0);
     expect(stdout.trim()).toBe('no devices connected');
@@ -116,7 +116,7 @@ describe('screepub devices', () => {
   test('a real reMarkable stub appears in the listing', async () => {
     const answering = Bun.serve({ port: 0, fetch: () => new Response('[]', { status: 200 }) });
     const { stdout } = await runCli(['devices', '--json'], {
-      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(tmpdir(), 'screepub-empty-')),
+      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(SCRATCH, 'empty-')),
       SCREEPUB_REMARKABLE_ENDPOINT: `http://127.0.0.1:${answering.port}`,
     });
     answering.stop(true);
@@ -127,14 +127,14 @@ describe('screepub devices', () => {
 });
 
 function kindleRoot(): { root: string; volume: string } {
-  const root = mkdtempSync(join(tmpdir(), 'screepub-mounts-'));
+  const root = mkdtempSync(join(SCRATCH, 'mounts-'));
   const volume = join(root, 'Kindle');
   mkdirSync(join(volume, 'documents'), { recursive: true });
   return { root, volume };
 }
 
 function book(name = 'Script.epub'): string {
-  const path = join(mkdtempSync(join(tmpdir(), 'screepub-book-')), name);
+  const path = join(mkdtempSync(join(SCRATCH, 'book-')), name);
   writeFileSync(path, 'book-bytes');
   return path;
 }
@@ -164,7 +164,7 @@ describe('screepub send', () => {
       },
     });
     const { stdout, exitCode } = await runCli(['send', book(), '--json'], {
-      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(tmpdir(), 'screepub-empty-')),
+      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(SCRATCH, 'empty-')),
       SCREEPUB_REMARKABLE_ENDPOINT: `http://127.0.0.1:${tablet.port}`,
     });
     tablet.stop(true);
@@ -178,7 +178,7 @@ describe('screepub send', () => {
   });
 
   test('--device picks one of several, and the others are untouched', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'screepub-mounts-'));
+    const root = mkdtempSync(join(SCRATCH, 'mounts-'));
     const kindle = join(root, 'Kindle');
     const kobo = join(root, 'KOBOeReader');
     mkdirSync(join(kindle, 'documents'), { recursive: true });
@@ -196,7 +196,7 @@ describe('screepub send', () => {
   });
 
   test('several connected and no --device is ambiguous-device, naming both', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'screepub-mounts-'));
+    const root = mkdtempSync(join(SCRATCH, 'mounts-'));
     const kindle = join(root, 'Kindle');
     const kobo = join(root, 'KOBOeReader');
     mkdirSync(join(kindle, 'documents'), { recursive: true });
@@ -213,7 +213,7 @@ describe('screepub send', () => {
 
   test('nothing connected is no-devices', async () => {
     const { stdout, exitCode } = await runCli(['send', book(), '--json'], {
-      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(tmpdir(), 'screepub-empty-')),
+      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(SCRATCH, 'empty-')),
     });
     expect(exitCode).toBe(1);
     expect(soleJson(stdout).error.code).toBe('no-devices');
@@ -231,7 +231,7 @@ describe('screepub send', () => {
   test('an extension reMarkable cannot read is unsupported-file', async () => {
     const tablet = Bun.serve({ port: 0, fetch: () => new Response('[]', { status: 200 }) });
     const { stdout, exitCode } = await runCli(['send', book('Script.azw3'), '--json'], {
-      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(tmpdir(), 'screepub-empty-')),
+      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(SCRATCH, 'empty-')),
       SCREEPUB_REMARKABLE_ENDPOINT: `http://127.0.0.1:${tablet.port}`,
     });
     tablet.stop(true);
@@ -245,7 +245,7 @@ describe('screepub send', () => {
       fetch: (req) => new Response('[]', { status: req.method === 'POST' ? 500 : 200 }),
     });
     const { stdout, exitCode } = await runCli(['send', book(), '--json'], {
-      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(tmpdir(), 'screepub-empty-')),
+      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(SCRATCH, 'empty-')),
       SCREEPUB_REMARKABLE_ENDPOINT: `http://127.0.0.1:${refusing.port}`,
     });
     refusing.stop(true);
@@ -261,7 +261,7 @@ describe('screepub send', () => {
 
   test('a file that is not there is unreadable', async () => {
     const { stdout, exitCode } = await runCli(['send', join(SCRATCH, 'ghost.epub'), '--json'], {
-      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(tmpdir(), 'screepub-empty-')),
+      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(SCRATCH, 'empty-')),
     });
     expect(exitCode).toBe(1);
     // Not no-devices: the file is checked before the device list is built.
@@ -283,10 +283,10 @@ describe('verb dispatch does not capture files', () => {
     // real cwd. `devices` has no extension, so the conversion path rejects it
     // as unsupported-type — which is exactly the proof that the FILE won: the
     // verb would have printed {"ok":true,"devices":[...]} and exited 0.
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-shadow-'));
+    const dir = mkdtempSync(join(SCRATCH, 'shadow-'));
     writeFileSync(join(dir, 'devices'), 'not a pdf');
     const { stdout, exitCode } = await runCli(['devices', '--json'], {
-      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(tmpdir(), 'screepub-empty-')),
+      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(SCRATCH, 'empty-')),
     }, dir);
     expect(exitCode).toBe(1);
     const result = soleJson(stdout);
@@ -297,16 +297,16 @@ describe('verb dispatch does not capture files', () => {
   test('the bare word lists devices in the same cwd with no such file', async () => {
     // Direction two. Same command, same cwd shape, only the file removed —
     // so the two tests differ in exactly the thing the rule is about.
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-shadow-'));
+    const dir = mkdtempSync(join(SCRATCH, 'shadow-'));
     const { stdout, exitCode } = await runCli(['devices', '--json'], {
-      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(tmpdir(), 'screepub-empty-')),
+      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(SCRATCH, 'empty-')),
     }, dir);
     expect(exitCode).toBe(0);
     expect(soleJson(stdout)).toEqual({ ok: true, devices: [] });
   });
 
   test('./devices always means the file', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-shadow-'));
+    const dir = mkdtempSync(join(SCRATCH, 'shadow-'));
     writeFileSync(join(dir, 'devices'), 'not a pdf');
     const { stdout, exitCode } = await runCli(['./devices', '--json'], {}, dir);
     expect(exitCode).toBe(1);
@@ -314,7 +314,7 @@ describe('verb dispatch does not capture files', () => {
   });
 
   test('a file named `send` converts rather than being a command', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-shadow-'));
+    const dir = mkdtempSync(join(SCRATCH, 'shadow-'));
     writeFileSync(join(dir, 'send'), 'not a pdf');
     const { stdout, exitCode } = await runCli(['send', '--json'], {}, dir);
     expect(exitCode).toBe(1);
@@ -418,7 +418,7 @@ describe('flag before verb', () => {
   test('a real file named devices gets no hint either', async () => {
     // Then the user meant the file — that is the shadowing rule — and telling
     // them to run the verb instead would be wrong.
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-shadow-'));
+    const dir = mkdtempSync(join(SCRATCH, 'shadow-'));
     writeFileSync(join(dir, 'devices'), 'not a pdf');
     const { stdout } = await runCli(['--json', 'devices'], {}, dir);
     expect(soleJson(stdout).error.message).not.toContain('did you mean');

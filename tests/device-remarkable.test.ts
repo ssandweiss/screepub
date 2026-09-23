@@ -1,5 +1,5 @@
 import { test, expect, afterAll } from 'bun:test';
-import { mkdtempSync, writeFileSync, truncateSync, openSync, closeSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, truncateSync, openSync, closeSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -9,6 +9,9 @@ import {
   uploadToRemarkable,
   remarkableAccepts,
 } from '../src/device/remarkable';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-device-remarkable-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 /** Records the request sequence, mirroring kit-check's StubRemarkable. The
  * real interface's /upload writes into the LAST-LISTED folder, so "upload to
@@ -39,7 +42,7 @@ const s = stub();
 afterAll(() => s.stop());
 
 function book(): string {
-  const path = join(mkdtempSync(join(tmpdir(), 'screepub-test-')), 'Script.epub');
+  const path = join(mkdtempSync(join(SCRATCH, 'test-')), 'Script.epub');
   writeFileSync(path, 'epub');
   return path;
 }
@@ -70,7 +73,7 @@ test('a failed root listing aborts the send with no blind POST', async () => {
 
 test('a file over the 100 MB cap is rejected before any network request', async () => {
   s.reset();
-  const big = join(mkdtempSync(join(tmpdir(), 'screepub-test-')), 'big.epub');
+  const big = join(mkdtempSync(join(SCRATCH, 'test-')), 'big.epub');
   closeSync(openSync(big, 'w'));
   truncateSync(big, REMARKABLE_MAX_UPLOAD_BYTES + 1); // sparse: instant to make
   await expect(uploadToRemarkable(big, s.url)).rejects.toThrow('100 MB');
@@ -79,7 +82,7 @@ test('a file over the 100 MB cap is rejected before any network request', async 
 
 test('only PDF and EPUB are accepted', async () => {
   s.reset();
-  const azw3 = join(mkdtempSync(join(tmpdir(), 'screepub-test-')), 'Script.azw3');
+  const azw3 = join(mkdtempSync(join(SCRATCH, 'test-')), 'Script.azw3');
   writeFileSync(azw3, 'x');
   // The literal `not .azw3.`, not the bare extension: the filename itself ends
   // in .azw3, so a message that merely echoed the path would satisfy a looser

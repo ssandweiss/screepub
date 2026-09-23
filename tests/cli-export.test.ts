@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { afterAll, describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,9 @@ import { exportCommand } from '../src/cli-export';
 import { availableFormats, type FreshKindleArtifactOptions } from '../src/export/artifact';
 import { isCalibreAvailable } from '../src/export/calibre';
 import type { KfxStatus } from '../src/export/kfx';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-cli-export-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 const kfxReadyStatus: KfxStatus = { calibre: true, previewer: true, pluginInstalled: true, ready: true };
 const calibreOnlyStatus: KfxStatus = { calibre: true, previewer: false, pluginInstalled: false, ready: false };
@@ -16,7 +19,7 @@ let epub: string;
 let fountain: string;
 
 beforeEach(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'screepub-export-'));
+  dir = mkdtempSync(join(SCRATCH, 'export-'));
   epub = join(dir, 'Script.epub');
   fountain = join(dir, 'Script.fountain');
   writeFileSync(fountain, 'INT. ROOM - DAY\n\nMARGO\nHello.\n');

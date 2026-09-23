@@ -7,7 +7,8 @@
 // Plugin INSTALLATION lives at the bottom of this file. It used to be
 // deferred because it "needs the vendored 485 KB zip"; there is no zip now,
 // and that is the point — see the comment above installKfxPlugin.
-import { existsSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { platform } from 'node:process';
 import { calibreTool, runCalibre, CALIBRE_FORMAT_GUARDS, CalibreMissingError, CalibreFailedError } from './calibre';
@@ -135,9 +136,22 @@ export async function toKfx(
   if (!status.ready) throw new KfxToolchainNotReadyError(status);
   const kfx = kfxSibling(epub);
   const scratch = kfxScratchPath(epub);
+  // Kindle Previewer, which the plugin runs to do the real conversion,
+  // writes a <uuid>/ folder into the temp folder on EVERY run (conv_out/,
+  // conversionLog.csv, an intermediate .mobi; about 250 KB) and never
+  // removes it. Measured 2026-09-22 with Calibre, KFX Output and Previewer
+  // 3 on macOS: one conversion, one new folder in $TMPDIR, and 189 had
+  // piled up there. Previewer honours TMPDIR (same measurement, redirected:
+  // the folder landed in the redirect instead), and the plugin passes
+  // TMPDIR, TMP and TEMP through to it, so each conversion gets a temp
+  // folder of its own and loses it, whatever Previewer left inside, when
+  // the conversion ends either way. TMP and TEMP are Windows's names for
+  // the same thing; Previewer on Windows has not been measured.
+  const previewerTmp = mkdtempSync(join(tmpdir(), 'screepub-kfx-'));
+  const env = { ...process.env, TMPDIR: previewerTmp, TMP: previewerTmp, TEMP: previewerTmp };
   onStage?.('converting to KFX (Kindle Previewer can take ~20s to start)…');
   try {
-    await runCalibre(tool, [epub, scratch, ...CALIBRE_FORMAT_GUARDS]);
+    await runCalibre(tool, [epub, scratch, ...CALIBRE_FORMAT_GUARDS], env);
     if (!existsSync(scratch)) {
       throw new CalibreFailedError('ebook-convert exited cleanly but produced no .kfx');
     }
@@ -146,6 +160,8 @@ export async function toKfx(
   } catch (error) {
     rmSync(scratch, { force: true });
     throw error;
+  } finally {
+    rmSync(previewerTmp, { recursive: true, force: true });
   }
   return kfx;
 }

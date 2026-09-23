@@ -1,15 +1,18 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { afterAll, describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { settingsCommand } from '../src/cli-settings';
 import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
 
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-cli-settings-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+
 let dir: string;
 let fountain: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'screepub-settings-'));
+  dir = mkdtempSync(join(SCRATCH, 'settings-'));
   fountain = join(dir, 'Script.fountain');
   writeFileSync(fountain, 'INT. ROOM - DAY\n\nA beat.\n');
 });

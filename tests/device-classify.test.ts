@@ -1,11 +1,14 @@
-import { test, expect } from 'bun:test';
-import { mkdtempSync, mkdirSync } from 'node:fs';
+import { afterAll, test, expect } from 'bun:test';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classify, volumeName } from '../src/device/classify';
 
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-device-classify-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+
 function volume(name: string, subdirs: string[] = []): string {
-  const dir = join(mkdtempSync(join(tmpdir(), 'screepub-test-')), name);
+  const dir = join(mkdtempSync(join(SCRATCH, 'test-')), name);
   mkdirSync(dir, { recursive: true });
   for (const sub of subdirs) mkdirSync(join(dir, sub), { recursive: true });
   return dir;
@@ -75,7 +78,7 @@ test('a Windows-shaped drive root with a .kobo signature still classifies as Kob
   // depend on the name at all, so it survives even here. (Backslash is just
   // a literal filename character on this POSIX test host, standing in for
   // the shape of a real Windows drive root.)
-  const parent = mkdtempSync(join(tmpdir(), 'screepub-test-'));
+  const parent = mkdtempSync(join(SCRATCH, 'test-'));
   const driveRoot = join(parent, 'D:\\');
   mkdirSync(join(driveRoot, '.kobo'), { recursive: true });
   expect(classify(driveRoot)).toBe('kobo');

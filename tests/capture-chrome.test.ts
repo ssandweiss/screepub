@@ -4,7 +4,7 @@
 // tools/capture/cdp.ts runs unchanged, so its failure paths (a Chrome that
 // dies at start, one that lists no page, a connection that drops) are
 // exercised without a real Chrome or /Users/Shared. A few seconds.
-import { afterEach, describe, test, expect } from 'bun:test';
+import { afterAll, afterEach, describe, test, expect } from 'bun:test';
 import {
   chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
 } from 'node:fs';
@@ -13,6 +13,9 @@ import { join } from 'node:path';
 import { launch } from '../tools/capture/cdp';
 import { runCapture } from '../tools/capture/run';
 import { SHOTS } from '../tools/capture/shots';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-chrome-driver-test-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 const ROOT = join(import.meta.dir, '..');
 const SCRIPT = join(ROOT, 'tests', 'fixtures', 'fake-chrome', 'chrome.sh');
@@ -83,7 +86,7 @@ function fakeChrome(o: Fake = {}, { die = false } = {}) {
       },
     },
   });
-  const dir = mkdtempSync(join(tmpdir(), 'screepub-fake-chrome-'));
+  const dir = mkdtempSync(join(SCRATCH, 'fake-chrome-'));
   const chrome = join(dir, 'chrome.sh');
   copyFileSync(SCRIPT, chrome);
   chmodSync(chrome, 0o755);
@@ -181,7 +184,7 @@ describe('a capture run, against a fake Chrome', () => {
     // server's handler throws on it. Without the catch, Bun answers with a
     // 67 KB HTML error page, the page never says ready, and all the run
     // could report after 150 s is "timed out".
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-capture-test-'));
+    const dir = mkdtempSync(join(SCRATCH, 'run-'));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const repo = join(dir, 'repo');
     mkdirSync(join(repo, 'desktop', 'ui'), { recursive: true });

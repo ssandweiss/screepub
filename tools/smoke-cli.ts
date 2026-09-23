@@ -9,7 +9,7 @@
 //
 //   bun tools/smoke-cli.ts --binary ./screepub
 
-import { existsSync, mkdtempSync, openSync, readSync, closeSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, openSync, readSync, closeSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -121,6 +121,9 @@ export function smokeCli(
 }
 
 if (import.meta.main) {
+  // exitCode, never process.exit(): exit() ends the process on the spot and
+  // the finally that removes the work folder would never run.
+  let work: string | undefined;
   try {
     const { values } = parseArgs({
       args: Bun.argv.slice(2),
@@ -137,11 +140,13 @@ if (import.meta.main) {
     const version = (
       JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')) as { version: string }
     ).version;
-    const work = mkdtempSync(join(tmpdir(), 'screepub-smoke-'));
+    work = mkdtempSync(join(tmpdir(), 'screepub-smoke-'));
     smokeCli(values.binary, fixture, work, version);
     console.log(`smoke: ${values.binary} converts, reports ${version}, and lists devices`);
   } catch (err) {
     console.error((err as Error).message);
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    if (work) rmSync(work, { recursive: true, force: true });
   }
 }

@@ -1,9 +1,12 @@
 import { test, expect, afterAll } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CliError, errorMessage } from '../src/cli-errors';
 import { resolveCommand, VERBS } from '../src/cli-devices';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-cli-devices-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 // No spawning helper lives here on purpose. Every test in this file drives the
 // handlers IN PROCESS with injected seams; the spawned-CLI tests live in
@@ -166,13 +169,13 @@ test('selection matches on the id, never on a prefix or the name', () => {
 });
 
 function book(name = 'Script.epub'): string {
-  const path = join(mkdtempSync(join(tmpdir(), 'screepub-send-')), name);
+  const path = join(mkdtempSync(join(SCRATCH, 'send-')), name);
   writeFileSync(path, 'book-bytes');
   return path;
 }
 
 function kindleVolume(): ConnectedDevice {
-  const volume = join(mkdtempSync(join(tmpdir(), 'screepub-vol-')), 'Kindle');
+  const volume = join(mkdtempSync(join(SCRATCH, 'vol-')), 'Kindle');
   mkdirSync(join(volume, 'documents'), { recursive: true });
   return { kind: 'kindle', name: 'Kindle', volume };
 }
@@ -244,7 +247,7 @@ test('a failed copy is send-failed, carrying the underlying message', async () =
   // A volume path whose PARENT is a regular file: mkdirSync fails with
   // ENOTDIR on every platform, so this is deterministic rather than relying
   // on a read-only directory the test runner might happen to own.
-  const blocker = join(mkdtempSync(join(tmpdir(), 'screepub-block-')), 'not-a-dir');
+  const blocker = join(mkdtempSync(join(SCRATCH, 'block-')), 'not-a-dir');
   writeFileSync(blocker, 'x');
   const device: ConnectedDevice = { kind: 'kobo', name: 'KOBOeReader', volume: join(blocker, 'Kobo') };
   let thrown: unknown;
@@ -281,7 +284,7 @@ test('a file that is not there is unreadable, and no device is touched', async (
   let thrown: unknown;
   try {
     await sendCommand({
-      file: join(tmpdir(), 'screepub-no-such-file.epub'),
+      file: join(SCRATCH, 'no-such-file.epub'),
       scan: () => { scanned += 1; return []; },
       probe: async () => false,
     });
@@ -294,7 +297,7 @@ test('a file that is not there is unreadable, and no device is touched', async (
 });
 
 test('a directory given as the file is unreadable, not send-failed', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'screepub-dir-'));
+  const dir = mkdtempSync(join(SCRATCH, 'dir-'));
   let thrown: unknown;
   try {
     await sendCommand({ file: dir, scan: () => [kindleVolume()], probe: async () => false });

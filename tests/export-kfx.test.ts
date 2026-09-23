@@ -1,5 +1,5 @@
-import { describe, test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync } from 'node:fs';
+import { afterAll, describe, test, expect } from 'bun:test';
+import { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { platform } from 'node:process';
@@ -14,6 +14,9 @@ import {
   KfxToolchainNotReadyError,
 } from '../src/export/kfx';
 import { calibreTool, CALIBRE_FORMAT_GUARDS } from '../src/export/calibre';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-export-kfx-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 test('Kindle Previewer is never found on Linux — Amazon ships no build', () => {
   if (platform === 'linux') expect(previewerPath()).toBeNull();
@@ -67,7 +70,7 @@ test('toKfx refuses outright when Calibre is absent', async () => {
   // hardware pass in piece C. What IS testable everywhere is that it fails
   // honestly rather than reporting success with no file.
   if (calibreTool('ebook-convert')) return;
-  await expect(toKfx(join(tmpdir(), 'screepub-nonexistent.epub'))).rejects.toThrow(
+  await expect(toKfx(join(SCRATCH, 'nonexistent.epub'))).rejects.toThrow(
     'ebook-convert was not found',
   );
 });
@@ -91,7 +94,7 @@ test('kfxSibling matches the extension case-insensitively', () => {
 // Linux. Everything else — argv, the scratch file, the rename — is real.
 
 function fakeEbookConvert(): { tool: string; argvLog: string; workDir: string } {
-  const toolDir = mkdtempSync(join(tmpdir(), 'screepub-kfx-fake-'));
+  const toolDir = mkdtempSync(join(SCRATCH, 'kfx-fake-'));
   const name = platform === 'win32' ? 'ebook-convert.exe' : 'ebook-convert';
   const tool = join(toolDir, name);
   const argvLog = join(toolDir, 'argv.log');
@@ -99,7 +102,7 @@ function fakeEbookConvert(): { tool: string; argvLog: string; workDir: string } 
   // to write — mimicking ebook-convert's own file creation.
   writeFileSync(tool, `#!/bin/sh\nfor a in "$@"; do echo "$a"; done > "${argvLog}"\ntouch "$2"\n`);
   chmodSync(tool, 0o755);
-  const workDir = mkdtempSync(join(tmpdir(), 'screepub-kfx-work-'));
+  const workDir = mkdtempSync(join(SCRATCH, 'kfx-work-'));
   return { tool, argvLog, workDir };
 }
 
@@ -151,6 +154,69 @@ test('toKfx refuses when the toolchain is not ready, naming what is missing', as
   expect(existsSync(kfxSibling(epub))).toBe(false); // and nothing was written
 });
 
+// --- Kindle Previewer's leftovers. The plugin hands the conversion to
+// Kindle Previewer, and Previewer writes a <uuid>/ folder into $TMPDIR on
+// every run (conv_out/, conversionLog.csv, an intermediate .mobi, about
+// 250 KB) and never removes it. Measured 2026-09-22 against Calibre, the
+// KFX Output plugin and Kindle Previewer 3: one real conversion, one new
+// folder, and 189 of them had piled up on the machine that measured it.
+// Previewer honours TMPDIR, so the fix is a temp folder per conversion
+// that toKfx owns and removes. This fake does what Previewer does to
+// whatever $TMPDIR it is handed, and writes down which folder that was.
+function leakyEbookConvert(exitCode: number) {
+  const toolDir = mkdtempSync(join(SCRATCH, 'kfx-leaky-'));
+  const tool = join(toolDir, 'ebook-convert');
+  const seen = join(toolDir, 'tmpdir.txt');
+  const leftover = crypto.randomUUID();
+  writeFileSync(tool, [
+    '#!/bin/sh',
+    'dir="${TMPDIR:-/tmp}"',
+    `printf '%s' "$dir" > "${seen}"`,
+    `mkdir -p "$dir/${leftover}/conv_out"`,
+    `echo '"Type","Description"' > "$dir/${leftover}/conversionLog.csv"`,
+    exitCode === 0 ? 'touch "$2"' : `echo 'Kindle Previewer failed' >&2; exit ${exitCode}`,
+    '',
+  ].join('\n'));
+  chmodSync(tool, 0o755);
+  const workDir = mkdtempSync(join(SCRATCH, 'kfx-work-'));
+  const epub = join(workDir, 'book.epub');
+  writeFileSync(epub, 'fake epub bytes');
+  return {
+    tool,
+    epub,
+    /** The temp folder the tool was given, and whether Previewer's folder
+     *  is still in it. Removes that one folder if it is, so a failing run
+     *  of this test does not add to the pile it is about. */
+    after: () => {
+      const dir = readFileSync(seen, 'utf8');
+      const left = join(dir, leftover);
+      const stillThere = { tmp: existsSync(dir), leftover: existsSync(left) };
+      rmSync(left, { recursive: true, force: true });
+      return stillThere;
+    },
+  };
+}
+
+test('toKfx gives Kindle Previewer its own temp folder and removes it, leftovers and all', async () => {
+  if (platform === 'win32') return; // the fake tool is a /bin/sh script
+  const fake = leakyEbookConvert(0);
+
+  const out = await toKfx(fake.epub, undefined, { tool: () => fake.tool, status: async () => READY });
+
+  expect(existsSync(out)).toBe(true); // the conversion itself still lands
+  expect(fake.after()).toEqual({ tmp: false, leftover: false });
+});
+
+test('a failed conversion removes Kindle Previewer’s temp folder too', async () => {
+  if (platform === 'win32') return;
+  const fake = leakyEbookConvert(1);
+
+  const attempt = toKfx(fake.epub, undefined, { tool: () => fake.tool, status: async () => READY });
+
+  await expect(attempt).rejects.toThrow('Kindle Previewer failed');
+  expect(fake.after()).toEqual({ tmp: false, leftover: false });
+});
+
 // --- pluginInstalled: exercised directly against a fake calibre-customize
 // so the "KFX Output" substring check is actually proven, not just assumed.
 // Without these, a mutant that hardcodes pluginInstalled to `calibre`
@@ -164,7 +230,7 @@ function withFakeCustomize(pluginListing: string, run: (dir: string) => Promise<
   return async () => {
     if (!describesPathScan) return;
     if (calibreTool('calibre-customize')) return; // never shadow a real install
-    const dir = mkdtempSync(join(tmpdir(), 'screepub-kfx-customize-'));
+    const dir = mkdtempSync(join(SCRATCH, 'kfx-customize-'));
     const name = platform === 'win32' ? 'calibre-customize.exe' : 'calibre-customize';
     const fake = join(dir, name);
     writeFileSync(fake, `#!/bin/sh\ncat <<'EOF'\n${pluginListing}\nEOF\n`);

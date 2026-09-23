@@ -3,6 +3,9 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-desktop-ui-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+
 const UI = join(new URL('..', import.meta.url).pathname, 'desktop', 'ui');
 const read = (name: string) => readFileSync(join(UI, name), 'utf8');
 const cssFiles = () => readdirSync(UI).filter((f) => f.endsWith('.css'));
@@ -654,7 +657,7 @@ describe('what the Convert surface decides', () => {
     const root = new URL('..', import.meta.url).pathname;
     const proc = Bun.spawn(
       ['bun', join(root, 'src', 'cli.ts'), join(root, 'tests', 'fixtures', 'screenplay.pdf'),
-        '--json', '--progress', '-o', join(tmpdir(), 'screepub-convert-progress.epub')],
+        '--json', '--progress', '-o', join(SCRATCH, 'convert-progress.epub')],
       { stdout: 'pipe', stderr: 'pipe' },
     );
     const [stderr] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
@@ -742,7 +745,7 @@ describe('what the Convert surface decides', () => {
     const root = new URL('..', import.meta.url).pathname;
     const proc = Bun.spawn(
       ['bun', join(root, 'src', 'cli.ts'), join(root, 'tests', 'fixtures', 'prose.pdf'),
-        '--json', '-o', join(tmpdir(), 'screepub-convert-surface.epub')],
+        '--json', '-o', join(SCRATCH, 'convert-surface.epub')],
       { stdout: 'pipe', stderr: 'pipe' },
     );
     const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
@@ -1457,7 +1460,7 @@ describe('what the Read surface decides', () => {
     const proc = Bun.spawn(
       ['bun', join(root, 'src', 'cli.ts'), join(root, 'tests', 'fixtures', 'screenplay.pdf'),
         '--json', '--preview-inline', '--no-fountain',
-        '-o', join(tmpdir(), 'screepub-read-surface.epub')],
+        '-o', join(SCRATCH, 'read-surface.epub')],
       { stdout: 'pipe', stderr: 'pipe' },
     );
     const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
@@ -2826,7 +2829,7 @@ describe('the ladder the Send surface asks for, without a toolchain', () => {
   let epub: string;
 
   beforeAll(() => {
-    dir = mkdtempSync(join(tmpdir(), 'screepub-send-'));
+    dir = mkdtempSync(join(SCRATCH, 'send-'));
     epub = join(dir, 'script.epub');
     writeFileSync(epub, 'not really an epub, but it is a file');
   });
