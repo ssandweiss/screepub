@@ -41,6 +41,9 @@ export const PROVEN = { kind: 'kindle', platform: 'mac' };
 
 export const KINDS = ['kindle', 'kobo', 'tolino', 'remarkable'];
 
+/** Something a person could read: a string with more than spaces in it. */
+const isText = (value) => typeof value === 'string' && value.trim() !== '';
+
 /** Every reader Screepub can reach, and how — shown whether or not one is
  *  connected, because with nothing plugged in this list IS the surface. The
  *  route is stated in full: "a Kindle gets an EPUB" would be wrong in a way
@@ -265,17 +268,34 @@ export const NO_MESSAGE = 'The engine refused to send without saying why.';
 /** The one place that decides what the status line says, so a line drawn at
  *  the start of a send and a line drawn at the end of one cannot disagree.
  *  `bad` is false for every phase but failure: a new attempt after a failed
- *  one has to clear the alarm, not inherit it. */
-export function statusFor(phase, { device = null, detail = '' } = {}) {
+ *  one has to clear the alarm, not inherit it.
+ *
+ *  The route phases sit beside the device ones: `opening` names the route
+ *  (its title, the engine's word for it), `saving` is the dialog's copy, and
+ *  `building-kindle` says the wait up front, because the Kindle rung can sit
+ *  in Kindle Previewer for twenty seconds with nothing else moving. `done` is
+ *  a route's own sentence, as `sent` is a device's. */
+export function statusFor(phase, { device = null, detail = '', route = null } = {}) {
   const name = device?.name ?? 'the reader';
   if (phase === 'failed') {
     const said = typeof detail === 'string' ? detail.trim() : '';
     return { line: said === '' ? NO_MESSAGE : said, bad: true };
   }
-  if (phase === 'sent') return { line: detail, bad: false };
+  if (phase === 'sent' || phase === 'done') return { line: detail, bad: false };
   if (phase === 'building') return { line: `Building the file ${name} can open…`, bad: false };
   if (phase === 'preparing') return { line: `Getting the book ready for ${name}…`, bad: false };
   if (phase === 'copying') return { line: `Copying it to ${name}…`, bad: false };
+  if (phase === 'opening') {
+    const title = isText(route?.title) ? route.title.trim() : '';
+    return { line: title === '' ? 'Opening…' : `Opening ${title}…`, bad: false };
+  }
+  if (phase === 'saving') return { line: 'Saving…', bad: false };
+  if (phase === 'building-kindle') {
+    return {
+      line: 'Building the Kindle file (Kindle Previewer can take about twenty seconds)…',
+      bad: false,
+    };
+  }
   return { line: '', bad: false };
 }
 
@@ -317,6 +337,149 @@ export function needsSettings(script) {
  *  "building" for the one that builds nothing would be theatre. */
 export function preparingPhase(device) {
   return forFormat(device) === 'kindle' ? 'building' : 'preparing';
+}
+
+// Routes: every way the book can leave, as `screepub routes` lists them.
+//
+// The catalog is the ENGINE's (src/export/routes.ts): which routes exist
+// here, their order, their words, which one is chosen, and why a dimmed one
+// cannot fire. What follows only checks that answer's shape and says what
+// the window does with each row. It never ranks, renames or hides one; if
+// anything here starts to decide which route is better, it belongs there.
+
+/** Why a listed row cannot fire, in the engine's three words. */
+const UNAVAILABLE = new Set(['connect', 'platform', 'setup']);
+
+/** A connected device as a row carries it, rebuilt clean, or null. Same
+ *  fields as deviceFrom() above, held to the stricter standard of a route:
+ *  `volume` has to be THERE (a string, or null for a reMarkable, which JSON
+ *  keeps), because a missing one means the engine changed its shape. */
+function routeDeviceFrom(device) {
+  if (typeof device !== 'object' || device === null || Array.isArray(device)) return null;
+  if (!isText(device.id) || !isText(device.kind) || !isText(device.name)) return null;
+  if (typeof device.volume !== 'string' && device.volume !== null) return null;
+  return { id: device.id, kind: device.kind, name: device.name, volume: device.volume };
+}
+
+/** One row, rebuilt clean, or null. The engine's rules, each one checked:
+ *  `unavailable` exactly when the row is not available, and a `device`
+ *  exactly on an available row that sends to one (a device row with no
+ *  device has nothing to hand to `send`; a device on any other row means
+ *  the list is not the shape the engine promises). */
+function routeFrom(route) {
+  if (typeof route !== 'object' || route === null || Array.isArray(route)) return null;
+  const { id, key, title, detail, button, available } = route;
+  if (![id, key, title, detail, button].every(isText)) return null;
+  if (typeof available !== 'boolean') return null;
+  if (available && route.unavailable !== undefined) return null;
+  if (!available && !UNAVAILABLE.has(route.unavailable)) return null;
+  const sendsToDevice = available && isDeviceRoute(route);
+  if ((route.device !== undefined) !== sendsToDevice) return null;
+  const clean = { id, key, title, detail, button, available };
+  if (!available) clean.unavailable = route.unavailable;
+  if (sendsToDevice) {
+    const device = routeDeviceFrom(route.device);
+    if (device === null) return null;
+    clean.device = device;
+  }
+  return clean;
+}
+
+/** `routes --json`'s answer as `{ routes, chosen }`, or null.
+ *
+ *  Taken whole or not at all, the way kfx.js takes its checklist: a list
+ *  with one broken row is not drawn with that row missing, because the rows
+ *  ARE the page and a quietly shorter list reads as a route that does not
+ *  exist. Null sends the page to the engine's failure line instead. The
+ *  copies are rebuilt field by field, so nothing the engine happened to
+ *  attach rides along into the drawing, and the engine's words are kept
+ *  exactly as written (an unavailable row's detail is its fix, shown as is).
+ *  Ids are unique and `chosen` is one of them: an id is what the page tells
+ *  rows apart by and what gets the brass button. */
+export function routesFrom(answer) {
+  if (answer?.ok !== true || !Array.isArray(answer.routes)) return null;
+  const list = answer.routes.map(routeFrom);
+  if (list.some((route) => route === null)) return null;
+  const ids = new Set(list.map((route) => route.id));
+  if (ids.size !== list.length) return null;
+  if (!ids.has(answer.chosen)) return null;
+  return { routes: list, chosen: answer.chosen };
+}
+
+/** Whether a row goes through `export` then `send`, the device flow with its
+ *  own phases: a volume reader of any kind (a kind this file has never heard
+ *  of included, as deviceFrom() keeps one), or a docked reMarkable. */
+export function isDeviceRoute(route) {
+  const key = route?.key;
+  if (typeof key !== 'string') return false;
+  return key.startsWith('device:') || key === 'remarkable';
+}
+
+/** The button a row gets: brass for the chosen route, outline for every
+ *  other one that can fire, and none at all for a row that cannot. A chosen
+ *  row that is unavailable (the Kindle you used last time, unplugged) keeps
+ *  its place at the top and waits without a button. */
+export function buttonClassFor(route, chosenId) {
+  if (route?.available !== true) return null;
+  return route.id === chosenId ? 'btn btn-brad' : 'btn btn-outline';
+}
+
+/** Used only when a path has no name in it at all, so the dialog never
+ *  starts on a bare ".epub", which a Mac would hide. */
+const SAVE_FALLBACK = 'Screenplay';
+
+const bareExtension = (extension) => String(extension ?? '').replace(/^\./, '');
+
+/** The save dialog's default name: the book's own stem with the extension of
+ *  the file being saved. The stem comes from the FILE name (a folder called
+ *  "v1.2" must not lend it a dot), with either separator, because the window
+ *  runs on Windows too. Only the last extension goes, so a title with dots
+ *  in it keeps them. */
+export function saveNameFor(epubPath, extension) {
+  const path = typeof epubPath === 'string' ? epubPath : '';
+  const file = path.split(/[/\\]/).pop() ?? '';
+  const dot = file.lastIndexOf('.');
+  const stem = dot > 0 ? file.slice(0, dot) : file;
+  return `${stem === '' ? SAVE_FALLBACK : stem}.${bareExtension(extension)}`;
+}
+
+/** The save dialog's one filter. The label is the engine's name for the
+ *  file; a filter with no label is named by its extension rather than left
+ *  as a blank line in the dialog. */
+export function saveFiltersFor(extension, label) {
+  const bare = bareExtension(extension);
+  const name = isText(label) ? label.trim() : bare.toUpperCase();
+  return [{ name, extensions: [bare] }];
+}
+
+/** Stand-in for a route the engine says worked but did not describe. It
+ *  claims exactly what is known. "Done." would claim more: the window does
+ *  not know what the route did, only that the engine said ok. */
+export const NO_NOTE = 'The engine said it worked, without saying what it did.';
+
+/** What a route's answer (`route --json`) adds up to, as the pair statusFor
+ *  takes, the way outcomeFor() does for a device. `ok !== true` is the
+ *  failure path, in the engine's words, whatever else the answer carries: a
+ *  note on a refusal is not a success. */
+export function routeNoteFrom(answer) {
+  if (answer?.ok !== true) return ['failed', { detail: failureMessage(answer) }];
+  return ['done', { detail: isText(answer.note) ? answer.note.trim() : NO_NOTE }];
+}
+
+/** The email route's first-time step. Amazon throws away mail from a sender
+ *  it has not been told to accept, and says nothing, so a first send that
+ *  "worked" never arrives. The Swift app offered a guide to Amazon's
+ *  Personal Document Settings page, where the Kindle's address lives and the
+ *  approved list is edited; this is that offer. `key` is what the engine
+ *  opens the page by: the window names no URL. Shown on the email row
+ *  whether or not it can fire here, because attaching the EPUB by hand
+ *  needs the same approval. */
+export function emailSetupHint(route) {
+  if (route?.key !== 'email-to-kindle') return null;
+  return {
+    line: 'First time? Amazon needs your sender address approved, or it drops the email without a word.',
+    key: 'kindle-email-setup',
+  };
 }
 
 export const EMPTY = {
