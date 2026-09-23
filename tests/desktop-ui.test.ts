@@ -1440,6 +1440,8 @@ describe('what the Read surface decides', () => {
     splitPreview: (html: string, parser: unknown) => { css: string; html: string };
     readerState: (script: unknown) => string;
     sceneLabel: (heading: unknown) => { place: string; time: string | null };
+    PAGE_MARKER_CLASS: string;
+    headingText: (node: unknown) => string;
     railEntries: (scenes: unknown) => { id: string; place: string; time: string | null }[];
     railCount: (total: number) => string;
     readerPlace: (marks: Mark[], scrollTop: number) => Place | null;
@@ -1693,6 +1695,64 @@ describe('what the Read surface decides', () => {
     const engine = readFileSync(
       join(new URL('..', import.meta.url).pathname, 'src', 'epub', 'html.ts'), 'utf8');
     expect(engine).toContain(`'${reader.OPENING}'`);
+  });
+
+  /** Just enough of a DOM node for headingText(): the two node types it
+   *  reads, a class list, and children. Not a browser, and it proves nothing
+   *  about one; it proves the walk skips what it should and keeps the rest. */
+  const textNode = (value: string) => ({ nodeType: 3, nodeValue: value, childNodes: [] });
+  const element = (className: string, ...children: unknown[]) => ({
+    nodeType: 1,
+    classList: { contains: (c: string) => className.split(' ').includes(c) },
+    childNodes: children,
+  });
+
+  test('a page number the engine carries inside a heading never reaches the rail', () => {
+    // The bug: since 0.7.0 page numbers are on by default, and when a scene
+    // starts a new page the engine puts that page's marker INSIDE the scene
+    // heading, as a floated span (registry 13a). Reading the heading's whole
+    // text listed the scene as "2.EXT. FIELD STATION - DAY".
+    const heading = element('scene-heading',
+      element(reader.PAGE_MARKER_CLASS, textNode('2.')),
+      textNode('EXT. FIELD STATION - DAY'));
+    expect(reader.headingText(heading)).toBe('EXT. FIELD STATION - DAY');
+    expect(reader.sceneLabel(reader.headingText(heading))).toEqual({
+      place: 'EXT. FIELD STATION', time: 'DAY',
+    });
+    // A heading with no marker is read as it always was.
+    expect(reader.headingText(element('scene-heading', textNode('INT. KITCHEN - NIGHT'))))
+      .toBe('INT. KITCHEN - NIGHT');
+    // Only the marker goes: other markup inside a heading keeps its words.
+    expect(reader.headingText(element('scene-heading',
+      textNode('INT. '), element('bold', textNode('THE VAULT')), textNode(' - DAY'))))
+      .toBe('INT. THE VAULT - DAY');
+    // A marker nested deeper, or one carrying more classes, is still a marker.
+    expect(reader.headingText(element('scene-heading',
+      element('wrap', element(`x ${reader.PAGE_MARKER_CLASS}`, textNode('14.'))),
+      textNode('INT. FIELD STATION - NIGHT'))))
+      .toBe('INT. FIELD STATION - NIGHT');
+    // No heading at all is the Opening, as before.
+    expect(reader.headingText(null)).toBe('');
+    expect(reader.sceneLabel(reader.headingText(undefined)).place).toBe('Opening');
+  });
+
+  test('the marker’s class is the one the engine actually writes', () => {
+    // Two files, one string: the engine names the span, the window skips it.
+    // If the engine renamed the class, headingText() would skip nothing and
+    // every page number would be back in the rail, with no test failing.
+    expect(reader.PAGE_MARKER_CLASS).toBe('page-marker');
+    expect(preview).toContain(`class="${reader.PAGE_MARKER_CLASS}"`);
+    const engine = readFileSync(
+      join(new URL('..', import.meta.url).pathname, 'src', 'epub', 'html.ts'), 'utf8');
+    expect(engine).toContain(`class="${reader.PAGE_MARKER_CLASS}"`);
+  });
+
+  test('the rail reads headings through headingText, not textContent', () => {
+    // The drawing half of read.js has no DOM here to run in, so the call is
+    // pinned by what the source says.
+    const source = readFileSync(join(UI, 'read.js'), 'utf8');
+    expect(source).toMatch(/heading:\s*headingText\(scene\.querySelector\('h2\.scene-heading'\)\)/);
+    expect(source).not.toMatch(/querySelector\('h2\.scene-heading'\)\?\.textContent/);
   });
 
   test('the rail keeps the engine’s order and skips what it cannot link to', () => {

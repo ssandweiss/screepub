@@ -176,6 +176,35 @@ export function sceneLabel(heading) {
   return { place, time };
 }
 
+/** The class the engine gives a printed page number (src/epub/html.ts). */
+export const PAGE_MARKER_CLASS = 'page-marker';
+
+/** A scene heading's words, without the page number the engine may carry
+ *  inside it.
+ *
+ *  When a scene starts a new page, the engine puts that page's marker in
+ *  the heading itself, as a floated span (registry 13a), because a marker
+ *  rides inside the next block rather than costing a line of its own. So
+ *  the heading's textContent reads "2.EXT. FIELD STATION - DAY", and since
+ *  page numbers went on by default in 0.7.0 that is what the rail showed.
+ *  This walks the heading and keeps every word except a marker's.
+ *
+ *  Takes the node rather than its text so the decision can be made without
+ *  guessing at digits: a heading that genuinely starts with a number keeps
+ *  it. Pure over anything node-shaped, which is how it is tested without a
+ *  DOM. */
+export function headingText(node) {
+  if (!node) return '';
+  let out = '';
+  for (const child of node.childNodes ?? []) {
+    if (child.nodeType === 3) out += child.nodeValue ?? '';
+    else if (child.nodeType === 1 && !child.classList?.contains(PAGE_MARKER_CLASS)) {
+      out += headingText(child);
+    }
+  }
+  return out;
+}
+
 /** How far one key press moves the reader down the script.
  *
  *  The frame is the document, so a keyboard reader has to be able to move it.
@@ -615,7 +644,7 @@ function buildRail(doc) {
   const sections = [...doc.querySelectorAll('section.scene')];
   const entries = railEntries(sections.map((scene) => ({
     id: scene.id,
-    heading: scene.querySelector('h2.scene-heading')?.textContent,
+    heading: headingText(scene.querySelector('h2.scene-heading')),
   })));
 
   if (entries.length === 0) {
