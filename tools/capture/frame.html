@@ -1,0 +1,40 @@
+<!doctype html>
+<!-- Pass two of a window picture. Pass one captured the window at its own
+     860 by 620 size (it pins its binding with fixed positioning, so it
+     cannot be drawn inside a smaller box). This page places that image in
+     a macOS-style frame: rounded corners, a hairline edge, a soft shadow,
+     and the three traffic lights sitting ON the paper, where the window's
+     Overlay title bar puts them. The tool captures it on a transparent
+     background. ?img= is the pass-one image; ?w= and ?h= its CSS size. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: transparent; }
+  .pad { padding: 44px 56px 68px; }
+  .win {
+    position: relative; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 0 0 0.5px rgba(0,0,0,.28), 0 22px 60px rgba(0,0,0,.30), 0 6px 16px rgba(0,0,0,.14);
+  }
+  .win img { display: block; }
+  .lights { position: absolute; top: 14px; left: 14px; display: flex; gap: 8px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,.22); }
+  .lights i:nth-child(1) { background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; }
+  .lights i:nth-child(3) { background: #28c840; }
+</style>
+</head>
+<body>
+<div class="pad"><div class="win"><img id="shot" alt=""><div class="lights"><i></i><i></i><i></i></div></div></div>
+<script>
+  window.__captureState = 'working';
+  const p = new URLSearchParams(location.search);
+  const img = document.getElementById('shot');
+  img.width = Number(p.get('w'));
+  img.height = Number(p.get('h'));
+  img.onload = () => { window.__captureState = 'ready'; };
+  img.onerror = () => { window.__captureState = 'failed'; window.__captureError = 'pass-one image did not load'; };
+  img.src = p.get('img');
+</script>
+</body>
+</html>
