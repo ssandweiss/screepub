@@ -100,9 +100,12 @@ epubcheck <out.epub>        # validate output (brew-installed)
   **`torture.pdf`** — 14 sheets exercising every content-driven registry
   behavior, whose coverage is tracked row-by-row in
   `tools/torture-manifest.json`. `bun tools/device-checklist.ts` prints the
-  device-side half of that manifest for a hardware pass. All four regenerate
-  from `make-fixture.py`, and `tests/fixture-stability.test.ts` fails if the
-  first three stop reproducing byte-for-byte.
+  device-side half of that manifest for a hardware pass. And
+  **`field-station.pdf`**, the invented 18-page feature every README and site
+  picture shows; the site's own scene sits on its pages 14 to 18, and
+  `tests/field-station.test.ts` checks that. All five regenerate from
+  `make-fixture.py`, and `tests/fixture-stability.test.ts` fails if any but
+  `torture.pdf` stops reproducing byte-for-byte.
 - Fixture sweep + epubcheck after any stage-1/CSS change. Test
   end-to-end with real PDFs too; outputs land in the app library folder.
 - **The corpus diff is the tool for "does this actually matter?"** Convert
