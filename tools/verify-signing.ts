@@ -342,6 +342,9 @@ if (import.meta.main) {
   }
   const work = mkdtempSync(join(tmpdir(), 'screepub-verify-signing-'));
   let detach: (() => void) | undefined;
+  // exitCode, never process.exit(), inside this try: exit() ends the process
+  // on the spot, so the finally never ran and a failed check left the work
+  // folder behind with the DMG still mounted inside it.
   try {
     let appPath: string;
     ({ appPath, detach } = mountDmg(dmg, work));
@@ -349,14 +352,15 @@ if (import.meta.main) {
     const { ok, lines } = describeVerdict(verdict, expectation);
     console.log(`verify-signing: ${dmg} (--expect ${expectation})`);
     for (const line of lines) console.log(`  ${line}`);
-    if (!ok) {
+    if (ok) {
+      console.log('\nverify-signing: all checks passed.');
+    } else {
       console.error('\nverify-signing: the artifact does not match what this release is meant to be.');
-      process.exit(1);
+      process.exitCode = 1;
     }
-    console.log('\nverify-signing: all checks passed.');
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
     detach?.();
     rmSync(work, { recursive: true, force: true });
