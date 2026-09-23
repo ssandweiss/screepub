@@ -147,9 +147,11 @@ plugin would have nothing to drive), reusing `kfx-setup.ts`'s
 Linux/this-system wording.
 
 When the plugin index or the download cannot be reached, the installer
-reports `could not reach Calibre's plugin index. Check the internet
+reports `Calibre's plugin index could not be reached. Check the internet
 connection, then try again.` rather than Python's own exception text
-(`src/export/kfx.ts` marks both fetches).
+(`src/export/kfx.ts` marks both fetches). `kfx-install` prefixes it with
+`could not install the KFX plugin: `, which is why the reason does not
+also open with "could not".
 
 ### The verbs, in `src/cli.ts` and `src/cli-devices.ts`
 
@@ -225,29 +227,45 @@ Kindles get AZW3 for now. KFX looks better, and needs the three free tools below
 - A link fix is a button that calls `openUrl(url)`. If that resolves false,
   the status line shows `linkFailedLine(url)`, so the reader can still get
   there by hand.
-- An install fix is a button. Pressed: every button in the block is
-  disabled, the status line reads `INSTALLING`, `runEngine(argv.kfxInstall())`
-  runs, then the rows redraw from `answer.setup` and the status line shows
-  `installedLine` or `failedLine`.
+- An install fix is a button. Pressed: the Install button is disabled and
+  reads `Installing…`, the Get links stay live (opening a page is harmless
+  at any time), the status line reads `INSTALLING`,
+  `runEngine(argv.kfxInstall())` runs, then the rows redraw from
+  `answer.setup` and the status line shows `installedLine` or `failedLine`.
 - `after` and `unavailable` fixes are plain text.
 - Existing classes where they fit: a step is a `.device-row` (name left,
   control right, the same shape as a connected reader), with `.device-name`,
-  `.reader-status` for "Installed", `.btn .btn-outline` for a fix, and a
-  `.send-status` line. Any new rule goes in `surfaces.css`, which is where
-  the Send page's rules already live and is not a file Screeepub 1 is
-  editing. `style.css` is not touched.
+  `.reader-status` for "Installed", the brass primary `.btn .btn-brad` for
+  Install, `.btn .btn-outline` for a Get link, and a `.send-status` line.
+  Any new rule goes in `surfaces.css`, which is where the Send page's rules
+  already live and is not a file Screeepub 1 is editing. `style.css` is not
+  touched.
 
 Lifecycle:
 
 - Probed with `kfx-status` when the Send page is shown, and again when the
   window regains focus while it is shown (the reader went off to install
-  Calibre and came back). One probe in flight at a time.
+  Calibre and came back). One probe in flight at a time. A probe whose
+  checklist matches the one on screen changes nothing, so a routine return
+  to the window moves neither the focus nor the status line; one that
+  differs clears the status line and the just-installed flag, then
+  redraws. A probe that was already out when an install began is dropped
+  (an install counter, the same shape as `send.js`'s `era`).
+- The heading, summary and `role="status"` line are built once per host,
+  in `mountKfx`. A redraw refills the summary and rebuilds only the rows,
+  so the live region exists before its words change.
+- A redraw keeps the keyboard. Focus that was in the block goes back to
+  the same step's control (found by `data-step`) when it can take focus,
+  and otherwise to `ctx.restoreFocus()`, `focus.js`'s plan for the page.
+- Leaving the page and coming back mid-install keeps the `INSTALLING` line.
 - Not drawn in the no-script or blocked states; only on the page that lists
   readers.
 - A send and an install never overlap. The install button is disabled while
-  a send runs, and `sendTo` returns early while an install runs. A plugin
-  swapped out under a running KFX conversion is not a case worth finding
-  out about.
+  a send runs, and `sendTo` returns early while an install runs. An install
+  disables the connected readers' Send buttons, and a Send button drawn
+  during one starts disabled: the device poll pauses only for a send, so a
+  reader plugged in mid-install still gets a row. A plugin swapped out
+  under a running KFX conversion is not a case worth finding out about.
 - The updater's restart (Screeepub 1's branch) waits on an in-flight counter
   inside `runEngine`, so an install in progress already holds the restart
   off. Nothing to add here for that.

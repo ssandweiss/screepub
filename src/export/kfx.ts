@@ -322,7 +322,7 @@ export async function installKfxPlugin(
     if (parsed.offline) {
       return {
         ok: false,
-        reason: "could not reach Calibre's plugin index. Check the internet connection, then try again.",
+        reason: "Calibre's plugin index could not be reached. Check the internet connection, then try again.",
       };
     }
     return { ok: false, reason: parsed.error ?? 'calibre reported a failure with no reason' };

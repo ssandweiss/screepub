@@ -12,6 +12,7 @@
 // directly by tests/desktop-ui.test.ts, and drawing below it.
 import { runEngine, argv, openUrl } from './app.js';
 import { el, clear, text } from './dom.js';
+import { canFocus } from './focus.js';
 
 // ---------------------------------------------------------------- decisions
 
@@ -147,31 +148,52 @@ export function afterInstall(answer, previous) {
 
 /** The node the block lives in, and what send.js lends it. */
 let host = null;
-/** { isSending(), devices(), onBusy(busy) } */
+/** { isSending(), devices(), onBusy(busy), restoreFocus() } */
 let hooks = null;
+/** The parts of the block that outlive a redraw on one host. mountKfx()
+ *  builds the frame once; a redraw refills the summary and rebuilds only the
+ *  rows. The status line above all must stay the SAME node: a screen reader
+ *  announces a change to a live region that already exists, and usually
+ *  says nothing about one that arrives with its words already in it. */
+let parts = null;
 /** The last checklist the engine gave. About the MACHINE, not the script,
  *  so it survives send.js redrawing the page for a new script. */
 let setup = null;
 let justInstalled = false;
 let installingNow = false;
 let probing = false;
-let statusNode = null;
+/** Installs begun so far. A probe already out when one began carries an
+ *  answer older than the install's own, so it checks this on its way back
+ *  and drops what it got if the count moved. Same shape as send.js's
+ *  `era`. */
+let installs = 0;
 let status = { line: '', bad: false };
 
 /** Draw into `node` from now on. Called from send.js's draw(), which
- *  rebuilds the page whenever the script changes. */
+ *  rebuilds the page whenever the script changes, so each call brings a
+ *  fresh node and the block's frame is built into it here, once. */
 export function mountKfx(node, options) {
   host = node;
   hooks = options;
+  parts = {
+    summary: el('p', { class: 'prose' }),
+    rows: el('div', { class: 'devices' }),
+    status: el('p', { class: 'caption send-status', role: 'status' }),
+  };
+  clear(host);
+  host.append(el('p', { class: 'state-label' }, HEADING), parts.summary, parts.rows, parts.status);
   draw();
 }
 
 /** The Send page came into view: ask the engine, and ask again whenever the
  *  window gets the focus back (the reader went to install Calibre and came
- *  back). */
+ *  back). An install still running keeps its line, since leaving the page
+ *  did not stop it. */
 export function kfxShown() {
-  justInstalled = false;
-  status = { line: '', bad: false };
+  if (!installingNow) {
+    justInstalled = false;
+    status = { line: '', bad: false };
+  }
   window.addEventListener('focus', onFocus);
   probe();
 }
@@ -202,14 +224,26 @@ function onFocus() {
 async function probe() {
   if (probing || installingNow) return;
   probing = true;
+  const mine = installs;
+  let next;
   try {
-    setup = setupFrom(await runEngine(argv.kfxStatus()));
+    next = setupFrom(await runEngine(argv.kfxStatus()));
   } catch {
     // Advice, not a feature: a probe that failed draws nothing.
-    setup = null;
+    next = null;
   } finally {
     probing = false;
   }
+  // An install began while this was out: its answer is the fresher one.
+  if (mine !== installs) return;
+  // The routine case, a reader coming back to the window with nothing
+  // changed: nothing is redrawn, so the focus and the status line stay put.
+  if (JSON.stringify(next) === JSON.stringify(setup)) return;
+  setup = next;
+  // The machine changed under the last thing said about it ("Kindles now
+  // get KFX.", or a page that would not open), so that line goes too.
+  justInstalled = false;
+  status = { line: '', bad: false };
   draw();
 }
 
@@ -218,40 +252,54 @@ function busy() {
 }
 
 function draw() {
-  if (host === null || !host.isConnected) return;
-  clear(host);
-  statusNode = null;
+  if (host === null || parts === null || !host.isConnected) return;
+  // Rebuilding the rows throws away whatever control the keyboard stood
+  // on, so where it stood is noted first and handed back after.
+  const focused = host.contains(document.activeElement) ? document.activeElement : null;
   if (!showSetup(setup, hooks?.devices?.() ?? null, justInstalled)) {
     host.hidden = true;
+    if (focused !== null) giveBackFocus(null);
     return;
   }
   host.hidden = false;
-  statusNode = el('p', { class: 'caption send-status', role: 'status' }, '');
-  host.append(
-    el('p', { class: 'state-label' }, HEADING),
-    el('p', { class: 'prose' }, setup.summary),
-    el('div', { class: 'devices' }, ...setup.steps.map(stepRow)),
-    statusNode,
-  );
+  text(parts.summary, setup.summary);
+  clear(parts.rows);
+  parts.rows.append(...setup.steps.map(stepRow));
   say(status);
+  if (focused !== null) giveBackFocus(focused.dataset?.step ?? null);
+}
+
+/** The keyboard, back where it was: the same step's control when it can
+ *  still take the focus (the Get button a reader pressed before going off to
+ *  a download page, found again after the re-probe on their return).
+ *  Otherwise focus.js's plan, through send.js, picks the page's first stop,
+ *  as it does after every other redraw in this window; the Install button,
+ *  for one, is disabled the moment it is pressed. */
+function giveBackFocus(step) {
+  const same = step === null ? null
+    : [...parts.rows.querySelectorAll('button')].find((button) => button.dataset.step === step);
+  if (canFocus(same)) same.focus();
+  else hooks?.restoreFocus?.();
 }
 
 function stepRow(step) {
   return el('div', { class: 'device-row' },
     el('div', { class: 'device-what' }, el('p', { class: 'device-name' }, step.name)),
-    control(controlFor(step, busy())),
+    control(controlFor(step, busy()), step.id),
   );
 }
 
-function control(c) {
+/** Each button carries its step as data-step, which is how a redraw finds
+ *  the same step's control again. */
+function control(c, step) {
   if (c.type === 'link') {
     return el('button', {
-      type: 'button', class: 'btn btn-outline', onclick: () => follow(c.url),
+      type: 'button', class: 'btn btn-outline', 'data-step': step, onclick: () => follow(c.url),
     }, c.label);
   }
   if (c.type === 'install') {
     return el('button', {
-      type: 'button', class: 'btn btn-brad', disabled: c.disabled, onclick: install,
+      type: 'button', class: 'btn btn-brad', 'data-step': step, disabled: c.disabled, onclick: install,
     }, installingNow ? 'Installing…' : c.label);
   }
   return el('p', { class: 'reader-status' }, c.text);
@@ -266,6 +314,7 @@ async function follow(url) {
 async function install() {
   if (installingNow || hooks?.isSending?.() === true) return;
   installingNow = true;
+  installs += 1;
   hooks?.onBusy?.(true);
   status = { line: INSTALLING, bad: false };
   draw();
@@ -286,8 +335,11 @@ async function install() {
   draw();
 }
 
+/** Into the one status node. Written only when the words change: the same
+ *  words rewritten into a live region can be announced again on every
+ *  redraw, and a send starting or ending redraws the block. */
 function say(next) {
-  if (statusNode === null) return;
-  text(statusNode, next.line);
-  statusNode.classList.toggle('bad', next.bad);
+  if (parts === null) return;
+  if (parts.status.textContent !== next.line) text(parts.status, next.line);
+  parts.status.classList.toggle('bad', next.bad);
 }

@@ -17,7 +17,9 @@
 import { runEngine, argv } from './app.js';
 import { settingsFrom } from './tune.js';
 import { el, clear, text } from './dom.js';
-import { mountKfx, kfxShown, kfxHidden, kfxDevicesChanged, kfxRedraw, kfxInstalling } from './kfx.js';
+import {
+  HEADING, mountKfx, kfxShown, kfxHidden, kfxDevicesChanged, kfxRedraw, kfxInstalling,
+} from './kfx.js';
 
 // ---------------------------------------------------------------- decisions
 
@@ -424,7 +426,7 @@ function draw() {
   statusLine = el('p', { class: 'caption send-status', role: 'status' }, '');
   artifactNote = el('p', { class: 'caption send-artifact' }, '');
   artifactNote.hidden = true;
-  const kfxNode = el('section', { class: 'kfx-setup', 'aria-label': 'Best Kindle quality' });
+  const kfxNode = el('section', { class: 'kfx-setup', 'aria-label': HEADING });
   kfxNode.hidden = true;
 
   pane.append(
@@ -440,6 +442,9 @@ function draw() {
     isSending: () => sending,
     devices: () => drawn,
     onBusy: (on) => { for (const button of buttons()) button.disabled = on; },
+    // Its redraws hand the keyboard back through the same plan as every
+    // other surface's (focus.js), when a control it held is gone.
+    restoreFocus: () => ctx.restoreFocus(),
   });
 }
 
@@ -464,13 +469,12 @@ async function refresh() {
   // would take the focus off a button someone had just tabbed to.
   if (drawn !== null && sameDevices(drawn, devices)) return;
   drawn = devices;
-  kfxDevicesChanged();
   clear(list);
-  if (devices.length === 0) {
-    drawEmpty();
-    return;
-  }
-  for (const device of devices) list.append(deviceRow(device));
+  if (devices.length === 0) drawEmpty();
+  else for (const device of devices) list.append(deviceRow(device));
+  // After the rows, not before: a KFX block that hides now while it held
+  // the keyboard hands it to the page's first stop, which should be a row.
+  kfxDevicesChanged();
 }
 
 /** Nothing connected is an ANSWER, not an error — the same position
@@ -561,13 +565,14 @@ async function ensureSettings() {
 async function sendTo(device) {
   if (sending || kfxInstalling()) return;
   sending = true;
-  kfxRedraw();
   const mine = era;
   /** Another script was opened while this send was in flight. */
   const stale = () => era !== mine;
   for (const button of buttons()) button.disabled = true;
   artifactNote.hidden = true;
   try {
+    // Inside the try, so a redraw that threw could never leave `sending` on.
+    kfxRedraw();
     await ensureSettings();
     if (stale()) return;
     const script = ctx.state.script;

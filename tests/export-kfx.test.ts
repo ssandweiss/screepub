@@ -417,8 +417,11 @@ describe('installKfxPlugin', () => {
       stderr: '',
     }), TOOL);
     expect(r.ok).toBe(false);
+    // Its own sentence, because cli-kfx.ts puts "could not install the KFX
+    // plugin: " in front of it: a reason that also began "could not reach"
+    // read as a stutter.
     expect(r.reason).toBe(
-      "could not reach Calibre's plugin index. Check the internet connection, then try again.",
+      "Calibre's plugin index could not be reached. Check the internet connection, then try again.",
     );
     expect(r.reason).not.toContain('urlopen');
   });

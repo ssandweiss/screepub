@@ -3974,3 +3974,374 @@ describe('the Send page’s KFX block: wiring', () => {
     expect(row.slice(0, row.indexOf('\n}'))).toContain('disabled: kfxInstalling()');
   });
 });
+
+describe('the Send page’s KFX block: wiring, second pass', () => {
+  const kfx = read('kfx.js');
+  const send = read('send.js');
+  /** A function's own body, from its head to the first unindented `}`. */
+  const body = (source: string, head: string) => {
+    const from = source.indexOf(head);
+    expect(from, `no ${head.trim()}`).toBeGreaterThan(-1);
+    const rest = source.slice(from);
+    return rest.slice(0, rest.indexOf('\n}'));
+  };
+
+  test('a probe that was out when an install began is thrown away', () => {
+    // Same shape as send.js's `era`. The counter is read before the await
+    // and checked after it, before the answer is used for anything.
+    const probe = body(kfx, 'async function probe(');
+    const captured = probe.indexOf('const mine = installs;');
+    const awaited = probe.indexOf('await ');
+    const checked = probe.indexOf('if (mine !== installs) return;');
+    expect(captured, 'probe() does not capture the install counter').toBeGreaterThan(-1);
+    expect(captured).toBeLessThan(awaited);
+    expect(checked, 'probe() does not check the install counter').toBeGreaterThan(awaited);
+    expect(checked).toBeLessThan(probe.indexOf('setup = '));
+    const install = body(kfx, 'async function install(');
+    expect(install.indexOf('installs += 1')).toBeGreaterThan(install.indexOf('installingNow = true'));
+  });
+
+  test('a routine re-probe changes nothing, and a changed one clears the old line', () => {
+    const probe = body(kfx, 'async function probe(');
+    const same = probe.indexOf('JSON.stringify(next) === JSON.stringify(setup)');
+    expect(same, 'probe() redraws even when nothing changed').toBeGreaterThan(-1);
+    expect(same).toBeLessThan(probe.lastIndexOf('draw()'));
+    const after = probe.slice(same);
+    expect(after).toContain('justInstalled = false');
+    expect(after).toMatch(/status = \{ line: '', bad: false \}/);
+  });
+
+  test('coming back to the page mid-install keeps the line that says so', () => {
+    const shown = body(kfx, 'export function kfxShown(');
+    expect(shown).toMatch(/if \(!installingNow\) \{\s*justInstalled = false;/);
+    expect(shown).toContain("window.addEventListener('focus', onFocus)");
+  });
+
+  test('one status node per host, and the keyboard is put back after a redraw', () => {
+    const mount = body(kfx, 'export function mountKfx(');
+    const draw = body(kfx, '\nfunction draw(');
+    expect(kfx.match(/role: 'status'/g)?.length).toBe(1);
+    expect(mount).toContain("role: 'status'");
+    expect(draw).not.toContain('clear(host)');
+    const had = draw.indexOf('host.contains(document.activeElement)');
+    expect(had, 'draw() never asks where the focus was').toBeGreaterThan(-1);
+    expect(had).toBeLessThan(draw.indexOf('clear('));
+    expect(kfx).toContain('hooks?.restoreFocus?.()');
+    expect(send).toContain('restoreFocus: () => ctx.restoreFocus()');
+  });
+
+  test('send.js names the block with kfx.js’s own heading', () => {
+    expect(send).toMatch(/import \{[^}]*\bHEADING\b[^}]*\} from '\.\/kfx\.js'/);
+    expect(send).toContain("'aria-label': HEADING");
+    expect(send).not.toContain("'Best Kindle quality'");
+  });
+
+  test('a redraw that throws cannot leave a send stuck on', () => {
+    // Inside the try, so the finally that clears `sending` covers it.
+    const sendTo = body(send, 'async function sendTo(');
+    const redraw = sendTo.indexOf('kfxRedraw()');
+    expect(redraw).toBeGreaterThan(sendTo.indexOf('try {'));
+    expect(redraw).toBeLessThan(sendTo.indexOf('await '));
+  });
+
+  test('the device list, the send flag and the busy hook reach the block', () => {
+    // The body, not the file: the import line alone names kfxDevicesChanged.
+    const refresh = body(send, 'async function refresh(');
+    const assigned = refresh.indexOf('drawn = devices;');
+    expect(assigned).toBeGreaterThan(-1);
+    const told = refresh.indexOf('kfxDevicesChanged()');
+    expect(told).toBeGreaterThan(assigned);
+    // After the rows as well: a block that hides while it holds the focus
+    // hands it to the page's first stop, which should be the new Send
+    // button and not the pane (seen in a browser, 2026-09-23).
+    expect(told).toBeGreaterThan(refresh.indexOf('drawEmpty()'));
+    expect(told).toBeGreaterThan(refresh.indexOf('list.append(deviceRow(device))'));
+    expect(send).toContain('isSending: () => sending');
+    expect(send).toContain('onBusy: (on) => { for (const button of buttons()) button.disabled = on; }');
+  });
+});
+
+describe('the Send page’s KFX block: what a reader sees across redraws', () => {
+  // A stub document just big enough for dom.js and for what kfx.js asks of
+  // a node. Its one piece of real behaviour is the one these tests are
+  // about: activeElement falls back to the body when the focused node is
+  // detached, disabled or inside something hidden, as a browser's focus
+  // fixup does. The engine is a queue of unanswered calls the test answers
+  // in whatever order it wants, which is how the races are staged.
+  class StubNode {
+    childNodes: StubNode[] = [];
+    parentNode: StubNode | null = null;
+    attrs = new Map<string, string>();
+    listeners = new Map<string, ((event: unknown) => void)[]>();
+    hidden = false;
+    disabled = false;
+    className = '';
+    data = '';
+    constructor(readonly tagName: string, readonly doc: StubDocument) {}
+    get firstChild() { return this.childNodes[0] ?? null; }
+    append(...nodes: (StubNode | string)[]) {
+      for (const each of nodes) {
+        const node = typeof each === 'string' ? this.doc.createTextNode(each) : each;
+        node.parentNode?.removeChild(node);
+        node.parentNode = this;
+        this.childNodes.push(node);
+      }
+    }
+    removeChild(node: StubNode) {
+      this.childNodes.splice(this.childNodes.indexOf(node), 1);
+      node.parentNode = null;
+      return node;
+    }
+    get textContent(): string {
+      return this.tagName === '#text' ? this.data : this.childNodes.map((c) => c.textContent).join('');
+    }
+    set textContent(value: string) {
+      if (this.tagName === '#text') { this.data = value; return; }
+      for (const child of this.childNodes) child.parentNode = null;
+      this.childNodes = [];
+      if (value !== '') this.append(value);
+    }
+    setAttribute(name: string, value: string) { this.attrs.set(name, value); }
+    getAttribute(name: string) { return this.attrs.get(name) ?? null; }
+    get dataset(): Record<string, string> {
+      return Object.fromEntries([...this.attrs].filter(([k]) => k.startsWith('data-'))
+        .map(([k, v]) => [k.slice(5).replace(/-(\w)/g, (_, c: string) => c.toUpperCase()), v]));
+    }
+    get classList() {
+      const names = () => this.className.split(/\s+/).filter(Boolean);
+      return {
+        contains: (name: string) => names().includes(name),
+        toggle: (name: string, on: boolean) => {
+          const rest = names().filter((n) => n !== name);
+          this.className = (on ? [...rest, name] : rest).join(' ');
+          return on;
+        },
+      };
+    }
+    addEventListener(type: string, fn: (event: unknown) => void) {
+      this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
+    }
+    click() {
+      if (this.disabled) return;
+      for (const fn of this.listeners.get('click') ?? []) fn({ type: 'click' });
+    }
+    get isConnected(): boolean {
+      let node: StubNode = this;
+      while (node.parentNode !== null) node = node.parentNode;
+      return node === this.doc.body;
+    }
+    contains(other: StubNode | null): boolean {
+      for (let node = other; node !== null; node = node.parentNode) if (node === this) return true;
+      return false;
+    }
+    closest(selector: string): StubNode | null {
+      if (selector !== '[hidden]') throw new Error(`the stub has no closest(${selector})`);
+      for (let node: StubNode | null = this; node !== null; node = node.parentNode) {
+        if (node.hidden) return node;
+      }
+      return null;
+    }
+    /** A bare tag name only, which is all anything here asks for. */
+    querySelectorAll(tag: string): StubNode[] {
+      const found: StubNode[] = [];
+      const walk = (node: StubNode) => {
+        for (const child of node.childNodes) {
+          if (child.tagName === tag.toUpperCase()) found.push(child);
+          walk(child);
+        }
+      };
+      walk(this);
+      return found;
+    }
+    focus() {
+      if (this.isConnected && !this.disabled && this.closest('[hidden]') === null) this.doc.focused = this;
+    }
+  }
+  class StubDocument {
+    body: StubNode;
+    focused: StubNode | null = null;
+    constructor() { this.body = new StubNode('BODY', this); }
+    createElement(tag: string) { return new StubNode(tag.toUpperCase(), this); }
+    createTextNode(value: string) {
+      const node = new StubNode('#text', this);
+      node.data = value;
+      return node;
+    }
+    get activeElement() {
+      const node = this.focused;
+      if (node === null || !node.isConnected || node.disabled || node.closest('[hidden]') !== null) {
+        return this.body;
+      }
+      return node;
+    }
+  }
+  type KfxDrawing = {
+    INSTALLING: string;
+    mountKfx: (node: StubNode, hooks: unknown) => void;
+    kfxShown: () => void;
+    kfxHidden: () => void;
+    kfxRedraw: () => void;
+  };
+  const g = globalThis as unknown as { window?: unknown; document?: unknown };
+  afterEach(() => {
+    delete g.window;
+    delete g.document;
+  });
+
+  const machine = (calibre: boolean, previewer: boolean, plugin: boolean) => ({
+    calibre, previewer, pluginInstalled: plugin, ready: calibre && previewer && plugin,
+  });
+  const status = (calibre: boolean, previewer: boolean, plugin: boolean) =>
+    ({ ok: true, ...kfxSetup(machine(calibre, previewer, plugin), 'darwin') });
+  const installed = (calibre: boolean, previewer: boolean) =>
+    ({ ok: true, version: '2.20.1', removed: [], setup: kfxSetup(machine(calibre, previewer, true), 'darwin') });
+  const INSTALLED_READY = 'Installed the KFX plugin 2.20.1. Kindles now get KFX.';
+
+  let fresh = 0;
+  async function world() {
+    const doc = new StubDocument();
+    const focusListeners = new Set<() => void>();
+    const pending: { verb: string; resolve: (stdout: string) => void }[] = [];
+    g.document = doc;
+    g.window = {
+      addEventListener: (type: string, fn: () => void) => { if (type === 'focus') focusListeners.add(fn); },
+      removeEventListener: (type: string, fn: () => void) => { if (type === 'focus') focusListeners.delete(fn); },
+      __TAURI__: {
+        core: {
+          invoke: (_cmd: string, { args }: { args: string[] }) =>
+            new Promise<string>((resolve) => pending.push({ verb: args[0], resolve })),
+        },
+        opener: { openUrl: async () => undefined },
+      },
+    };
+    // A module of its own per test: kfx.js keeps the machine's state at
+    // module level, on purpose, and one test's must not leak into the next.
+    fresh += 1;
+    const kfx = (await import(`${join(UI, 'kfx.js')}?redraws-${fresh}`)) as KfxDrawing;
+    const host = doc.createElement('section');
+    host.hidden = true;
+    doc.body.append(host);
+    const w = {
+      doc,
+      kfx,
+      host,
+      restored: 0,
+      mount() {
+        kfx.mountKfx(host, {
+          isSending: () => false,
+          devices: () => [],
+          onBusy: () => undefined,
+          restoreFocus: () => { w.restored += 1; },
+        });
+      },
+      async answer(verb: string, value: unknown) {
+        const at = pending.findIndex((p) => p.verb === verb);
+        if (at < 0) throw new Error(`nothing asked the engine for ${verb}`);
+        pending.splice(at, 1)[0].resolve(JSON.stringify(value));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      },
+      regainFocus() { for (const fn of [...focusListeners]) fn(); },
+      buttons: () => host.querySelectorAll('button'),
+      button(label: string) {
+        const found = w.buttons().find((b) => b.textContent === label);
+        if (found === undefined) throw new Error(`no ${label} button: ${w.buttons().map((b) => b.textContent)}`);
+        return found;
+      },
+      labels: () => w.buttons().map((b) => b.textContent),
+      statusNode() {
+        const all: StubNode[] = [];
+        const walk = (node: StubNode) => { for (const c of node.childNodes) { all.push(c); walk(c); } };
+        walk(host);
+        return all.find((node) => node.getAttribute('role') === 'status') ?? null;
+      },
+    };
+    w.mount();
+    w.kfx.kfxShown();
+    return w;
+  }
+
+  test('one status line for the life of the block, so a screen reader hears it change', async () => {
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    const line = w.statusNode();
+    expect(line).not.toBe(null);
+    w.button('Install').click();
+    expect(w.statusNode()).toBe(line);
+    expect(line!.textContent).toBe(w.kfx.INSTALLING);
+    await w.answer('kfx-install', installed(true, true));
+    expect(w.statusNode()).toBe(line);
+    expect(line!.textContent).toBe(INSTALLED_READY);
+  });
+
+  test('a routine re-probe on coming back changes nothing on screen', async () => {
+    const w = await world();
+    await w.answer('kfx-status', status(true, false, false));
+    const get = w.button('Get Kindle Previewer');
+    get.focus();
+    w.regainFocus();
+    await w.answer('kfx-status', status(true, false, false));
+    expect(get.isConnected).toBe(true);
+    expect(w.doc.activeElement).toBe(get);
+  });
+
+  test('when the rows do change, the keyboard goes back to the same step', async () => {
+    // The reader went to get Kindle Previewer; Calibre turned up meanwhile.
+    const w = await world();
+    await w.answer('kfx-status', status(false, false, false));
+    w.button('Get Kindle Previewer').focus();
+    w.regainFocus();
+    await w.answer('kfx-status', status(true, false, false));
+    const now = w.doc.activeElement;
+    expect(now.textContent).toBe('Get Kindle Previewer');
+    expect(now.isConnected).toBe(true);
+    expect(w.restored).toBe(0);
+  });
+
+  test('when that control is gone, the page’s own plan takes the keyboard', async () => {
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    const install = w.button('Install');
+    install.focus();
+    install.click();
+    // "Installing…" is disabled, so it cannot hold the focus.
+    expect(w.labels()).toEqual(['Installing…']);
+    expect(w.restored).toBe(1);
+  });
+
+  test('a probe still out when an install finishes cannot undo it', async () => {
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    w.regainFocus(); // a probe goes out...
+    w.button('Install').click(); // ...and the install starts behind it
+    await w.answer('kfx-install', installed(true, true));
+    await w.answer('kfx-status', status(true, true, false)); // the stale one lands last
+    expect(w.labels()).toEqual([]);
+    expect(w.statusNode()!.textContent).toBe(INSTALLED_READY);
+  });
+
+  test('leaving and coming back mid-install keeps the line that says so', async () => {
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    w.button('Install').click();
+    w.kfx.kfxHidden();
+    w.kfx.kfxShown();
+    w.kfx.kfxRedraw();
+    expect(w.statusNode()!.textContent).toBe(w.kfx.INSTALLING);
+  });
+
+  test('a success line stays for an unchanged machine and goes when it changes', async () => {
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    w.button('Install').click();
+    await w.answer('kfx-install', installed(true, true));
+    w.regainFocus();
+    await w.answer('kfx-status', status(true, true, true));
+    expect(w.statusNode()!.textContent).toBe(INSTALLED_READY);
+    // Kindle Previewer was removed since: "Kindles now get KFX." is no
+    // longer true, and must not stand over a Get button.
+    w.regainFocus();
+    await w.answer('kfx-status', status(true, false, true));
+    expect(w.labels()).toEqual(['Get Kindle Previewer']);
+    expect(w.statusNode()!.textContent).toBe('');
+  });
+});
