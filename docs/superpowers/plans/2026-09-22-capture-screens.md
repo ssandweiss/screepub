@@ -384,6 +384,16 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 4: The engine gate
 
+**Superseded in review (2026-09-22, commit 4d5cd7f).** The gate code below
+checked only a call's first argument and its first `-o`, and the code review
+showed six shapes that still wrote or read any file (`--fountain`,
+`--preview-html`, `--output` and its `=` and joined forms, a repeated `-o`, a
+convert without `--library`, `--options`). The committed gate instead
+rebuilds each call with the window's own `argv` builders and allows it only
+on an exact match, failing closed on anything else, with a refusal test for
+every one of those shapes. The code below is kept as the record of what was
+planned.
+
 **Files:**
 - Create: `tools/capture/gate.ts`
 - Create: `tests/capture.test.ts`
@@ -820,9 +830,12 @@ window.__TAURI__ = {
   core: {
     async invoke(command, payload) {
       if (command === 'run_engine') {
+        // The per-run token the server requires on /engine, so no other
+        // page open in a browser on this machine can post engine calls to
+        // the capture server's port while it runs.
         const response = await fetch('/engine', {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', 'x-capture-token': cfg.token },
           body: JSON.stringify({ args: payload.args }),
         });
         const text = await response.text();
@@ -1158,6 +1171,43 @@ Expected: no output.
 
 **Files:**
 - Create: `tools/capture-screens.ts`
+- Modify: `tools/capture/page.ts` (the config gains `token`)
+- Modify: `tests/capture.test.ts` (the config in its page tests gains `token`; one new test)
+
+**Amended after the Tasks 4-6 code review (2026-09-22).** Three things the
+review found about this task's server, all built in below:
+- `/engine` requires a per-run random token, passed to the page in
+  `window.__CAPTURE__` and sent back by the bridge as `x-capture-token`.
+  Without it, any page in a browser on this machine that guessed the port
+  could post engine calls, and the gate would be the only thing in the way.
+- `?shot=` is checked against the shot list; an unknown name is a 400.
+- `tsconfig.json` includes only `src` and `tests`, so a tool file is
+  typechecked only if a test imports it. `tools/capture-screens.ts` therefore
+  exports `main` behind `import.meta.main`, and a test imports it and
+  `tools/capture/cdp.ts`.
+
+- [ ] **Step 0: Carry the token through the page config**
+
+In `tools/capture/page.ts`, add `token: string;` to `CaptureConfig`, with a
+one-line comment saying it is the per-run secret `/engine` requires. In
+`tests/capture.test.ts`, add `token: 't'` to every `CaptureConfig` object
+literal the page tests build. Then append:
+
+```ts
+describe('the capture command and Chrome driver typecheck', () => {
+  test('they import without running, so tsc covers them', async () => {
+    // tsconfig.json includes only src/ and tests/; importing these here is
+    // what puts them under `bunx tsc --noEmit`.
+    const cmd = await import('../tools/capture-screens');
+    const cdp = await import('../tools/capture/cdp');
+    expect(typeof cmd.main).toBe('function');
+    expect(cdp.CHROME).toBe('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+  });
+});
+```
+
+Run `bun test tests/capture.test.ts` and see this new test fail
+(`Cannot find module '../tools/capture-screens'`) before Step 1.
 
 - [ ] **Step 1: Write it**
 
@@ -1199,8 +1249,9 @@ const TYPES: Record<string, string> = {
 };
 const typeOf = (p: string) => TYPES[p.slice(p.lastIndexOf('.'))] ?? 'application/octet-stream';
 
-async function main() {
+export async function main() {
   const { values } = parseArgs({ args: Bun.argv.slice(2), options: { only: { type: 'string' } } });
+  const token = crypto.randomUUID();
   const shots = values.only ? SHOTS.filter((s) => s.name === values.only) : SHOTS;
   if (shots.length === 0) throw new Error(`capture: no shot named ${values.only}`);
   if (!existsSync(CHROME)) {
@@ -1220,6 +1271,9 @@ async function main() {
     async fetch(req) {
       const url = new URL(req.url);
       if (url.pathname === '/engine' && req.method === 'POST') {
+        if (req.headers.get('x-capture-token') !== token) {
+          return new Response('capture: missing or wrong token', { status: 403 });
+        }
         const { args } = (await req.json()) as { args: string[] };
         const gate = gateEngineCall(args, { demoPdf: DEMO_PDF, library: LIBRARY });
         if (!gate.allow) {
@@ -1234,9 +1288,14 @@ async function main() {
         return new Response(out);
       }
       if (url.pathname === '/capture/window.html') {
-        const html = readFileSync(join(REPO_DIR, 'desktop', 'ui', 'index.html'), 'utf8');
         const shot = url.searchParams.get('shot') ?? '';
-        return new Response(captureIndex(html, { shot, demoPdf: DEMO_PDF }), { headers: { 'content-type': 'text/html' } });
+        if (!SHOTS.some((s) => s.kind === 'window' && s.name === shot)) {
+          return new Response(`capture: no window shot named ${shot}`, { status: 400 });
+        }
+        const html = readFileSync(join(REPO_DIR, 'desktop', 'ui', 'index.html'), 'utf8');
+        return new Response(captureIndex(html, { shot, demoPdf: DEMO_PDF, token }), {
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        });
       }
       if (url.pathname.startsWith('/pass-one/')) {
         const file = join(passOne, url.pathname.slice('/pass-one/'.length));
@@ -1282,10 +1341,12 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error((err as Error).message);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error((err as Error).message);
+    process.exit(1);
+  });
+}
 ```
 
 Before writing the last `rmSync` line, check whether `/Users/Shared/Documents` exists on this Mac before the tool runs. If it does, delete that line: the tool must only ever remove what it created. If it does not, keep it: `rmSync` without `recursive` refuses a non-empty folder, which is the property relied on.
