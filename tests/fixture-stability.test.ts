@@ -19,6 +19,10 @@ describe('committed fixtures regenerate byte-identically', () => {
     screenplay: 'tests/fixtures/screenplay.pdf',
     prose: 'tests/fixtures/prose.pdf',
     blank: 'tests/fixtures/blank-pages.pdf',
+    // The invented feature the README and site pictures show. Regenerated
+    // byte for byte like the others, so a generator refactor cannot quietly
+    // change what the pictures are of.
+    demo: 'tests/fixtures/field-station.pdf',
   } as const;
 
   for (const [kind, committed] of Object.entries(COMMITTED)) {

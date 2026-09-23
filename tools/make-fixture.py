@@ -637,6 +637,55 @@ def torture_streams():
 KINDS["torture"] = torture_streams
 
 
+# --- demo: the invented feature the README and site pictures show ---------
+# Laid out PAGE BY PAGE, not flowed: the site's scene has to land on printed
+# pages 14 to 18, where the site's own page markers say it is. So each page
+# is drawn exactly as tools/field-station-content.py writes it, and a page
+# that does not fit is an error rather than a silent reflow that would move
+# every page number after it.
+
+def _demo_content():
+    import importlib.util
+    import pathlib
+    path = pathlib.Path(__file__).with_name("field-station-content.py")
+    spec = importlib.util.spec_from_file_location("field_station_content", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# A real script puts no blank line between a character name and what that
+# character says, so neither does this. Everything else gets one above it.
+_JOINED_TO_CUE = {"paren", "dialogue"}
+
+
+def flow_page(rows):
+    """One page of (kind, text) rows -> the (x, text) / None rows
+    content_stream draws. Raises SystemExit if the page overflows."""
+    out = []
+    for kind, text in rows:
+        if out and kind not in _JOINED_TO_CUE:
+            out.append(None)
+        for chunk in textwrap.wrap(text, WRAP[kind]) or [""]:
+            out.append((X[kind], chunk))
+    if len(out) > LINES_PER_PAGE:
+        raise SystemExit(
+            f"field-station page overflows: {len(out)} lines, the limit is "
+            f"{LINES_PER_PAGE}. It starts: {rows[0]!r}")
+    return out
+
+
+def demo_streams():
+    mod = _demo_content()
+    return [title_stream(mod.TITLE)] + [
+        content_stream(flow_page(p), i + 1 if i else None)
+        for i, p in enumerate(mod.PAGES)
+    ]
+
+
+KINDS["demo"] = demo_streams
+
+
 # --- layout as data, for tests -------------------------------------------
 # Page PLACEMENT is the thing most likely to rot silently: a speech written
 # to start at line 50 so it straddles a page break still satisfies every
