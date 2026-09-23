@@ -17,13 +17,18 @@
 //     one request a day; stamping afterwards would turn a persistent failure
 //     into a request on every launch, which is the opposite of the promise.
 //   * The plugin does not relaunch on macOS. It swaps the bundle and stops.
-//     A one-click restart is another crate and another permission, so the
-//     honest move is to ask rather than to pretend.
+//     Until 2026-09-23 that was the end of it: a one-click restart was
+//     another crate and another permission, so the window asked the reader
+//     to quit and reopen. The owner watched that fail on his own Mac (0.7.2
+//     installed, the window still said 0.7.1, and nothing said why) and
+//     approved both: tauri-plugin-process and process:allow-restart. The
+//     restart waits for any engine work still running (installAndRestart).
 import { pickUpdate, shouldCheck } from './update-compare.js';
 
 const OPT_IN = 'updateOptIn';
 const ASKED = 'updateAsked';
 const STAMP = 'updateLastChecked';
+const FOUND = 'updateFound';
 
 /** Whether this build can be updated at all where it is running.
  *
@@ -59,16 +64,78 @@ export function rememberAnswer(storage, optedIn) {
   storage?.setItem(OPT_IN, optedIn ? 'true' : 'false');
 }
 
-/** An offer the LAUNCH check found, held until somebody opens the sheet.
+/** Whether the Convert page should ask the one question.
  *
- *  Held rather than re-requested, because asking the server twice for an
- *  answer already in hand would break the once-a-day promise the moment
- *  anyone opened the notes. */
-let pending = null;
-export function setPending(result) { pending = result ?? null; }
-export function pendingUpdate() { return pending; }
+ *  Only where an update could actually happen, and only until it has been
+ *  answered, here or with the switch in the release notes. "Said no" and
+ *  "never asked" are different states (see rememberAnswer), and only the
+ *  second one is asked. */
+export function shouldAsk(usable, storage) {
+  return Boolean(usable) && !readState(storage).asked;
+}
 
-/** What to tell someone after the bundle has been swapped. */
+/** The version a check found, kept across launches.
+ *
+ *  The check runs once a day, so an offer held only in memory was lost by
+ *  quitting and reopening the same day: the label went away and nothing
+ *  brought it back until tomorrow. Forgetting writes an empty string rather
+ *  than removing the key, because every storage this file is handed has
+ *  setItem and an empty string reads as nothing. */
+export function rememberFound(storage, version) {
+  storage?.setItem(FOUND, String(version ?? ''));
+}
+
+export function forgetFound(storage) {
+  storage?.setItem(FOUND, '');
+}
+
+/** The remembered version if this build is still behind it, else null. The
+ *  judgement is pickUpdate's, the same one a live check uses. */
+export function rememberedOffer(storage, currentVersion) {
+  const found = storage?.getItem(FOUND);
+  if (!found) return null;
+  return pickUpdate({ version: found, currentVersion }).offer ? found : null;
+}
+
+/** How far a download has got, as a whole percent, or null when the server
+ *  sent no length. Never above 100: a server that under-reports its length
+ *  must not produce "140%". */
+export function downloadPercent(received, total) {
+  if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(received)) return null;
+  return Math.min(100, Math.max(0, Math.floor((received / total) * 100)));
+}
+
+/** The words beside the version stamp for each moment of an update, or null
+ *  when there is nothing to say. One function, so the label and the release
+ *  notes cannot describe the same moment two ways. */
+export function updateLabel(phase) {
+  switch (phase?.kind) {
+    case 'offer':
+      return `Update to ${phase.version}`;
+    case 'downloading': {
+      const percent = downloadPercent(phase.received, phase.total);
+      return percent === null
+        ? `Downloading ${phase.version}…`
+        : `Downloading ${phase.version}… ${percent}%`;
+    }
+    case 'installing':
+      return 'Installing…';
+    case 'waiting':
+      return 'Restarting after this finishes…';
+    case 'restarting':
+      return 'Restarting…';
+    case 'failed':
+      return 'Update failed. Try again';
+    case 'installed':
+      return installedLine(phase.version);
+    default:
+      return null;
+  }
+}
+
+/** What to tell someone when the bundle has been swapped and this build
+ *  cannot restart itself (no process plugin). With the plugin, the window
+ *  restarts instead and nobody reads this. */
 export function installedLine(version) {
   return `Update installed. Quit and reopen Screepub to use ${version}.`;
 }
@@ -106,7 +173,14 @@ export async function runCheck({ manual, storage, now, check }) {
   const decision = pickUpdate(update
     ? { version: update.version, currentVersion: update.currentVersion }
     : null);
-  if (!decision.offer) return { outcome: 'current', reason: decision.reason };
+  if (!decision.offer) {
+    // A request was made and answered: whatever an earlier check remembered
+    // is no longer true. A FAILED request never reaches here, so no network
+    // forgets nothing.
+    forgetFound(storage);
+    return { outcome: 'current', reason: decision.reason };
+  }
+  rememberFound(storage, update.version);
   return {
     outcome: 'offer',
     version: update.version,

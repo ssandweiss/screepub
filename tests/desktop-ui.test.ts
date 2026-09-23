@@ -3148,25 +3148,107 @@ describe('the update check asks once, stamps first, and never guesses', () => {
     expect(read('main.js')).toContain('notes.updateFound');
   });
 
-  test('a launch check that finds something leaves a mark to find', async () => {
-    // Otherwise the daily check is a request that changes nothing a person
-    // can see, which is the worst of both: it costs the network and tells
-    // nobody. The offer is held so the sheet can show it without asking the
-    // server a second time.
-    const up: any = await import(join(UI, 'update.js'));
-    up.setPending({ outcome: 'offer', version: '0.9.0' });
-    expect(up.pendingUpdate()?.version).toBe('0.9.0');
-    up.setPending(null);
-    expect(up.pendingUpdate()).toBe(null);
-  });
-
-  test('after installing, it asks for a restart it cannot perform', () => {
-    // The plugin swaps the bundle in place on macOS and does NOT relaunch.
-    // A one-click restart is another crate and another permission, which is
-    // not ours to add, so the honest thing is to ask.
+  test('without a restart, it asks for a quit and reopen', () => {
+    // Only reached by a build without tauri-plugin-process. Every build that
+    // carries this line also carries the plugin, so in practice the window
+    // restarts instead (installAndRestart); this is the honest fallback.
     const line = update.installedLine('0.7.0');
     expect(line).toContain('0.7.0');
     expect(line.toLowerCase()).toContain('quit');
+  });
+});
+
+describe('what the update label says, and what it remembers', () => {
+  let update: any;
+  beforeAll(async () => { update = await import(join(UI, 'update.js')); });
+
+  const store = (seed: Record<string, string> = {}) => {
+    const map = new Map(Object.entries(seed));
+    return {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => { map.set(k, String(v)); },
+      dump: () => Object.fromEntries(map),
+    };
+  };
+
+  test('the Convert page asks only where updates work, and only until answered', () => {
+    expect(update.shouldAsk(true, store())).toBe(true);
+    expect(update.shouldAsk(false, store())).toBe(false);
+    // "Said no" is an answer. Only "never asked" is asked.
+    expect(update.shouldAsk(true, store({ updateAsked: 'true', updateOptIn: 'false' }))).toBe(false);
+    expect(update.shouldAsk(true, store({ updateAsked: 'true', updateOptIn: 'true' }))).toBe(false);
+  });
+
+  test('an offer is remembered across launches, and forgotten once this build catches up', async () => {
+    const s = store();
+    const result = await update.runCheck({
+      manual: true, storage: s, now: 1,
+      check: async () => ({ version: '0.8.0', currentVersion: '0.7.2', body: '' }),
+    });
+    expect(result.outcome).toBe('offer');
+    // Tomorrow's launch, same build: still behind, so the label comes back.
+    expect(update.rememberedOffer(s, '0.7.2')).toBe('0.8.0');
+    // After the update: this build IS the remembered version.
+    expect(update.rememberedOffer(s, '0.8.0')).toBe(null);
+    expect(update.rememberedOffer(store(), '0.7.2')).toBe(null);
+  });
+
+  test('a check that finds nothing newer forgets a remembered offer', async () => {
+    // A release that was pulled must not leave a label pointing at it.
+    const s = store({ updateFound: '0.8.0' });
+    await update.runCheck({ manual: true, storage: s, now: 1, check: async () => null });
+    expect(update.rememberedOffer(s, '0.7.2')).toBe(null);
+  });
+
+  test('a failed check forgets nothing', async () => {
+    // No network is not news. The label stays until a check actually answers.
+    const s = store({ updateFound: '0.8.0' });
+    await update.runCheck({
+      manual: true, storage: s, now: 1, check: async () => { throw 'offline'; },
+    });
+    expect(update.rememberedOffer(s, '0.7.2')).toBe('0.8.0');
+  });
+
+  test('forgetFound empties the remembered version', () => {
+    const s = store({ updateFound: '0.8.0' });
+    update.forgetFound(s);
+    expect(update.rememberedOffer(s, '0.7.2')).toBe(null);
+  });
+
+  test('a download reads as a whole percent, and never past 100', () => {
+    expect(update.downloadPercent(0, 1000)).toBe(0);
+    expect(update.downloadPercent(405, 1000)).toBe(40);
+    expect(update.downloadPercent(1000, 1000)).toBe(100);
+    // A server that under-reports its length must not produce "140%".
+    expect(update.downloadPercent(1400, 1000)).toBe(100);
+    // No length from the server: no number at all, rather than a made-up one.
+    expect(update.downloadPercent(400, null)).toBe(null);
+    expect(update.downloadPercent(400, 0)).toBe(null);
+  });
+
+  test('every moment of an update has its own words', () => {
+    expect(update.updateLabel(null)).toBe(null);
+    expect(update.updateLabel({ kind: 'offer', version: '0.8.0' })).toBe('Update to 0.8.0');
+    expect(update.updateLabel({ kind: 'downloading', version: '0.8.0', received: 400, total: 1000 }))
+      .toBe('Downloading 0.8.0… 40%');
+    expect(update.updateLabel({ kind: 'downloading', version: '0.8.0', received: 400, total: null }))
+      .toBe('Downloading 0.8.0…');
+    expect(update.updateLabel({ kind: 'installing', version: '0.8.0' })).toBe('Installing…');
+    expect(update.updateLabel({ kind: 'waiting', version: '0.8.0' })).toBe('Restarting after this finishes…');
+    expect(update.updateLabel({ kind: 'restarting', version: '0.8.0' })).toBe('Restarting…');
+    expect(update.updateLabel({ kind: 'failed', version: '0.8.0', message: 'x' })).toBe('Update failed. Try again');
+    expect(update.updateLabel({ kind: 'installed', version: '0.8.0' })).toBe(update.installedLine('0.8.0'));
+  });
+
+  test('none of it uses an em dash', () => {
+    // The owner's rule for text a person reads.
+    for (const phase of [
+      { kind: 'offer', version: '1' }, { kind: 'downloading', version: '1', received: 1, total: 2 },
+      { kind: 'installing' }, { kind: 'waiting' }, { kind: 'restarting' },
+      { kind: 'failed', message: '' }, { kind: 'installed', version: '1' },
+    ]) {
+      expect(update.updateLabel(phase)).not.toContain('—');
+    }
   });
 });
 
