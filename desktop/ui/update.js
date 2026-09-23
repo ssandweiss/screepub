@@ -205,7 +205,8 @@ export async function runCheck({ manual, storage, now, check }) {
  *  task, the retry button, depends on that rule). Returns what happened, so
  *  the caller knows what a second click should do:
  *    restarting  the restart was asked for (the process is on its way out)
- *    installed   the bundle is swapped but this build cannot restart itself
+ *    installed   the bundle is swapped but this build cannot restart itself,
+ *                or its restart was refused
  *    current     a fresh check found nothing newer after all
  *    error       something failed; `message` is for a person */
 export async function installAndRestart({

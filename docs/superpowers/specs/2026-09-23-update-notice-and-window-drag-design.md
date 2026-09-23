@@ -103,11 +103,24 @@ people will never turn it on and never hear about an update.
   update may rename it (`restart_macos_app`, read in the source), then spawns
   it and exits.
 - **Waiting for work.** `app.js` counts engine calls in flight: every
-  `runEngine` call, which covers convert, send, export, device listing and
-  settings writes. `whenIdle()` resolves when the count is zero, whether the
-  calls resolved or rejected. The restart is `await whenIdle()` then
-  `restartApp()`. A settings write counts on purpose: restarting halfway
-  through saving a sidecar would be worse than a slow restart.
+  `runEngine` call except `devices` (send.js polls it every 2 s while the
+  Send tab is open, and each poll takes about 1.5 s on its own, so counting
+  it could hold a restart off indefinitely for as long as that tab stayed
+  open). `whenIdle()` does not resolve the instant the count touches zero: a
+  reviewer found that an awaited chain of calls belonging to one job
+  (send.js: settings, export, send; tune.js: save, rebuild) can touch zero
+  BETWEEN two calls of the same job, not only after it ends. `whenIdle()`
+  instead resolves once no counted call has been running for 500 ms
+  (`ENGINE_QUIET_MS`), which covers that gap. The restart is
+  `await whenIdle()` then `restartApp()`. A settings write counts on
+  purpose: restarting halfway through saving a sidecar would be worse than a
+  slow restart.
+  **Known gap:** the 500 ms quiet period also covers tune.js's own 300 ms
+  settle timer (`SETTLE_MS`), but only for a knob moved during a save or
+  within 200 ms after one ends. A knob moved after a longer quiet has no
+  engine call running yet when the debounce starts, so a restart already
+  waiting on `whenIdle()` can fire and drop the change before tune.js ever
+  asks the engine to save it. Not closed by this plan.
 - **Fallback:** if `restartReady()` is false, the label ends on today's
   `installedLine`: "Update installed. Quit and reopen Screepub to use 0.7.3."
 - **Comments to rewrite:** `update.js` and `notes-surface.js` both say a

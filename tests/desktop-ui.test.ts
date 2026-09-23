@@ -1357,6 +1357,7 @@ describe('the window knows when the engine is working, and can restart', () => {
       expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
       await call;
       expect(app.engineBusy()).toBe(false);
+      expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
     } finally {
       delete win.window;
     }
@@ -1398,6 +1399,16 @@ describe('the window knows when the engine is working, and can restart', () => {
     const matches = read('app.js').match(/tauri\(\)\??\.process\??\.\w+/g) ?? [];
     expect(matches.length).toBeGreaterThan(0);
     for (const m of matches) expect(m).toMatch(/relaunch$/);
+  });
+
+  test('the quiet period is timed off a monotonic clock, not the wall clock', () => {
+    // Date.now() jumps: a clock sync, DST, or someone changing the system
+    // clock could make (Date.now() - lastEnded) go negative or huge, either
+    // holding a restart off forever or releasing it early. performance.now()
+    // cannot jump like that.
+    const src = read('app.js');
+    expect(src).not.toContain('Date.now()');
+    expect(src).toContain('performance.now()');
   });
 });
 

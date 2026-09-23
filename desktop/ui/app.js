@@ -80,13 +80,26 @@ let idleWaiters = [];
 // rebuild the same way (tune.js:743, 766); the next call in either chain
 // starts again within microtasks of the one before it finishing, so the
 // count touches zero BETWEEN two calls that belong to the same job, not just
-// after the job ends. 500 ms covers that gap and tune.js's own 300 ms settle
-// timer before a change even reaches the engine as a save.
+// after the job ends. 500 ms covers that gap.
+//
+// It does NOT cover every knob move. tune.js debounces a change behind its
+// own 300 ms settle timer (SETTLE_MS, tune.js:411; schedule(), tune.js:714)
+// before the change ever reaches the engine as a save. That debounce is
+// covered only for a knob moved DURING a save, or within the 200 ms after
+// one ends: only then has the 300 ms timer fired, and the engine call it
+// produces started, by the time this quiet period would otherwise expire. A
+// knob moved after a LONGER quiet has no engine call running yet when the
+// debounce starts, so a restart already waiting on whenIdle() can fire and
+// drop the change before tune.js ever asks the engine to save it. That gap
+// is not closed here.
 export const ENGINE_QUIET_MS = 500;
 
-// Date.now() when a counted call last finished. -Infinity so a whenIdle()
-// asked before anything has ever run resolves at once, the same as one asked
-// long after everything has.
+// performance.now() when a counted call last finished. -Infinity so a
+// whenIdle() asked before anything has ever run resolves at once, the same
+// as one asked long after everything has. performance.now() rather than the
+// wall clock: it is monotonic, so a clock sync, DST, or the system clock
+// changing cannot make this go negative or huge and either hold a restart
+// off forever or release it early.
 let lastEnded = -Infinity;
 let settleTimer = null;
 
@@ -109,7 +122,7 @@ function countsTowardBusy(args) {
  *  waiting for a moment that already passed. */
 function settle() {
   if (inFlight !== 0 || idleWaiters.length === 0) return;
-  const remaining = ENGINE_QUIET_MS - (Date.now() - lastEnded);
+  const remaining = ENGINE_QUIET_MS - (performance.now() - lastEnded);
   if (settleTimer) {
     clearTimeout(settleTimer);
     settleTimer = null;
@@ -134,15 +147,17 @@ export async function runEngine(args) {
   } finally {
     if (counted) {
       inFlight -= 1;
-      lastEnded = Date.now();
+      lastEnded = performance.now();
       settle();
     }
   }
 }
 
 /** True while any COUNTED engine call is running. Unlike whenIdle, this asks
- *  nothing about the quiet period: it is the instantaneous fact a surface
- *  reads to disable a button, not the promise a restart waits on. */
+ *  nothing about the quiet period: it is the instantaneous fact, not the
+ *  promise a restart waits on. Its only reader is update.js's 'waiting'
+ *  label (wired through update-flow.js's `busy: engineBusy`); no surface
+ *  reads it to disable a button. */
 export function engineBusy() {
   return inFlight > 0;
 }
