@@ -449,17 +449,30 @@ describe('the window is granted no more than it needs', () => {
     }
   });
 
-  test('the opener may reach this project’s issue tracker and nothing else', () => {
+  test('the opener may reach the issue tracker and the KFX download pages, and nothing else', async () => {
+    const { KFX_LINKS } = await import('../src/export/kfx-setup');
     const opener = capability().permissions.find(
       (p: unknown) => typeof p === 'object' && p !== null
         && (p as { identifier: string }).identifier === 'opener:allow-open-url',
     );
     expect(opener).toBeDefined();
-    // A glob, so it must not widen past the repository. "https://*" or a bare
-    // "https://github.com/*" would let any page on the host be opened from
-    // whatever text the window happened to be holding.
+    // The repository is a glob, so it must not widen past the repository:
+    // "https://*" or a bare "https://github.com/*" would let any page on the
+    // host be opened from whatever text the window happened to be holding.
+    // The KFX pages are EXACT strings. tauri-plugin-opener 2.5.5 matches the
+    // raw URL with glob::Pattern (src/scope.rs), where `*` also matches `/`,
+    // so an exact string is the only grant that means one page.
+    const exact = new Set<string>(KFX_LINKS);
     for (const entry of opener.allow) {
-      expect(entry.url.startsWith('https://github.com/ssandweiss/screepub/')).toBe(true);
+      const ok = entry.url.startsWith('https://github.com/ssandweiss/screepub/') || exact.has(entry.url);
+      expect(`${entry.url} allowed: ${ok}`).toBe(`${entry.url} allowed: true`);
+    }
+    // And the other way round: every link the engine can put on the Send
+    // page is granted, character for character. Without this half, a new
+    // link in src/export/kfx-setup.ts would draw a button Tauri refuses.
+    const granted = new Set(opener.allow.map((e: { url: string }) => e.url));
+    for (const url of KFX_LINKS) {
+      expect(`${url} granted: ${granted.has(url)}`).toBe(`${url} granted: true`);
     }
   });
 
