@@ -246,10 +246,11 @@ your click: the upload to a docked reMarkable over USB, GitHub when you choose
 and, only if you say yes when it first asks (one line under the drop area,
 which stays until you answer; the switch in the release notes changes your
 answer later), one request a day for this project's `latest.json` on GitHub,
-plus the download when you choose **Update to** beside the version number.
-That download's signature is checked against a key built into the app before
-anything is swapped, and the app then restarts itself, waiting first for any
-conversion, send or export that is still running. It has no Send-to-Kindle
+plus the download when you choose **Update to** beside the version number, or
+**Install** in the release notes. That download's signature is checked
+against a key built into the app before anything is swapped, and the app
+then restarts itself, waiting first for any conversion, send or export that
+is still running. It has no Send-to-Kindle
 page yet. Showing a book in your file manager is local and reaches nothing.
 
 The one thing worth being clear about: **you** can choose to send a script

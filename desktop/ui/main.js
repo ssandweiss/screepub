@@ -43,7 +43,13 @@ notesSheet.append(
   notesBody,
 );
 root.append(notesSheet);
-frame.onRev(() => notesSheet.showModal());
+// The sheet is built once, above, at boot; the switch inside it was read
+// from storage then too. show() resyncs it, so an answer given later under
+// the drop well on the Convert page is not stuck showing off until relaunch.
+frame.onRev(() => {
+  notes.show();
+  notesSheet.showModal();
+});
 
 const surfaces = { convert, read, tune, send };
 

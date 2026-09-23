@@ -4122,6 +4122,162 @@ describe('one update run, one moment, heard by the label and the notes alike', (
   });
 });
 
+describe('what the Updates block in the release notes shows for one moment', () => {
+  // Pulled out of the subscriber as a pure function so every moment can be
+  // checked directly, without mounting a surface. `state` is what the block
+  // has already drawn: has an offer ever been shown this session, and the
+  // version/body an offer or a download most recently named (installing,
+  // waiting, restarting, failed and installed carry no body of their own).
+  let notes: any;
+  let RELEASE: any;
+  beforeAll(async () => {
+    notes = await import(join(UI, 'notes-surface.js'));
+    ({ RELEASE } = await import(join(UI, 'notes.js')));
+  });
+
+  test('null before any offer leaves say alone: this is the surface\'s own idle state', () => {
+    const view = notes.notesView(null, { drewOffer: false });
+    expect(view.say).toBeUndefined();
+    expect(view.body).toEqual({ text: '', hidden: true });
+    expect(view.install).toEqual({ text: '', hidden: true, disabled: true });
+    expect(view.checkDisabled).toBe(false);
+  });
+
+  test('offer: names the version, shows the body it carries, and Install is ready', () => {
+    const view = notes.notesView(
+      { kind: 'offer', version: '0.8.0', body: 'notes' },
+      { drewOffer: false },
+    );
+    expect(view.say).toBe('Screepub 0.8.0 is available.');
+    expect(view.body).toEqual({ text: 'notes', hidden: false });
+    expect(view.install).toEqual({ text: 'Install 0.8.0', hidden: false, disabled: false });
+    expect(view.checkDisabled).toBe(false);
+  });
+
+  test('offer with no body: the paragraph stays hidden rather than show empty prose', () => {
+    const view = notes.notesView({ kind: 'offer', version: '0.8.0', body: '' }, { drewOffer: false });
+    expect(view.body).toEqual({ text: '', hidden: true });
+  });
+
+  test('a retry\'s offer moment (retrying: true) keeps Install disabled: nothing is confirmed yet', () => {
+    const view = notes.notesView(
+      { kind: 'offer', version: '0.8.0', body: 'notes', retrying: true },
+      { drewOffer: true, version: '0.8.0', body: 'notes' },
+    );
+    expect(view.say).toBe('Screepub 0.8.0 is available.');
+    expect(view.install).toEqual({ text: 'Install 0.8.0', hidden: false, disabled: true });
+  });
+
+  test('downloading: names its own body (a retry can find a newer version), disables Check', () => {
+    // The version and body here are NEWER than what state remembers: a
+    // retry's own fresh check found 0.8.1, with different notes than the
+    // 0.8.0 that was last offered.
+    const view = notes.notesView(
+      { kind: 'downloading', version: '0.8.1', received: 400, total: 1000, body: 'new notes' },
+      { drewOffer: true, version: '0.8.0', body: 'old notes' },
+    );
+    expect(view.say).toBe('Downloading 0.8.1… 40%');
+    expect(view.body).toEqual({ text: 'new notes', hidden: false });
+    expect(view.install).toEqual({ text: 'Install 0.8.1', hidden: false, disabled: true });
+    expect(view.checkDisabled).toBe(true);
+  });
+
+  test('installing: keeps naming whatever version and body were last drawn', () => {
+    const view = notes.notesView(
+      { kind: 'installing', version: '0.8.0' },
+      { drewOffer: true, version: '0.8.0', body: 'notes' },
+    );
+    expect(view.say).toBe('Installing…');
+    expect(view.body).toEqual({ text: 'notes', hidden: false });
+    expect(view.install).toEqual({ text: 'Install 0.8.0', hidden: false, disabled: true });
+    expect(view.checkDisabled).toBe(true);
+  });
+
+  test('waiting: says why the restart is waiting, and disables Check', () => {
+    const view = notes.notesView(
+      { kind: 'waiting', version: '0.8.0' },
+      { drewOffer: true, version: '0.8.0', body: 'notes' },
+    );
+    expect(view.say).toBe('Restarting after this finishes…');
+    expect(view.checkDisabled).toBe(true);
+  });
+
+  test('restarting: disables Check (a manual "current" now would contradict the label)', () => {
+    const view = notes.notesView(
+      { kind: 'restarting', version: '0.8.0' },
+      { drewOffer: true, version: '0.8.0', body: 'notes' },
+    );
+    expect(view.say).toBe('Restarting…');
+    expect(view.checkDisabled).toBe(true);
+  });
+
+  test('failed: the full reason, Install re-enabled to retry, Check left alone', () => {
+    const view = notes.notesView(
+      { kind: 'failed', version: '0.8.0', message: 'no network' },
+      { drewOffer: true, version: '0.8.0', body: 'notes' },
+    );
+    expect(view.say).toBe('no network');
+    expect(view.body).toEqual({ text: 'notes', hidden: false });
+    expect(view.install).toEqual({ text: 'Install 0.8.0', hidden: false, disabled: false });
+    // NOT in the disabling list: a manual check is exactly how a reader
+    // stuck on a failure finds out whether a newer fix has since shipped.
+    expect(view.checkDisabled).toBe(false);
+  });
+
+  test('installed: the fallback line, Check stays disabled (the bundle is already swapped)', () => {
+    const view = notes.notesView(
+      { kind: 'installed', version: '0.8.0' },
+      { drewOffer: true, version: '0.8.0', body: 'notes' },
+    );
+    expect(view.say).toBe('Update installed. Quit and reopen Screepub to use 0.8.0.');
+    expect(view.checkDisabled).toBe(true);
+  });
+
+  test('null after an offer: a check found nothing newer, so say so', () => {
+    const view = notes.notesView(null, { drewOffer: true });
+    expect(view.say).toBe(`Screepub ${RELEASE.version} is the newest there is.`);
+    expect(view.body).toEqual({ text: '', hidden: true });
+    expect(view.install).toEqual({ text: '', hidden: true, disabled: true });
+  });
+});
+
+describe('the release notes switch actually shows what it is set to', () => {
+  test('checked is the boolean itself, not \'\' (which el() sets as false)', () => {
+    // el()'s checked branch does `node.checked = value` directly: passing
+    // the ternary's '' set node.checked to the STRING's truthiness in the
+    // JSX-ish reading a reviewer expects, but assigning a DOM boolean
+    // property coerces '' to false regardless of intent, so the switch
+    // always rendered off.
+    const notes = read('notes-surface.js');
+    expect(notes).toContain('checked: state.optedIn,');
+    expect(notes).not.toMatch(/checked:\s*state\.optedIn\s*\?\s*''\s*:\s*null/);
+  });
+
+  test('a "Turn on" given on the Convert page reaches the switch before the sheet opens', () => {
+    // The sheet is built once at boot; readState(localStorage) was read
+    // once then too. A later answer on the Convert page never reached this
+    // checkbox until relaunch.
+    const notes = read('notes-surface.js');
+    expect(notes).toContain('export function show()');
+    expect(notes).toMatch(/show\(\)\s*\{[\s\S]*?readState\(localStorage\)/);
+    const main = read('main.js');
+    expect(main).toMatch(/notes\.show\(\);\s*\n\s*notesSheet\.showModal\(\);/);
+  });
+});
+
+describe('"Check for updates" does not race the flow\'s own run', () => {
+  test('it is disabled for every moment notesView disables it, not just while its own request is in flight', () => {
+    // The manual click handler used to unconditionally set
+    // `button.disabled = false` when ITS OWN request finished, which could
+    // re-enable the button while an unrelated flow run (started from the
+    // label, say) was still busy downloading or installing — a manual
+    // check answering "current" then would contradict the label on screen
+    // and clear the remembered offer out from under it.
+    const notes = read('notes-surface.js');
+    expect(notes).toMatch(/button\.disabled\s*=\s*checkDisabled/);
+  });
+});
+
 describe('a refused file is no longer a dead end', () => {
   // The Swift app could report a bug from the failure screen, and the report
   // carried the refusal's code with it. The Tauri window could not report
@@ -4702,7 +4858,10 @@ describe('the release notes redraw one Install button and one body, not a new on
     expect(notes.match(/btn-brad/g)?.length).toBe(1);
     expect(notes).toContain("el('button', { type: 'button', class: 'btn btn-brad btn-small', hidden: true }");
     expect(notes).toContain("el('p', { class: 'prose update-body', hidden: true }");
-    expect(notes).toMatch(/text\(body,\s*phase\.body/);
+    // Redrawn from notesView's own return value (view.body.text), not
+    // appended: the pure function decides the words, the subscriber only
+    // paints them.
+    expect(notes).toMatch(/text\(body,\s*view\.body\.text\)/);
     // Not appended per offer: say.after(...) built a new paragraph each time.
     expect(notes).not.toContain('say.after(');
   });

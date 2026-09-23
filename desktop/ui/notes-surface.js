@@ -29,6 +29,82 @@ function noteItem(item) {
     : el('p', { class: 'note-item' }, item.body);
 }
 
+/** The Updates block's rules, pulled out of the subscriber so every moment
+ *  can be checked directly, without mounting a surface.
+ *
+ *  Pure: a function of the CURRENT phase (whatever update-flow.js just
+ *  emitted) and of what the block has already drawn —
+ *    state.drewOffer   has an offer ever been shown this session? A null
+ *                       phase before the first offer is this block's own
+ *                       IDLE state (nothing has been asked yet); a null
+ *                       phase after one is a check that found nothing
+ *                       newer, and those read very differently.
+ *    state.version /
+ *    state.body        the version and notes an offer or a download most
+ *                       recently named. installing, waiting, restarting,
+ *                       failed and installed carry no body of their own,
+ *                       and blanking the notes the instant the download
+ *                       starts would be its own small lie.
+ *
+ *  `say` is `undefined`, not a string, exactly where the caller should
+ *  leave its own text alone. */
+export function notesView(phase, state) {
+  const drewOffer = Boolean(state?.drewOffer);
+  if (phase === null || phase === undefined) {
+    return {
+      say: drewOffer ? `Screepub ${RELEASE.version} is the newest there is.` : undefined,
+      body: { text: '', hidden: true },
+      install: { text: '', hidden: true, disabled: true },
+      checkDisabled: false,
+    };
+  }
+  if (phase.kind === 'offer') {
+    return {
+      say: `Screepub ${phase.version} is available.`,
+      body: { text: phase.body ?? '', hidden: !phase.body },
+      // A retry leaving 'failed' re-emits its own 'offer' phase, marked
+      // retrying, while installAndRestart's fresh check is still in
+      // flight (update-flow.js). Nothing is confirmed yet, so Install
+      // must not look ready to click again.
+      install: { text: `Install ${phase.version}`, hidden: false, disabled: Boolean(phase.retrying) },
+      checkDisabled: false,
+    };
+  }
+  // Every other kind. `downloading` carries its own (possibly NEWER) body —
+  // a retry's own fresh check can find a version with different release
+  // notes than what was last offered — so it is used fresh; everything
+  // else keeps naming whatever state last drew.
+  const version = phase.version ?? state?.version ?? '';
+  const body = phase.kind === 'downloading' ? (phase.body ?? '') : (state?.body ?? '');
+  // Disabled while a run is busy doing something a manual "current" would
+  // contradict, and once installed (the bundle is already swapped). NOT
+  // while 'failed': a manual check is exactly how someone stuck on a
+  // failure finds out whether a newer fix has since shipped.
+  const checkDisabled = phase.kind === 'downloading' || phase.kind === 'installing'
+    || phase.kind === 'waiting' || phase.kind === 'restarting' || phase.kind === 'installed';
+  return {
+    say: phase.kind === 'failed' ? phase.message : updateLabel(phase),
+    body: { text: body, hidden: !body },
+    install: { text: `Install ${version}`, hidden: false, disabled: phase.kind !== 'failed' },
+    checkDisabled,
+  };
+}
+
+// The one checkbox the "once a day" switch actually is, so show() (below)
+// can resync it. Null wherever the block is absent (flow.usable() false).
+let autoCheckbox = null;
+
+/** Called just before the release notes sheet opens (main.js, frame.onRev),
+ *  because the sheet is built ONCE at boot and readState(localStorage) was
+ *  read once then too: a "Turn on" given later, under the drop well on the
+ *  Convert page, answered shouldAsk() and reached the flow, but never
+ *  reached this checkbox, which kept showing off until the window
+ *  relaunched. */
+export function show() {
+  if (autoCheckbox === null) return;
+  autoCheckbox.checked = readState(localStorage).optedIn;
+}
+
 export function mount(pane) {
   pane.append(
     el('h2', { class: 'slug' }, `Screepub ${RELEASE.version}`),
@@ -69,10 +145,15 @@ function updateBlock() {
   const say = el('p', { class: 'caption update-status', role: 'status' }, '');
   const state = readState(localStorage);
 
+  // Whatever notesView's checkDisabled last said, so the manual click
+  // handler below can restore THAT rather than unconditionally re-enable a
+  // button the flow (started from the label, say) still wants disabled.
+  let checkDisabled = false;
+
   const auto = el('input', {
     type: 'checkbox',
     id: 'update-auto',
-    checked: state.optedIn ? '' : null,
+    checked: state.optedIn,
     onchange: (event) => {
       rememberAnswer(localStorage, event.target.checked);
       text(say, event.target.checked
@@ -80,6 +161,7 @@ function updateBlock() {
         : 'Screepub will not look on its own.');
     },
   });
+  autoCheckbox = auto;
 
   const button = el('button', { type: 'button', class: 'btn btn-outline btn-small' },
     'Check for updates');
@@ -91,7 +173,10 @@ function updateBlock() {
     const result = await runCheck({
       manual: true, storage: localStorage, now: Date.now(), check: updateCheck,
     });
-    button.disabled = false;
+    // Not unconditionally false: a flow run started elsewhere (the label,
+    // say) may have become busy WHILE this request was in flight, and this
+    // restores to whatever it currently wants rather than fight it.
+    button.disabled = checkDisabled;
     if (result.outcome === 'error') { text(say, result.message); return; }
     if (result.outcome !== 'offer') {
       text(say, `Screepub ${RELEASE.version} is the newest there is.`);
@@ -126,25 +211,26 @@ function updateBlock() {
     install,
   );
 
+  // What notesView needs to keep naming a version/body across moments that
+  // carry none of their own (see the pure function's own doc comment).
+  let drewOffer = false;
+  let lastVersion = null;
+  let lastBody = '';
   flow.subscribe((phase) => {
-    if (phase === null) {
-      body.hidden = true;
-      install.hidden = true;
-      return;
+    const view = notesView(phase, { drewOffer, version: lastVersion, body: lastBody });
+    if (view.say !== undefined) text(say, view.say);
+    text(body, view.body.text);
+    body.hidden = view.body.hidden;
+    text(install, view.install.text);
+    install.hidden = view.install.hidden;
+    install.disabled = view.install.disabled;
+    checkDisabled = view.checkDisabled;
+    button.disabled = checkDisabled;
+    if (phase !== null && phase !== undefined) {
+      drewOffer = true;
+      if (phase.version !== undefined) lastVersion = phase.version;
+      if (phase.kind === 'offer' || phase.kind === 'downloading') lastBody = phase.body ?? '';
     }
-    if (phase.kind === 'offer') {
-      text(say, `Screepub ${phase.version} is available.`);
-      text(body, phase.body ?? '');
-      body.hidden = !phase.body;
-      text(install, `Install ${phase.version}`);
-      install.hidden = false;
-      install.disabled = false;
-      return;
-    }
-    // Every later moment is the label's words, except a failure, which gets
-    // the full reason here: this is where someone looks for it.
-    text(say, phase.kind === 'failed' ? phase.message : updateLabel(phase));
-    install.disabled = phase.kind !== 'failed';
   });
   return block;
 }
