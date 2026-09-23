@@ -1,7 +1,8 @@
 # Design: every way a book leaves Screepub (parity piece B)
 
-Date: 2026-09-23 · Status: draft, building the engine half; the window half
-waits on the owner's answer to the two questions at the end.
+Date: 2026-09-23 · Status: accepted. The owner answered both questions at
+the end on 2026-09-23: "yes go for it" (the save dialog permission, and the
+engine opening Books, Amazon and Mail).
 Piece B of [the parity plan](../plans/2026-09-21-parity.md).
 Evidence: [the parity audit](../../parity-audit.md), "The route catalog".
 Contract: decision 25 of [the UI pass spec](2026-09-20-desktop-ui-pass-design.md).
@@ -55,8 +56,12 @@ with its fix instead of hiding it.
 5. **The window never writes a file.** It raises a save dialog and hands
    the engine a path, as the UI pass spec agreed: `screepub export ...
    --out <path>`.
-6. **Pending the owner:** who opens Books, Amazon and Mail. See the
-   questions. The engine half is built so either answer is a small change.
+6. **The engine opens Books, Amazon's app and page, and Mail** (owner,
+   2026-09-23), the same way it already runs Calibre. Those routes open a
+   file in the library, piece C makes the library movable, and a window
+   permission is a fixed path that cannot follow it. The ADR gets a dated
+   amendment saying so. The window gains exactly one permission for this
+   piece: `dialog:allow-save`.
 
 ## The engine
 
@@ -196,7 +201,7 @@ Best Kindle quality ...  (piece D, unchanged)
   the library (the window's reveal grant is a fixed path); that is C's.
 - Amazon's Send to Kindle for PC. Windows gets the web route.
 
-## Open questions for the owner
+## The owner's questions, answered 2026-09-23 ("yes go for it")
 
 1. **Save a copy needs the window to show a Save box.** That is one new
    window permission, `dialog:allow-save` (the ADR already names it as a

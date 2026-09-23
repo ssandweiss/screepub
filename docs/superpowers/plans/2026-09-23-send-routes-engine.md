@@ -231,7 +231,7 @@ export async function emailToKindle(epub: string, open?: Opener): Promise<string
 - Email: `['open', '-a', 'Mail', epub]`. Note `Opened a Mail message with the book attached. Address it to your Kindle's email address.`
 - A non-zero exit → throw an Error whose message names what could not be opened (`could not open Apple Books: <stderr, trimmed>`); explorer on Windows exits 1 even on success, so for that one argv, ignore its exit code.
 - The default `Opener` spawns argv[0] with the rest (Bun.spawn), waits, returns code and stderr.
-- **PENDING OWNER:** the spec's question 2. Build it as above; if the owner prefers window permissions, only this file and the `route` handler change.
+- **Decided by the owner (2026-09-23):** the engine performs these opens, as above. The window gains no permission for them.
 
 **Handler** (`src/cli-routes.ts`):
 
