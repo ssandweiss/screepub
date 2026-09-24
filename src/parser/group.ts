@@ -1,5 +1,6 @@
 import type { Fmt, RawLine, TextBlock } from './types';
 import { INDENT_RANGES } from './types';
+import { SCENE_HEADING } from './classify';
 
 /** Two fmts are the same shift. Both undefined counts as the same. */
 function sameFmt(a: Fmt | undefined, b: Fmt | undefined): boolean {
@@ -91,7 +92,7 @@ function quickClassify(indent: number): QuickType {
 }
 
 function isSceneHeading(text: string): boolean {
-  return /^(INT\.|EXT\.|INT\.\/EXT\.|I\/E\.)/.test(text);
+  return SCENE_HEADING.test(text);
 }
 
 function cleanEllipsis(line: RawLine): RawLine {
