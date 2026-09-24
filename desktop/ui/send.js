@@ -503,15 +503,17 @@ export function sameRoutes(a, b) {
 }
 
 /** What a row says: its title and the engine's detail (the mechanism when it
- *  can fire, the fix when it cannot), and on a connected device row the same
- *  two lines it had before routes: where the file lands, and the unproven
- *  caveat. */
+ *  can fire, the fix when it cannot), and on a connected device row the
+ *  unproven caveat and, for a reader that mounts, the volume the file lands
+ *  on. A docked reMarkable never mounts and gets no such line: the engine's
+ *  detail already says how it is reached, and whereLine()'s stand-in beside
+ *  it said the same thing twice. */
 export function routeLines(route, platform) {
   const device = route?.device ?? null;
   return {
     title: route?.title,
     detail: route?.detail,
-    where: device === null ? null : whereLine(device),
+    where: device !== null && isText(device.volume) ? whereLine(device) : null,
     caveat: device === null ? null : caveatFor(device, platform),
   };
 }
@@ -823,7 +825,7 @@ function routeRow(route, chosen) {
       hint === null ? null : el('p', { class: 'caption route-hint' }, hint.line, ' ',
         el('button', {
           type: 'button', class: 'btn-quiet', 'data-route': hint.key, disabled: kfxInstalling(),
-          onclick: () => perform({ key: hint.key, title: SETUP_TITLE }),
+          onclick: () => keepFocus(hint.key, () => perform({ key: hint.key, title: SETUP_TITLE })),
         }, SETUP_BUTTON)),
     ),
     button,
@@ -833,8 +835,29 @@ function routeRow(route, chosen) {
 /** A row's button: a device through sendTo(), with its phases; every other
  *  route through perform(). */
 function choose(route) {
-  if (performerFor(route) === 'device') sendTo(route.device);
-  else perform(route);
+  if (performerFor(route) === 'device') keepFocus(route.id, () => sendTo(route.device));
+  else keepFocus(route.id, () => perform(route));
+}
+
+/** Runs one route and gives the keyboard back to the button that started it.
+ *  A route kills every button on the list while it runs, and a dead button
+ *  cannot hold the focus; a Save box takes it too, and when that closes the
+ *  window's own handler puts it on the page's first live stop, which is not
+ *  this row. So when the keyboard was in the list as the route started, it
+ *  goes back to the same route's button once the buttons live again, found
+ *  by its id (a repoll may redraw the row), or failing that to the page's
+ *  plan: giveBackFocus(), as after a redraw. Success, refusal or a cancelled
+ *  Save box alike.
+ *
+ *  Left alone when there is nothing to put back (a mouse press: WebKit does
+ *  not focus a clicked button) or the reader has moved on: another script
+ *  (a new page), or another surface (the list is hidden, and the plan would
+ *  move the keyboard on a page the reader is not looking at). */
+async function keepFocus(id, run) {
+  const held = list !== null && list.contains(document.activeElement);
+  const mine = era;
+  await run();
+  if (held && era === mine && canFocus(list)) giveBackFocus(id);
 }
 
 /** Every Send button on the surface, so a send can take the whole list out

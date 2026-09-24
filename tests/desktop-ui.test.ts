@@ -3055,6 +3055,22 @@ describe('the Send page performs every route: shape', () => {
     expect(body('async function perform(')).toContain('argv.emailSetup()');
   });
 
+  test('every route, the setup link included, hands the keyboard back when it is done', () => {
+    // A route kills every button while it runs (a dead button drops the
+    // focus) and a Save box takes the focus too, so each press goes through
+    // keepFocus(), which puts it back on the same route's button.
+    const choose = body('function choose(');
+    expect(choose).toContain('keepFocus(route.id, () => sendTo(route.device))');
+    expect(choose).toContain('keepFocus(route.id, () => perform(route))');
+    expect(send).toContain('keepFocus(hint.key, () => perform({ key: hint.key, title: SETUP_TITLE }))');
+    const keep = body('async function keepFocus(');
+    const held = keep.indexOf('list.contains(document.activeElement)');
+    const ran = keep.indexOf('await run()');
+    expect(held, 'keepFocus() never asks where the keyboard was').toBeGreaterThan(-1);
+    expect(held).toBeLessThan(ran);
+    expect(keep.slice(ran)).toContain('if (held && era === mine && canFocus(list)) giveBackFocus(id);');
+  });
+
   test('after a success the list is asked for again, and no older answer can undo it', () => {
     for (const head of ['async function perform(', 'async function sendTo(']) {
       const fn = body(head);

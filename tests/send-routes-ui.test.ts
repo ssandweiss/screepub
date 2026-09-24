@@ -699,7 +699,7 @@ describe('performerFor: which flow a row’s button runs', () => {
 });
 
 describe('routeLines: what a row says', () => {
-  test('a device row keeps its volume line and its unproven caveat, as before routes', () => {
+  test('a mounted reader keeps its volume line and every device its unproven caveat', () => {
     const list = routes({
       platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: true,
       devices: [kindle, kobo, rm],
@@ -715,8 +715,12 @@ describe('routeLines: what a row says', () => {
     expect(kobos.caveat).not.toBe(null);
     // The Kindle is proven on a Mac only.
     expect(send.routeLines(k, 'Linux x86_64').caveat).not.toBe(null);
-    // A reMarkable never mounts: the same line it had before routes.
-    expect(send.routeLines(r, 'MacIntel').where).toBe(send.whereLine(r.device));
+    // A reMarkable never mounts: no volume line at all, because the engine's
+    // detail ("the EPUB, over its USB connection") already says how it goes.
+    expect(send.routeLines(r, 'MacIntel').where).toBe(null);
+    expect(send.routeLines(r, 'MacIntel').detail).toBe(r.detail);
+    // A volume that is only spaces is no volume.
+    expect(send.routeLines({ ...k, device: { ...k.device!, volume: '  ' } }, 'MacIntel').where).toBe(null);
   });
 
   test('every other row, available or dimmed, is its title and the engine’s detail', () => {
@@ -810,7 +814,9 @@ describe('the Send page, drawn from the route list and performed row by row', ()
   // kfx.js ask of a node; the model is desktop-ui.test.ts's "what a reader
   // sees across redraws" block. activeElement falls back to the body when the
   // focused node is detached, disabled or inside something hidden, as a
-  // browser's focus fixup does. The engine and the save dialog are queues of
+  // browser's focus fixup does. Disabling the focused button drops the focus
+  // for good, as that fixup does too: re-enabling it does not hand it back,
+  // so a test of putting the keyboard back cannot pass on the stub's memory. The engine and the save dialog are queues of
   // unanswered calls the test answers in whatever order it wants, and the
   // two-second poll is a callback the test fires by hand.
   class StubNode {
@@ -819,10 +825,15 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     attrs = new Map<string, string>();
     listeners = new Map<string, ((event: unknown) => void)[]>();
     hidden = false;
-    disabled = false;
+    dead = false;
     className = '';
     data = '';
     constructor(readonly tagName: string, readonly doc: StubDocument) {}
+    get disabled() { return this.dead; }
+    set disabled(on: boolean) {
+      this.dead = on;
+      if (on && this.doc.focused === this) this.doc.focused = null;
+    }
     get firstChild() { return this.childNodes[0] ?? null; }
     append(...nodes: (StubNode | string)[]) {
       for (const each of nodes) {
@@ -1197,6 +1208,95 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     w.poll();
     await w.answer('routes', listed([kobo, kindle]));
     expect(block.hidden).toBe(false);
+  });
+
+  test('the keyboard goes back to Save the EPUB after its Save box is cancelled', async () => {
+    const w = await world();
+    await w.answer('routes', listed([]));
+    const save = w.button('Save the EPUB…');
+    save.focus();
+    save.click(); // Return on the focused button
+    // The Save box has the focus now; when it closes, the window's own
+    // handler (main.js) puts it on the page's first live stop, which with
+    // every route button dead is the reach table.
+    w.pane.all().find((n) => n.tagName === 'SUMMARY')!.focus();
+    await w.choose(null);
+    expect(w.doc.activeElement).toBe(w.button('Save the EPUB…'));
+    expect(w.ctx.restored).toBe(0);
+  });
+
+  test('the keyboard goes back to the route’s button after a refusal, and after a success', async () => {
+    const w = await world();
+    await w.answer('routes', listed([]));
+    const books = w.button('Add to Apple Books');
+    books.focus();
+    books.click();
+    expect(w.doc.activeElement).not.toBe(books); // a dead button holds nothing
+    await w.answer('route', { ok: false, error: { code: 'open-failed', message: 'Books did not open.' } });
+    expect(w.doc.activeElement).toBe(w.button('Add to Apple Books'));
+
+    w.button('Add to Apple Books').click();
+    await w.answer('route', { ok: true, note: 'Added to Apple Books.' });
+    expect(w.doc.activeElement).toBe(w.button('Add to Apple Books'));
+    // The repoll moves the brass and rebuilds the rows; the keyboard stays.
+    await w.answer('routes', listed([], 'apple-books'));
+    expect(w.doc.activeElement).toBe(w.button('Add to Apple Books'));
+    expect(w.doc.activeElement.className).toBe('btn btn-brad');
+  });
+
+  test('a device send and the setup link hand the keyboard back the same way', async () => {
+    const w = await world();
+    await w.answer('routes', listed([kobo]));
+    w.button('Copy to KOBOeReader').focus();
+    w.button('Copy to KOBOeReader').click();
+    await settle();
+    await w.answer('export', { ok: false, error: { code: 'export-failed', message: 'No book.' } });
+    expect(w.doc.activeElement).toBe(w.button('Copy to KOBOeReader'));
+
+    const link = w.button('Open Amazon’s page');
+    link.focus();
+    link.click();
+    await w.answer('route', { ok: false, error: { code: 'open-failed', message: 'No browser.' } });
+    expect(w.doc.activeElement).toBe(w.button('Open Amazon’s page'));
+  });
+
+  test('a mouse press, a new script or another page leaves the keyboard where it is', async () => {
+    // Nothing to put back when the keyboard was not in the list, and nothing
+    // to take it from when the reader has moved on.
+    const w = await world();
+    await w.answer('routes', listed([]));
+    const summary = w.pane.all().find((n) => n.tagName === 'SUMMARY')!;
+    summary.focus();
+    w.button('Add to Apple Books').click(); // a click does not focus a button in WebKit
+    await w.answer('route', { ok: false, error: { code: 'x', message: 'No.' } });
+    expect(w.doc.activeElement).toBe(summary);
+
+    w.button('Add to Apple Books').focus();
+    w.button('Add to Apple Books').click();
+    w.pane.hidden = true; // the reader went to Read meanwhile
+    await w.answer('route', { ok: false, error: { code: 'x', message: 'No.' } });
+    expect(w.ctx.restored).toBe(0);
+    w.pane.hidden = false;
+
+    w.button('Add to Apple Books').focus();
+    w.button('Add to Apple Books').click();
+    w.ctx.state.script = { ...script(), epubPath: '/lib/other/Other.epub' };
+    w.send.scriptChanged();
+    if (w.asked().includes('kfx-status')) await w.answer('kfx-status', { ok: false });
+    await w.answer('route', { ok: false, error: { code: 'x', message: 'No.' } });
+    expect(w.ctx.restored).toBe(0);
+  });
+
+  test('a docked reMarkable is described once, in the engine’s words', async () => {
+    // It never mounts, so it has no volume line; the engine's detail already
+    // says how it is reached. A mounted reader keeps its volume line.
+    const w = await world();
+    await w.answer('routes', listed([kobo, rm]));
+    const [koboRow, rmRow] = w.rows();
+    expect(rmRow!.all().filter((n) => n.className === 'route-detail').map((n) => n.textContent))
+      .toEqual(['the EPUB, over its USB connection']);
+    expect(rmRow!.all().some((n) => n.className === 'device-where')).toBe(false);
+    expect(koboRow!.all().find((n) => n.className === 'device-where')!.textContent).toBe('/Volumes/KOBOeReader');
   });
 
   test('Apple Books: every button dead while it runs, the engine’s note after, then the list again', async () => {
