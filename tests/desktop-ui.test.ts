@@ -564,53 +564,138 @@ describe('the Convert surface', () => {
     expect(build).toContain('note,');
   });
 
-  test('the library line is probed on show, and nowhere else, with a bare read', () => {
-    const showFn = convert.slice(
-      convert.indexOf('export function show'),
-      convert.indexOf('export function choose'),
+  test('D2: the library line lives in one slot, built empty by drawWell after the question', () => {
+    const drawWellSrc = convert.slice(
+      convert.indexOf('function drawWell'),
+      convert.indexOf('async function pickFileThenConvert'),
     );
-    expect(showFn).toContain('probeLibrary()');
+    const askIdx = drawWellSrc.indexOf('askLine()');
+    const slotIdx = drawWellSrc.indexOf('buildLibrarySlot()');
+    const appendIdx = drawWellSrc.indexOf('pane.append(slot.line, slot.secondary)');
+    expect(askIdx).toBeGreaterThan(-1);
+    expect(slotIdx).toBeGreaterThan(askIdx);
+    expect(appendIdx).toBeGreaterThan(slotIdx);
+    // drawWell starts its own probe. show() and reset() no longer probe on
+    // their own: drawWell already runs everywhere the well is actually
+    // (re)drawn (mount, "Convert another", a refusal's "Back to one"), and a
+    // plain tab return to an idle well that is still on screen has nothing
+    // to re-probe.
+    expect(drawWellSrc).toContain('probeLibrary(');
+    const showFn = convert.slice(
+      convert.indexOf('export function show'), convert.indexOf('export function choose'),
+    );
+    expect(showFn).not.toContain('probeLibrary');
+    const resetFn = convert.slice(
+      convert.indexOf('export function reset'), convert.indexOf('function askLine'),
+    );
+    expect(resetFn).not.toContain('probeLibrary');
+  });
+
+  test('P7: a stale probe is dropped by a generation counter drawWell bumps on every redraw', () => {
+    const drawWellSrc = convert.slice(
+      convert.indexOf('function drawWell'),
+      convert.indexOf('async function pickFileThenConvert'),
+    );
+    expect(drawWellSrc).toContain('libraryGeneration += 1');
     const probe = convert.slice(
       convert.indexOf('async function probeLibrary'),
-      convert.indexOf('function appendLibraryLine'),
-    );
-    expect(probe).toContain('argv.appSettings()');
-    // A bare read: no --set, so this call never counts toward busy (see
-    // app.js's countsTowardBusy) and can run at any time, including while a
-    // conversion is in flight elsewhere.
-    expect(probe).not.toContain('--set');
-    // "Convert another" is the well arriving fresh, the same as the first
-    // time the surface was shown.
-    const resetFn = convert.slice(
-      convert.indexOf('export function reset'),
-      convert.indexOf('function askLine'),
-    );
-    expect(resetFn).toContain('probeLibrary()');
-  });
-
-  test('Change asks the OS for a folder before it ever asks the engine to move anything', () => {
-    const block = convert.slice(
-      convert.indexOf('function appendLibraryLine'),
       convert.indexOf('function drawWell'),
     );
-    const run = block.slice(block.indexOf('async function run('));
-    expect(run.indexOf('pickFolder(')).toBeGreaterThan(-1);
-    expect(run.indexOf('argv.appSettings(')).toBeGreaterThan(run.indexOf('pickFolder('));
-    // Both buttons go quiet for the whole span, not just the engine call, so
-    // a second click while the folder picker itself is still open cannot
-    // start a second write.
-    expect(run.indexOf('setBusy(true)')).toBeGreaterThan(-1);
-    expect(run.indexOf('pickFolder(')).toBeGreaterThan(run.indexOf('setBusy(true)'));
+    expect(probe).toContain('gen !== libraryGeneration');
   });
 
-  test('the library line reuses the quiet caption and button, and asks for no new CSS', () => {
-    const block = convert.slice(
-      convert.indexOf('function appendLibraryLine'),
+  test('P5/P6: a failed or malformed probe leaves the slot exactly as drawWell built it', () => {
+    const probe = convert.slice(
+      convert.indexOf('async function probeLibrary'),
       convert.indexOf('function drawWell'),
     );
-    expect(block).toContain("class: 'caption'");
-    expect(block).toContain("class: 'btn-quiet'");
-    expect(block).not.toMatch(/class:\s*'library/);
+    // Never a second line: the only way this feature reaches the page is
+    // the one slot drawWell already appended.
+    expect(probe).not.toContain('pane.append');
+    // A dead engine returns from the catch, and a malformed answer returns
+    // from the null-library check, BEFORE slot.showLibrary is ever reached.
+    const catchIdx = probe.indexOf('catch');
+    const nullCheckIdx = probe.indexOf('library === null');
+    const showIdx = probe.indexOf('slot.showLibrary(');
+    expect(catchIdx).toBeGreaterThan(-1);
+    expect(nullCheckIdx).toBeGreaterThan(catchIdx);
+    expect(showIdx).toBeGreaterThan(nullCheckIdx);
+  });
+
+  test('B1/C2/C4/6: the picker opens with both buttons already quiet, at the current folder, and a cancel or a no-op pick sends nothing', () => {
+    const slot = convert.slice(
+      convert.indexOf('function buildLibrarySlot'),
+      convert.indexOf('async function probeLibrary'),
+    );
+    const run = slot.slice(slot.indexOf('async function run('));
+    const busyIdx = run.indexOf('setBusy(true)');
+    const pickIdx = run.indexOf('pickFolder(');
+    const engineIdx = run.indexOf('runEngine(argv.appSettings(');
+    expect(busyIdx).toBeGreaterThan(-1);
+    // B1: quiet before the picker opens, not just around the engine call.
+    expect(pickIdx).toBeGreaterThan(busyIdx);
+    // B1: and back on again in a finally, so a thrown pickFolder cannot
+    // leave both buttons disabled forever.
+    expect(run).toMatch(/finally\s*\{[^]*setBusy\(false\)/);
+    // C2: the picker starts where the library already is.
+    expect(run).toContain('pickFolder({ defaultPath: library.path })');
+    // C4 + minor #6: a cancelled picker (null), or picking the folder
+    // already in use, returns before the engine is ever asked to do
+    // anything.
+    const guard = run.slice(pickIdx, engineIdx);
+    expect(guard).toContain('path === null');
+    expect(guard).toContain('path === library.path');
+    expect(guard).toMatch(/return;/);
+  });
+
+  test('E1/E2: a refusal or a thrown error replaces only the secondary line, never the buttons', () => {
+    const slot = convert.slice(
+      convert.indexOf('function buildLibrarySlot'),
+      convert.indexOf('async function probeLibrary'),
+    );
+    const run = slot.slice(slot.indexOf('async function run('));
+    const success = run.slice(run.indexOf('if (result.ok)'), run.indexOf('} else {'));
+    const refusal = run.slice(run.indexOf('} else {'), run.indexOf('} catch'));
+    const crash = run.slice(run.indexOf('} catch'), run.indexOf('} finally'));
+    expect(success).toContain('showLibrary(result.library)');
+    // E1: a JSON refusal only ever touches the secondary line.
+    expect(refusal).not.toContain('showLibrary(');
+    expect(refusal).toContain('showSecondary(result.message)');
+    // E2: a thrown error (a crashed engine, or a thrown picker) does too.
+    expect(crash).not.toContain('showLibrary(');
+    expect(crash).toContain('showSecondary(err.message)');
+  });
+
+  test('R2: Reset goes through the very same run() as Change, so it cannot send anything else', () => {
+    const slot = convert.slice(
+      convert.indexOf('function buildLibrarySlot'),
+      convert.indexOf('async function probeLibrary'),
+    );
+    // One shared handler read off the actions map, not a second copy of the
+    // logic for Reset that a change here could let drift.
+    expect(slot).toContain('onclick: () => run(action, library)');
+    const run = slot.slice(slot.indexOf('async function run('));
+    expect(run).toContain('let path = null;');
+    // The only place `path` is ever REASSIGNED (not merely declared or
+    // compared) is the one branch Change alone takes; Reset's path is that
+    // initial null, straight into libraryChangeArgs (pinned separately as a
+    // pure decision: libraryChangeArgs(null) is the literal
+    // libraryPath: null).
+    const afterDeclaration = run.slice(run.indexOf('let path = null;') + 'let path = null;'.length);
+    const reassignments = afterDeclaration.match(/path = /g) ?? [];
+    expect(reassignments.length).toBe(1);
+    expect(afterDeclaration.indexOf('path = ')).toBeGreaterThan(
+      afterDeclaration.indexOf("action === 'change'"),
+    );
+  });
+
+  test('the slot reuses well-ask (centred, gapped) rather than new CSS', () => {
+    const slot = convert.slice(
+      convert.indexOf('function buildLibrarySlot'),
+      convert.indexOf('async function probeLibrary'),
+    );
+    expect(slot).toContain("class: 'well-ask'");
+    expect(slot).not.toMatch(/class:\s*'library/);
     const css = read('surfaces.css');
     expect(css).not.toContain('.library');
   });
@@ -628,6 +713,7 @@ describe('what the Convert surface decides', () => {
     HEADINGS: Record<string, string>;
     OVERRIDABLE: string;
     NO_MESSAGE: string;
+    NO_LIBRARY_MESSAGE: string;
     PROGRESS_START: Progress;
     shortcutLabel: (platform: unknown) => string;
     failureFor: (error: unknown) => {
@@ -1017,6 +1103,20 @@ describe('what the Convert surface decides', () => {
     expect(convert.libraryLine({
       ...base, path: '/Users/ann/Books', home: '/Users/ann', fromEnv: true,
     })).toBe('Books are saved in ~/Books, set by SCREEPUB_LIBRARY.');
+    // A root home is still just the home folder: "~", not "~/" or "~\".
+    expect(convert.libraryLine({ ...base, path: '/', home: '/' }))
+      .toBe('Books are saved in ~.');
+    expect(convert.libraryLine({ ...base, path: 'C:\\', home: 'C:\\' }))
+      .toBe('Books are saved in ~.');
+    // Windows paths compare case-insensitively, because the filesystem they
+    // name does.
+    expect(convert.libraryLine({
+      ...base, path: 'c:\\users\\ann\\Documents\\Screepub', home: 'C:\\Users\\Ann',
+    })).toBe('Books are saved in ~\\Documents\\Screepub.');
+    // POSIX paths do not: a case difference is a different, unrelated path.
+    expect(convert.libraryLine({
+      ...base, path: '/users/ann/Documents', home: '/Users/Ann',
+    })).toBe('Books are saved in /users/ann/Documents.');
   });
 
   test('libraryActions offers Change alone, Change and Reset, or neither', () => {
@@ -1051,16 +1151,26 @@ describe('what the Convert surface decides', () => {
       ok: true,
       library: { path: '/x', chosen: '/x', platformDefault: '/d', fromEnv: false, home: '/h' },
     });
-    // The engine's own sentence, verbatim: the same rule failureFor applies
-    // everywhere else on this screen.
+    // The engine's own sentence, verbatim.
     expect(convert.libraryAfter({
       ok: false,
       error: { code: 'bad-settings', message: 'the library folder must be a full path' },
     })).toEqual({ ok: false, message: 'the library folder must be a full path' });
-    // A contract-breaking refusal still says something a person can act on.
+    // A contract-breaking refusal still says something a person can act on,
+    // but NOT failureFor's "the engine refused the file without saying why":
+    // nothing was refused and there is no file, so this gets its own words.
     expect(convert.libraryAfter({ ok: false, error: {} })).toEqual({
-      ok: false, message: convert.NO_MESSAGE,
+      ok: false, message: convert.NO_LIBRARY_MESSAGE,
     });
+    expect(convert.libraryAfter({ ok: false })).toEqual({
+      ok: false, message: convert.NO_LIBRARY_MESSAGE,
+    });
+    // ok: true with nothing usable inside is just as much a broken contract
+    // as a refusal with no sentence, and gets the same fallback.
+    expect(convert.libraryAfter({ ok: true, library: null, home: '/h' })).toEqual({
+      ok: false, message: convert.NO_LIBRARY_MESSAGE,
+    });
+    expect(convert.NO_LIBRARY_MESSAGE).toBe('Screepub could not confirm where books are saved.');
   });
 });
 

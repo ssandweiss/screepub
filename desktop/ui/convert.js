@@ -268,25 +268,37 @@ export function libraryFrom(answer) {
   return { path, chosen, platformDefault, fromEnv, home: answer.home };
 }
 
-/** The library line itself. The home folder shows as `~` only when the path
- *  genuinely sits under it: the folder itself, or home plus a path
- *  separator and more, never for a sibling that merely shares the same
- *  prefix (`/Users/ann2` is not under `/Users/ann`). Both slashes are
- *  checked because the path may have come from either OS, and `home` is
- *  stripped of any trailing separator of its own first, so a caller that
- *  hands one over does not get a doubled one back. */
+/** The library line itself. See shortenHome for the ~ rule. */
 export function libraryLine(library) {
   const { path, home, fromEnv } = library;
-  const root = home.replace(/[/\\]+$/, '');
-  let shown = path;
-  if (path === root) {
-    shown = '~';
-  } else if (path.startsWith(`${root}/`) || path.startsWith(`${root}\\`)) {
-    shown = `~${path.slice(root.length)}`;
-  }
+  const shown = shortenHome(path, home);
   return fromEnv
     ? `Books are saved in ${shown}, set by SCREEPUB_LIBRARY.`
     : `Books are saved in ${shown}.`;
+}
+
+/** `path`, with a leading `home` folded to `~`, but only when it genuinely
+ *  sits under home: the folder itself, or home plus a separator and more,
+ *  never a sibling that merely shares the same prefix (`/Users/ann2` is not
+ *  under `/Users/ann`). Checked against both separators, because `path` may
+ *  have come from either OS.
+ *
+ *  A path carrying a backslash, or a bare drive letter, is Windows and
+ *  compares case-insensitively, the way its own filesystem does; a POSIX
+ *  path does not. `home` is tried both as given and with its own trailing
+ *  separator stripped, so a root home (`/`, `C:\`) matches the folder
+ *  itself as `~` rather than `~/` or `~\`: comparing only the stripped form
+ *  is what used to produce those, because a path equal to an UNstripped
+ *  home with a separator of its own never matched the stripped root. */
+function shortenHome(path, home) {
+  const windows = path.includes('\\') || home.includes('\\') || /^[A-Za-z]:/.test(path);
+  const fold = (s) => (windows ? s.toLowerCase() : s);
+  const root = home.replace(/[/\\]+$/, '');
+  if (fold(path) === fold(home) || fold(path) === fold(root)) return '~';
+  for (const sep of ['/', '\\']) {
+    if (fold(path).startsWith(fold(`${root}${sep}`))) return `~${path.slice(root.length)}`;
+  }
+  return path;
 }
 
 /** Which buttons belong beside the library line. SCREEPUB_LIBRARY wins over
@@ -308,14 +320,23 @@ export function libraryChangeArgs(path) {
   return JSON.stringify({ libraryPath: path });
 }
 
+/** Shown when app-settings answers in a way its own contract does not
+ *  promise: ok with no usable library inside, or a refusal with no sentence
+ *  at all. Not failureFor's NO_MESSAGE ("the engine refused the file"):
+ *  nothing was refused here, and there is no file, so this gets its own
+ *  words. */
+export const NO_LIBRARY_MESSAGE = 'Screepub could not confirm where books are saved.';
+
 /** What Change or Reset should show once the engine has answered: a clean
- *  library to redraw the line from, or a message for the line's place.
- *  Reuses failureFor so a settings refusal renders through the same rule as
- *  every other one this surface shows. */
+ *  library to redraw the line from, or a message for the secondary line.
+ *  libraryFrom already rejects an answer whose `ok` is not literally true,
+ *  so there is nothing left for this function to check beyond what it
+ *  returns. */
 export function libraryAfter(answer) {
-  const library = answer?.ok ? libraryFrom(answer) : null;
+  const library = libraryFrom(answer);
   if (library !== null) return { ok: true, library };
-  return { ok: false, message: failureFor(answer?.error).message };
+  const message = typeof answer?.error?.message === 'string' ? answer.error.message.trim() : '';
+  return { ok: false, message: message === '' ? NO_LIBRARY_MESSAGE : message };
 }
 
 // ------------------------------------------------------------------ drawing
@@ -325,6 +346,12 @@ let pane = null;
 let chooseButton = null;
 let unlistenProgress = null;
 let busy = false;
+
+// Bumped every time drawWell rebuilds the page, so a probe or a Change/Reset
+// answer that arrives after the well has been redrawn (a refusal's "Back to
+// one", "Convert another", a fresh mount) can tell it no longer belongs to
+// the well on screen and drop itself instead of filling a slot nobody sees.
+let libraryGeneration = 0;
 
 // The bar's width is the one value the window computes rather than declares,
 // and CSP `default-src 'self'` refuses an inline style. A constructed
@@ -350,10 +377,6 @@ export function show() {
   // button, which is only on screen in one of this surface's four states;
   // the plan in focus.js picks the first control there actually is.
   ctx.restoreFocus();
-  // The idle well is the only state with anything under it to redraw: a
-  // conversion, a result or a refusal has no library line on screen, and
-  // probing there would spend an engine call on a line nobody can see.
-  if (pane.dataset.state === 'idle') probeLibrary();
 }
 
 export function choose() {
@@ -398,9 +421,6 @@ function icon() {
 export function reset() {
   if (busy) return;
   drawWell();
-  // "Convert another" is the well arriving fresh, same as the first time
-  // this surface was shown, so the library line belongs here too.
-  probeLibrary();
 }
 
 /** The question, if there is one to ask. It removes itself once answered and
@@ -425,46 +445,36 @@ function askLine() {
   );
 }
 
-/** The library line's own probe. Reading app-settings with nothing to set is
- *  a bare read (see app.js's countsTowardBusy: it never counts toward busy),
- *  and it is a convenience, not a requirement of the well: a dead engine or
- *  an answer that breaks the contract draws nothing rather than an error
- *  nobody asked for. */
-async function probeLibrary() {
-  let answer;
-  try {
-    answer = await runEngine(argv.appSettings());
-  } catch {
-    return;
-  }
-  // The page may have moved on to a conversion, a result or a refusal while
-  // this was in flight, and the well it belongs to may not even be on
-  // screen any more.
-  if (pane.dataset.state !== 'idle') return;
-  const library = libraryFrom(answer);
-  if (library === null) return;
-  appendLibraryLine(library);
-}
-
-/** Build the library line and wire Change / Reset to redraw only THIS pair
- *  of paragraphs, however long their own engine calls take. Same shape as
- *  drawResult's reveal note: the DOM is built once, here, and every later
- *  update only ever touches the elements this closure captured, so a stray
- *  answer can never land on whatever the well happens to show by then. */
-function appendLibraryLine(library) {
-  const line = el('p', { class: 'caption' }, '');
-  const moved = el('p', { class: 'caption' }, movedLine);
-  moved.hidden = true;
+/** The library line's one slot under the drop area: built empty by drawWell,
+ *  after the update question, and filled (or refilled) in place by the
+ *  probe below or by Change/Reset. This pair of paragraphs is the only DOM
+ *  the feature ever owns, so nothing here ever appends a second line beside
+ *  it: the drawWell/probeLibrary pair on either side of this function is
+ *  what makes that true even across a redraw or a race between two probes.
+ *
+ *  A refusal from Change or Reset only ever replaces `secondary`
+ *  (movedLine's own spot): `line` and its buttons are left exactly as the
+ *  last good library drew them, so the reader can just try again. */
+function buildLibrarySlot() {
+  const line = el('p', { class: 'well-ask', hidden: true });
+  const secondary = el('p', { class: 'well-ask', hidden: true }, '');
   let buttons = [];
 
-  function draw(lib) {
-    text(line, `${libraryLine(lib)} `);
-    buttons = libraryActions(lib).map((action) => el('button', {
+  function showLibrary(library) {
+    const words = el('span', {}, libraryLine(library));
+    buttons = libraryActions(library).map((action) => el('button', {
       type: 'button',
       class: 'btn-quiet',
-      onclick: () => run(action, lib),
+      onclick: () => run(action, library),
     }, action === 'change' ? 'Change…' : 'Reset'));
-    line.append(...buttons);
+    clear(line);
+    line.append(words, ...buttons);
+    line.hidden = false;
+  }
+
+  function showSecondary(message) {
+    text(secondary, message);
+    secondary.hidden = message === '';
   }
 
   function setBusy(on) {
@@ -472,48 +482,64 @@ function appendLibraryLine(library) {
   }
 
   // Change and Reset are the same shape: ask the OS for a folder (Change
-  // only), send it, and show what came back. Both buttons are disabled for
-  // the whole span, not just the engine call, so a click on either one
-  // while the folder picker is open cannot start a second write.
-  async function run(action, lib) {
+  // only), send it, and show what came back. The buttons go quiet before
+  // the picker even opens and come back only in the finally, so a thrown
+  // picker (or a thrown engine call) cannot leave them disabled forever,
+  // and a second click on either one while the picker is open cannot start
+  // a second write.
+  async function run(action, library) {
     setBusy(true);
-    let path = null;
-    if (action === 'change') {
-      path = await pickFolder({ defaultPath: lib.path });
-      if (path === null) {
-        setBusy(false);
-        return;
-      }
-    }
-    let answer;
     try {
-      answer = await runEngine(argv.appSettings(libraryChangeArgs(path)));
+      let path = null;
+      if (action === 'change') {
+        path = await pickFolder({ defaultPath: library.path });
+        // Cancelled, or the folder already in use: nothing to send, and
+        // nothing for the secondary line to say either.
+        if (path === null || path === library.path) return;
+      }
+      const answer = await runEngine(argv.appSettings(libraryChangeArgs(path)));
+      const result = libraryAfter(answer);
+      if (result.ok) {
+        showLibrary(result.library);
+        showSecondary(action === 'change' ? movedLine : '');
+      } else {
+        showSecondary(result.message);
+      }
     } catch (err) {
+      showSecondary(err.message);
+    } finally {
       setBusy(false);
-      text(line, err.message);
-      moved.hidden = true;
-      return;
-    }
-    setBusy(false);
-    const result = libraryAfter(answer);
-    if (result.ok) {
-      draw(result.library);
-      // Reset says nothing extra: nothing was converted between the old
-      // folder and the default, so there is nothing for movedLine to be
-      // right about.
-      moved.hidden = action !== 'change';
-    } else {
-      text(line, result.message);
-      moved.hidden = true;
     }
   }
 
-  draw(library);
-  pane.append(line, moved);
+  return { line, secondary, showLibrary };
+}
+
+/** The library line's own probe: read-only (app-settings with nothing to
+ *  set never counts toward busy, see app.js's countsTowardBusy), and a
+ *  convenience rather than a requirement of the well, so a dead engine or
+ *  an answer that breaks the contract leaves `slot` exactly as drawWell
+ *  built it: empty. `gen` is drawWell's own generation counter, captured
+ *  when the probe starts; if it no longer matches by the time the probe
+ *  returns, the well has been redrawn since and `slot` is no longer the one
+ *  on screen, so the answer is dropped rather than filling it anyway. */
+async function probeLibrary(gen, slot) {
+  let answer;
+  try {
+    answer = await runEngine(argv.appSettings());
+  } catch {
+    return;
+  }
+  if (gen !== libraryGeneration || pane.dataset.state !== 'idle') return;
+  const library = libraryFrom(answer);
+  if (library === null) return;
+  slot.showLibrary(library);
 }
 
 function drawWell() {
   clear(pane);
+  libraryGeneration += 1;
+  const gen = libraryGeneration;
   chooseButton = el('button', { type: 'button', class: 'well-btn', onclick: choose },
     `Choose PDF…  ${shortcutLabel(navigator.userAgentData?.platform ?? navigator.platform)}`);
 
@@ -534,12 +560,18 @@ function drawWell() {
   // Not passed to append() directly: append(null) would print "null".
   const ask = askLine();
   if (ask) pane.append(ask);
+  // The library line's slot, after the question: built empty here and
+  // handed straight to its own probe, so this is the only place either one
+  // is ever created.
+  const slot = buildLibrarySlot();
+  pane.append(slot.line, slot.secondary);
   pane.dataset.state = 'idle';
   // The code belongs to the refusal that set it, not to the pane. Left in
   // place it would ride along on the next success — a `data-state="done"`
   // carrying `data-error-code="not-screenplay"` is exactly the wrong thing to
   // find in a bug report pasted out of the DOM.
   delete pane.dataset.errorCode;
+  probeLibrary(gen, slot);
 }
 
 async function pickFileThenConvert() {
