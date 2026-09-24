@@ -7,6 +7,7 @@ import { mapConversionError } from '../src/cli-errors';
 const ROOT = new URL('..', import.meta.url).pathname;
 const FIXTURES = new URL('./fixtures/', import.meta.url).pathname;
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-cli-'));
+const FIXTURE_PDF = `${FIXTURES}screenplay.pdf`;
 
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
@@ -239,4 +240,260 @@ describe('cli --progress', () => {
     expect(exitCode).toBe(0);
     expect(stderr).toBe('');
   }, 60000);
+});
+
+describe('the default conversion path is unchanged by verb dispatch', () => {
+  test('a PDF whose stem is a verb converts exactly as any other would', async () => {
+    // Names that brush against dispatch: "send.pdf" starts with a verb, and
+    // "devices.pdf" is the shadowing rule's near miss. Both must take the
+    // ordinary path and produce the ordinary success payload.
+    for (const name of ['send.pdf', 'devices.pdf']) {
+      const input = `${SCRATCH}/${name}`;
+      writeFileSync(input, new Uint8Array(await Bun.file(`${FIXTURES}screenplay.pdf`).arrayBuffer()));
+      const out = `${SCRATCH}/${name}.epub`;
+      const { stdout, exitCode } = await runCli([input, '-o', out, '--no-fountain', '--json']);
+      expect(exitCode).toBe(0);
+      const result = JSON.parse(stdout);
+      expect(result.ok).toBe(true);
+      expect(result.epubPath).toBe(out);
+      expect(result.pages).toBeGreaterThan(0);
+    }
+  }, 120000);
+});
+
+describe('--options-json', () => {
+  test('applies a knob passed as an argv string', async () => {
+    const previewPath = `${SCRATCH}/options-json-applies.html`;
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-html', previewPath,
+      '-o', `${SCRATCH}/options-json-applies.epub`, '--no-fountain',
+      '--options-json', '{"dialogueSideMarginPct":7}']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.ok).toBe(true);
+    const html = await Bun.file(previewPath).text();
+    // Not "it didn't crash": the number we passed has to reach the CSS.
+    // The brief's own version of this assertion (bare "7%" / not "20%")
+    // is a false negative waiting to happen: section.titlepage carries a
+    // static `margin-top: 20%` unrelated to this knob, so "not contain
+    // 20%" would fail against a CORRECT implementation the day someone
+    // reads that titlepage rule. Anchor on the actual declaration.
+    expect(html).toContain('margin-left: 7%');
+    expect(html).not.toContain('margin-left: 20%'); // the default this overrode
+  }, 60000);
+
+  test('clamps out-of-range values instead of trusting them', async () => {
+    const previewPath = `${SCRATCH}/options-json-clamps.html`;
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-html', previewPath,
+      '-o', `${SCRATCH}/options-json-clamps.epub`, '--no-fountain',
+      '--options-json', '{"dialogueSideMarginPct":999}']);
+    expect(JSON.parse(out.stdout).ok).toBe(true);
+    const html = await Bun.file(previewPath).text();
+    expect(html).toContain('margin-left: 30%'); // resolveFormatOptions' documented ceiling
+    expect(html).not.toContain('margin-left: 999%');
+  }, 60000);
+
+  test('rejects a non-object payload with bad-options', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json', '--options-json', '[1,2]']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.ok).toBe(false);
+    expect(answer.error.code).toBe('bad-options');
+    expect(answer.error.message).toContain('--options-json');
+  });
+
+  test('rejects malformed JSON with bad-options and does not leak the payload', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json', '--options-json', '{oops']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.error.code).toBe('bad-options');
+    expect(answer.error.message).not.toContain('oops');
+  });
+
+  test('refuses both --options and --options-json rather than picking one', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json', '--options', 'x.json',
+      '--options-json', '{}']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.error.code).toBe('bad-options');
+    expect(answer.error.message).toContain('not both');
+  });
+
+  // Beyond the brief: resolveFormatOptions ignores unknown keys and falls
+  // back to the default for a wrong-typed value rather than rejecting the
+  // whole payload — that's the SAME merge path --options already uses, so
+  // --options-json must inherit that behavior rather than validating twice
+  // (a second, stricter check here would be the "two merge rules" the task
+  // exists to avoid). These tests catch an implementation that skips
+  // resolveFormatOptions and spreads the parsed JSON directly: that would
+  // either crash rendering or leak the raw string into the CSS.
+  test('ignores an unknown key without failing the conversion', async () => {
+    const previewPath = `${SCRATCH}/options-json-unknown-key.html`;
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-html', previewPath,
+      '-o', `${SCRATCH}/options-json-unknown-key.epub`, '--no-fountain',
+      '--options-json', '{"notARealKnob":123,"dialogueSideMarginPct":12}']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.ok).toBe(true);
+    const html = await Bun.file(previewPath).text();
+    // The unknown key is dropped silently; the valid sibling key still lands.
+    expect(html).toContain('margin-left: 12%');
+  }, 60000);
+
+  test('falls back to the default for a wrong-typed value instead of crashing', async () => {
+    const previewPath = `${SCRATCH}/options-json-wrong-type.html`;
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-html', previewPath,
+      '-o', `${SCRATCH}/options-json-wrong-type.epub`, '--no-fountain',
+      '--options-json', '{"dialogueSideMarginPct":"wide"}']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.ok).toBe(true);
+    const html = await Bun.file(previewPath).text();
+    // A naive `JSON.parse` + spread would template the raw string straight
+    // into the CSS ("wide%"); resolveFormatOptions must fall back to the
+    // documented default instead.
+    expect(html).not.toContain('wide%');
+    expect(html).toContain('margin-left: 20%');
+  }, 60000);
+});
+
+describe('--preview-inline', () => {
+  test('puts the same document in the JSON that --preview-html writes to disk', async () => {
+    const previewPath = `${SCRATCH}/preview-inline-parity.html`;
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-inline',
+      '--preview-html', previewPath, '-o', `${SCRATCH}/preview-inline-parity.epub`,
+      '--no-fountain']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.ok).toBe(true);
+    const onDisk = await Bun.file(previewPath).text();
+    // Byte equality, not "contains something": the reader's whole premise is
+    // that what you proof is what ships, so two producers would be a defect.
+    expect(answer.previewHtml).toBe(onDisk);
+  }, 60000);
+
+  test('the inlined document carries the stylesheet, not a link to one', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-inline',
+      '-o', `${SCRATCH}/preview-inline-style.epub`, '--no-fountain']);
+    const { previewHtml } = JSON.parse(out.stdout);
+    expect(previewHtml).toContain('<style>');
+    expect(previewHtml).not.toContain('<link rel="stylesheet"');
+    expect(previewHtml).toContain('h2.scene-heading');
+  }, 60000);
+
+  test('stdout is still exactly one JSON object', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-inline',
+      '-o', `${SCRATCH}/preview-inline-single-line.epub`, '--no-fountain']);
+    expect(out.stdout.trim().split('\n')).toHaveLength(1);
+    expect(() => JSON.parse(out.stdout)).not.toThrow();
+  }, 60000);
+
+  test('the key is absent unless asked for', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json',
+      '-o', `${SCRATCH}/preview-inline-absent.epub`, '--no-fountain']);
+    expect(JSON.parse(out.stdout).previewHtml).toBeUndefined();
+  }, 60000);
+
+  test('it is a usage error without --json', async () => {
+    const out = await runCli([FIXTURE_PDF, '--preview-inline']);
+    expect(out.exitCode).toBe(1);
+    expect(out.stderr).toContain('--preview-inline');
+  }, 60000);
+
+  // Beyond the brief: the absent-key test above proves the flag stays off
+  // by default, but not that turning it on actually does something beyond
+  // "doesn't crash" when no --preview-html is also given (that's the ONLY
+  // combination the app itself will ever use — the window has no
+  // filesystem to point --preview-html at). Assert the content, not just
+  // its presence, so a stub that emits `previewHtml: ''` would fail here.
+  test('with no --preview-html, the inlined document is still the real preview', async () => {
+    const out = await runCli([FIXTURE_PDF, '--json', '--preview-inline',
+      '-o', `${SCRATCH}/preview-inline-standalone.epub`, '--no-fountain']);
+    const answer = JSON.parse(out.stdout);
+    expect(answer.ok).toBe(true);
+    expect(typeof answer.previewHtml).toBe('string');
+    expect(answer.previewHtml.length).toBeGreaterThan(1000);
+    // The preview document has no title page (that's an EPUB-only section),
+    // so anchor on body content the fixture is known to render instead.
+    expect(answer.previewHtml).toContain('<p class="character">MARGO</p>');
+    expect(answer.previewHtmlPath).toBeUndefined();
+  }, 60000);
+});
+
+describe('a large answer survives a pipe', () => {
+  // The desktop window reads the engine's stdout through a pipe, and a pipe
+  // buffer is 64 KiB. `console.log` to a pipe is buffered, and exiting does
+  // not wait for the tail: measured before the fix, the answer for the
+  // script generated below reached a piped caller cut to exact 64 KiB
+  // multiples (262,144 / 589,824 / 655,360 …) with no app and no Tauri
+  // anywhere, while the same command redirected to a FILE was always whole.
+  // The engine's own suite never saw it because every other answer here fits
+  // in one buffer; --preview-inline is 1.85-2.6 KB per page, so a 120-page
+  // script is already several buffers deep.
+  //
+  // HOW THIS TEST IS SHAPED, because the obvious shapes do not work and one
+  // of them shipped here and had to be replaced.
+  //
+  // The loss is a race between the process exiting and its last writes
+  // leaving. So the reader must be FAST, not slow. A deliberately slow
+  // reader — the first version of this test — makes the race LESS likely,
+  // not more: backpressure keeps the child alive until it has flushed, which
+  // is the thing being tested for. Measured per attempt with the defect
+  // restored, 20 attempts each: reading at full speed lost 30%, pausing 5 ms
+  // between reads lost 10%, pausing 50 ms lost 0%, and waiting 400 ms before
+  // reading at all — what this test used to do — lost 5%. Six attempts at 5%
+  // is a test that passes against a live defect most of the time, and a
+  // reviewer duly caught it doing so (11 of 16 runs).
+  //
+  // What does work is CONTENDING for the machine: the attempts run in
+  // PARALLEL, so eight conversions race each other and the scheduler. That
+  // raises the loss rate and cuts the wall clock at the same time — eight
+  // attempts take about half a second in total, where six serial ones took
+  // three seconds.
+  //
+  // Measured with the defect restored: 20 rounds of 8, every round caught it,
+  // and the WORST round still lost 3 of its 8 attempts (best, 7 of 8). So
+  // this is not a knife edge. With the fix in place, 20 rounds of 8 — 160
+  // attempts — lost nothing, so there are no false reds either.
+  const ATTEMPTS = 8;
+
+  /** An invented screenplay, big enough to need several pipe buffers. */
+  function generated(scenes: number) {
+    const parts = ['Title: Generated Load Sample\nAuthor: Test Harness\n\n'];
+    for (let i = 0; i < scenes; i += 1) {
+      parts.push(`INT. TEST ROOM ${i} - DAY\n\n`);
+      parts.push(`A plain room with a numbered door. Nothing in it matters except its
+length, which is the whole point of sample number ${i}.\n\n`);
+      parts.push(`ALPHA\nThis is line ${i} of a script that exists only to be big.\n\n`);
+      parts.push(`BETA\n(flatly)\nUnderstood. That was line ${i}. There will be more.\n\n`);
+    }
+    return parts.join('');
+  }
+
+  test('every byte of it, every time', async () => {
+    const script = `${SCRATCH}/pipe-load.fountain`;
+    writeFileSync(script, generated(1000), 'utf8');
+
+    // One output path each: the attempts run at once and must not race for a
+    // file as well as for the CPU.
+    const answers = await Promise.all(
+      Array.from({ length: ATTEMPTS }, (_, i) =>
+        runCli([script, '--json', '--preview-inline',
+          '--no-fountain', '-o', `${SCRATCH}/pipe-load-${i}.epub`])),
+    );
+
+    const lengths: number[] = [];
+    for (const [i, out] of answers.entries()) {
+      const stdout = out.stdout.trim();
+      lengths.push(stdout.length);
+      // Named by attempt, so a failure says which run lost its tail.
+      expect(`attempt ${i} parses: ${(() => {
+        try {
+          return JSON.parse(stdout).ok === true;
+        } catch {
+          return false;
+        }
+      })()}`).toBe(`attempt ${i} parses: true`);
+    }
+
+    // The answer is the same every time, so any difference is loss. (A
+    // truncation that happened to cut identically on every attempt would
+    // still be caught by the parse above.)
+    expect(lengths.map((l) => l === lengths[0])).toEqual(lengths.map(() => true));
+    // And the test is actually testing the thing: an answer that fits in one
+    // 64 KiB pipe buffer could never have shown the defect.
+    expect(lengths[0]).toBeGreaterThan(4 * 65536);
+  }, 120000);
 });

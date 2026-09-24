@@ -43,7 +43,7 @@ public struct FormatSettings: Codable, Sendable, Equatable {
         cueAlignment: "centered",
         includeTitlePage: true,
         showSceneNumbers: false,
-        showPageMarkers: false,
+        showPageMarkers: true,
         dualDialogue: "sideBySide",
         justifyText: false,
         printSplitMinimums: true,

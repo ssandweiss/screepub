@@ -5,8 +5,15 @@
   "pages": 5,
   "scenes": 5,
   "characters": 3,
-  "topCharacters": ["MARGO", "DEV", "NIECE"],
-  "warnings": ["an example warning"],
+  "topCharacters": [
+    "MARGO",
+    "DEV",
+    "NIECE"
+  ],
+  "warnings": [
+    "an example warning"
+  ],
+  "spacingRepairs": 0,
   "epubPath": "/tmp/sample/Sample Script.epub",
   "mobiPath": "/tmp/sample/Sample Script.mobi",
   "fountainPath": "/tmp/sample/Sample Script.fountain",

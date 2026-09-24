@@ -60,6 +60,71 @@ Fine-grained tokens → Generate new token**:
 
 Paste as **`TAP_TOKEN`**.
 
+## 4. `TAURI_SIGNING_PRIVATE_KEY` — the updater's signing key
+
+Added 2026-09-21 for piece A of the parity plan. The cross-platform app
+updates itself through Tauri's updater plugin, which verifies every
+download against a minisign signature. The release signs the updater
+archive with a private key only CI holds, and the app carries the
+matching public key in `desktop/src-tauri/tauri.conf.json`.
+
+**Generate the pair on your own machine.** Never in a session transcript,
+never on a runner. The Tauri CLI this repository pins does it:
+
+```bash
+cargo install tauri-cli --version 2.11.4 --locked
+```
+
+```bash
+cargo tauri signer generate -w ~/.tauri/screepub.key
+```
+
+It asks for a password (optional; recommended), writes the private key to
+`~/.tauri/screepub.key` and the public key beside it as
+`~/.tauri/screepub.key.pub`, and prints only the two paths. Tauri's own
+warning applies in full: **lose the private key or its password and no
+installed copy of the app can ever be updated again**, because every copy
+trusts only this key. Store the private key where the Apple certificate
+lives.
+
+Then, three things:
+
+- **`TAURI_SIGNING_PRIVATE_KEY`** — the CONTENTS of `~/.tauri/screepub.key`
+  (`pbcopy < ~/.tauri/screepub.key`), pasted as a repo secret. It is one
+  line of base64 and the CLI accepts it as is.
+- **`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`** — the password, if you set one.
+  Leave this secret out if you did not: the workflow then passes an empty
+  string, which is what a password-less key expects.
+- **The public key** goes into `desktop/src-tauri/tauri.conf.json` as
+  `plugins.updater.pubkey`: the contents of `~/.tauri/screepub.key.pub`,
+  one line, committed. It is safe to share and safe to commit.
+
+What holds this together, in the order it runs:
+
+- `bun test` accepts an EMPTY `pubkey` (the state until you act) and
+  refuses garbage, so a working branch is never red for want of the key.
+- `release.yml`'s `checks` job refuses to tag a release whose app trusts
+  no real key (`tools/update-signature.ts --pubkey-from-config`, run on
+  the tagged commit's config).
+- The macOS leg runs `tools/build-app-bundle.ts --updater`, which refuses
+  to START without the private key rather than failing after the full
+  universal build, then publishes
+  `Screepub-Desktop-macOS-universal.app.tar.gz` and its `.sig`.
+- `app-upload` writes `latest.json` from what arrived
+  (`tools/build-update-manifest.ts`) and uploads it LAST, so nothing it
+  names is ever missing when it is read.
+- `latest-check` reads the manifest back from the endpoint the app uses
+  (`tools/check-latest.ts`) and compares it with the newest release: the
+  version, every platform's asset, every signature, and the key id
+  against the one the app trusts. `tap-freshness.yml` repeats that
+  weekly. Both are red until a release ships with the key in place, since
+  v0.6.0 publishes no manifest, and that red is the honest reading.
+
+Unlike `TAP_TOKEN`, absence IS fatal to a release, on purpose:
+[ADR 2026-09-21](adr/2026-09-21-doors-not-commands.md) makes the updater
+the precondition for v0.6.1, and a release that cannot sign an update is
+the thing it forbids.
+
 ## Sanity check
 
 **Updated 2026-07-31: a throwaway tag no longer works here.** Both the

@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- The README's hero: the site's own before-and-after, as a still. The
+     site drives that section from scroll position (layout(t) in
+     site/index.html): both devices are fully in and level between t=0.42
+     and t=0.56, so this holds it at 0.49. Same origin through the capture
+     server, so this page can scroll the frame and hide the fixed top bar,
+     which would otherwise sit across the top of the picture. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>html, body, iframe { margin: 0; border: 0; width: 100%; height: 100%; display: block; }</style>
+</head>
+<body>
+<iframe id="site" src="/site/index.html"></iframe>
+<script>
+  window.__captureState = 'working';
+  const HOLD = 0.49;
+  const frame = document.getElementById('site');
+  const fail = (m) => { window.__captureState = 'failed'; window.__captureError = m; };
+  frame.addEventListener('load', async () => {
+    try {
+      const w = frame.contentWindow;
+      const d = frame.contentDocument;
+      const act = d.getElementById('act2');
+      if (!act) return fail('site/index.html has no #act2 section any more');
+      const style = d.createElement('style');
+      style.textContent = '#topbar { display: none !important; }';
+      d.head.append(style);
+      const span = act.offsetHeight - w.innerHeight;
+      w.scrollTo(0, act.offsetTop + HOLD * span);
+      await d.fonts.ready;
+      await new Promise((r) => w.requestAnimationFrame(() => w.requestAnimationFrame(r)));
+      await new Promise((r) => setTimeout(r, 400));
+      window.__captureState = 'ready';
+    } catch (e) { fail(String(e && e.message || e)); }
+  });
+</script>
+</body>
+</html>

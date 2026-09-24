@@ -11,6 +11,44 @@ written as a **toggle or slider in the Mac app** (the reader window's rail;
 app. Entries below marked "not built" remain future work; everything else
 is live.
 
+**Where a conversion's options come from (2026-09-14):** explicit flag
+(`--options` / `--options-json`) over the script's sidecar
+(`<Stem>.screepub.json`, written by `screepub settings`) over these
+defaults, knob by knob, through the one merge `resolveFormatOptions` already
+is. The conversion itself reads the sidecar — beside the input, or in the
+script's library folder under `--library`, which wins — so a tuned script's
+FIRST book carries its tuning. It used to be read only by `screepub
+settings`, so the library adopted a sidecar and then rendered at the
+defaults; every export rung but MOBI converts that EPUB as it stands, so
+those defaults reached the reader. An unusable sidecar is ignored (the
+conversion still succeeds) and, either way, the engine says on stderr which
+file it used and names it as `settingsPath` in the `--json` answer.
+
+**App defaults now sit in that chain too (2026-09-23):** one more layer,
+between the script's sidecar and these shipped defaults, holds the app-wide
+format defaults set with `screepub app-settings`. The precedence: explicit
+flags > the script's saved settings > app defaults > these shipped
+defaults. The desktop window's per-script Settings page reaches the same
+layer from its foot: "Use these for new scripts" promotes that script's
+current settings to the app defaults, and "Reset new scripts to Screepub's
+defaults" (shown only when the two differ) puts the shipped defaults back.
+The first `--library` conversion of a PDF with no sidecar of its own saves
+the settings it started from as that script's own, so a later change to
+the app defaults reaches only scripts converted afterwards; a script
+already in the library from before this change has no saved settings, and
+keeps following the app defaults until it is tuned once.
+
+**That save is a choice (2026-09-24):** the Settings page's "When a PDF is
+converted" offers "Keep its settings" (the default, the behaviour above)
+and "Follow the defaults", stored as `keepScriptSettings` in the app
+settings file and written with `screepub app-settings --set
+'{"keepScriptSettings":false}'`. Off, a library conversion saves nothing,
+so a script nobody has tuned keeps following the app defaults. Switching
+reaches only conversions from then on: a script that already has a
+sidecar keeps it, because a saved one and a tuned one are the same file
+and the engine never deletes or rewrites either because of this choice.
+Spec: `docs/superpowers/specs/2026-09-24-keep-script-settings-choice-design.md`.
+
 **Coverage of these entries by the committed torture fixture is tracked in
 `tools/torture-manifest.json`**, one row per entry, and
 `tests/torture-coverage.test.ts` fails when an entry has no decision
@@ -133,6 +171,12 @@ and the suite will say so if you forget.
   line beneath it? If `break-after: avoid` proves not to bind, the
   recorded fallback is a wrapper holding the heading + the first ELEMENT
   only — never the whole first block, which is the bug this replaced.
+- **Device verdict 2026-09-15, Apple Books: DOES NOT BIND there.** An
+  `h2.scene-heading` sat alone at the foot of a column with its action in
+  the next one, with all three spellings of the rule present. See #8b for
+  the full verdict and why the rule stays anyway. This does not disturb the
+  Kindle verdict below — it is a second engine answering differently, which
+  is the normal case, not a contradiction.
 - **Device verdict 2026-07-30: BINDS — the chain holds without the
   wrapper.** First isolated evidence (nothing prior could tell the two
   mechanisms apart: #8b's 2026-07-29 pass measured cues wearing both):
@@ -332,9 +376,11 @@ and the suite will say so if you forget.
   ignores break CSS (device-map §6, MobileRead t=346874).
 - **The list is DERIVED, not maintained twice (corrected 2026-07-31):**
   the shadow rule's selectors come from the same gating that emits the
-  keeps (`columnKeeps` in css.ts) — #8b's `.keep-together`, #10a's
-  `table.dual-dialogue`, and #8c's `.dialogue-block` when
-  `keepSpeechesWhole` is on. It first shipped as a hand-written list of
+  keeps (`columnKeeps` in css.ts) — #10a's `table.dual-dialogue`, and #8c's
+  `.dialogue-block` when `keepSpeechesWhole` is on. #8b's wrapper was the
+  third member until 2026-09-14; with it deleted the rule shares a selector
+  with the table rule it shadows and is emitted AFTER it, so `ruleFor()`
+  answers with the real keep rather than the column spelling. It first shipped as a hand-written list of
   the first two, which silently left the whole-speech keep inert in
   Apple Books: the toggle did nothing there while the cue keep worked.
   A keep can no longer join the inventory and skip the shadow rule.
@@ -413,13 +459,13 @@ and the suite will say so if you forget.
   book CSS (MobileRead t=328903). Ignored: KF8/AZW3, MOBI. Unverified
   on kepub e-ink (patch-lore says its WebKit reads them; not confirmed
   on device). Apple Books: WebKit implements the properties; untested.
-- **Interaction (load-bearing):** #8b's `.keep-together` is ALWAYS on and
-  wraps cue + parentheticals + the FIRST dialogue paragraph in
-  `break-inside: avoid`. A single-paragraph speech therefore never
-  splits and its widows/orphans never fire — until that keep yields (a
-  first paragraph taller than a page still breaks, and then this does
-  apply). This rule bites on the TAIL
-  paragraphs of multi-paragraph speeches and on action. With #8c also
+- **Interaction (load-bearing; rewritten 2026-09-14):** #8b's keep used to
+  be a wrapper holding cue + parentheticals + the FIRST dialogue paragraph
+  in `break-inside: avoid`, so a single-paragraph speech never split and its
+  widows/orphans never fired. That wrapper is gone: #8b is now a chain on
+  the cue and the parenthetical, nothing wraps the dialogue, and this rule
+  therefore fires on EVERY dialogue paragraph including the first. It is
+  what bounds the chunk the chain pushes. With #8c also
   ON, whole speeches are atomic and the dialogue arm is fully inert;
   the action arm is unaffected in every mode.
 - **App option:** "Print-style split minimums" (reader rail, Page group).
@@ -489,6 +535,53 @@ and the suite will say so if you forget.
   `src/convert.ts` (`stageOneWarnings`, `CONTD_CUE`).
 
 ### 8b. Cue keeps its first dialogue line (always on)
+- **WRAPPER DELETED 2026-09-14 — the keep is a CHAIN, and the wrapper was
+  the bug.** Device verdict, photo-confirmed: on a real script sent via
+  **Send-to-Kindle web** (Amazon server conversion to KFX, Enhanced
+  Typesetting) cues stranded at page bottoms with their dialogue overleaf.
+  One stranded cue introduced a **one-line** speech, which rules out every
+  size-based explanation at once: not `orphans`, not an oversized pushed
+  chunk, not a speech too tall to fit. Nothing bound the cue forward.
+  The cause was the ELEMENT the bind sat on. The 2026-08-11 repair put
+  `break-after: avoid` on the `<div class="keep-together">` wrapper. This
+  converter honors `break-after` on elements that carry TEXT — #5a proved
+  exactly that, on this exact route, on `h2.scene-heading` — but not on a
+  structural div, and it does not propagate a last child's `break-after`
+  up to its parent. So `p.character`'s own rule governed a break inside
+  the wrapper that can never be taken, and the wrapper→dialogue boundary,
+  the only break a reader actually meets, was governed by nothing.
+  **The fix is the shape #5a already proved here:** the wrapper is gone and
+  the chain sits on the paragraphs — `break-after: avoid` on `p.character`
+  AND on `p.parenthetical`. A speech is now a flat run of `<p>` inside
+  `.dialogue-block`.
+  **The parenthetical link reverses a deliberate refusal, on purpose.**
+  #5 is right that every avoid link grows the pushed chunk, and while the
+  keep was a wrapper that objection held: the chunk already carried cue and
+  speech, and one more link bought a blank-bottom page. Without the wrapper
+  the chunk is cue + parenthetical + the `orphans` minimum (#17), about four
+  lines — the same bound #5a accepted when it traded the heading wrapper for
+  a chain. A test pins the link now; the old test pinning its absence is
+  deleted with the reason recorded here.
+  **Lesson, for the third time in this entry:** a device verdict about a
+  PROPERTY does not transfer across a change in DOM shape. 2026-08-11
+  recorded that lesson and then the repair committed the same error in the
+  other direction, carrying #5a's `h2` verdict onto a `div`.
+  **DEVICE VERDICT 2026-09-20: the chain HOLDS. No stranded cues.**
+  Owner-observed on a real 112-page script, rebuilt with the chain and sent
+  by the same route that produced the failure (Send-to-Kindle web, Amazon
+  server conversion to KFX, Enhanced Typesetting), read on the same device.
+  This closes the pending item above: the combination is now confirmed, not
+  just its individual links, and it is the same route and grade of evidence
+  that condemned the wrapper on 2026-09-14.
+  **Evidence grade and what it does NOT cover.** One script, one route,
+  owner-observed, same grade as #5a's 2026-07-30 pass. The reader was
+  looking for cues stranded at page bottoms and found none. He was not
+  asked to check scene headings specifically, and no font size was
+  stipulated, so "a long speech at max font size" remains unmeasured even
+  though the defect it was meant to catch did not appear. A stranded cue on
+  any future script reopens this.
+- **SUPERSEDED 2026-09-14 (kept for the trail) — the narrowing STRANDED
+  CUES, and why.**
 - **NARROWED 2026-08-11 — the keep no longer contains the speech.** The
   wrapper closed AFTER the first dialogue TOKEN, and our serializer writes
   a whole speech as one line, so that token is the entire speech: an
@@ -548,22 +641,63 @@ and the suite will say so if you forget.
   device in documents/Downloads/Items01/). Dual-dialogue side-by-side
   tables photo-confirmed readable on device in AZW3; not yet
   re-verified in sideloaded KFX.
-- **What:** inside each dialogue block, cue + parentheticals + the first
-  dialogue line share a `keep-together` wrapper (the KDP-documented
-  container form; scene headings no longer use it — see #5a) so a cue
-  never strands at a page bottom with its speech overleaf
-  (user-requested 2026-07-22).
-- **The column spelling too (2026-07-30):** `.keep-together` additionally
-  carries `-webkit-column-break-inside: avoid`, in a SEPARATE rule of its
-  own — separate because iBooks drops both spellings when they share one
-  declaration block — which extends this keep to **Apple Books**, whose
-  WebKit honors only the old spelling, and to the **Readium family**
-  (Thorium, Kobo's mobile apps). Same wrapper, same selector, two more
-  audiences. **Not** a kepub claim: kepub paginates with multicol, so the
+- **What:** inside each dialogue block, the cue and any parentheticals each
+  carry `break-after: avoid`, so a cue never strands at a page bottom with
+  its speech overleaf (user-requested 2026-07-22). A chain on the
+  paragraphs, not a wrapper: the `keep-together` container form was tried
+  from 2026-07-22 and deleted 2026-09-14 (see the top of this entry, and
+  #5a, which made the same move for headings first).
+- **DEVICE VERDICT 2026-09-15, Apple Books, screenshot-confirmed: the
+  forward bind does NOT hold, in EITHER spelling.** The first Apple Books
+  evidence this project has ever had, and it is negative. Books paginates
+  two columns to a spread, so it is a multicol engine as assumed. But with
+  the torture fixture at +3 to +5 font sizes: a `p.character` (WREN) sat
+  alone at the foot of the right-hand column with its dialogue overleaf on
+  the next page, and an `h2.scene-heading` sat alone at the foot of a
+  left-hand column with its action in the next column. Both elements carry
+  `page-break-after: avoid` AND `break-after: avoid` AND
+  `-webkit-column-break-after: avoid`, in separate rules per the iBooks
+  shared-block bug. All three were ignored.
+  **What this retires:** the 2026-07-30 claim below that the column spelling
+  "extends this keep to Apple Books" was never verified and is now disproven
+  for the DIRECTIONAL binds. Whether Books honors the INSIDE spelling on a
+  wrapper is still untested, and we no longer have a wrapper to test it with.
+  **Severity is not uniform.** The right-column case is a real page turn and
+  is the defect #8b exists to prevent. The left-column case is a break
+  between two columns the reader can see at once, which is cosmetic. Both
+  come from the same ignored rule.
+  **The rule stays anyway, and this is the reason:** it is proven inert in
+  Books but UNTESTED in the Readium family (Thorium, Kobo's phone and tablet
+  apps), which is the other half of what it was aimed at. It re-spells links
+  that already exist rather than adding new ones, so it costs no pushed
+  chunk on any engine that already honors the modern spelling. If a Readium
+  pass also comes back negative, delete it as dead CSS rather than leaving
+  it to imply a coverage we do not have.
+  **The tension worth naming before anyone tries to fix this.** The KFX
+  converter ignores `break-after` on a `<div>` and honors it on a `<p>`;
+  Books ignores it on both. The only mechanism known to work in Books is
+  `break-inside` on a wrapper — which is precisely the shape that produced
+  blank-bottomed pages on Kindle and that #8b deleted on 2026-09-14. The two
+  engines want opposite structures, and a wrapper big enough to help Books
+  is a wrapper big enough to hurt Kindle. Kindle is the primary target, so
+  the cue stranding in Apple Books is ACCEPTED until someone finds a third
+  mechanism.
+- **The column spelling, and the hole it now leaves (2026-07-30, revised
+  2026-09-14):** the wrapper used to carry `-webkit-column-break-inside:
+  avoid` in a SEPARATE rule — separate because iBooks drops both spellings
+  when they share one declaration block — which extended this keep to
+  **Apple Books**, whose WebKit honors only the old spelling, and to the
+  **Readium family** (Thorium, Kobo's mobile apps). With the wrapper gone
+  that rule lists only #10a's table. **There is no `-webkit-column-break-
+  after` anywhere in the stylesheet**, so on those engines the cue chain,
+  the heading chain (#5a) and the mini-slug chain (#5b) are all inert.
+  That was true before this change too — the wrapper only ever shadowed the
+  INSIDE spelling — so it is a standing gap, not a regression, and it is
+  the obvious next thing to fix here. Unverified on any of those engines. **Not** a kepub claim: kepub paginates with multicol, so the
   old spelling is a plausible reach, but the evidence on record is that it
   ignores break CSS and wants file splits (device-map §6, t=346874).
-- **Code:** `src/epub/html.ts` (`closeSpeech`), `src/epub/css.ts`
-  (`.keep-together` and the column-spelling rule beside it).
+- **Code:** `src/epub/html.ts` (`speechBlock`), `src/epub/css.ts`
+  (`p.character` and `p.parenthetical`).
 
 ### 8c. Whole-speech keep (option, default OFF; 2026-07-30)
 - **What:** `keepSpeechesWhole` makes each `.dialogue-block` atomic —
@@ -794,6 +928,11 @@ and the suite will say so if you forget.
 - **App option:** the reader rail's Dialogue group → "Dual dialogue". Known
   limitation: a short action line immediately after a dual block with no
   intervening cue can absorb into the left speech.
+- **Merge bug, fixed 2026-09-23:** before that date, once a base held
+  `dualDialogue: 'sequential'`, nothing downstream, including the window's
+  toggle back to side by side, could move it: an explicit `'sideBySide'`
+  was read the same as absent and fell through to the base. The merge now
+  accepts either value explicitly.
 - **Code:** `src/parser/extract.ts` (`deinterleaveDualDialogue`).
 
 ### 10b. Tall dual exchanges degrade to sequential (2026-07-30)
@@ -878,7 +1017,7 @@ and the suite will say so if you forget.
 - **App option:** "Show scene numbers in headings" — small change in
   `src/epub/html.ts` (`scene_heading` case, `t.scene_number`).
 
-### 13a. Original page-number markers (option, default off)
+### 13a. Original page-number markers (option, default ON; 2026-09-21)
 - **What:** `showPageMarkers` emits the PDF's printed pagination as small
   right-flush dimmed markers ("47.") at page boundaries — page count is how
   scripts are evaluated (1 page ≈ 1 minute), and reflow otherwise erases
@@ -902,6 +1041,20 @@ and the suite will say so if you forget.
   sepia as well as white. Engines with no opacity support render it at
   full strength — a harmless degrade — and Enhanced Typesetting lists
   opacity as supported (Guidelines 2026.2 §18.1).
+- **Default flipped ON (2026-09-21):** it shipped off. The argument for off
+  was that the markers are furniture and a clean book should not carry the
+  source's page breaks; the argument that won is that page numbers are how
+  a script is *discussed*. Notes come back against printed pages ("the beat
+  on 42 is late"), and a book that dropped the pagination made every one of
+  those notes unfindable, with nothing else in it carrying the printed
+  numbering. Anyone who wants the clean book still has the knob.
+  **`showSceneNumbers` was deliberately NOT flipped with it** (see 13): a
+  scene number is an intentional property of a draft, present or absent
+  because a writer decided, so adding one is inventing content. A page
+  number is navigation, and the PDF already had it.
+  This is a stage-2 knob, so it is written into the `.fountain` when the PDF
+  is read: existing scripts keep whatever they were converted with, and only
+  a fresh conversion picks the new default up.
 - **Code:** `src/fountain/serialize.ts` (`printedPageOffset`),
   `src/epub/html.ts` + `src/mobi/html.ts` (synopsis case),
   `src/epub/css.ts` (`span.page-marker`), `src/epub/build.ts` (page-list).
@@ -918,6 +1071,31 @@ and the suite will say so if you forget.
   `src/convert.ts`.
 
 ## Mac app notes
+
+**These eighteen options now have two interfaces, not one.** Besides the
+SwiftUI reader rail described below, they are the **Tune surface of the
+cross-platform Tauri window** (`desktop/ui/tune.js`), in the same four groups
+— the page, dialogue, the text, what the book carries — plus the four
+`Read from the PDF` knobs. The window owns no formatting rule of its own: it
+reaches every option through the CLI, `screepub settings <fountain> --set`
+to read and store the per-script sidecar and `--options-json` to re-render
+from the cached `.fountain`, so the engine remains the only thing that
+decides what a knob means. The `From the PDF` knobs carry the same "won't
+change the preview" caveat there as in the Swift rail: they are decided while
+the PDF is being read and only the next conversion from the PDF can apply
+them.
+
+**The two interfaces disagree about how many those are, and the window is
+the one that is right.** `ReaderRail.swift`'s `From the PDF` section holds
+two knobs (`rejoinSplitDialogue`, `contdMode`) and says in a comment that
+they are "the only knobs consumed in fountain/serialize.ts". They are not:
+`showPageMarkers` and `dualDialogue` are read there too (serialize.ts's
+`= pg N` marker and its `^` caret), so both are written INTO the `.fountain`
+when the PDF is read and neither can move a preview that re-renders from
+that cached `.fountain`. The Swift rail files them under `Content` and
+`Dialogue`, where they read as live knobs. `desktop/ui/tune.js` groups all
+four together under `Read from the PDF` with the caveat. Whoever next opens
+the Mac app should move those two; nothing in the engine needs to change.
 
 - All knobs above funnel into two seams: **CSS generation**
   (`src/epub/css.ts` — make it a function of an options object) and
