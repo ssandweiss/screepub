@@ -24,6 +24,7 @@ import { resolveCommand, devicesCommand, sendCommand, VERBS, type Verb } from '.
 import { updateDecisionCommand, updateShouldCheckCommand } from './cli-update';
 import { settingsCommand } from './cli-settings';
 import { exportCommand } from './cli-export';
+import { appSettingsCommand } from './cli-app-settings';
 import { kfxInstallCommand, kfxStatusCommand, installLines, setupLines } from './cli-kfx';
 import { kfxPossible } from './export/kfx-setup';
 import type { ListDevicesOptions } from './device/list';
@@ -81,6 +82,8 @@ Commands:
                                             read/write a script's own settings
   screepub export <file.epub> [--for kindle|epub] [--json]
                                             the file you would put on a reader
+  screepub app-settings [--set <json>] [--json]
+                                            where books land, and what new scripts start from
   screepub kfx-status [--json]              can this computer make KFX for a Kindle?
   screepub kfx-install [--json]             add the KFX plugin to Calibre (online)
   screepub update-decision --offered <v> --current <v> [--json]
@@ -156,6 +159,26 @@ Options:
   --for <kindle|epub>    which file you want (default epub)
   --fountain <file>      the script's .fountain, needed to rebuild a MOBI
   --options-json <json>  this script's settings, so a rebuild keeps them
+  --json                 machine-readable result on stdout (for the app)
+  -h, --help             show this help
+`;
+
+const APP_SETTINGS_USAGE = `screepub app-settings: where books land, and what new scripts start from
+
+Usage:
+  screepub app-settings [--set <json>] [--json]
+
+Reads the app-wide settings: the folder converted books are saved into, and
+the format defaults a new script starts from. --set takes a JSON object
+with either or both of:
+  libraryPath     a full path, or null to go back to the default folder
+  formatDefaults  a FormatOptions object, or null to go back to Screepub's own
+
+When SCREEPUB_LIBRARY is set, it wins over the chosen folder: books land
+there no matter what libraryPath says.
+
+Options:
+  --set <json>           libraryPath and/or formatDefaults, see above
   --json                 machine-readable result on stdout (for the app)
   -h, --help             show this help
 `;
@@ -238,6 +261,7 @@ function verbUsage(verb: Verb): string {
   if (verb === 'kfx-install') return KFX_INSTALL_USAGE;
   if (verb === 'update-decision') return UPDATE_DECISION_USAGE;
   if (verb === 'update-should-check') return UPDATE_SHOULD_CHECK_USAGE;
+  if (verb === 'app-settings') return APP_SETTINGS_USAGE;
   return SEND_USAGE;
 }
 
@@ -439,7 +463,7 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
         fail({ code: 'usage', message: 'devices takes no --device — it lists every reader (--device belongs to send)' });
       }
       if (values.set !== undefined) {
-        fail({ code: 'usage', message: 'devices takes no --set (--set belongs to settings)' });
+        fail({ code: 'usage', message: 'devices takes no --set (--set belongs to settings and app-settings)' });
       }
       if (values.for !== undefined) {
         fail({ code: 'usage', message: 'devices takes no --for (--for belongs to export)' });
@@ -471,7 +495,7 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       // flag this verb cannot act on must not look like it did something.
       const foreign: [unknown, string, string][] = [
         [values.device, '--device', 'send'],
-        [values.set, '--set', 'settings'],
+        [values.set, '--set', 'settings and app-settings'],
         [values.for, '--for', 'export'],
         [values.fountain, '--fountain', 'export'],
         [values['options-json'], '--options-json', 'export'],
@@ -532,7 +556,7 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       // user's Calibre. tests/cli-kfx.test.ts pins the order in this source.
       const foreign: [unknown, string, string][] = [
         [values.device, '--device', 'send'],
-        [values.set, '--set', 'settings'],
+        [values.set, '--set', 'settings and app-settings'],
         [values.for, '--for', 'export'],
         [values.fountain, '--fountain', 'export'],
         [values['options-json'], '--options-json', 'export'],
@@ -607,9 +631,48 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       return;
     }
 
+    if (verb === 'app-settings') {
+      // Same discipline as `devices`: a flag this verb cannot act on is
+      // refused, not silently ignored. --set is the one flag it shares with
+      // `settings`, so it is not refused here.
+      if (values.device !== undefined) {
+        fail({ code: 'usage', message: 'app-settings takes no --device (--device belongs to send)' });
+      }
+      if (values.for !== undefined) {
+        fail({ code: 'usage', message: 'app-settings takes no --for (--for belongs to export)' });
+      }
+      if (values.fountain !== undefined) {
+        fail({ code: 'usage', message: 'app-settings takes no --fountain (--fountain belongs to export)' });
+      }
+      if (values['options-json'] !== undefined) {
+        fail({ code: 'usage', message: 'app-settings takes no --options-json (--options-json belongs to export)' });
+      }
+      if (positionals.length > 0) {
+        fail({ code: 'usage', message: `app-settings takes no arguments (got "${positionals[0]}")` });
+      }
+      const result = appSettingsCommand({ set: values.set });
+      if (jsonMode) {
+        console.log(JSON.stringify({ ok: true, ...result }));
+        return;
+      }
+      const { library, customized } = result;
+      const where = library.fromEnv
+        ? 'set by SCREEPUB_LIBRARY'
+        : library.chosen !== null
+          ? 'the folder you chose'
+          : 'the default folder';
+      console.log(`books are saved in ${library.path} (${where})`);
+      console.log(
+        customized
+          ? 'new scripts start from: your own defaults'
+          : "new scripts start from: Screepub's defaults",
+      );
+      return;
+    }
+
     // verb === 'send'
     if (values.set !== undefined) {
-      fail({ code: 'usage', message: 'send takes no --set (--set belongs to settings)' });
+      fail({ code: 'usage', message: 'send takes no --set (--set belongs to settings and app-settings)' });
     }
     if (values.for !== undefined) {
       fail({ code: 'usage', message: 'send takes no --for (--for belongs to export)' });

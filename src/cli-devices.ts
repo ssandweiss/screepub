@@ -19,6 +19,9 @@ export const VERBS = [
   'update-should-check',
   'kfx-status',
   'kfx-install',
+  // 2026-09-23: app-settings joined for parity piece C (where books land,
+  // and what new scripts start from).
+  'app-settings',
 ] as const;
 export type Verb = (typeof VERBS)[number];
 
