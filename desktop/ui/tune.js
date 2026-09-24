@@ -485,6 +485,63 @@ export function defaultsWriteOutcome(mine, current, answer, confirmedMessage) {
   return { applied: false, stale: false, message: result.message };
 }
 
+/** The app-wide choice beside the defaults foot: whether a PDF converted
+ *  from now on keeps the settings it started from (the engine's "pin"), or
+ *  follows the defaults until it is tuned. Spec:
+ *  docs/superpowers/specs/2026-09-24-keep-script-settings-choice-design.md.
+ *  The words are the owner's. `id` is the radio's own element id, which its
+ *  label and its line are tied to. */
+export const KEEP_CHOICE = {
+  legend: 'When a PDF is converted',
+  options: [
+    {
+      keep: true, id: 'keep-script-settings-keep', label: 'Keep its settings',
+      line: 'The script keeps the settings it was made with. Changing the defaults later '
+        + 'won’t change it.',
+    },
+    {
+      keep: false, id: 'keep-script-settings-follow', label: 'Follow the defaults',
+      line: 'Scripts you haven’t tuned change when the defaults do. Scripts that already have '
+        + 'their own settings keep them.',
+    },
+  ],
+};
+
+/** Said once a choice is stored. It names the one thing the radios cannot:
+ *  nothing already converted changes. */
+export const KEEP_SAVED_NOTE = 'Saved. It applies to PDFs you convert from now on.';
+
+/** The choice off a settings answer (or an app-settings one: both carry
+ *  `keepScriptSettings`), or null when it is not a boolean. Null draws no
+ *  choice at all, the same call drawDefaultsFoot() makes for a malformed
+ *  answer: a radio checked by guesswork would claim something about the
+ *  reader's settings file that nobody read. */
+export function keepChoiceFrom(answer) {
+  const value = answer?.keepScriptSettings;
+  return typeof value === 'boolean' ? value : null;
+}
+
+/** The --set value behind either radio. */
+export function keepWriteArgs(keep) {
+  return JSON.stringify({ keepScriptSettings: keep });
+}
+
+/** What one choice write becomes once app-settings --set has answered.
+ *  `mine`/`current` are the era when the write began and now, the same
+ *  guard defaultsWriteOutcome() uses: another script's page gets nothing.
+ *  `seq`/`latest` are this write's place in the queue and the newest
+ *  choice's: a write overtaken by a newer choice still reports what the
+ *  engine STORED (so a later refusal can put the radios back to the truth),
+ *  but the radios and the note belong to the newer write. */
+export function keepWriteOutcome(mine, current, seq, latest, answer) {
+  if (mine !== current) return { stale: true, stored: null };
+  const stored = answer?.ok === true ? keepChoiceFrom(answer) : null;
+  if (seq !== latest) return { stale: true, stored };
+  if (stored !== null) return { stale: false, applied: true, stored, message: KEEP_SAVED_NOTE };
+  const said = typeof answer?.error?.message === 'string' ? answer.error.message.trim() : '';
+  return { stale: false, applied: false, stored: null, message: said === '' ? NO_MESSAGE : said };
+}
+
 // ------------------------------------------------------------------ drawing
 
 let ctx = null;
@@ -515,6 +572,22 @@ let defaultsCaptionEl = null;
 let defaultsNoteEl = null;
 let defaultsUseButton = null;
 let defaultsResetButton = null;
+// "When a PDF is converted", drawn beside the foot and kept the same way:
+// built once per full draw(), then updated IN PLACE by
+// applyKeepChoiceState(), so the radio a reader is standing on is never
+// swapped out from under them. `keepSettings` is what the engine last said
+// is stored; `keepShown` is what the radios show, which runs ahead of it
+// while the reader's newest choice is still on its way to the engine.
+// `keepSeq` and `keepRunning` are NOT per script and are never reset: the
+// setting is the app's, and a choice made on one script's page is still
+// the reader's choice once another script is open.
+let keepSettings = null;
+let keepShown = null;
+let keepNote = '';
+let keepRadios = null;
+let keepNoteEl = null;
+let keepSeq = 0;
+let keepRunning = Promise.resolve();
 let previewFrame = null;
 let previewCss = '';
 let loaded = false;
@@ -554,6 +627,11 @@ export function scriptChanged() {
   defaultsNoteEl = null;
   defaultsUseButton = null;
   defaultsResetButton = null;
+  keepSettings = null;
+  keepShown = null;
+  keepNote = '';
+  keepRadios = null;
+  keepNoteEl = null;
   pending = {};
   clearTimeout(timer);
   draw();
@@ -578,6 +656,8 @@ async function load() {
     onPreset = currentPreset(answer);
     appDefaults = appDefaultsFrom(answer);
     shippedDefaults = shippedDefaultsFrom(answer);
+    keepSettings = keepChoiceFrom(answer);
+    keepShown = keepSettings;
   } catch (err) {
     settings = null;
     // Openable again: a sidecar that could not be read once — a disk that
@@ -637,6 +717,7 @@ function draw(status) {
         ...GROUPS.map(drawGroup),
         statusLine,
         drawDefaultsFoot(),
+        drawKeepChoice(),
       ),
       drawPreview(),
     ),
@@ -801,6 +882,89 @@ async function writeDefaults(next, confirmed) {
       applyDefaultsFootState();
     }
   }
+}
+
+/** "When a PDF is converted": a real radio group, beside the defaults foot
+ *  because it decides what those defaults mean for a script converted
+ *  later. A fieldset and legend name the group; two native radios sharing
+ *  one name give it one Tab stop and arrow keys between the options; each
+ *  has a label and its line tied on with aria-describedby. Absent, like the
+ *  foot, when the answer did not say what is stored. */
+function drawKeepChoice() {
+  if (keepSettings === null) {
+    keepRadios = null;
+    keepNoteEl = null;
+    return null;
+  }
+  keepRadios = new Map();
+  const options = KEEP_CHOICE.options.map((option) => {
+    const lineId = `${option.id}-line`;
+    const input = el('input', {
+      type: 'radio', id: option.id, name: 'keep-script-settings', class: 'keep-radio',
+      'aria-describedby': lineId,
+      onchange: () => chooseKeep(option.keep),
+    });
+    keepRadios.set(option.keep, input);
+    return el('div', { class: 'keep-option' },
+      input,
+      el('label', { for: option.id, class: 'keep-label' }, option.label),
+      el('p', { class: 'caption keep-line', id: lineId }, option.line));
+  });
+  keepNoteEl = el('p', { class: 'caption keep-note', role: 'status' });
+  applyKeepChoiceState();
+  return el('fieldset', { class: 'keep-choice' },
+    el('legend', { class: 'state-label keep-legend' }, KEEP_CHOICE.legend),
+    ...options,
+    keepNoteEl);
+}
+
+/** The one place that writes keepShown and keepNote onto the group's nodes,
+ *  on the first paint and on every answer after it. Silent when the group
+ *  is not on screen. */
+function applyKeepChoiceState() {
+  if (keepRadios === null) return;
+  for (const [keep, input] of keepRadios) input.checked = keep === keepShown;
+  text(keepNoteEl, keepNote);
+  keepNoteEl.hidden = keepNote === '';
+}
+
+/** A radio was chosen. The write is queued behind any still out, rather
+ *  than the radios going quiet the way the foot's buttons do: an arrow key
+ *  both moves focus and changes the choice, and disabling the radio a
+ *  keyboard reader is standing on would drop their place. Queued, two
+ *  writes cannot finish in the wrong order; numbered, only the newest one
+ *  paints. */
+function chooseKeep(keep) {
+  if (keep === keepShown) return;
+  keepShown = keep;
+  keepNote = '';
+  applyKeepChoiceState();
+  const mine = era;
+  const seq = ++keepSeq;
+  keepRunning = keepRunning.catch(() => {}).then(() => writeKeep(keep, mine, seq));
+}
+
+/** Send one choice, unless a newer one has been made while it waited its
+ *  turn (the newer one says what the reader wants, and will be sent next).
+ *  Still sent when the page has moved to another script since: the setting
+ *  is the app's, and the reader chose it. Only the painting follows the
+ *  era guard, through keepWriteOutcome(). */
+async function writeKeep(keep, mine, seq) {
+  if (seq !== keepSeq) return;
+  let outcome;
+  try {
+    const answer = await runEngine(argv.appSettings(keepWriteArgs(keep)));
+    outcome = keepWriteOutcome(mine, era, seq, keepSeq, answer);
+  } catch (err) {
+    outcome = era !== mine || seq !== keepSeq
+      ? { stale: true, stored: null }
+      : { stale: false, applied: false, stored: null, message: err.message };
+  }
+  if (outcome.stored !== null) keepSettings = outcome.stored;
+  if (outcome.stale) return;
+  keepShown = keepSettings;
+  keepNote = outcome.message;
+  applyKeepChoiceState();
 }
 
 /** Which groups arrive open. Only the first: five shut boxes is a surface

@@ -351,11 +351,19 @@ afterwards. Scripts already in the library from before this release saved
 nothing, so they keep following the app defaults until a knob is moved
 once on their own Settings page.
 
+That save is a choice. The Settings page's "When a PDF is converted" offers
+"Keep its settings" (the default) and "Follow the defaults";
+`screepub app-settings --set '{"keepScriptSettings": false}'` is the same
+switch (`true` or `null` turns it back on). With it off, a converted PDF
+saves nothing of its own, so it follows the app defaults until you tune
+it. Switching changes only what happens to PDFs converted from then on:
+a script that already has saved settings keeps them either way.
+
 `screepub reveal <file> [--json]` shows a converted file (given as a full
 path) in the system's file manager: Finder with the file selected on
 macOS, the containing folder on Windows and Linux.
 
-Both settings live in one small file outside the library:
+All three settings live in one small file outside the library:
 `~/Library/Application Support/Screepub/settings.json` on macOS,
 `%APPDATA%\Screepub\settings.json` on Windows, and
 `$XDG_CONFIG_HOME/screepub/settings.json` on Linux

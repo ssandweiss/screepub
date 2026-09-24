@@ -4138,6 +4138,219 @@ describe('the Tune surface: app defaults for new scripts', () => {
     expect(footButtons(pane).use!.disabled).toBe(false);
     expect(footButtons(pane).reset!.disabled).toBe(false);
   });
+
+  // ---- "When a PDF is converted": keep its settings, or follow the defaults
+  //
+  // Spec 2026-09-24-keep-script-settings-choice-design.md. An app-wide
+  // choice read off the same settings answer as the defaults above and
+  // written through the same app-settings --set.
+
+  test('the choice’s words are the owner’s, pinned exactly, and carry no em dash', () => {
+    expect(tune.KEEP_CHOICE.legend).toBe('When a PDF is converted');
+    expect(tune.KEEP_CHOICE.options.map((o: any) => [o.keep, o.label, o.line])).toEqual([
+      [true, 'Keep its settings',
+        'The script keeps the settings it was made with. Changing the defaults later won’t change it.'],
+      [false, 'Follow the defaults',
+        'Scripts you haven’t tuned change when the defaults do. Scripts that already have their own settings keep them.'],
+    ]);
+    expect(tune.KEEP_SAVED_NOTE).toBe('Saved. It applies to PDFs you convert from now on.');
+    for (const line of [
+      tune.KEEP_CHOICE.legend, tune.KEEP_SAVED_NOTE,
+      ...tune.KEEP_CHOICE.options.flatMap((o: any) => [o.label, o.line]),
+    ]) {
+      expect(line).not.toContain('\u2014');
+    }
+  });
+
+  test('keepChoiceFrom takes only a boolean, and keepWriteArgs is the --set value for either option', () => {
+    expect(tune.keepChoiceFrom({ keepScriptSettings: true })).toBe(true);
+    expect(tune.keepChoiceFrom({ keepScriptSettings: false })).toBe(false);
+    // An answer that breaks the contract draws no choice rather than a
+    // guessed one.
+    expect(tune.keepChoiceFrom({ keepScriptSettings: 'false' })).toBeNull();
+    expect(tune.keepChoiceFrom({})).toBeNull();
+    expect(tune.keepChoiceFrom(undefined)).toBeNull();
+    expect(tune.keepWriteArgs(false)).toBe('{"keepScriptSettings":false}');
+    expect(tune.keepWriteArgs(true)).toBe('{"keepScriptSettings":true}');
+  });
+
+  test('keepWriteOutcome: another script’s write and a superseded write are not painted; the latest is applied or reported', () => {
+    const ok = (keep: boolean) => ({ ok: true, keepScriptSettings: keep });
+    // The page moved to another script: nothing, not even the stored value,
+    // belongs to what is on screen now.
+    expect(tune.keepWriteOutcome(1, 2, 1, 1, ok(false))).toEqual({ stale: true, stored: null });
+    // A newer choice is queued behind this one: what the engine stored is
+    // still recorded, but the radios and the note are the newer write's.
+    expect(tune.keepWriteOutcome(1, 1, 1, 2, ok(false))).toEqual({ stale: true, stored: false });
+    expect(tune.keepWriteOutcome(1, 1, 2, 2, ok(false))).toEqual({
+      stale: false, applied: true, stored: false, message: tune.KEEP_SAVED_NOTE,
+    });
+    expect(tune.keepWriteOutcome(1, 1, 2, 2, { ok: false, error: { message: 'cannot save the settings file' } }))
+      .toEqual({ stale: false, applied: false, stored: null, message: 'cannot save the settings file' });
+    // ok without the value in it is not a confirmation of anything.
+    expect(tune.keepWriteOutcome(1, 1, 2, 2, { ok: true }))
+      .toEqual({ stale: false, applied: false, stored: null, message: tune.NO_MESSAGE });
+  });
+
+  /** The choice's two radios, keyed by what each one keeps. */
+  function keepRadios(pane: FakeNode) {
+    const radios = pane.findTag('input').filter((n) => n.getAttribute('type') === 'radio');
+    const byLabel = (label: string) => {
+      const option = tune.KEEP_CHOICE.options.find((o: any) => o.label === label);
+      return radios.find((r) => r.getAttribute('id') === option.id) ?? null;
+    };
+    return { all: radios, keep: byLabel('Keep its settings'), follow: byLabel('Follow the defaults') };
+  }
+
+  test('it is a real radio group: a fieldset with a legend, two radios sharing a name, each labelled and described', async () => {
+    const { pane } = await mountReady(engine, { keepScriptSettings: true });
+    const box = pane.find('keep-choice');
+    expect(box).not.toBeNull();
+    expect(box!.tagName).toBe('fieldset');
+    const legend = box!.findTag('legend');
+    expect(legend.length).toBe(1);
+    expect(legend[0].textContent).toBe('When a PDF is converted');
+
+    const { all, keep, follow } = keepRadios(pane);
+    expect(all.length).toBe(2);
+    // One name, so the platform makes them one group: one Tab stop, arrow
+    // keys between the two, and only one ever checked.
+    expect(new Set(all.map((r) => r.getAttribute('name'))).size).toBe(1);
+    expect(all[0].getAttribute('name')).not.toBeNull();
+    const labels = box!.findTag('label');
+    const paragraphs = box!.findTag('p');
+    for (const radio of [keep!, follow!]) {
+      const id = radio.getAttribute('id')!;
+      const option = tune.KEEP_CHOICE.options.find((o: any) => o.id === id);
+      expect(labels.find((l) => l.getAttribute('for') === id)?.textContent).toBe(option.label);
+      const described = radio.getAttribute('aria-describedby');
+      expect(paragraphs.find((p) => p.getAttribute('id') === described)?.textContent).toBe(option.line);
+    }
+    expect(keep!.checked).toBe(true);
+    expect(follow!.checked).toBe(false);
+    // Beside the defaults foot, in the knobs column.
+    const knobs = pane.find('tune-knobs')!;
+    expect(knobs.kids.indexOf(box!)).toBeGreaterThan(knobs.kids.indexOf(pane.find('tune-defaults')!));
+  });
+
+  test('it opens on what the engine says is stored, and an answer without it draws no choice at all', async () => {
+    const off = await mountReady(engine, { keepScriptSettings: false });
+    expect(keepRadios(off.pane).follow!.checked).toBe(true);
+    expect(keepRadios(off.pane).keep!.checked).toBe(false);
+
+    engine = stubEngine();
+    const missing = await mountReady(engine);
+    expect(missing.pane.find('keep-choice')).toBeNull();
+  });
+
+  test('choosing "Follow the defaults" writes it through app-settings, never disables the radios, and confirms', async () => {
+    const { pane } = await mountReady(engine, { keepScriptSettings: true });
+    const { keep, follow } = keepRadios(pane);
+    follow!.checked = true;
+    follow!.dispatch('change');
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(engine.calls.length).toBe(2);
+    expect(engine.calls[1].args).toEqual(['app-settings', '--json', '--set', '{"keepScriptSettings":false}']);
+    // Not disabled while the write is out: an arrow key both moves focus
+    // and changes the choice, and a disabled radio drops the keyboard.
+    expect(keep!.disabled).toBe(false);
+    expect(follow!.disabled).toBe(false);
+    expect(follow!.checked).toBe(true);
+
+    engine.resolve(1, { ok: true, keepScriptSettings: false });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pane.find('keep-note')!.textContent).toBe(tune.KEEP_SAVED_NOTE);
+    expect(pane.find('keep-note')!.hidden).toBe(false);
+    expect(pane.find('keep-note')!.getAttribute('role')).toBe('status');
+    expect(follow!.checked).toBe(true);
+    expect(keep!.checked).toBe(false);
+    // Updated in place: the radio the reader is on is the same node.
+    expect(keepRadios(pane).follow).toBe(follow);
+  });
+
+  test('a refusal puts the radios back to what the engine holds, and shows its sentence', async () => {
+    const { pane } = await mountReady(engine, { keepScriptSettings: true });
+    const { keep, follow } = keepRadios(pane);
+    follow!.checked = true;
+    follow!.dispatch('change');
+    await new Promise((r) => setTimeout(r, 0));
+    engine.resolve(1, { ok: false, error: { code: 'bad-settings', message: 'cannot save the settings file' } });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(keep!.checked).toBe(true);
+    expect(follow!.checked).toBe(false);
+    expect(pane.find('keep-note')!.textContent).toBe('cannot save the settings file');
+
+    // A throw (the engine did not answer at all) is reported the same way.
+    follow!.checked = true;
+    follow!.dispatch('change');
+    await new Promise((r) => setTimeout(r, 0));
+    engine.reject(2, 'the engine is not there');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(keep!.checked).toBe(true);
+    expect(pane.find('keep-note')!.textContent).toBe('the engine is not there');
+  });
+
+  test('two quick choices are sent one after the other, and only the latest is painted', async () => {
+    const { pane } = await mountReady(engine, { keepScriptSettings: true });
+    const { keep, follow } = keepRadios(pane);
+    follow!.checked = true;
+    follow!.dispatch('change');
+    await new Promise((r) => setTimeout(r, 0));
+    keep!.checked = true;
+    follow!.checked = false;
+    keep!.dispatch('change');
+    await new Promise((r) => setTimeout(r, 0));
+    // Queued, not raced: the second write waits for the first to answer.
+    expect(engine.calls.length).toBe(2);
+
+    engine.resolve(1, { ok: true, keepScriptSettings: false });
+    await new Promise((r) => setTimeout(r, 0));
+    // The first answer is superseded: the reader's latest choice stays shown.
+    expect(keep!.checked).toBe(true);
+    expect(pane.find('keep-note')!.textContent).toBe('');
+    expect(engine.calls.length).toBe(3);
+    expect(engine.calls[2].args).toContain('{"keepScriptSettings":true}');
+
+    engine.resolve(2, { ok: true, keepScriptSettings: true });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(keep!.checked).toBe(true);
+    expect(pane.find('keep-note')!.textContent).toBe(tune.KEEP_SAVED_NOTE);
+  });
+
+  test('a choice made on one script is still sent after the page moves on, but not painted onto the next script', async () => {
+    const { pane, ctx } = await mountReady(engine, { keepScriptSettings: true });
+    const { follow } = keepRadios(pane);
+    follow!.checked = true;
+    follow!.dispatch('change');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(engine.calls.length).toBe(2);
+
+    ctx.state.script = {
+      fountainPath: '/scripts/other.fountain', epubPath: null, previewHtml: undefined, settings: null,
+    };
+    tune.scriptChanged();
+    const shown = tune.show();
+    engine.resolve(2, settingsAnswer({ keepScriptSettings: true }));
+    await shown;
+    expect(keepRadios(pane).keep!.checked).toBe(true);
+
+    engine.resolve(1, { ok: true, keepScriptSettings: false });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(keepRadios(pane).keep!.checked).toBe(true);
+    expect(pane.find('keep-note')!.textContent).toBe('');
+  });
+
+  test('scriptChanged resets the choice’s state with the rest of the foot', () => {
+    const changed = source.slice(
+      source.indexOf('export function scriptChanged('), source.indexOf('export async function show('));
+    for (const line of [
+      'keepSettings = null', 'keepShown = null', "keepNote = ''",
+      'keepRadios = null', 'keepNoteEl = null',
+    ]) {
+      expect(changed).toContain(line);
+    }
+  });
 });
 
 describe('the Send surface', () => {
