@@ -8,7 +8,7 @@
 // tests/desktop-ui.test.ts. Below the line is drawing: it holds no rule of
 // its own, so a live run is enough to check it.
 import {
-  runEngine, pickScreenplay, onProgress, argv, FORCE_FLAG, openUrl,
+  runEngine, pickScreenplay, pickFolder, onProgress, argv, FORCE_FLAG, openUrl,
 } from './app.js';
 import { el, clear, text } from './dom.js';
 import { newIssueUrl, osLabel } from './feedback.js';
@@ -251,6 +251,73 @@ export function droppedPath(paths) {
   return paths.find((p) => typeof p === 'string' && p.trim() !== '') ?? null;
 }
 
+/** What a clean `app-settings --json` answer gives the library line to work
+ *  with, or null for anything the engine's contract doesn't actually
+ *  promise. The probe that calls this is a convenience, so a malformed
+ *  answer draws nothing rather than a line that misreports where books go. */
+export function libraryFrom(answer) {
+  if (answer === null || typeof answer !== 'object' || answer.ok !== true) return null;
+  const library = answer.library;
+  if (library === null || typeof library !== 'object') return null;
+  const { path, chosen, platformDefault, fromEnv } = library;
+  if (typeof path !== 'string') return null;
+  if (chosen !== null && typeof chosen !== 'string') return null;
+  if (typeof platformDefault !== 'string') return null;
+  if (typeof fromEnv !== 'boolean') return null;
+  if (typeof answer.home !== 'string') return null;
+  return { path, chosen, platformDefault, fromEnv, home: answer.home };
+}
+
+/** The library line itself. The home folder shows as `~` only when the path
+ *  genuinely sits under it: the folder itself, or home plus a path
+ *  separator and more, never for a sibling that merely shares the same
+ *  prefix (`/Users/ann2` is not under `/Users/ann`). Both slashes are
+ *  checked because the path may have come from either OS, and `home` is
+ *  stripped of any trailing separator of its own first, so a caller that
+ *  hands one over does not get a doubled one back. */
+export function libraryLine(library) {
+  const { path, home, fromEnv } = library;
+  const root = home.replace(/[/\\]+$/, '');
+  let shown = path;
+  if (path === root) {
+    shown = '~';
+  } else if (path.startsWith(`${root}/`) || path.startsWith(`${root}\\`)) {
+    shown = `~${path.slice(root.length)}`;
+  }
+  return fromEnv
+    ? `Books are saved in ${shown}, set by SCREEPUB_LIBRARY.`
+    : `Books are saved in ${shown}.`;
+}
+
+/** Which buttons belong beside the library line. SCREEPUB_LIBRARY wins over
+ *  whatever was chosen (see argv.appSettings' own doc comment), so there is
+ *  nothing to offer changing while it is set. */
+export function libraryActions(library) {
+  if (library.fromEnv) return [];
+  return library.chosen === null ? ['change'] : ['change', 'reset'];
+}
+
+/** What Change says once it has actually moved the library. Reset does not
+ *  show this: going back to the default did not convert anything either. */
+export const movedLine = 'New books go here. Books already converted stay where they are.';
+
+/** The value app-settings' own set option takes for Change (a folder) or
+ *  Reset (`null`, back to the default): the one thing that differs between
+ *  them, so both go through the same call in appendLibraryLine below. */
+export function libraryChangeArgs(path) {
+  return JSON.stringify({ libraryPath: path });
+}
+
+/** What Change or Reset should show once the engine has answered: a clean
+ *  library to redraw the line from, or a message for the line's place.
+ *  Reuses failureFor so a settings refusal renders through the same rule as
+ *  every other one this surface shows. */
+export function libraryAfter(answer) {
+  const library = answer?.ok ? libraryFrom(answer) : null;
+  if (library !== null) return { ok: true, library };
+  return { ok: false, message: failureFor(answer?.error).message };
+}
+
 // ------------------------------------------------------------------ drawing
 
 let ctx = null;
@@ -283,6 +350,10 @@ export function show() {
   // button, which is only on screen in one of this surface's four states;
   // the plan in focus.js picks the first control there actually is.
   ctx.restoreFocus();
+  // The idle well is the only state with anything under it to redraw: a
+  // conversion, a result or a refusal has no library line on screen, and
+  // probing there would spend an engine call on a line nobody can see.
+  if (pane.dataset.state === 'idle') probeLibrary();
 }
 
 export function choose() {
@@ -327,6 +398,9 @@ function icon() {
 export function reset() {
   if (busy) return;
   drawWell();
+  // "Convert another" is the well arriving fresh, same as the first time
+  // this surface was shown, so the library line belongs here too.
+  probeLibrary();
 }
 
 /** The question, if there is one to ask. It removes itself once answered and
@@ -349,6 +423,93 @@ function askLine() {
     el('button', { type: 'button', class: 'btn-quiet', onclick: (event) => answer(true, event) }, ASK.yes),
     el('button', { type: 'button', class: 'btn-quiet', onclick: (event) => answer(false, event) }, ASK.no),
   );
+}
+
+/** The library line's own probe. Reading app-settings with nothing to set is
+ *  a bare read (see app.js's countsTowardBusy: it never counts toward busy),
+ *  and it is a convenience, not a requirement of the well: a dead engine or
+ *  an answer that breaks the contract draws nothing rather than an error
+ *  nobody asked for. */
+async function probeLibrary() {
+  let answer;
+  try {
+    answer = await runEngine(argv.appSettings());
+  } catch {
+    return;
+  }
+  // The page may have moved on to a conversion, a result or a refusal while
+  // this was in flight, and the well it belongs to may not even be on
+  // screen any more.
+  if (pane.dataset.state !== 'idle') return;
+  const library = libraryFrom(answer);
+  if (library === null) return;
+  appendLibraryLine(library);
+}
+
+/** Build the library line and wire Change / Reset to redraw only THIS pair
+ *  of paragraphs, however long their own engine calls take. Same shape as
+ *  drawResult's reveal note: the DOM is built once, here, and every later
+ *  update only ever touches the elements this closure captured, so a stray
+ *  answer can never land on whatever the well happens to show by then. */
+function appendLibraryLine(library) {
+  const line = el('p', { class: 'caption' }, '');
+  const moved = el('p', { class: 'caption' }, movedLine);
+  moved.hidden = true;
+  let buttons = [];
+
+  function draw(lib) {
+    text(line, `${libraryLine(lib)} `);
+    buttons = libraryActions(lib).map((action) => el('button', {
+      type: 'button',
+      class: 'btn-quiet',
+      onclick: () => run(action, lib),
+    }, action === 'change' ? 'Change…' : 'Reset'));
+    line.append(...buttons);
+  }
+
+  function setBusy(on) {
+    for (const button of buttons) button.disabled = on;
+  }
+
+  // Change and Reset are the same shape: ask the OS for a folder (Change
+  // only), send it, and show what came back. Both buttons are disabled for
+  // the whole span, not just the engine call, so a click on either one
+  // while the folder picker is open cannot start a second write.
+  async function run(action, lib) {
+    setBusy(true);
+    let path = null;
+    if (action === 'change') {
+      path = await pickFolder({ defaultPath: lib.path });
+      if (path === null) {
+        setBusy(false);
+        return;
+      }
+    }
+    let answer;
+    try {
+      answer = await runEngine(argv.appSettings(libraryChangeArgs(path)));
+    } catch (err) {
+      setBusy(false);
+      text(line, err.message);
+      moved.hidden = true;
+      return;
+    }
+    setBusy(false);
+    const result = libraryAfter(answer);
+    if (result.ok) {
+      draw(result.library);
+      // Reset says nothing extra: nothing was converted between the old
+      // folder and the default, so there is nothing for movedLine to be
+      // right about.
+      moved.hidden = action !== 'change';
+    } else {
+      text(line, result.message);
+      moved.hidden = true;
+    }
+  }
+
+  draw(library);
+  pane.append(line, moved);
 }
 
 function drawWell() {

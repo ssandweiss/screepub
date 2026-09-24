@@ -544,6 +544,76 @@ describe('the Convert surface', () => {
     expect(handler).toContain('note.hidden');
     expect(handler).not.toContain('pane.append');
   });
+
+  test('CW1 review pin: Show in Finder hands the engine the open script’s own epub path', () => {
+    // A stray script.fountainPath, or a path captured before the answer
+    // arrived, would compile and even run: it would only show up the day
+    // the two paths actually differ.
+    expect(convert).toContain('revealNote(runEngine, script.epubPath)');
+  });
+
+  test('CW1 review pin: the reveal note is one of drawResult’s own appended children', () => {
+    // The note built at the top of drawResult (asserted above) has to
+    // actually reach the page, in the SAME pane.append call that draws the
+    // rest of the result, not left sitting in a variable nobody appends.
+    const drawResult = convert.slice(convert.indexOf('function drawResult'));
+    const build = drawResult.slice(
+      drawResult.indexOf('pane.append('),
+      drawResult.indexOf('ctx.scriptChanged()'),
+    );
+    expect(build).toContain('note,');
+  });
+
+  test('the library line is probed on show, and nowhere else, with a bare read', () => {
+    const showFn = convert.slice(
+      convert.indexOf('export function show'),
+      convert.indexOf('export function choose'),
+    );
+    expect(showFn).toContain('probeLibrary()');
+    const probe = convert.slice(
+      convert.indexOf('async function probeLibrary'),
+      convert.indexOf('function appendLibraryLine'),
+    );
+    expect(probe).toContain('argv.appSettings()');
+    // A bare read: no --set, so this call never counts toward busy (see
+    // app.js's countsTowardBusy) and can run at any time, including while a
+    // conversion is in flight elsewhere.
+    expect(probe).not.toContain('--set');
+    // "Convert another" is the well arriving fresh, the same as the first
+    // time the surface was shown.
+    const resetFn = convert.slice(
+      convert.indexOf('export function reset'),
+      convert.indexOf('function askLine'),
+    );
+    expect(resetFn).toContain('probeLibrary()');
+  });
+
+  test('Change asks the OS for a folder before it ever asks the engine to move anything', () => {
+    const block = convert.slice(
+      convert.indexOf('function appendLibraryLine'),
+      convert.indexOf('function drawWell'),
+    );
+    const run = block.slice(block.indexOf('async function run('));
+    expect(run.indexOf('pickFolder(')).toBeGreaterThan(-1);
+    expect(run.indexOf('argv.appSettings(')).toBeGreaterThan(run.indexOf('pickFolder('));
+    // Both buttons go quiet for the whole span, not just the engine call, so
+    // a second click while the folder picker itself is still open cannot
+    // start a second write.
+    expect(run.indexOf('setBusy(true)')).toBeGreaterThan(-1);
+    expect(run.indexOf('pickFolder(')).toBeGreaterThan(run.indexOf('setBusy(true)'));
+  });
+
+  test('the library line reuses the quiet caption and button, and asks for no new CSS', () => {
+    const block = convert.slice(
+      convert.indexOf('function appendLibraryLine'),
+      convert.indexOf('function drawWell'),
+    );
+    expect(block).toContain("class: 'caption'");
+    expect(block).toContain("class: 'btn-quiet'");
+    expect(block).not.toMatch(/class:\s*'library/);
+    const css = read('surfaces.css');
+    expect(css).not.toContain('.library');
+  });
 });
 
 describe('what the Convert surface decides', () => {
@@ -572,6 +642,17 @@ describe('what the Convert surface decides', () => {
     droppedPath: (paths: unknown) => string | null;
     revealFailureMessage: (answer: unknown) => string | null;
     revealNote: (run: (args: string[]) => Promise<unknown>, path: string) => Promise<string>;
+    libraryFrom: (answer: unknown) => {
+      path: string; chosen: string | null; platformDefault: string; fromEnv: boolean; home: string;
+    } | null;
+    libraryLine: (library: {
+      path: string; home: string; fromEnv: boolean;
+    }) => string;
+    libraryActions: (library: { chosen: string | null; fromEnv: boolean }) => string[];
+    movedLine: string;
+    libraryChangeArgs: (path: string | null) => string;
+    libraryAfter: (answer: unknown) =>
+      { ok: true; library: Record<string, unknown> } | { ok: false; message: string };
   };
   let convert: ConvertModule;
 
@@ -874,6 +955,113 @@ describe('what the Convert surface decides', () => {
     expect(shown.message.length).toBeGreaterThan(20);
     expect(answer.error.message.startsWith(shown.message)).toBe(true);
   }, 60000);
+
+  test('libraryFrom accepts a clean app-settings answer and rejects anything malformed', () => {
+    const good = {
+      ok: true,
+      library: {
+        path: '/Users/ann/Documents/Screepub',
+        chosen: null,
+        platformDefault: '/Users/ann/Documents/Screepub',
+        fromEnv: false,
+      },
+      home: '/Users/ann',
+    };
+    expect(convert.libraryFrom(good)).toEqual({
+      path: '/Users/ann/Documents/Screepub',
+      chosen: null,
+      platformDefault: '/Users/ann/Documents/Screepub',
+      fromEnv: false,
+      home: '/Users/ann',
+    });
+    for (const bad of [
+      null,
+      undefined,
+      'nope',
+      { ok: false, library: good.library, home: good.home },
+      { ok: true, library: null, home: good.home },
+      { ok: true, library: { ...good.library, path: 3 }, home: good.home },
+      { ok: true, library: { ...good.library, chosen: 3 }, home: good.home },
+      { ok: true, library: { ...good.library, platformDefault: null }, home: good.home },
+      { ok: true, library: { ...good.library, fromEnv: 'no' }, home: good.home },
+      { ok: true, library: good.library, home: 9 },
+      { ok: true, library: good.library }, // no home at all
+    ]) {
+      expect(convert.libraryFrom(bad as never)).toBeNull();
+    }
+  });
+
+  test('libraryLine shortens the home folder to ~, and only when the path is really under it', () => {
+    const base = { chosen: null, platformDefault: '/Users/ann/Documents/Screepub', fromEnv: false };
+    // The home folder itself.
+    expect(convert.libraryLine({ ...base, path: '/Users/ann', home: '/Users/ann' }))
+      .toBe('Books are saved in ~.');
+    // A folder under home.
+    expect(convert.libraryLine({ ...base, path: '/Users/ann/Documents/Screepub', home: '/Users/ann' }))
+      .toBe('Books are saved in ~/Documents/Screepub.');
+    // A home the caller handed over WITH its own trailing separator must not
+    // double the slash or swallow the leading one off the rest.
+    expect(convert.libraryLine({ ...base, path: '/Users/ann/Documents/Screepub', home: '/Users/ann/' }))
+      .toBe('Books are saved in ~/Documents/Screepub.');
+    // A sibling folder that merely shares the prefix is not "under" home.
+    expect(convert.libraryLine({ ...base, path: '/Users/ann2/Books', home: '/Users/ann' }))
+      .toBe('Books are saved in /Users/ann2/Books.');
+    // Windows, backslashes throughout.
+    expect(convert.libraryLine({
+      ...base, path: 'C:\\Users\\ann\\Documents\\Screepub', home: 'C:\\Users\\ann',
+    })).toBe('Books are saved in ~\\Documents\\Screepub.');
+    // Nowhere near home.
+    expect(convert.libraryLine({ ...base, path: '/Volumes/External/Books', home: '/Users/ann' }))
+      .toBe('Books are saved in /Volumes/External/Books.');
+    // SCREEPUB_LIBRARY says so, and is shortened by the same rule.
+    expect(convert.libraryLine({
+      ...base, path: '/Users/ann/Books', home: '/Users/ann', fromEnv: true,
+    })).toBe('Books are saved in ~/Books, set by SCREEPUB_LIBRARY.');
+  });
+
+  test('libraryActions offers Change alone, Change and Reset, or neither', () => {
+    const base = { path: '/x', platformDefault: '/x', home: '/h' };
+    expect(convert.libraryActions({ ...base, chosen: null, fromEnv: false })).toEqual(['change']);
+    expect(convert.libraryActions({ ...base, chosen: '/x', fromEnv: false }))
+      .toEqual(['change', 'reset']);
+    // SCREEPUB_LIBRARY wins over whatever was chosen, so there is nothing to
+    // offer changing.
+    expect(convert.libraryActions({ ...base, chosen: '/x', fromEnv: true })).toEqual([]);
+    expect(convert.libraryActions({ ...base, chosen: null, fromEnv: true })).toEqual([]);
+  });
+
+  test('movedLine says what moving the library does, and does not do, in one sentence', () => {
+    expect(convert.movedLine).toBe(
+      'New books go here. Books already converted stay where they are.',
+    );
+  });
+
+  test('libraryChangeArgs is the --set value for a folder, or for going back to the default', () => {
+    expect(convert.libraryChangeArgs('/Users/ann/Books')).toBe('{"libraryPath":"/Users/ann/Books"}');
+    expect(convert.libraryChangeArgs(null)).toBe('{"libraryPath":null}');
+  });
+
+  test('libraryAfter reads a clean library out of a --set answer, or the engine’s refusal', () => {
+    const answer = {
+      ok: true,
+      library: { path: '/x', chosen: '/x', platformDefault: '/d', fromEnv: false },
+      home: '/h',
+    };
+    expect(convert.libraryAfter(answer)).toEqual({
+      ok: true,
+      library: { path: '/x', chosen: '/x', platformDefault: '/d', fromEnv: false, home: '/h' },
+    });
+    // The engine's own sentence, verbatim: the same rule failureFor applies
+    // everywhere else on this screen.
+    expect(convert.libraryAfter({
+      ok: false,
+      error: { code: 'bad-settings', message: 'the library folder must be a full path' },
+    })).toEqual({ ok: false, message: 'the library folder must be a full path' });
+    // A contract-breaking refusal still says something a person can act on.
+    expect(convert.libraryAfter({ ok: false, error: {} })).toEqual({
+      ok: false, message: convert.NO_MESSAGE,
+    });
+  });
 });
 
 describe('what the Convert surface decides about a refusal', () => {
