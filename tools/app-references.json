@@ -52,9 +52,9 @@
       "breaks": "Two live paths inside app/Packages/KFXKit (PROVENANCE.md and LICENSE) plus the Screepub.app resource path. This is a LICENSE document: a dangling path in it is a compliance defect, not a typo. F3 acceptance criterion 13."
     },
     "brand/README.md": {
-      "refs": 3,
+      "refs": 5,
       "category": "doc",
-      "breaks": "Declares app/Sources/ScreepubApp/Theme.swift the source of the shared brand tokens. Reversed by F3 criterion 12."
+      "breaks": "Describes the frozen Swift copy of the brand tokens: tokens.json became the source on 2026-09-23 (F3 criterion 12), and the drift check skips once app/ is gone. At F3, drop the sentences about the Swift copy."
     },
     "brand/tokens.css": {
       "refs": 2,
