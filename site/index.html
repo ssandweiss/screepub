@@ -277,6 +277,16 @@ h2 .answer{color:var(--ink-muted);display:block}
   border-left:2px solid var(--brass);padding-left:16px;margin:46px 0 34px;max-width:34em}
 .note a{color:var(--ink-soft)}
 .closer{display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-top:8px}
+
+/* ---------- every download ---------- */
+.downloads{padding-top:10vh;padding-bottom:12vh;border-top:1px solid rgba(29,27,22,.08)}
+.downloads h2{margin-bottom:10px}
+.downloads p,.downloads li{font-family:var(--fp);color:var(--ink-soft);font-size:15px;
+  line-height:1.62;max-width:34em}
+.downloads ul{list-style:none;padding:0;margin:26px 0;border-top:1px solid rgba(29,27,22,.12)}
+.downloads li{padding:12px 0;border-bottom:1px solid rgba(29,27,22,.12);max-width:44em}
+.downloads code{font-family:var(--fs);font-size:12px;letter-spacing:.02em;color:var(--ink)}
+.downloads a{color:var(--ink-soft)}
 .trans{font-family:var(--fs);letter-spacing:.07em;color:var(--ink-muted);
   font-size:11px;text-align:right}
 .end{font-family:var(--fs);letter-spacing:.1em;color:var(--ink-muted);font-size:11px;
@@ -446,6 +456,44 @@ footer .right{margin-left:auto}
       <a class="btn lg" href="https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-macOS.dmg">DOWNLOAD FOR MACOS</a>
       <span class="fine">FREE. NO ACCOUNT. YOUR SCRIPT NEVER LEAVES YOUR MACHINE.</span>
     </div>
+  </section>
+
+  <section class="downloads pad" id="all-downloads">
+    <div class="slug">INT. THE DOWNLOAD PAGE - EVERY FILE</div>
+    <h2>Every download.</h2>
+    <p>
+      <strong>On a Mac, the supported download is <code>Screepub-macOS.dmg</code></strong>
+      &mdash; signed and notarized by Apple, and the one this project has been
+      shipping. The button above is that file.
+    </p>
+    <ul>
+      <li>Linux (Debian, Ubuntu): <code>Screepub-linux-amd64.deb</code></li>
+      <li>Linux (Fedora, openSUSE): <code>Screepub-linux-x86_64.rpm</code></li>
+      <li>macOS, the new cross-platform window:
+        <code>Screepub-Desktop-macOS-universal.dmg</code>
+        (Apple Silicon and Intel in one download)</li>
+      <li>Windows: <code>Screepub-windows-x64-setup.exe</code></li>
+      <li>Command line, any platform: see the
+        <a href="https://github.com/ssandweiss/screepub#readme">README</a></li>
+    </ul>
+    <p>
+      <strong>Windows will warn you.</strong> Screepub for Windows is unsigned
+      &mdash; it carries no code-signing certificate &mdash; so SmartScreen
+      shows a &ldquo;publisher unknown&rdquo; screen the first time you run
+      it. Choose <strong>More info</strong>, then
+      <strong>Run anyway</strong>. Certificates cost money this project does
+      not spend yet; this note exists so the warning is expected rather than
+      alarming. The Windows installer also fetches Microsoft&rsquo;s WebView2
+      runtime once if your machine has none. Converting never touches the
+      network, on any platform.
+    </p>
+    <p>
+      <strong>Nobody has installed the new window yet.</strong> Automation
+      builds each of these, and runs the converter out of all but the Intel Mac
+      one before publishing. No one has run an installer on a real machine, or
+      opened the window on anything but Linux.
+    </p>
+    <p><a href="https://github.com/ssandweiss/screepub/releases/latest">All files on the latest release &rarr;</a></p>
   </section>
 
   <div class="end">FADE OUT.</div>

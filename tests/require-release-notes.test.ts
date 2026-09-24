@@ -1,7 +1,10 @@
-import { describe, test, expect } from 'bun:test';
+import { afterAll, describe, test, expect } from 'bun:test';
 import { join } from 'node:path';
 import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-require-release-notes-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 const HOOK = join(import.meta.dir, '..', 'tools', 'hooks', 'require-release-notes.sh');
 
@@ -14,7 +17,7 @@ function runHook(command: string): { code: number; stderr: string } {
 // Runs the hook with a PATH that has everything it needs EXCEPT jq, so the
 // "jq is missing" fallback path is genuinely exercised rather than assumed.
 function runHookNoJq(command: string): { code: number; stderr: string } {
-  const sandbox = mkdtempSync(join(tmpdir(), 'require-release-notes-nojq-'));
+  const sandbox = mkdtempSync(join(SCRATCH, 'nojq-'));
   try {
     for (const bin of ['git', 'grep', 'sort', 'cat', 'wc']) {
       const real = Bun.which(bin);

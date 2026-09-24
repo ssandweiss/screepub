@@ -4,11 +4,16 @@
     make-fixture.py screenplay tests/fixtures/screenplay.pdf
     make-fixture.py prose      tests/fixtures/prose.pdf
     make-fixture.py blank      tests/fixtures/blank-pages.pdf
+    make-fixture.py torture    tests/fixtures/torture.pdf
+    make-fixture.py demo       tests/fixtures/field-station.pdf
 
 Real scripts are confidential, so the committed fixtures are invented. The
-three kinds cover the three paths convert.ts can take: a screenplay that
-converts, a document that trips the not-a-screenplay guard, and pages with
-no text layer that trip the scanned guard.
+first three kinds cover the three paths convert.ts can take: a screenplay
+that converts, a document that trips the not-a-screenplay guard, and pages
+with no text layer that trip the scanned guard. torture exercises every
+content-driven registry behavior (tools/torture-content.py), and demo is
+Field Station, the invented feature the README and site pictures show
+(tools/field-station-content.py).
 
 Geometry from docs/screenplay-format-reference.md — 12pt Courier, 10 chars
 per inch, 6 lines per inch. Indents matter: Screepub classifies elements by
@@ -613,17 +618,23 @@ KINDS = {
 }
 
 
-def _torture_content():
-    """Load tools/torture-content.py. It is data, kept in its own file so
-    the person editing 14 sheets of screenplay never has to read layout
-    code. The dash in the filename means it cannot be a normal import."""
+def _load_sibling(filename, modname):
+    """Load a data file that sits beside this script. The content files are
+    kept apart so the person writing screenplay never has to read layout
+    code, and the dash in their filenames means they cannot be a normal
+    import."""
     import importlib.util
     import pathlib
-    path = pathlib.Path(__file__).with_name("torture-content.py")
-    spec = importlib.util.spec_from_file_location("torture_content", path)
+    path = pathlib.Path(__file__).with_name(filename)
+    spec = importlib.util.spec_from_file_location(modname, path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _torture_content():
+    """tools/torture-content.py: 14 sheets of screenplay, as data."""
+    return _load_sibling("torture-content.py", "torture_content")
 
 
 def torture_streams():
@@ -635,6 +646,53 @@ def torture_streams():
 
 
 KINDS["torture"] = torture_streams
+
+
+# --- demo: the invented feature the README and site pictures show ---------
+# Laid out PAGE BY PAGE, not flowed: the site's scene has to land on printed
+# pages 14 to 18, where the site's own page markers say it is. So each page
+# is drawn exactly as tools/field-station-content.py writes it, and a page
+# that does not fit is an error rather than a silent reflow that would move
+# every page number after it.
+
+def _demo_content():
+    """tools/field-station-content.py: the Field Station pages, as data."""
+    return _load_sibling("field-station-content.py", "field_station_content")
+
+
+# A real script puts no blank line between a character name and what that
+# character says, so neither does this. Everything else gets one above it.
+_JOINED_TO_CUE = {"paren", "dialogue"}
+
+
+def flow_page(rows):
+    """One page of (kind, text) rows -> the (x, text) / None rows
+    content_stream draws. Raises SystemExit if the page overflows."""
+    out = []
+    for kind, text in rows:
+        if out and kind not in _JOINED_TO_CUE:
+            out.append(None)
+        # Straighten BEFORE wrapping, so the wrap measures what is drawn: an
+        # em dash is drawn as two characters and would otherwise count as one.
+        text = text.translate(ASCII_MAP)
+        for chunk in textwrap.wrap(text, WRAP[kind]) or [""]:
+            out.append((X[kind], chunk))
+    if len(out) > LINES_PER_PAGE:
+        raise SystemExit(
+            f"field-station page overflows: {len(out)} lines, the limit is "
+            f"{LINES_PER_PAGE}. It starts: {rows[0]!r}")
+    return out
+
+
+def demo_streams():
+    mod = _demo_content()
+    return [title_stream(mod.TITLE)] + [
+        content_stream(flow_page(p), i + 1 if i else None)
+        for i, p in enumerate(mod.PAGES)
+    ]
+
+
+KINDS["demo"] = demo_streams
 
 
 # --- layout as data, for tests -------------------------------------------
@@ -689,6 +747,12 @@ def layout_json(kind):
         pages = [{"page": 1, "rows": _title_rows(mod.TITLE)}]
         for i, rows in enumerate(flow_torture(mod.CONTENT)):
             pages.append({"page": i + 2, "rows": _torture_rows(rows)})
+        return pages
+    if kind == "demo":
+        mod = _demo_content()
+        pages = [{"page": 1, "rows": _title_rows(mod.TITLE)}]
+        for i, rows in enumerate(mod.PAGES):
+            pages.append({"page": i + 2, "rows": _content_rows(flow_page(rows))})
         return pages
     if kind != "screenplay":
         # prose and blank have no line-addressable structure worth emitting:

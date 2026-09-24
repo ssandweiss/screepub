@@ -153,10 +153,13 @@ Condensed; full mechanics in the grounding notes and registry entries.
 - Final Draft double-printed markers deduplicated geometrically
   (extract.ts:144-156, #10); a `(CONT'D)` printed 1pt above its cue
   absorbed by Y_TOLERANCE (extract.ts:68).
-- Output keeps: heading + first block wrapped in `.keep-together`
-  (#5a), cue + first dialogue line likewise (#8b), dual-dialogue table
-  unbreakable; parentheticals deliberately unprotected to keep pushed
-  chunks small (#5). Device reality: KFX honors keeps; sideloaded
+- Output keeps are CHAINS on the paragraphs, not wrappers: `break-after:
+  avoid` on the heading (#5a), on the cue and on the parenthetical (#8b),
+  plus the unbreakable dual-dialogue table (#10a). Both wrappers were
+  deleted after they stranded what they were meant to hold — the heading's
+  in 2026-07-30, the cue's in 2026-09-14 — because the KFX converter
+  ignores break-after on a structural div. Chunks stay small via `orphans`
+  (#17) rather than by leaving links out (#5). Device reality: KFX honors keeps; sideloaded
   AZW3/MOBI does not (#8b); Kobo/RMSDK need file splits for hard breaks
   (device-map.md §2).
 - Original print pages can be surfaced as `= pg N` markers +  EPUB3

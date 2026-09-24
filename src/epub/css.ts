@@ -23,11 +23,17 @@
 // will make you.
 //     break-after: avoid   h2.scene-heading (gated: keepSceneHeadingWithScene, on)
 //     break-after: avoid   p.character
+//     break-after: avoid   p.parenthetical (the cue chain, registry #8b)
 //     break-after: avoid   p.mini-slug (live: secondary sluglines, registry #5b)
 //     break-before: avoid  p.transition
-//     break-inside: avoid  .keep-together (the cue keep)
 //     break-inside: avoid  table.dual-dialogue
 //     break-inside: avoid  .dialogue-block (gated: keepSpeechesWhole, off)
+// The cue keep is a CHAIN on those two paragraphs, not a wrapper. A
+// `.keep-together` div used to carry it; the KFX converter behind
+// Send-to-Kindle honors break-after on text-bearing elements (#5a, proved
+// on h2.scene-heading) but not on a structural div, and does not propagate
+// a last child's break-after to its parent, so the wrapper→dialogue
+// boundary went ungoverned and cues stranded on device (#8b, 2026-09-14).
 // Two mechanisms sit outside that list and cost less than an avoid link:
 //     page-break-before: always  section.scene (gated: scenePageBreaks, off)
 //       — ends a page rather than refusing to, so it grows no chunk.
@@ -73,8 +79,16 @@ export function screenplayCss(o: FormatOptions): string {
   // spelling below is DERIVED from the keep set rather than a second copy
   // of it kept in sync by hand. A keep missing from here is inert in
   // Apple Books, which honors only that spelling.
-  const columnKeeps = ['.keep-together', 'table.dual-dialogue'];
+  const columnKeeps = ['table.dual-dialogue'];
   if (o.keepSpeechesWhole) columnKeeps.push('.dialogue-block');
+  // The same derivation for the two directional binds. These had no column
+  // spelling at all until 2026-09-14, so every keep-with-next rule in the
+  // book was inert on Apple Books and the Readium family while the INSIDE
+  // keeps worked — the identical silent-inertness the derived-list
+  // correction was written to prevent, hiding one property along.
+  const columnAfter = o.keepSceneHeadingWithScene ? ['h2.scene-heading'] : [];
+  columnAfter.push('p.mini-slug', 'p.character', 'p.parenthetical');
+  const columnBefore = ['p.transition'];
   // The heading keep is a CHAIN, not a wrapper: break-after on the h2
   // holds it to whatever follows, without making the whole first block
   // unbreakable (the old wrapper pushed half-page chunks; registry #5a).
@@ -104,40 +118,6 @@ body {
   font-family: ${FONT_STACKS[o.fontFamily]};
 }
 ${sceneBreak}
-/* The cue keep: cue + parentheticals share this unbreakable wrapper, and
-   it binds FORWARD to the dialogue that follows it, so a cue never strands
-   at a page bottom. Container-level inside-avoid is the KDP-documented
-   keep-together form.
-
-   Both halves are load-bearing and the forward half was learned on device.
-   The wrapper used to contain the first dialogue TOKEN, which our
-   serializer writes as the whole speech, so the keep was as tall as the
-   speech and pushed blank-bottomed pages. Taking the dialogue out fixed
-   that and broke this: the cue became the wrapper's LAST child, so
-   break-after on p.character governed a break that no longer existed, and
-   cues stranded again. The break a reader meets is the one between this
-   wrapper and the dialogue outside it, so the wrapper is the only thing
-   that can carry it.
-
-   The chunk this creates is bounded: wrapper + the orphans minimum of
-   dialogue lines (#17), not wrapper + speech. That bound is the whole
-   point, per #5 on avoid links growing pushed chunks.
-
-   NOTE: no backticks in this comment. It lives inside a template literal,
-   and a backtick here ends the stylesheet mid-sentence. */
-.keep-together {
-  page-break-inside: avoid;
-  break-inside: avoid;
-  page-break-after: avoid;
-  break-after: avoid;
-}
-
-/* Apple Books honors ONLY this older spelling; the Readium family
-   (Thorium, Kobo's mobile apps) honors it too. SEPARATE rule on purpose:
-   iBooks drops BOTH forms when they share one declaration block. Unguarded
-   on purpose: the engines that need it largely predate @supports. */
-${columnKeeps.join(', ')} { -webkit-column-break-inside: avoid; }
-
 h2.scene-heading {
   font-size: 1em;
   font-weight: bold;
@@ -207,14 +187,22 @@ ${o.cueAlignment === 'centered'
   break-after: avoid;
 }
 
-/* Deliberately NOT chained forward. Registry #5: every avoid link grows
-   the unbreakable chunk a renderer pushes to the next page, and pushed
-   chunks are exactly the blank-bottom "weird page break" this file keeps
-   being asked to fix. A parenthetical breaks freely on purpose. */
+/* Chained forward as of 2026-09-14, reversing a deliberate refusal. #5 is
+   right that every avoid link grows the chunk a renderer pushes, and while
+   the cue keep was a WRAPPER that argument held: the chunk already carried
+   the cue and the speech, and one more link made a blank-bottom page. With
+   the wrapper gone the chunk is cue + parenthetical + the orphans minimum
+   (#17), about four lines, which is the same bound #5a accepted when it
+   traded the heading wrapper for a chain.
+
+   Without this link a cue and its parenthetical strand together, which is
+   the defect #8b exists to prevent wearing a different hat. */
 p.parenthetical {
 ${o.cueAlignment === 'centered'
     ? '  text-align: center;'
     : `  margin-left: ${o.parentheticalIndentPct}%;\n  margin-right: ${Math.round(o.parentheticalIndentPct / 2)}%;`}
+  page-break-after: avoid;
+  break-after: avoid;
 }
 
 p.dialogue {
@@ -233,6 +221,7 @@ table.dual-dialogue {
   page-break-inside: avoid;
   break-inside: avoid;
 }
+
 
 table.dual-dialogue td {
   width: 50%;
@@ -311,6 +300,29 @@ section.titlepage p.author {
 .fmt-plus2 {
   font-size: 1.5em;
 }
+
+/* ── the multicol spelling of every break rule above ──────────────────
+
+   Some engines paginate by laying the book out in CSS multi-column and
+   showing one column per screen, and they read ONLY the multicol
+   vocabulary for fragmentation: Apple Books, whose WebKit honors nothing
+   else, and the Readium family (Thorium, Kobo's phone and tablet apps).
+
+   SEPARATE rules on purpose, and last on purpose. Separate because iBooks
+   drops BOTH spellings when they share one declaration block. Last because
+   these selectors repeat ones used above, and a shadow placed first would
+   make ruleFor() in the tests answer with the spelling nothing else reads
+   (the incident 3abeba3 is named for). Unguarded by @supports on purpose:
+   the engines that need this largely predate it.
+
+   Derived from the same gating that emits the real rules, never a second
+   list kept by hand. A hand-kept copy once left the whole-speech keep
+   silently inert in Apple Books while the cue keep worked. */
+${columnKeeps.join(', ')} { -webkit-column-break-inside: avoid; }
+
+${columnAfter.join(', ')} { -webkit-column-break-after: avoid; }
+
+${columnBefore.join(', ')} { -webkit-column-break-before: avoid; }
 `.trimStart();
 }
 

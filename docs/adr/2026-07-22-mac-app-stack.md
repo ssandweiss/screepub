@@ -1,6 +1,11 @@
 # ADR: Mac app stack — SwiftUI shell + Bun-compiled engine sidecar
 
-Date: 2026-07-22 · Status: accepted (user-approved)
+Date: 2026-07-22 · Status: **superseded** by [2026-09-12-cross-platform-tauri.md](2026-09-12-cross-platform-tauri.md)
+
+> Superseded 2026-09-12. This ADR rejected Rust/Tauri because the app was
+> Mac-only; that premise no longer holds. Its rejections of Electron and of
+> rewriting the engine in another language still stand and are carried
+> forward. Everything below is kept as the record of what was true.
 
 ## Decision
 

@@ -64,7 +64,7 @@ export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
   cueAlignment: 'centered',
   includeTitlePage: true,
   showSceneNumbers: false,
-  showPageMarkers: false,
+  showPageMarkers: true,
   dualDialogue: 'sideBySide',
   justifyText: false,
   printSplitMinimums: true,
@@ -73,10 +73,16 @@ export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-/** Merge a partial (e.g. parsed from --options JSON) over the defaults,
- * clamping numeric knobs and ignoring unknown keys/invalid values. */
-export function resolveFormatOptions(partial?: Record<string, unknown>): FormatOptions {
-  const d = DEFAULT_FORMAT_OPTIONS;
+/** Merge a partial (e.g. parsed from --options JSON) over `base`, clamping
+ * numeric knobs and ignoring unknown keys/invalid values. `base` defaults to
+ * the shipped defaults; the per-script sidecar passes the user's global
+ * settings instead, so a sidecar carrying one key overrides one knob and
+ * leaves the rest of their tuning alone. */
+export function resolveFormatOptions(
+  partial?: Record<string, unknown>,
+  base: FormatOptions = DEFAULT_FORMAT_OPTIONS,
+): FormatOptions {
+  const d = base;
   const p = partial ?? {};
   const bool = (key: keyof FormatOptions): boolean =>
     typeof p[key] === 'boolean' ? (p[key] as boolean) : (d[key] as boolean);
@@ -103,7 +109,8 @@ export function resolveFormatOptions(partial?: Record<string, unknown>): FormatO
     includeTitlePage: bool('includeTitlePage'),
     showSceneNumbers: bool('showSceneNumbers'),
     showPageMarkers: bool('showPageMarkers'),
-    dualDialogue: p.dualDialogue === 'sequential' ? 'sequential' : d.dualDialogue,
+    dualDialogue:
+      p.dualDialogue === 'sequential' || p.dualDialogue === 'sideBySide' ? p.dualDialogue : d.dualDialogue,
     justifyText: bool('justifyText'),
     printSplitMinimums: bool('printSplitMinimums'),
     preserveFontShifts: bool('preserveFontShifts'),

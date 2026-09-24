@@ -1,6 +1,7 @@
 // Adapted from an earlier table-read parser by the same author, reworked for
 // headless Bun/Node: modern pdf.js build + DOM shims, no browser worker.
 import './pdfjs-shims';
+import { isCueText } from './cue';
 import type { FamilyBucket, FontRun, RawLine, SizeStep } from './types';
 import { getDocument, OPS } from 'pdfjs-dist/build/pdf.mjs';
 
@@ -25,9 +26,13 @@ export async function extractDocument(
   pdfBytes: Uint8Array,
   maxPages?: number,
   onProgress?: PageProgress,
-): Promise<{ lines: RawLine[]; pageCount: number }> {
+): Promise<{ lines: RawLine[]; pageCount: number; spacingRepairs: number }> {
   const pdf = await getDocument({ data: pdfBytes }).promise;
   const allLines: RawLine[] = [];
+  // Counted, not silent. repairPhantomSpaces edits an author's words, so the
+  // number rides out with the result and the app can say so. A count that
+  // suddenly jumps on a script is how anyone would notice it misfiring.
+  let spacingRepairs = 0;
 
   const lastPage = maxPages ? Math.min(pdf.numPages, maxPages) : pdf.numPages;
   for (let pageNum = 1; pageNum <= lastPage; pageNum++) {
@@ -37,6 +42,9 @@ export async function extractDocument(
     const ops = await operatorList(page);
     stampFontStyles(page, textContent.items);
     if (ops) stampUnderlines(textContent.items, ops, viewport.width);
+    // Before grouping, because every stage downstream reads `str` and a
+    // phantom space fragments a word into two tokens for all of them.
+    spacingRepairs += repairPhantomSpaces(textContent.items, ops);
 
     const pageLines = groupItemsIntoLines(textContent.items, viewport.width, pageNum);
     allLines.push(...pageLines);
@@ -50,7 +58,7 @@ export async function extractDocument(
   // Courier script (registry #18).
   stampLineFmt(allLines);
 
-  return { lines: allLines, pageCount: pdf.numPages };
+  return { lines: allLines, pageCount: pdf.numPages, spacingRepairs };
 }
 
 interface TextItem {
@@ -69,6 +77,103 @@ interface TextItem {
 }
 
 const endX = (item: TextItem) => item.transform[4] + (item.width ?? item.str.length * 6);
+
+/**
+ * Undo word spaces pdf.js invented, using the glyph stream as the truth.
+ *
+ * pdf.js turns a wide inter-glyph gap into a space in the string it hands
+ * us. Usually right; wrong on a PDF whose text has been re-encoded. A Final
+ * Draft script re-saved through Quartz carried a uniform +17 tracking
+ * adjustment on every glyph pair and, about once a page, one anomalous
+ * ~-110 that widened a single gap by roughly 1.5pt. That is a fifth of a
+ * character, far short of a space, and pdf.js called it one: "these"
+ * arrived as "thes e", 94 times across 70 of 112 pages.
+ *
+ * Two facts make this repairable rather than guesswork, and both matter:
+ *
+ * A REAL space is a glyph. It appears in the run as its own entry with a
+ * full cell of advance. An invented one is not in the run at all. So a
+ * writer who spaced out a word deliberately keeps every space, and we never
+ * have to reason about whether they meant it.
+ *
+ * And SCREENPLAYS ARE MONOSPACED, so the ink says how many characters there
+ * really are. Every clean item on a page divides to the same cell width;
+ * an item carrying a phantom is a whole cell short of its own string. That
+ * is the flag, and it is why this cannot fire on a proportional font: there
+ * is no grid, so no item is ever flagged. (Measured on a pitch deck: 87
+ * items look short, and every one of them is a false positive. The floor on
+ * `width` and the uniqueness check below are what keep that harmless, but
+ * the real protection is that this only runs where a script is Courier.)
+ *
+ * Returns how many items it repaired.
+ */
+export function repairPhantomSpaces(items: unknown[], ops: OpList | null): number {
+  if (!ops) return 0;
+  const texts = items as TextItem[];
+
+  // The glyph runs, keyed by their text with ALL whitespace removed, so a
+  // run and the item it produced match even though their spacing differs —
+  // which is the entire point. A key claimed twice is dropped: picking one
+  // would be a coin flip, and a wrong repair is worse than none.
+  const byKey = new Map<string, string | null>();
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    if (ops.fnArray[i] !== OPS.showText) continue;
+    // argsArray is ArrayLike<unknown> by design — the op list is a union of
+    // every operator's arguments — so showText's own shape is asserted here
+    // rather than widening the interface for one caller.
+    const args = ops.argsArray[i] as unknown[] | undefined;
+    const glyphs = args?.[0];
+    if (!Array.isArray(glyphs)) continue;
+    // Glyphs only. The numbers between them are positioning, and reading
+    // them as anything else is the bug this function exists to undo.
+    const text = glyphs
+      .map((g) => (typeof g === 'number' ? '' : ((g as { unicode?: string })?.unicode ?? '')))
+      .join('');
+    if (!text.trim()) continue;
+    const key = text.replace(/\s+/gu, '');
+    byKey.set(key, byKey.has(key) ? null : text);
+  }
+  if (byKey.size === 0) return 0;
+
+  // The page's cell width, as the median of width-per-character over lines
+  // long enough to be representative. Median, not mean: the damaged items
+  // are the outliers we are hunting and must not drag the baseline toward
+  // themselves.
+  const cells = texts
+    .filter((t) => typeof t.width === 'number' && t.width > 0 && t.str.trim().length > 8)
+    .map((t) => t.width! / t.str.length)
+    .sort((a, b) => a - b);
+  if (cells.length < 3) return 0;
+  const cell = cells[Math.floor(cells.length / 2)]!;
+  if (!(cell > 0)) return 0;
+
+  let repaired = 0;
+  for (const t of texts) {
+    if (typeof t.width !== 'number' || t.width <= 0) continue;
+    // 0.6 of a cell: comfortably past the rounding in a real line (measured
+    // spread is under 0.02) and comfortably under the 1.0 a genuine missing
+    // character would cost.
+    if (t.str.length - t.width / cell < 0.6) continue;
+    const truth = byKey.get(t.str.replace(/\s+/gu, ''));
+    if (!truth) continue;
+    // Compare TRIMMED. A glyph run usually ends with a trailing space that
+    // the item does not carry, which makes the two the same length even
+    // when the run has one less space in the middle — so a raw comparison
+    // reads "no improvement" and skips. That is not hypothetical: it let
+    // three of the four known cases through on the first cut of this, and
+    // only the one run that happened to have no trailing space was fixed.
+    // Leading and trailing space is safe to drop here regardless: indent
+    // comes from the transform, and joinLine trims and collapses anyway.
+    const fixed = truth.trim();
+    // Only ever REMOVE spacing. A repair that added text would mean the two
+    // strings disagreed about something other than whitespace, and this
+    // function has no business fixing that.
+    if (fixed.length >= t.str.trim().length) continue;
+    t.str = fixed;
+    repaired++;
+  }
+  return repaired;
+}
 
 export function groupItemsIntoLines(
   items: unknown[],
@@ -606,17 +711,6 @@ function clusterSplit(items: TextItem[], pageWidth: number): ClusterSplit | null
   return { leftText, rightText, leftItems: left, rightItems: right };
 }
 
-/** A short, overwhelmingly-uppercase run — the shape of a character cue.
- * Excludes title-page furniture (emails, dates, phone numbers). */
-function isCueShaped(text: string): boolean {
-  const t = text.trim();
-  if (t.length < 2 || t.length > 35) return false;
-  const letters = t.match(/\p{L}/gu) ?? [];
-  if (letters.length < 2) return false;
-  const uppers = t.match(/[A-Z]/g) ?? [];
-  return uppers.length / letters.length >= 0.8;
-}
-
 // Synthetic indents for de-interleaved dual-dialogue lines: standard cue
 // and dialogue zones so the classifier treats each column as an ordinary
 // sequential speech.
@@ -639,7 +733,7 @@ function deinterleaveDualDialogue(
 
   while (i < lines.length) {
     const split = clusterSplit(lines[i].items, pageWidth);
-    const isDualCue = split !== null && isCueShaped(split.leftText) && isCueShaped(split.rightText);
+    const isDualCue = split !== null && isCueText(split.leftText) && isCueText(split.rightText);
 
     if (!isDualCue) {
       // Shooting scripts print the scene number in BOTH margins on the
@@ -707,10 +801,10 @@ function deinterleaveDualDialogue(
       const leftText = joinItems(leftItems);
       const rightText = joinItems(rightItems);
 
-      if (leftText && rightText && isCueShaped(leftText) && isCueShaped(rightText)) {
+      if (leftText && rightText && isCueText(leftText) && isCueText(rightText)) {
         break; // next simultaneous exchange — new region anchors here
       }
-      if (leftText && !rightText && isCueShaped(leftText)) {
+      if (leftText && !rightText && isCueText(leftText)) {
         break; // a normal cue or slugline — back to single-column flow
       }
       if (leftText && leftBodyMinX !== null && leftItems[0].transform[4] < leftBodyMinX - 24) {
