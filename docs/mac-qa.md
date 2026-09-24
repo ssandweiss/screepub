@@ -24,9 +24,10 @@ it passes. When one fails, note the words on screen and carry on.
 
 - **Updates.** One question under the drop area asks whether to check once
   a day. A found update shows as "Update to 0.7.3" beside the version, in
-  place of the old dot. Installing restarts the window by itself, after any
-  running work finishes. The switch in the release notes shows its real
-  state.
+  place of the old dot. Installing restarts the window by itself, once
+  running work has finished, any open file dialog has closed, and any
+  settings change has been saved. The switch in the release notes shows its
+  real state.
 - **Moving the window.** Drag it by the strip along the top, or by the gaps
   in the tab bar.
 - **Send.** Every way out in one list: readers over USB, Apple Books,
@@ -38,8 +39,14 @@ it passes. When one fails, note the words on screen and carry on.
   it. Show in Finder follows it.
 - **Settings page.** "Use these for new scripts", and a way back to
   Screepub's own defaults. A book keeps the settings it was built with.
-- **Coming with it.** "When a PDF is converted: Keep its settings / Follow
-  the defaults" on the Settings page, built on branch settings-toggle.
+- **Keep or follow.** "When a PDF is converted: Keep its settings / Follow
+  the defaults" on the Settings page.
+- **Taking turns.** A settings change made while a send, a Kindle file or a
+  conversion is using the same book waits for it and says so ("Waiting for
+  the copy to finish…"). Opening Apple Books, Send to Kindle or Mail never
+  makes it wait.
+- **Safer copies to a reader.** The copy goes to a hidden file first and is
+  renamed into place, so a failed copy leaves the old book.
 - **Read.** The scene list no longer puts page numbers in front of scene
   names.
 - **Tidier.** Kindle Previewer's temp folders are removed after each KFX
@@ -74,26 +81,29 @@ it passes. When one fails, note the words on screen and carry on.
 
 #### Tests and the candidate build
 
-- [ ] **[claude] The full test suite**
+- [x] **[claude] The full test suite** (passed 2026-09-24)
   - Do: `bun test` from the repo root.
-  - See: 0 fail. On 2026-09-24, in a worktree without the private
-    scripts: 2572 pass, 11 skip, 0 fail.
+  - See: 0 fail. On 2026-09-24 at 3bc54b4, in a worktree without the
+    private scripts: 2672 pass, 11 skip, 0 fail.
   - Fail: any failure, or a test that read or wrote the real settings file.
-- [ ] **[claude] Types**
+- [x] **[claude] Types** (passed 2026-09-24)
   - Do: `bunx tsc --noEmit`.
   - See: no output.
   - Fail: any error.
-- [ ] **[claude] Build the candidate window**
+- [x] **[claude] Build the candidate window** (passed 2026-09-24)
   - Do: `bun tools/build-sidecar.ts --host`, then in `desktop/src-tauri`:
     `cargo tauri build --bundles app --config tauri.transition.conf.json`.
-    Give Sam the path to `Screepub Desktop.app`.
+    Give Sam the path to `Screepub Desktop.app`. It lands at
+    `desktop/src-tauri/target/release/bundle/macos/Screepub Desktop.app`
+    inside the worktree it was built in. For this pass Claude built it at
+    `/Users/CWP_MBP_SGS2/Documents/CODING_PROJECTS/Projects/02_Darkwell/Screepub/.claude/worktrees/qa-run/desktop/src-tauri/target/release/bundle/macos/Screepub Desktop.app`.
   - See: it builds; the engine inside answers `--version --json`; `git
     status` is clean afterwards.
   - Fail: the build fails, or it rewrote a tracked file.
 
 #### Updates
 
-- [ ] **[claude] The one-time question**
+- [x] **[claude] The one-time question** (passed 2026-09-24)
   - Do: run `tests/desktop-ui.test.ts`, then open the window's own page in
     headless Chrome with a stand-in updater and empty storage.
   - See: "Check for new versions once a day?" with Turn on and No thanks
@@ -102,7 +112,7 @@ it passes. When one fails, note the words on screen and carry on.
     never shows.
   - Fail: it comes back after an answer, shows where updates cannot
     happen, or a request goes out first.
-- [ ] **[claude] The label beside the version**
+- [x] **[claude] The label beside the version** (passed 2026-09-24)
   - Do: same page, with the stand-in offering a newer version; step it
     through a download.
   - See: "Update to X", then "Downloading X… 40%" (no percent when the
@@ -113,20 +123,22 @@ it passes. When one fails, note the words on screen and carry on.
     takes the label down.
   - Fail: other words, a label that looks clickable mid-download, or the
     dot.
-- [ ] **[claude] The restart waits for work**
+- [x] **[claude] The restart waits for work** (passed 2026-09-24)
   - Do: the waiting tests in `tests/desktop-ui.test.ts`.
   - See: the restart fires only once the engine has been quiet for half a
-    second. The Send page's background checks (readers, routes, KFX
-    status, reading the settings, Show in Finder) do not hold it off. A
-    settings write does.
+    second. The background checks (the Send page's route list and KFX
+    status, the Convert page's library line, and Show in Finder) do not
+    hold it off. A settings write does, and so do an open file dialog and
+    a Settings knob still settling.
   - Fail: any of those the other way round.
-- [ ] **[claude] The release-notes switch shows its real state**
+- [x] **[claude] The release-notes switch shows its real state** (passed
+  2026-09-24)
   - Do: on the stand-in page, press Turn on under the drop area, then open
     the release notes.
   - See: the "once a day" box is ticked, without a relaunch. Untick it,
     close, reopen: still unticked.
   - Fail: the box disagrees with the answer.
-- [ ] **[claude] What the window is allowed to do**
+- [x] **[claude] What the window is allowed to do** (passed 2026-09-24)
   - Do: `bun test tests/desktop-shell.test.ts`.
   - See: restart and window dragging granted; quitting itself not granted;
     folder picker and Save box granted; the old fixed-folder reveal
@@ -135,7 +147,7 @@ it passes. When one fails, note the words on screen and carry on.
 
 #### Where books go, and what new scripts start from
 
-- [ ] **[claude] The library folder rules**
+- [x] **[claude] The library folder rules** (passed 2026-09-24)
   - Do: with the settings file in a scratch folder, run `screepub
     app-settings --json`, then `--set` a good folder, a relative one, one
     under `/System`, and `{"libraryPath": null}`; then once more with
@@ -145,7 +157,7 @@ it passes. When one fails, note the words on screen and carry on.
     folder is refused with a sentence and nothing is stored. `null` goes
     back to the default.
   - Fail: a bad folder is stored, or the wrong folder is used.
-- [ ] **[claude] The library line on the Convert page**
+- [x] **[claude] The library line on the Convert page** (passed 2026-09-24)
   - Do: stand-in page, three cases: the default, a chosen folder, and
     `SCREEPUB_LIBRARY` set.
   - See: "Books are saved in ~/Documents/Screepub." with Change…. A chosen
@@ -153,18 +165,21 @@ it passes. When one fails, note the words on screen and carry on.
     and has no buttons. A refused folder shows the engine's sentence on a
     second line and keeps the buttons.
   - Fail: wrong words, or buttons that vanish after a refusal.
-- [ ] **[claude] Defaults for new scripts**
-  - Do: stand-in page, a converted script's Settings page: press "Use
-    these for new scripts", then "Reset new scripts to Screepub's
-    defaults". Check the same through `screepub app-settings`.
+- [x] **[claude] Defaults for new scripts** (passed 2026-09-24)
+  - Do: stand-in page, a converted script's Settings page: move one knob
+    (Dialogue margins, say), wait for "Saved.", then press "Use these for
+    new scripts", then "Reset new scripts to Screepub's defaults". Check
+    the same through `screepub app-settings`.
   - See: the foot first says "New scripts start from Screepub's own
-    defaults." After Use: "New scripts will start from these settings.",
-    and the Reset button appears. Reset puts it back and hides itself.
+    defaults." After Use: the note "New scripts will start from these
+    settings.", the caption "New scripts start from your own defaults.",
+    and the Reset button. Use on an untouched script shows the note but no
+    Reset, because nothing differs. Reset puts it back and hides itself.
     Who wins, highest first: a one-off flag, the script's own settings,
     your defaults, Screepub's defaults.
   - Fail: wrong caption, Reset offered when nothing differs, or a
     different order.
-- [ ] **[claude] A book keeps what it was built with**
+- [x] **[claude] A book keeps what it was built with** (passed 2026-09-24)
   - Do: convert Field Station into a scratch library, then change the
     defaults for new scripts.
   - See: `field-station.screepub.json` appears with the first conversion.
@@ -172,15 +187,17 @@ it passes. When one fails, note the words on screen and carry on.
     before. A one-off `--options` is not saved into it. A `.fountain`
     input saves nothing.
   - Fail: the old book follows the new defaults, or a one-off flag sticks.
-- [ ] **[claude] Keep its settings / Follow the defaults** (ships with this
-  release; built on branch settings-toggle)
-  - Do: once the branch lands: on the Settings page, under "When a PDF is
-    converted", choose Keep its settings, convert a new PDF, change the
-    defaults for new scripts; then again with Follow the defaults.
+- [x] **[claude] Keep its settings / Follow the defaults** (passed
+  2026-09-24)
+  - Do: on the Settings page, under "When a PDF is converted", choose Keep
+    its settings, convert a new PDF, change the defaults for new scripts;
+    then again with Follow the defaults.
   - See: Keep: that book stays as it was built. Follow: it takes the new
-    defaults. The choice is still there after a relaunch.
+    defaults. The choice is still there after a relaunch. A script
+    following the defaults gets settings of its own the first time one of
+    its knobs moves.
   - Fail: both choices behave the same, or the choice is forgotten.
-- [ ] **[claude] Side by side can win again**
+- [x] **[claude] Side by side can win again** (passed 2026-09-24)
   - Do: make Sequential the dual dialogue default, then set one script to
     side by side: `screepub settings <script>.fountain --set
     '{"dualDialogue":"sideBySide"}'`.
@@ -189,7 +206,7 @@ it passes. When one fails, note the words on screen and carry on.
 
 #### Send routes
 
-- [ ] **[claude] The list on this Mac**
+- [x] **[claude] The list on this Mac** (passed 2026-09-24)
   - Do: `screepub routes <book>.epub --json`, settings in a scratch folder.
   - See: Apple Books, Send to Kindle web, Save the EPUB, Save a Kindle
     file; then dimmed: Kindle, Kobo, tolino ("plug in over USB to send"),
@@ -197,14 +214,14 @@ it passes. When one fails, note the words on screen and carry on.
     Apple Mail as the default mail app…"). Chosen: Apple Books, when
     nothing is remembered. Seen exactly so on 2026-09-24.
   - Fail: another order, or a dimmed row with no fix.
-- [ ] **[claude] Saving a copy, and the memory**
+- [x] **[claude] Saving a copy, and the memory** (passed 2026-09-24)
   - Do: `screepub route save-epub <book>.epub --out <scratch>/x.epub`, then
     again with a relative path, and with a `.mobi` name.
   - See: the first writes the file, answers "Saved to …", and the scratch
     settings file now says `"lastRoute": "save-epub"`. The other two are
     refused before anything is written.
   - Fail: a refused save writes anything, or a failed route is remembered.
-- [ ] **[claude] Refusals come before anything opens**
+- [x] **[claude] Refusals come before anything opens** (passed 2026-09-24)
   - Do: `bun test tests/cli-routes.test.ts tests/routes.test.ts
     tests/route-facts.test.ts tests/send-routes-ui.test.ts`.
   - See: all pass. A reader key, an unknown key, a save with no `--out`,
@@ -212,25 +229,32 @@ it passes. When one fails, note the words on screen and carry on.
     anything opens. A remembered route that can never work here falls
     back to the first one that can.
   - Fail: any failure.
-- [ ] **[claude] The Send page draws what the engine says**
+- [x] **[claude] The Send page draws what the engine says** (passed
+  2026-09-24)
   - Do: stand-in page, fed a routes answer; change which one is chosen.
   - See: rows keep the engine's order. Only the chosen row's button is
-    brass. Dimmed rows show their fix and have no button. The email row
+    brass in the list. The KFX block's Install button is brass too, when
+    that block shows. Dimmed rows show their fix and have no button. The email row
     carries "First time? Amazon needs your sender address approved…" and
     "Open Amazon's page", even when dimmed.
   - Fail: rows move, or a dimmed row gets a button.
 
 #### Best Kindle quality (KFX)
 
-- [ ] **[claude] The checklist on this Mac**
-  - Do: `screepub kfx-status`, then again with `CALIBRE_CONFIG_DIRECTORY`
-    pointing at an empty scratch folder.
+- [x] **[claude] The checklist on this Mac** (passed 2026-09-24)
+  - Do: `screepub kfx-status` with `CALIBRE_CONFIG_DIRECTORY` pointing at a
+    copy of `~/Library/Preferences/calibre`, then at an empty scratch
+    folder.
   - See: first: "Kindles get KFX, the best quality Screepub can make."
     Second: Calibre installed, Kindle Previewer installed, KFX plugin "not
     installed: run screepub kfx-install". Seen exactly so on 2026-09-24.
+    The plugin counts as installed when Calibre lists "KFX Output" or a
+    renamed "KFX Output (…)" copy; the companion "Set KFX metadata" plugin
+    alone does not.
   - Fail: the scratch run still sees the real plugin. Then the protection
     in Part 2 does not work, and Sam should skip the install.
-- [ ] **[claude] The links, and the installer's refusals**
+- [x] **[claude] The links, and the installer's refusals** (passed
+  2026-09-24)
   - Do: `bun test tests/export-kfx-setup.test.ts tests/cli-kfx.test.ts`;
     fetch the three download pages.
   - See: all pass. Calibre's Mac and Windows pages and Amazon's Kindle
@@ -240,7 +264,7 @@ it passes. When one fails, note the words on screen and carry on.
 
 #### Reading
 
-- [ ] **[claude] The scene list has no page numbers**
+- [x] **[claude] The scene list has no page numbers** (passed 2026-09-24)
   - Do: stand-in page, convert Field Station, open Read. Then the same on
     the private test scripts, reported as counts only.
   - See: 11 scenes, none starting with a page number (9 of the 11 did
@@ -249,13 +273,15 @@ it passes. When one fails, note the words on screen and carry on.
 
 #### Temp folders
 
-- [ ] **[claude] A Kindle file leaves nothing behind**
+- [x] **[claude] A Kindle file leaves nothing behind** (passed 2026-09-24)
   - Do: list the system temp folder, run `screepub export <book>.epub
-    --for kindle` on Field Station (KFX on this Mac), list it again.
+    --for kindle` on Field Station (KFX on this Mac) with
+    `CALIBRE_CONFIG_DIRECTORY` on a copy of your Calibre folder, list it
+    again.
   - See: no new `screepub-kfx-…` folder and no new Kindle Previewer
     folder.
   - Fail: anything new left behind.
-- [ ] **[claude] Tests and tools leave nothing behind**
+- [x] **[claude] Tests and tools leave nothing behind** (passed 2026-09-24)
   - Do: list the temp folder before and after the full `bun test`.
   - See: `tests/temp-hygiene.test.ts` passes, and nothing new named
     `screepub-…` is left.
@@ -263,18 +289,17 @@ it passes. When one fails, note the words on screen and carry on.
 
 #### Pictures and docs
 
-- [ ] **[claude] The pictures retake cleanly**
+- [x] **[claude] The pictures retake cleanly** (passed 2026-09-24)
   - Do: `bun tools/capture-screens.ts`.
   - See: all nine print `unchanged`.
-  - Fail: a refused call or a changed picture. Expected to fail today:
-    see "Found while writing this", item 1.
-- [ ] **[claude] The docs match the window**
+  - Fail: a refused call or a changed picture.
+- [x] **[claude] The docs match the window** (passed 2026-09-24)
   - Do: read README.md's network paragraph and `docs/send-to-kindle.md`
     beside the Send page.
   - See: nothing says the window has no Send to Kindle page, and every
     web page the Send page opens is listed.
-  - Fail: README.md:257 as it reads today (see "Found while writing
-    this", item 2).
+  - Fail: README says the window has no Send to Kindle page, or leaves out
+    a page the Send page opens.
 
 ---
 
@@ -409,6 +434,11 @@ Field Station open, Kindle still unplugged.
     address it to your Kindle's email address. Switch the default back
     afterwards.
   - Fail: a message with no attachment, or the row stays dimmed.
+- [ ] **[hands] A knob moved during a build waits its turn**
+  - Do: press Save a Kindle file…, and while it builds, open Settings and
+    move a knob. Cancel the Save box when it opens.
+  - See: "Waiting for the copy to finish…", then "Saved."
+  - Fail: the knob change is lost or saves over the build.
 - [ ] **[hands] Save a Kindle file**
   - Do: Save a Kindle file…, save to the Desktop.
   - See: "Building the Kindle file (Kindle Previewer can take about twenty
@@ -457,6 +487,7 @@ not installed, while your real Calibre still has KFX Output 2.20.1.
   - See: a "Best Kindle quality" block: "Kindles get AZW3 for now. KFX
     looks better, and needs the three free tools below." Calibre:
     Installed. Kindle Previewer: Installed. KFX plugin: an Install button.
+    Its Install button is brass, beside the brass on your last way out.
   - Fail: no block. Most likely Screepub was still running, so the
     setting never reached it: quit and try again.
 - [ ] **[hands] Install the plugin**
@@ -516,7 +547,7 @@ again. It holds nothing else the window uses.
 Only once 0.7.3 is published. 0.7.2 cannot restart itself, so this update
 still ends with you quitting and reopening once.
 
-- [ ] **[claude] 0.7.3 is published**
+- [ ] **[claude] 0.7.3 is published** (after 0.7.3 is published)
   - Do: fetch the latest release's `latest.json`.
   - See: it names 0.7.3, and the release carries the Mac download.
   - Fail: it still names 0.7.2.
@@ -548,7 +579,7 @@ still ends with you quitting and reopening once.
   - See: the "once a day" box matches your answer; "Screepub 0.7.3 is the
     newest there is."; nothing beside the version stamp.
   - Fail: an offer, a label, or an error.
-- [ ] **[claude] The app on disk**
+- [ ] **[claude] The app on disk** (after 0.7.3 is published)
   - Do: read the installed app's version, and check its signature with
     `spctl`.
   - See: 0.7.3, accepted, notarized Developer ID.
@@ -594,9 +625,10 @@ still ends with you quitting and reopening once.
   after a change starts fresh in the new folder, without its old tuning.
 - Email to your Kindle needs Apple Mail as the default mail app. Any other
   mail app drops the attachment, which is why the row is dimmed.
-- From the next release on: a Settings knob moved in the half second
-  before an automatic restart can be lost. It is written up in the update
-  spec and not fixed.
+- While a copy to a reader is in flight the reader holds both books, so a
+  reader with room for only one refuses the send and keeps the old book.
+- A copy killed outright can leave a hidden `.screepub-<8 hex>.partial` on
+  the reader; the next send of that book writes over it.
 
 ### Found while writing this (2026-09-24)
 
@@ -610,17 +642,22 @@ still ends with you quitting and reopening once.
    runs a real capture. Allowing the call would also add a line to the
    drop picture ("Books are saved in /Users/Shared/Documents/Screepub, set
    by SCREEPUB_LIBRARY."), so it is a picture decision as well as a fix.
+   **Fixed on 2026-09-24:** the picture tool allows the settings read and
+   hides the library line.
 2. **README.md:257-258** still says the window "has no Send-to-Kindle page
    yet", and the paragraph it ends (from README.md:243) lists the window's
    network touchpoints without the Amazon pages the Send page now opens.
+   **Fixed on 2026-09-24:** README updated.
 3. **docs/send-to-kindle.md:22-24 and :44-46** describe the old Swift
    app's Settings and its Save a Copy, not the window's Send page.
+   **Fixed on 2026-09-24:** docs/send-to-kindle.md updated.
 4. **A restart can land on an open Save box** (from the next release on).
    The restart waits for engine work only (`desktop/ui/app.js:239`). Save
    a Kindle file builds the file, then opens the Save box
    (`desktop/ui/send.js:1002`) with no engine work running, so a restart
    waiting on the build fires half a second later, under the open box.
    The same goes for the folder picker (`desktop/ui/convert.js:504`).
+   **Fixed on 2026-09-24:** a restart waits while any dialog is open.
 5. **Not a bug, but it shapes the pass:** on this Mac the window's storage
    already records the question as answered (yes), so it will not appear
    until that memory is moved aside ("The one-time question", above).
