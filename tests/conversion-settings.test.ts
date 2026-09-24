@@ -206,14 +206,15 @@ describe('a conversion renders with the script it is converting', () => {
   }, 120000);
 });
 
-// Piece C's app defaults (parity gear) meant a script with no sidecar reads
-// its settings off the app defaults on EVERY conversion, forever. Changing
-// the app defaults later (the Settings page's "Reset new scripts to
-// Screepub's defaults") then silently redraws every untuned book already
-// in the library, including ones already on a reader's device. The fix:
-// a --library conversion that finds no sidecar pins the exact options the
-// book was built with, so the script becomes its own from then on.
-describe('a library conversion pins the settings it was built with', () => {
+// A script with no sidecar of its own reads its settings off the app-wide
+// format defaults on every conversion, forever. Changing those defaults
+// later (the Settings page's "Reset new scripts to Screepub's defaults")
+// then silently redraws every untuned book already in the library,
+// including ones already on a reader's device. So the first --library
+// conversion of a PDF that finds no sidecar saves what it started from as
+// the script's own, and the script is independent of the app defaults from
+// then on.
+describe('a library conversion saves the settings it started from', () => {
   const APP_MARGIN = 19;
 
   beforeAll(() => {
@@ -335,5 +336,114 @@ describe('a library conversion pins the settings it was built with', () => {
     ]);
     expect(exitCode).toBe(0);
     expect(existsSync(join(scripts, 'NoLibrary.screepub.json'))).toBe(false);
+  }, 120000);
+
+  test('a conversion that fails after the library folder opens leaves no sidecar behind', async () => {
+    const scripts = await scriptFolder('Blocked.pdf');
+    const root = scratch('lib');
+    // Claiming the folder ahead of time, the way an earlier conversion
+    // would, then putting a DIRECTORY where the book is about to land:
+    // writeFileAtomic's rename onto an existing directory fails with
+    // EISDIR, so this conversion never finishes.
+    const prefix = libraryOutput(join(scripts, 'Blocked.pdf'), root);
+    mkdirSync(`${prefix}.epub`);
+
+    const { exitCode } = await runCli(
+      [join(scripts, 'Blocked.pdf'), '--library', '--json'], { SCREEPUB_LIBRARY: root },
+    );
+    expect(exitCode).toBe(1);
+    // The book never landed, so the settings it would have started from
+    // must not be recorded as this script's own either.
+    expect(existsSync(`${prefix}.screepub.json`)).toBe(false);
+  }, 30000);
+
+  test('a flag used on the very first --library conversion is not pinned: what gets saved is what the script started from', async () => {
+    const { dir: configDir } = appConfig({ dialogueSideMarginPct: APP_MARGIN });
+    const scripts = await scriptFolder('FlagFirst.pdf');
+    const root = scratch('lib');
+
+    const { stdout, exitCode } = await runCli(
+      [
+        join(scripts, 'FlagFirst.pdf'), '--library', '--json',
+        '--options-json', JSON.stringify({ dialogueSideMarginPct: 5 }),
+      ],
+      { SCREEPUB_LIBRARY: root, SCREEPUB_CONFIG_DIR: configDir },
+    );
+    expect(exitCode).toBe(0);
+    const answer = JSON.parse(stdout);
+    // The flag won for THIS conversion...
+    expect(await epubCss(answer.epubPath)).toContain('margin-left: 5%');
+    // ...but a flag used for one conversion must never freeze into the
+    // script's standing choice. What gets saved is the app default this
+    // script started from (this block only ever runs when there was no
+    // sidecar to read, so that is exactly what the conversion's own
+    // options were, minus the flag).
+    const sidecar = join(root, 'FlagFirst', 'FlagFirst.screepub.json');
+    const pinned = JSON.parse(readFileSync(sidecar, 'utf8'));
+    expect(pinned.dialogueSideMarginPct).toBe(APP_MARGIN);
+  }, 120000);
+
+  test('a --library conversion of a .fountain input saves nothing: there is no library .fountain to attach it to', async () => {
+    const scripts = scratch('scripts');
+    const fountainInput = join(scripts, 'Loose.fountain');
+    writeFileSync(fountainInput, 'Title: Loose\n\nINT. ROOM - DAY\n\nAction holds.\n');
+    const root = scratch('lib');
+
+    const { stdout, exitCode } = await runCli(
+      [fountainInput, '--library', '--json'], { SCREEPUB_LIBRARY: root },
+    );
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout).ok).toBe(true);
+    // A .fountain input never gets a .fountain written into the library
+    // (only a PDF produces one), so a saved sidecar here would have no
+    // library .fountain for `screepub settings` to read it against, while
+    // still outranking the user's own sidecar beside their .fountain input
+    // on the next conversion.
+    expect(existsSync(join(root, 'Loose', 'Loose.screepub.json'))).toBe(false);
+  }, 30000);
+
+  test('a sidecar write that fails does not fail the conversion, and says so once on stderr', async () => {
+    const scripts = await scriptFolder('CannotPin.pdf');
+    const root = scratch('lib');
+    // A monkeypatch, not a permission trick: chmod can only lock the WHOLE
+    // script folder, which would also stop the book itself from being
+    // written (the EISDIR case above already covers a conversion that
+    // fails outright). This blocks only the sidecar's own temp file, by
+    // name, so the book writes succeed and only the save afterward fails.
+    const preload = join(scratch('preload'), 'block-sidecar-write.ts');
+    writeFileSync(preload, [
+      "const fs = require('node:fs');",
+      'const original = fs.writeFileSync;',
+      'fs.writeFileSync = (path, ...rest) => {',
+      "  if (typeof path === 'string' && path.endsWith('.tmp') && path.includes('.screepub.json.')) {",
+      "    throw new Error('EACCES: permission denied (test)');",
+      '  }',
+      '  return original(path, ...rest);',
+      '};',
+    ].join('\n'));
+
+    const proc = Bun.spawn(
+      [
+        'bun', '--preload', preload, `${ROOT}src/cli.ts`,
+        join(scripts, 'CannotPin.pdf'), '--library', '--json',
+      ],
+      { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, SCREEPUB_LIBRARY: root } },
+    );
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    expect(exitCode).toBe(0);
+    const answer = JSON.parse(stdout);
+    expect(answer.ok).toBe(true);
+    // The book is written and correct...
+    expect(existsSync(answer.epubPath)).toBe(true);
+    // ...the save that could not happen leaves no half-written sidecar...
+    expect(existsSync(join(root, 'CannotPin', 'CannotPin.screepub.json'))).toBe(false);
+    // ...and is said exactly once, not swallowed and not a stack trace.
+    const lines = stderr.trim().split('\n').filter((l) => l !== '');
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toContain('could not save');
   }, 120000);
 });
