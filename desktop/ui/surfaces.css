@@ -558,6 +558,12 @@
   .tune-preview-frame { height: 44vh; }
 }
 
+/* The foot of the Settings page: which defaults a new script starts from,
+ * and the two quiet buttons that change it. Only the row's own gap is new —
+ * everything else rides on .caption and .btn-quiet, already declared above. */
+.tune-defaults { margin: var(--space-8) 0 0; }
+.tune-defaults-row { display: flex; flex-wrap: wrap; gap: var(--space-4); margin: var(--space-2) 0 0; }
+
 /* Each group folds. Same disclosure vocabulary as the reach table on Send,
  * so the window has one way of saying "there is more here" rather than two. */
 .knob-group { margin: 0 0 var(--space-6); max-width: var(--measure); }

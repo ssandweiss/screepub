@@ -384,6 +384,86 @@ export const LEDE = 'These settings belong to this script alone. They are kept w
 export const PRESET_LABEL = 'Load a preset';
 export const PRESET_NOTE = 'Overwrites every setting below.';
 
+/** What the pane shows before there is anything to tune: FAULT only when
+ *  THIS draw is itself reporting a load that failed — load() already tells
+ *  it that, in its catch and its own `settings === null` branch, by passing
+ *  a bad status down to draw() — and a quiet reading caption otherwise. That
+ *  "otherwise" covers both a pane that has not asked yet (mount,
+ *  scriptChanged) and one still waiting on an answer, because nothing else
+ *  redraws in between. Treating a bare `settings === null` as failure,
+ *  unconditionally, was the defect: every ordinary look at Settings passes
+ *  through null before load() answers, so a reader saw the fault screen
+ *  flash on the way in every single time. */
+export function emptyPaneMode(settings, status) {
+  if (settings !== null) return 'ready';
+  return status?.bad === true ? 'fault' : 'reading';
+}
+
+export const READING = 'Reading this script’s settings…';
+
+/** The engine's `settings` answer also carries the app-wide defaults a NEW
+ *  script would start from: `appDefaults` (what a new script gets today) and
+ *  `defaults` (Screepub's own, unconditionally — the same field settingsFrom
+ *  already reads as "this script's shipped defaults"). Both are validated
+ *  the identical way a script's own settings are, through settingsFrom
+ *  itself: an app default that fails the eighteen-knob check is one this
+ *  window cannot safely claim anything about. */
+export function appDefaultsFrom(answer) {
+  return settingsFrom({ settings: answer?.appDefaults });
+}
+
+export function shippedDefaultsFrom(answer) {
+  return settingsFrom({ settings: answer?.defaults });
+}
+
+/** What "Use these for new scripts" or "Reset new scripts to Screepub's
+ *  defaults" should show once app-settings --set has answered: the fresh
+ *  app defaults and Screepub's own, both validated through settingsFrom —
+ *  or a message for the confirmation line. Mirrors convert.js's
+ *  libraryAfter: same shape, same reason, a different field pair. */
+export function appSettingsAfter(answer) {
+  const appDefaults = settingsFrom({ settings: answer?.formatDefaults });
+  const shippedDefaults = settingsFrom({ settings: answer?.shippedDefaults });
+  if (appDefaults !== null && shippedDefaults !== null) {
+    return { ok: true, appDefaults, shippedDefaults };
+  }
+  const message = typeof answer?.error?.message === 'string' ? answer.error.message.trim() : '';
+  return { ok: false, message: message === '' ? NO_MESSAGE : message };
+}
+
+/** One sentence saying which defaults a new script starts from, compared
+ *  knob by knob through sameSettings — the same equality the engine itself
+ *  uses, and the same reason currentPreset() above compares rather than
+ *  remembers a name: nothing stores WHICH defaults a reader chose, only
+ *  what they equal now. */
+export function defaultsCaption(appDefaults, shippedDefaults) {
+  return sameSettings(appDefaults, shippedDefaults)
+    ? 'New scripts start from Screepub’s own defaults.'
+    : 'New scripts start from your own defaults.';
+}
+
+/** Whether there is anything for "Reset new scripts to Screepub's defaults"
+ *  to do. Not offered when the app defaults could not be read at all: a
+ *  button that resets an unknown quantity is a button that might announce a
+ *  change that never happens. */
+export function canResetDefaults(appDefaults, shippedDefaults) {
+  return appDefaults !== null && shippedDefaults !== null
+    && !sameSettings(appDefaults, shippedDefaults);
+}
+
+/** The --set value behind both buttons: this script's current settings
+ *  become the app defaults, or `null` sends the app back to Screepub's own.
+ *  One value differs, one call shape — the same trade convert.js's
+ *  libraryChangeArgs makes for Change and Reset on the library folder. */
+export function defaultsWriteArgs(next) {
+  return JSON.stringify({ formatDefaults: next });
+}
+
+export const USE_DEFAULTS_LABEL = 'Use these for new scripts';
+export const RESET_DEFAULTS_LABEL = 'Reset new scripts to Screepub’s defaults';
+export const USE_DEFAULTS_NOTE = 'New scripts will start from these settings.';
+export const RESET_DEFAULTS_NOTE = 'New scripts will start from Screepub’s own defaults.';
+
 // ------------------------------------------------------------------ drawing
 
 let ctx = null;
@@ -392,6 +472,14 @@ let settings = null;
 let presets = [];
 let onPreset = null;
 let presetsBox = null;
+// The app-wide defaults a NEW script starts from, and Screepub's own —
+// loaded alongside this script's own settings (same answer, appDefaultsFrom
+// and shippedDefaultsFrom read two more fields off it) because that is the
+// one engine round trip Settings already makes; a second probe just to draw
+// a caption would be the well's old library-line mistake repeated.
+let appDefaults = null;
+let shippedDefaults = null;
+let defaultsBox = null;
 let previewFrame = null;
 let previewCss = '';
 let loaded = false;
@@ -423,6 +511,8 @@ export function scriptChanged() {
   loaded = false;
   settings = null;
   presets = [];
+  appDefaults = null;
+  shippedDefaults = null;
   pending = {};
   clearTimeout(timer);
   draw();
@@ -445,6 +535,8 @@ async function load() {
     settings = settingsFrom(answer);
     presets = presetsFrom(answer);
     onPreset = currentPreset(answer);
+    appDefaults = appDefaultsFrom(answer);
+    shippedDefaults = shippedDefaultsFrom(answer);
   } catch (err) {
     settings = null;
     // Openable again: a sidecar that could not be read once — a disk that
@@ -469,14 +561,23 @@ function draw(status) {
   statusLine = null;
   if (ctx.state.script === null) return;
 
-  if (settings === null) {
+  const mode = emptyPaneMode(settings, status);
+  if (mode === 'reading') {
+    // Not FAULT: nothing has failed, load() just has not answered yet (or
+    // has not been asked yet — mount() and scriptChanged() both draw before
+    // show() ever calls load()). A reader opening Settings on an ordinary
+    // script used to see the fault screen for exactly this long, every time.
+    pane.append(el('p', { class: 'caption' }, READING));
+    return;
+  }
+  if (mode === 'fault') {
     // Through el(), which drops a null child, rather than straight onto the
-    // pane, which renders one as the word "null". The status line is absent
-    // whenever nothing has failed yet, so that is the ordinary path.
+    // pane, which renders one as the word "null". `status` is always a bad
+    // one here — that is what emptyPaneMode used to decide this branch.
     pane.append(el('div', { class: 'fault-body-block' },
       el('h2', { class: 'slug' }, FAULT.slug),
       el('p', { class: 'prose' }, FAULT.line),
-      status?.bad ? el('p', { class: 'caption bad' }, status.line) : null,
+      el('p', { class: 'caption bad' }, status.line),
       el('div', { class: 'read-ways' },
         el('button', {
           type: 'button', class: 'btn btn-outline', onclick: () => ctx.goTo('convert'),
@@ -494,6 +595,7 @@ function draw(status) {
         (presetsBox = drawPresets()),
         ...GROUPS.map(drawGroup),
         statusLine,
+        (defaultsBox = drawDefaultsFoot()),
       ),
       drawPreview(),
     ),
@@ -560,6 +662,82 @@ function drawPresets() {
         }, preset.displayName);
       })),
     el('p', { class: 'caption presets-note' }, PRESET_NOTE));
+}
+
+/** The foot of the Settings page: which defaults a NEW script starts from,
+ *  and a way to change that. Unlike drawPresets(), which replaces itself
+ *  whole because a preset click can rename what "you are here" means, this
+ *  block stays put and only its text and the Reset button's visibility
+ *  change — through the same `why.hidden` pattern drawKnob uses for a
+ *  control's explanation, so an empty or inapplicable line takes no space
+ *  without a second definition of "hidden" for this page to disagree with.
+ *
+ *  Neither button ever calls argv.settings(: this surface's OWN save path
+ *  (change() → schedule() → flush()) is untouched by either one, because
+ *  what they write is the APP's defaults, not this script's settings. */
+function drawDefaultsFoot() {
+  // A malformed answer — the engine's contract broken, not a reader's
+  // doing — leaves nothing this block could honestly claim. Absent rather
+  // than wrong, the same call drawPresets() makes with an empty list.
+  if (appDefaults === null || shippedDefaults === null) return null;
+  const caption = el('p', { class: 'caption' });
+  const note = el('p', { class: 'caption defaults-note', hidden: true }, '');
+  const useButton = el('button', {
+    type: 'button', class: 'btn-quiet',
+    onclick: () => writeDefaults(settings, USE_DEFAULTS_NOTE),
+  }, USE_DEFAULTS_LABEL);
+  const resetButton = el('button', {
+    type: 'button', class: 'btn-quiet',
+    onclick: () => writeDefaults(null, RESET_DEFAULTS_NOTE),
+  }, RESET_DEFAULTS_LABEL);
+
+  function refresh() {
+    text(caption, defaultsCaption(appDefaults, shippedDefaults));
+    resetButton.hidden = !canResetDefaults(appDefaults, shippedDefaults);
+  }
+
+  /** `next` is this script's current settings (Use these) or null (Reset).
+   *  Both buttons go quiet for the whole round trip, not just the one
+   *  pressed: two writes racing each other is exactly what disabling only
+   *  the clicked button would allow. `mine` follows the same era guard
+   *  flush() uses, because this write, like that one, can outlive the
+   *  script it was started from — the reader may have opened a different
+   *  script's Settings, whose own drawDefaultsFoot() already built the row
+   *  that is actually on screen, before this one's engine call returns. */
+  async function writeDefaults(next, confirmed) {
+    const mine = era;
+    useButton.disabled = true;
+    resetButton.disabled = true;
+    try {
+      const answer = await runEngine(argv.appSettings(defaultsWriteArgs(next)));
+      if (era !== mine) return;
+      const result = appSettingsAfter(answer);
+      if (result.ok) {
+        appDefaults = result.appDefaults;
+        shippedDefaults = result.shippedDefaults;
+        refresh();
+        text(note, confirmed);
+      } else {
+        text(note, result.message);
+      }
+      note.hidden = false;
+    } catch (err) {
+      if (era !== mine) return;
+      text(note, err.message);
+      note.hidden = false;
+    } finally {
+      if (era === mine) {
+        useButton.disabled = false;
+        resetButton.disabled = false;
+      }
+    }
+  }
+
+  refresh();
+  return el('div', { class: 'tune-defaults' },
+    caption,
+    el('div', { class: 'tune-defaults-row' }, useButton, resetButton),
+    note);
 }
 
 /** Which groups arrive open. Only the first: five shut boxes is a surface

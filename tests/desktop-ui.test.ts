@@ -3170,8 +3170,15 @@ describe('the Tune surface', () => {
     expect(drawKnob).toMatch(/state\(controls\.get/);
     const refresh = source.slice(source.indexOf('function refreshIdle('));
     expect(refresh.slice(0, 400)).toMatch(/state\(control\)/);
-    // Nothing enables, disables or describes a control behind its back.
-    expect([...source.matchAll(/\.disabled\s*=/g)].length).toBe(1);
+    // Nothing enables, disables or describes a KNOB control behind its back.
+    // Scoped to the knob-drawing functions themselves: the defaults foot at
+    // the page's foot disables its own two buttons while a write is in
+    // flight, which is a different control answering to a different rule
+    // (busy-disabled, like convert.js's library Change/Reset), not a second
+    // binding of this one.
+    const knobControls = source.slice(
+      source.indexOf('function drawKnob('), source.indexOf('function applyAll('));
+    expect([...knobControls.matchAll(/\.disabled\s*=/g)].length).toBe(1);
     // Attribute(...) rather than the bare word, so the comment that
     // explains the defect does not count as a second binding.
     expect([...source.matchAll(/Attribute\('aria-describedby'/g)].length).toBe(2);
@@ -3241,6 +3248,202 @@ describe('the Tune surface', () => {
     expect(source).toMatch(/el\('label', \{ for: id/);
     expect(source).toContain('aria-describedby');
     expect(source).toContain("role: 'status'");
+  });
+
+  test('emptyPaneMode: FAULT only when this draw is reporting a load that failed', async () => {
+    const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+    // A freshly mounted pane, or one whose script just changed: no load has
+    // been asked for yet, so there is nothing to call a failure.
+    expect(tune.emptyPaneMode(null, undefined)).toBe('reading');
+    // A load in flight: nothing redraws between load() starting and it
+    // answering, so this is the same call mount() and scriptChanged() made —
+    // still reading, never fault, for as long as no answer has arrived.
+    expect(tune.emptyPaneMode(null, undefined)).toBe('reading');
+    // load()'s own two failure branches are the only calls that ever pass a
+    // bad status alongside a null settings.
+    expect(tune.emptyPaneMode(null, tune.statusFor('failed', 'the sidecar is gone'))).toBe('fault');
+    expect(tune.emptyPaneMode(null, tune.statusFor('failed'))).toBe('fault');
+    // Settings in hand is ready regardless of what status says.
+    expect(tune.emptyPaneMode({ ...DEFAULT_FORMAT_OPTIONS }, undefined)).toBe('ready');
+    expect(tune.emptyPaneMode({ ...DEFAULT_FORMAT_OPTIONS }, tune.statusFor('failed'))).toBe('ready');
+  });
+
+  test('load() never draws FAULT for a null settings that is not itself a failure', () => {
+    // Pinned by shape: the defect was draw() gating FAULT on `settings ===
+    // null` alone. mount() and scriptChanged() both call draw() with no
+    // status while settings is still null — that must not resolve to fault.
+    const mountFn = source.slice(source.indexOf('export function mount('), source.indexOf('export function scriptChanged('));
+    expect(mountFn).toMatch(/draw\(\);?\s*$/m);
+    expect(mountFn).not.toMatch(/statusFor\('failed'/);
+    const changed = source.slice(
+      source.indexOf('export function scriptChanged('), source.indexOf('export async function show('));
+    expect(changed).toMatch(/draw\(\);?\s*$/m);
+    expect(changed).not.toMatch(/statusFor\('failed'/);
+    // draw()'s own gate goes through emptyPaneMode, not a bare null check.
+    const draw = source.slice(source.indexOf('function draw(status)'), source.indexOf('function drawPreview('));
+    expect(draw).toMatch(/emptyPaneMode\(settings, status\)/);
+    expect(draw).toMatch(/\}, READING\)/);
+    expect(tune.READING).toBe('Reading this script’s settings…');
+  });
+
+  test('a settings load that failed reports through statusFor, not a bare message', () => {
+    // load()'s three failure exits (no fountainPath, a throw, a malformed
+    // answer) all reach draw() through statusFor('failed', …), which is what
+    // makes emptyPaneMode's status?.bad check meaningful.
+    const load = source.slice(source.indexOf('async function load('), source.indexOf('function draw(status)'));
+    expect([...load.matchAll(/statusFor\('failed'/g)].length).toBe(3);
+  });
+});
+
+describe('the Tune surface: app defaults for new scripts', () => {
+  const source = read('tune.js');
+  let tune: Record<string, any>;
+  let DEFAULT_FORMAT_OPTIONS: any;
+  beforeAll(async () => {
+    tune = await import(join(UI, 'tune.js'));
+    ({ DEFAULT_FORMAT_OPTIONS } = await import('../src/options'));
+  });
+
+  test('appDefaultsFrom and shippedDefaultsFrom read the settings answer through settingsFrom', () => {
+    const answer = {
+      settings: { ...DEFAULT_FORMAT_OPTIONS },
+      defaults: { ...DEFAULT_FORMAT_OPTIONS },
+      appDefaults: { ...DEFAULT_FORMAT_OPTIONS, fontFamily: 'serif' },
+    };
+    expect(tune.appDefaultsFrom(answer)).toEqual({ ...DEFAULT_FORMAT_OPTIONS, fontFamily: 'serif' });
+    expect(tune.shippedDefaultsFrom(answer)).toEqual({ ...DEFAULT_FORMAT_OPTIONS });
+    // Same rejection settingsFrom already applies to a script's own
+    // settings: a short or malformed object is not silently accepted here
+    // either, because this window would otherwise draw a caption about
+    // knobs it never actually checked.
+    expect(tune.appDefaultsFrom({ appDefaults: { fontFamily: 'serif' } })).toBeNull();
+    expect(tune.appDefaultsFrom({})).toBeNull();
+    expect(tune.appDefaultsFrom(undefined)).toBeNull();
+    expect(tune.shippedDefaultsFrom({ defaults: null })).toBeNull();
+  });
+
+  test('appSettingsAfter reads formatDefaults and shippedDefaults from an app-settings --set answer, or its refusal', () => {
+    const answer = {
+      ok: true,
+      formatDefaults: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 12 },
+      shippedDefaults: { ...DEFAULT_FORMAT_OPTIONS },
+      customized: true,
+    };
+    expect(tune.appSettingsAfter(answer)).toEqual({
+      ok: true,
+      appDefaults: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 12 },
+      shippedDefaults: { ...DEFAULT_FORMAT_OPTIONS },
+    });
+    // The engine's own sentence, verbatim — the same rule every refusal on
+    // this surface follows.
+    expect(tune.appSettingsAfter({
+      ok: false, error: { code: 'bad-settings', message: 'formatDefaults must be an object' },
+    })).toEqual({ ok: false, message: 'formatDefaults must be an object' });
+    // A broken contract — ok with nothing usable inside, or a refusal with
+    // no sentence at all — falls back to the same NO_MESSAGE every other
+    // refusal on this surface uses when the engine says nothing.
+    expect(tune.appSettingsAfter({ ok: true })).toEqual({ ok: false, message: tune.NO_MESSAGE });
+    expect(tune.appSettingsAfter({ ok: false })).toEqual({ ok: false, message: tune.NO_MESSAGE });
+  });
+
+  test('defaultsCaption says which defaults a new script starts from, knob by knob', () => {
+    const shipped = { ...DEFAULT_FORMAT_OPTIONS };
+    expect(tune.defaultsCaption({ ...shipped }, shipped))
+      .toBe('New scripts start from Screepub’s own defaults.');
+    expect(tune.defaultsCaption({ ...shipped, fontFamily: 'serif' }, shipped))
+      .toBe('New scripts start from your own defaults.');
+  });
+
+  test('canResetDefaults is true only when the app defaults differ from Screepub’s own', () => {
+    const shipped = { ...DEFAULT_FORMAT_OPTIONS };
+    expect(tune.canResetDefaults({ ...shipped }, shipped)).toBe(false);
+    expect(tune.canResetDefaults({ ...shipped, justifyText: !shipped.justifyText }, shipped)).toBe(true);
+    // An app default this window could not validate is not something a
+    // button can honestly offer to reset.
+    expect(tune.canResetDefaults(null, shipped)).toBe(false);
+    expect(tune.canResetDefaults(shipped, null)).toBe(false);
+  });
+
+  test('defaultsWriteArgs is the --set value for either button', () => {
+    const mine = { ...DEFAULT_FORMAT_OPTIONS, cueAlignment: 'indented' };
+    expect(tune.defaultsWriteArgs(mine)).toBe(JSON.stringify({ formatDefaults: mine }));
+    expect(tune.defaultsWriteArgs(null)).toBe('{"formatDefaults":null}');
+  });
+
+  test('the caption and both button labels have no em dash', () => {
+    for (const line of [
+      tune.defaultsCaption({ ...DEFAULT_FORMAT_OPTIONS }, { ...DEFAULT_FORMAT_OPTIONS }),
+      tune.defaultsCaption({ ...DEFAULT_FORMAT_OPTIONS, justifyText: true }, { ...DEFAULT_FORMAT_OPTIONS, justifyText: false }),
+      tune.USE_DEFAULTS_LABEL, tune.RESET_DEFAULTS_LABEL,
+      tune.USE_DEFAULTS_NOTE, tune.RESET_DEFAULTS_NOTE,
+    ]) {
+      expect(line).not.toContain('—');
+    }
+  });
+
+  test('"Use these for new scripts" sends this script’s CURRENT settings, never defaults or appDefaults', () => {
+    const foot = source.slice(
+      source.indexOf('function drawDefaultsFoot('), source.indexOf('function groupStartsOpen('));
+    expect(foot).toMatch(/onclick: \(\) => writeDefaults\(settings, USE_DEFAULTS_NOTE\)/);
+    // Not `defaults` and not `appDefaults` — those name what a new script
+    // starts from today, not what this one is currently tuned to.
+    expect(foot).not.toMatch(/writeDefaults\(defaults[,)]/);
+    expect(foot).not.toMatch(/writeDefaults\(appDefaults[,)]/);
+  });
+
+  test('"Reset new scripts to Screepub’s defaults" sends formatDefaults: null', () => {
+    const foot = source.slice(
+      source.indexOf('function drawDefaultsFoot('), source.indexOf('function groupStartsOpen('));
+    expect(foot).toMatch(/onclick: \(\) => writeDefaults\(null, RESET_DEFAULTS_NOTE\)/);
+  });
+
+  test('neither button calls argv.settings(: this surface writes the APP defaults, not the script’s own', () => {
+    const foot = source.slice(
+      source.indexOf('function drawDefaultsFoot('), source.indexOf('function groupStartsOpen('));
+    expect(foot).not.toContain('argv.settings(');
+    expect(foot).toContain('argv.appSettings(');
+  });
+
+  test('the Reset button is gated by canResetDefaults, not drawn unconditionally', () => {
+    const foot = source.slice(
+      source.indexOf('function drawDefaultsFoot('), source.indexOf('function groupStartsOpen('));
+    expect(foot).toMatch(/resetButton\.hidden = !canResetDefaults\(appDefaults, shippedDefaults\)/);
+  });
+
+  test('both buttons are disabled for the whole write, not just the one pressed', () => {
+    const write = source.slice(
+      source.indexOf('async function writeDefaults('), source.indexOf('function groupStartsOpen('));
+    // Both go quiet before the engine is asked anything.
+    const beforeAwait = write.slice(0, write.indexOf('await runEngine'));
+    expect(beforeAwait).toContain('useButton.disabled = true');
+    expect(beforeAwait).toContain('resetButton.disabled = true');
+    // And both come back, on every way out.
+    expect([...write.matchAll(/useButton\.disabled = false/g)].length).toBeGreaterThanOrEqual(1);
+    expect([...write.matchAll(/resetButton\.disabled = false/g)].length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('a write in flight is guarded by the same era a stale flush already checks', () => {
+    // Follows convert.js's own generation pattern (libraryGeneration) and
+    // this file's flush(): a write started from one script must not paint
+    // its answer onto whatever script is on screen by the time it resolves.
+    const write = source.slice(
+      source.indexOf('async function writeDefaults('), source.indexOf('function groupStartsOpen('));
+    expect(write).toMatch(/const mine = era/);
+    expect([...write.matchAll(/era !== mine/g)].length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('the foot is placed after the knob groups, at the bottom of the tune-knobs column', () => {
+    const draw = source.slice(source.indexOf('function draw(status)'), source.indexOf('function drawPreview('));
+    expect(draw.indexOf('...GROUPS.map(drawGroup)')).toBeLessThan(draw.indexOf('drawDefaultsFoot()'));
+    expect(draw.indexOf('statusLine,')).toBeLessThan(draw.indexOf('drawDefaultsFoot()'));
+  });
+
+  test('a malformed app-defaults answer draws nothing rather than a wrong caption', () => {
+    // The same call drawPresets() makes for an empty preset list: absent
+    // rather than a claim this window never actually checked.
+    const foot = source.slice(
+      source.indexOf('function drawDefaultsFoot('), source.indexOf('function drawDefaultsFoot(') + 400);
+    expect(foot).toMatch(/if \(appDefaults === null \|\| shippedDefaults === null\) return null;/);
   });
 });
 
