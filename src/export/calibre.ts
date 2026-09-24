@@ -3,7 +3,7 @@
 // does exactly this conversion first; Send-to-Kindle email/web converts
 // server-side).
 import { accessSync, constants, existsSync, renameSync, rmSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { basename, delimiter, dirname, join } from 'node:path';
 import { platform } from 'node:process';
 
 /** Calibre would otherwise undo two Screepub decisions during the convert: it
@@ -90,15 +90,49 @@ export async function runCalibre(
   if (code !== 0) throw new CalibreFailedError(stderr.trim() || `exit ${code}`);
 }
 
-/** Convert an EPUB to AZW3 next to it (~1s; no caching — a stale cache would
- * outlive conversion-recipe changes). */
-export async function toAzw3(epub: string): Promise<string> {
-  const tool = calibreTool('ebook-convert');
+/** The sibling `.azw3` for a given EPUB: same directory, same stem. The one
+ * derivation, shared by toAzw3 and the ladder's reuse check (artifact.ts). */
+export function azw3Sibling(epub: string): string {
+  return `${epub.replace(/\.epub$/i, '')}.azw3`;
+}
+
+/** Hidden same-directory scratch the AZW3 conversion writes into, the same
+ * shape as kfx.ts's kfxScratchPath and for the same three reasons: same
+ * folder so promoting it is a rename, the `.azw3` extension because
+ * ebook-convert picks its output format from it, and the leading dot so
+ * nothing mistakes an unfinished file for a book. */
+export function azw3ScratchPath(epub: string): string {
+  const stem = basename(epub).replace(/\.epub$/i, '');
+  return join(dirname(epub), `.${stem}.partial.azw3`);
+}
+
+/** Injectable seam, present only so toAzw3 is testable on a machine whose
+ * real Calibre sits at a fixed path ahead of PATH (see kfx.ts's KfxDeps). */
+export interface Azw3Deps {
+  tool?: () => string | null;
+}
+
+/** Convert an EPUB to AZW3 next to it (~1s). Always converts: whether an
+ * existing .azw3 is fresh enough to reuse is the ladder's call
+ * (artifact.ts), by the same rule as the KFX and MOBI rungs. Because it
+ * reuses, a half-written file must never sit at the final path (it would be
+ * newer than its EPUB and trusted as fresh forever), so the conversion
+ * writes to a scratch file and renames it into place, as toKfx does. */
+export async function toAzw3(epub: string, deps: Azw3Deps = {}): Promise<string> {
+  const tool = (deps.tool ?? (() => calibreTool('ebook-convert')))();
   if (!tool) throw new CalibreMissingError();
-  const azw3 = `${epub.replace(/\.epub$/i, '')}.azw3`;
-  await runCalibre(tool, [epub, azw3, ...CALIBRE_FORMAT_GUARDS]);
-  if (!existsSync(azw3)) {
-    throw new CalibreFailedError('ebook-convert exited cleanly but produced no .azw3');
+  const azw3 = azw3Sibling(epub);
+  const scratch = azw3ScratchPath(epub);
+  try {
+    await runCalibre(tool, [epub, scratch, ...CALIBRE_FORMAT_GUARDS]);
+    if (!existsSync(scratch)) {
+      throw new CalibreFailedError('ebook-convert exited cleanly but produced no .azw3');
+    }
+    rmSync(azw3, { force: true });
+    renameSync(scratch, azw3);
+  } catch (error) {
+    rmSync(scratch, { force: true });
+    throw error;
   }
   return azw3;
 }

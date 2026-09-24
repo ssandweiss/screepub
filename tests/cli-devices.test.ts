@@ -1,5 +1,5 @@
-import { test, expect, afterAll } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { test, expect, afterAll, describe } from 'bun:test';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CliError, errorMessage } from '../src/cli-errors';
@@ -81,6 +81,10 @@ test('VERBS is the single list of known verbs', () => {
   // piece C: where books land, and what new scripts start from), and
   // reveal joined the same day (parity piece C: show a file in the
   // system's file manager).
+  // `routes` joined on 2026-09-23 too (parity piece B):
+  // the Send page's list of every way a book can leave. `route` joined the
+  // same day: it performs one of them (Apple Books, Amazon, Mail, a saved
+  // copy) and remembers it.
   expect([...VERBS]).toEqual([
     'devices',
     'send',
@@ -92,6 +96,8 @@ test('VERBS is the single list of known verbs', () => {
     'kfx-install',
     'app-settings',
     'reveal',
+    'routes',
+    'route',
   ]);
 });
 
@@ -182,6 +188,18 @@ function book(name = 'Script.epub'): string {
   return path;
 }
 
+/** Where a send in this file remembers its route: a fresh folder in
+ *  SCRATCH, never the real app settings file. EVERY sendCommand call below
+ *  passes one, failures included, so no change to when `send` remembers can
+ *  ever reach the machine running the suite. */
+function settingsIn(): string {
+  return join(mkdtempSync(join(SCRATCH, 'config-')), 'settings.json');
+}
+
+function remembered(path: string): unknown {
+  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : undefined;
+}
+
 function kindleVolume(): ConnectedDevice {
   const volume = join(mkdtempSync(join(SCRATCH, 'vol-')), 'Kindle');
   mkdirSync(join(volume, 'documents'), { recursive: true });
@@ -210,6 +228,7 @@ test('sending to a volume device copies it where that vendor indexes', async () 
     file,
     scan: () => [device],
     probe: async () => false,
+    settingsPath: settingsIn(),
   });
   expect(result.device).toEqual({ id: device.volume!, kind: 'kindle', name: 'Kindle' });
   expect(result.destination).toBe(join(device.volume!, 'documents', 'Script.epub'));
@@ -226,6 +245,7 @@ test('sending to reMarkable uploads and reports no destination path', async () =
     scan: () => [],
     probe: async () => true,
     remarkableEndpoint: UPLOAD_URL,
+    settingsPath: settingsIn(),
   });
   expect(result.device).toEqual({ id: 'remarkable', kind: 'remarkable', name: 'reMarkable' });
   expect(result.uploaded).toBe(true);
@@ -242,6 +262,7 @@ test('reMarkable rejects an extension it cannot read, before any request', async
       scan: () => [],
       probe: async () => true,
       remarkableEndpoint: UPLOAD_URL,
+      settingsPath: settingsIn(),
     });
   } catch (err) { thrown = err; }
   expect(thrown).toBeInstanceOf(CliError);
@@ -260,7 +281,9 @@ test('a failed copy is send-failed, carrying the underlying message', async () =
   const device: ConnectedDevice = { kind: 'kobo', name: 'KOBOeReader', volume: join(blocker, 'Kobo') };
   let thrown: unknown;
   try {
-    await sendCommand({ file: book(), deviceId: device.volume!, scan: () => [device], probe: async () => false });
+    await sendCommand({
+      file: book(), deviceId: device.volume!, scan: () => [device], probe: async () => false, settingsPath: settingsIn(),
+    });
   } catch (err) { thrown = err; }
   expect(thrown).toBeInstanceOf(CliError);
   expect((thrown as CliError).code).toBe('send-failed');
@@ -280,6 +303,7 @@ test('a failed upload is send-failed, not a raw RemarkableUploadError', async ()
       scan: () => [],
       probe: async () => true,
       remarkableEndpoint: `http://127.0.0.1:${refusing.port}`,
+      settingsPath: settingsIn(),
     });
   } catch (err) { thrown = err; }
   refusing.stop(true);
@@ -295,6 +319,7 @@ test('a file that is not there is unreadable, and no device is touched', async (
       file: join(SCRATCH, 'no-such-file.epub'),
       scan: () => { scanned += 1; return []; },
       probe: async () => false,
+      settingsPath: settingsIn(),
     });
   } catch (err) { thrown = err; }
   expect(thrown).toBeInstanceOf(CliError);
@@ -308,7 +333,7 @@ test('a directory given as the file is unreadable, not send-failed', async () =>
   const dir = mkdtempSync(join(SCRATCH, 'dir-'));
   let thrown: unknown;
   try {
-    await sendCommand({ file: dir, scan: () => [kindleVolume()], probe: async () => false });
+    await sendCommand({ file: dir, scan: () => [kindleVolume()], probe: async () => false, settingsPath: settingsIn() });
   } catch (err) { thrown = err; }
   expect((thrown as CliError).code).toBe('unreadable');
 });
@@ -329,4 +354,103 @@ test('a non-Error throw still produces a message key the decoder can read', () =
   }
   // A real Error still reports its own message, not "Error: ...".
   expect(errorMessage(new Error('ENOTDIR: not a directory'))).toBe('ENOTDIR: not a directory');
+});
+
+describe('send remembers the route that worked', () => {
+  test('a volume send remembers the device KIND, never its volume, and keeps other keys', async () => {
+    const device = kindleVolume();
+    const settingsPath = settingsIn();
+    writeFileSync(settingsPath, JSON.stringify({ lastRoute: 'save-epub', libraryPath: '/kept' }));
+    await sendCommand({ file: book(), scan: () => [device], probe: async () => false, settingsPath });
+    // A path would go stale the moment the reader was unplugged; the kind is
+    // what the Send page can find again. Piece C's keys share the file.
+    expect(remembered(settingsPath)).toEqual({ lastRoute: 'device:kindle', libraryPath: '/kept' });
+  });
+
+  test('a Kobo send remembers device:kobo', async () => {
+    const volume = join(mkdtempSync(join(SCRATCH, 'vol-')), 'KOBOeReader');
+    mkdirSync(volume, { recursive: true });
+    const settingsPath = settingsIn();
+    await sendCommand({
+      file: book(), scan: () => [{ kind: 'kobo', name: 'KOBOeReader', volume }], probe: async () => false, settingsPath,
+    });
+    expect(remembered(settingsPath)).toEqual({ lastRoute: 'device:kobo' });
+  });
+
+  test('a reMarkable upload remembers remarkable', async () => {
+    const settingsPath = settingsIn();
+    await sendCommand({
+      file: book(), scan: () => [], probe: async () => true, remarkableEndpoint: UPLOAD_URL, settingsPath,
+    });
+    expect(remembered(settingsPath)).toEqual({ lastRoute: 'remarkable' });
+  });
+
+  test('a failed copy remembers nothing', async () => {
+    const blocker = join(mkdtempSync(join(SCRATCH, 'block-')), 'not-a-dir');
+    writeFileSync(blocker, 'x');
+    const device: ConnectedDevice = { kind: 'kobo', name: 'KOBOeReader', volume: join(blocker, 'Kobo') };
+    const settingsPath = settingsIn();
+    let thrown: unknown;
+    try {
+      await sendCommand({ file: book(), scan: () => [device], probe: async () => false, settingsPath });
+    } catch (err) { thrown = err; }
+    expect((thrown as CliError).code).toBe('send-failed');
+    expect(existsSync(settingsPath)).toBe(false);
+  });
+
+  test('a failed upload remembers nothing', async () => {
+    const refusing = Bun.serve({ port: 0, fetch: () => new Response('no', { status: 500 }) });
+    const settingsPath = settingsIn();
+    let thrown: unknown;
+    try {
+      await sendCommand({
+        file: book(), scan: () => [], probe: async () => true,
+        remarkableEndpoint: `http://127.0.0.1:${refusing.port}`, settingsPath,
+      });
+    } catch (err) { thrown = err; }
+    refusing.stop(true);
+    expect((thrown as CliError).code).toBe('send-failed');
+    expect(existsSync(settingsPath)).toBe(false);
+  });
+
+  test('a file the reMarkable cannot read remembers nothing', async () => {
+    const settingsPath = settingsIn();
+    let thrown: unknown;
+    try {
+      await sendCommand({
+        file: book('Script.azw3'), scan: () => [], probe: async () => true, remarkableEndpoint: UPLOAD_URL, settingsPath,
+      });
+    } catch (err) { thrown = err; }
+    expect((thrown as CliError).code).toBe('unsupported-file');
+    expect(existsSync(settingsPath)).toBe(false);
+  });
+
+  test('a read-only settings folder does not fail the send: the book is on the reader', async () => {
+    const folder = mkdtempSync(join(SCRATCH, 'readonly-'));
+    chmodSync(folder, 0o555);
+    const device = kindleVolume();
+    try {
+      const result = await sendCommand({
+        file: book(), scan: () => [device], probe: async () => false, settingsPath: join(folder, 'settings.json'),
+      });
+      expect(readFileSync(result.destination!, 'utf8')).toBe('book-bytes');
+      expect(existsSync(join(folder, 'settings.json'))).toBe(false);
+    } finally {
+      chmodSync(folder, 0o755);
+    }
+  });
+
+  test('a settings path that cannot exist (its parent is a file) does not fail the send', async () => {
+    // ENOTDIR on every platform and for every user, root included, where a
+    // read-only folder would not stop root.
+    const blocker = join(mkdtempSync(join(SCRATCH, 'block-')), 'a-file');
+    writeFileSync(blocker, 'x');
+    uploads.length = 0;
+    const result = await sendCommand({
+      file: book(), scan: () => [], probe: async () => true, remarkableEndpoint: UPLOAD_URL,
+      settingsPath: join(blocker, 'config', 'settings.json'),
+    });
+    expect(result.uploaded).toBe(true);
+    expect(uploads).toEqual(['/upload']);
+  });
 });

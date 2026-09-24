@@ -367,6 +367,8 @@ overrides that folder everywhere.
 ```bash
 bun src/cli.ts devices [--json]                          # list connected e-readers
 bun src/cli.ts send <file> [--device <id>] [--json]      # send an existing file to one
+bun src/cli.ts routes <file.epub> [--json]               # every way this book can leave, best first
+bun src/cli.ts route <key> <file.epub> [--out <path>]    # send it to Apple Books, Amazon or Mail, or save a copy
 bun src/cli.ts kfx-status [--json]                       # can this computer make KFX for a Kindle?
 bun src/cli.ts kfx-install [--json]                      # install the KFX plugin into Calibre (online)
 ```
@@ -380,6 +382,21 @@ the docked tablet, which accepts **only PDF and EPUB** (anything else is
 refused before a byte moves). With one reader connected `--device` is
 optional; with several it is required, and `devices` prints the ids it
 accepts.
+
+`routes` lists every other way the book can leave too: Apple Books, Amazon's
+Send to Kindle, email, and saving a copy, in a fixed order, with the one you
+chose last time marked as the choice, even when it can't fire right now.
+`route <key>` performs one of them (`apple-books`, `send-to-kindle`,
+`email-to-kindle`, `save-epub`, `save-kindle`) and remembers it for next time;
+`route kindle-email-setup` takes no file and opens Amazon's Personal Document
+Settings page, where a Kindle's email address and the approved senders live.
+The two saves need an absolute `--out` path; Apple Books and email are
+Mac only, and email needs Apple Mail set as the default mail app. The
+remembered choice lives in an app settings file, not the library: macOS
+`~/Library/Application Support/Screepub/settings.json`, Windows
+`%APPDATA%\Screepub\settings.json`, elsewhere `$XDG_CONFIG_HOME/screepub`
+(or `~/.config/screepub`); `SCREEPUB_CONFIG_DIR` overrides it on every
+platform.
 
 A Kindle gets its best rendering from KFX, which needs three free tools:
 Calibre, Amazon's Kindle Previewer, and the KFX Output plugin inside

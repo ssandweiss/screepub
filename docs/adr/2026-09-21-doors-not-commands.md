@@ -70,6 +70,28 @@ grant here: a door, not an opinion. What to link is decided by
 `src/export/kfx-setup.ts`, and `tests/desktop-shell.test.ts` holds that
 file's links and this grant to the same three strings.
 
+**Amended 2026-09-23 (parity piece B, send routes).** Apple Books, Amazon's
+Send to Kindle app and its own web page, Amazon's Personal Document
+Settings page (the email route's one-time setup) and Apple Mail are all
+opened by the ENGINE, not the window. So is the file manager, already in
+this piece: the Send to Kindle web route opens the book's folder beside
+Amazon's page. (Show in Finder moves to the engine with piece C.) The
+owner's reasoning: the routes open a file that lives in the Screepub
+library, piece C is what makes that library's location movable, and a
+window permission is a fixed path written into a manifest that cannot
+follow it there. So these are four `screepub route <key>` calls the engine
+performs (`apple-books`; `send-to-kindle`, which opens the folder too;
+`email-to-kindle`; and `kindle-email-setup`, which takes no book), through
+the same door `run_engine` already is, and they cost the window no new
+permission at all. The window's own doors gain exactly one new entry for
+this piece: `dialog:allow-save`, so the reader can choose where a saved
+copy of the EPUB or the Kindle file goes. It has no allow-list to write,
+for the same reason `process:allow-restart` does not: the user picks the
+path in the native box, and the window only ever hands that one string
+back to the engine, which is what writes there. Approved by the owner the
+same day ("yes go for it"). Same test as every grant here: a door, not an
+opinion.
+
 **Amended 2026-09-23 (the update notice and window drag).** One new crate:
 `tauri-plugin-process`, linked for exactly one reason, restarting the
 window after an update once the engine is idle. Only
@@ -83,6 +105,18 @@ scope, and `core:window:allow-start-dragging` only lets the page ask to
 move the one window it is already inside, which is not a resource a list
 of allowed values would narrow. Approved by the owner the same day. Still
 two commands.
+
+**Amended 2026-09-23 (parity piece C, the gear).** The library folder can
+now be chosen (`screepub app-settings`), so the window's one path-scoped
+door, `opener:allow-reveal-item-in-dir` fixed to `$DOCUMENT/Screepub/**`,
+could no longer follow it, and it is removed. Show in Finder is the
+engine's `screepub reveal <file>` instead, through `run_engine`, the same
+answer piece B gave for the routes above. The window gains one door in its
+place: `dialog:allow-open`, so the reader can choose the folder in the
+OS's own picker. Like `dialog:allow-save`, it has no allow-list to write:
+the user picks the folder, and the window only hands that one path to the
+engine, which checks it, creates it and stores it. Approved by the owner
+the same day ("yes go for it"). Still two commands.
 
 What this buys, and it is six of the nine gaps the audit found: Apple
 Books, Send-to-Kindle, email-to-Kindle, save-a-copy, Report a Bug, and

@@ -6,10 +6,13 @@ import { platform } from 'node:process';
 import JSZip from 'jszip';
 import {
   CALIBRE_FORMAT_GUARDS,
+  azw3ScratchPath,
+  azw3Sibling,
   calibreTool,
   isCalibreAvailable,
   toAzw3,
   toKepub,
+  CalibreFailedError,
   CalibreMissingError,
 } from '../src/export/calibre';
 import { convertFountain } from '../src/convert';
@@ -149,6 +152,82 @@ test('toKepub converts to .kepub then renames to .kepub.epub (fake ebook-convert
   } finally {
     process.env.PATH = originalPath;
   }
+});
+
+// --- toAzw3 driven for real against a fake ebook-convert, through the same
+// tool seam toKfx has (a machine with Calibre installed resolves the real
+// one from a fixed path before PATH, so PATH-shadowing cannot reach it).
+// The AZW3 rung now reuses a fresh .azw3 (artifact.ts), so a half-written
+// one must never sit at the final path: it would be newer than its EPUB and
+// trusted as fresh forever. Same scratch-then-rename discipline as toKfx.
+
+function fakeAzw3Tool(exitCode: number): { tool: string; argvLog: string; epub: string } {
+  const toolDir = mkdtempSync(join(SCRATCH, 'azw3-fake-'));
+  const tool = join(toolDir, 'ebook-convert');
+  const argvLog = join(toolDir, 'argv.log');
+  // Logs argv one entry per line, writes something to the output path it
+  // was told to (a partial file, when it then fails), and exits as told.
+  writeFileSync(
+    tool,
+    `#!/bin/sh\nfor a in "$@"; do echo "$a"; done > "${argvLog}"\necho converted > "$2"\nexit ${exitCode}\n`,
+  );
+  chmodSync(tool, 0o755);
+  const epub = join(mkdtempSync(join(SCRATCH, 'azw3-work-')), 'book.epub');
+  writeFileSync(epub, 'fake epub bytes');
+  return { tool, argvLog, epub };
+}
+
+test('azw3Sibling: same directory, same stem, .azw3, whatever the case of .epub', () => {
+  expect(azw3Sibling(join('/tmp', 'lib', 'Script.epub'))).toBe(join('/tmp', 'lib', 'Script.azw3'));
+  expect(azw3Sibling(join('/tmp', 'lib', 'Script.EPUB'))).toBe(join('/tmp', 'lib', 'Script.azw3'));
+});
+
+test('the AZW3 scratch path is hidden, same-directory, and keeps the .azw3 extension', () => {
+  // ebook-convert picks its output format from the extension, so the
+  // scratch must end in .azw3; the leading dot keeps it out of sight.
+  expect(azw3ScratchPath(join('/tmp', 'dir', 'Book.EPUB'))).toBe(join('/tmp', 'dir', '.Book.partial.azw3'));
+});
+
+test('toAzw3 converts into the scratch path, then renames it onto azw3Sibling', async () => {
+  if (platform === 'win32') return; // the fake tool is a /bin/sh script
+  const { tool, argvLog, epub } = fakeAzw3Tool(0);
+  writeFileSync(azw3Sibling(epub), 'an older conversion');
+
+  const out = await toAzw3(epub, { tool: () => tool });
+
+  expect(out).toBe(azw3Sibling(epub));
+  const argv = readFileSync(argvLog, 'utf8').split('\n').filter(Boolean);
+  expect(argv).toEqual([epub, azw3ScratchPath(epub), ...CALIBRE_FORMAT_GUARDS]);
+  expect(existsSync(azw3ScratchPath(epub))).toBe(false); // renamed away
+  expect(readFileSync(out, 'utf8')).toBe('converted\n'); // replaced the older one
+});
+
+test('a failed conversion leaves no scratch behind and never touches the .azw3 already there', async () => {
+  if (platform === 'win32') return;
+  const { tool, epub } = fakeAzw3Tool(1);
+  writeFileSync(azw3Sibling(epub), 'an older conversion');
+
+  await expect(toAzw3(epub, { tool: () => tool })).rejects.toThrow(CalibreFailedError);
+
+  expect(existsSync(azw3ScratchPath(epub))).toBe(false);
+  expect(readFileSync(azw3Sibling(epub), 'utf8')).toBe('an older conversion');
+});
+
+test('a tool that exits cleanly but writes nothing is a failure, not a missing file returned', async () => {
+  if (platform === 'win32') return;
+  const toolDir = mkdtempSync(join(SCRATCH, 'azw3-silent-'));
+  const tool = join(toolDir, 'ebook-convert');
+  writeFileSync(tool, '#!/bin/sh\nexit 0\n');
+  chmodSync(tool, 0o755);
+  const epub = join(mkdtempSync(join(SCRATCH, 'azw3-work-')), 'book.epub');
+  writeFileSync(epub, 'fake epub bytes');
+
+  await expect(toAzw3(epub, { tool: () => tool })).rejects.toThrow('produced no .azw3');
+  expect(existsSync(azw3Sibling(epub))).toBe(false);
+});
+
+test('toAzw3 with no tool at all is CalibreMissingError', async () => {
+  await expect(toAzw3(join(SCRATCH, 'never.epub'), { tool: () => null })).rejects.toThrow(CalibreMissingError);
 });
 
 async function minimalEpub(): Promise<string> {

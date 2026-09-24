@@ -240,11 +240,18 @@ describe('the engine contract lives in exactly one file', () => {
       appSettings: argv.appSettings(),
       appSettingsSet: argv.appSettings('{"libraryPath":"/abs"}'),
       reveal: argv.reveal('/s/script.epub'),
+      routes: argv.routes('/s/script.epub'),
+      route: argv.route('apple-books', '/s/script.epub'),
+      routeSaveEpub: argv.route('save-epub', '/s/script.epub', { out: '/s/out.epub' }),
+      routeSaveKindle: argv.route('save-kindle', '/s/script.epub', {
+        out: '/s/out.azw3', fountain: '/s/script.fountain', optionsJson: '{"a":1}',
+      }),
+      emailSetup: argv.emailSetup(),
     };
     // Every builder the interface promises is exercised above.
     expect(Object.keys(argv).sort()).toEqual(
-      ['appSettings', 'convert', 'devices', 'export', 'kfxInstall', 'kfxStatus', 'reconvert',
-        'reveal', 'send', 'settings', 'version'].sort(),
+      ['appSettings', 'convert', 'devices', 'emailSetup', 'export', 'kfxInstall', 'kfxStatus',
+        'reconvert', 'reveal', 'route', 'routes', 'send', 'settings', 'version'].sort(),
     );
     for (const [name, args] of Object.entries(built)) {
       expect(`${name} has --json: ${args.includes('--json')}`).toBe(`${name} has --json: true`);
@@ -269,6 +276,36 @@ describe('the engine contract lives in exactly one file', () => {
       ['app-settings', '--json', '--set', '{"libraryPath":"/abs"}'],
     );
     expect(argv.reveal('/s/script.epub')).toEqual(['reveal', '/s/script.epub', '--json']);
+  });
+
+  test('the route builders, pinned whole: routes never carries an out/fountain/options triple, route always may', async () => {
+    // Same reasoning as the "pinned WHOLE" convert assertion below: this argv
+    // is the entire contract with the engine, and an extra or missing element
+    // is exactly what a wrong edit leaves behind.
+    const { argv } = await import(join(UI, 'app.js'));
+    expect(argv.routes('/s/script.epub')).toEqual(['routes', '/s/script.epub', '--json']);
+
+    expect(argv.route('apple-books', '/s/script.epub')).toEqual(
+      ['route', 'apple-books', '/s/script.epub', '--json'],
+    );
+    expect(argv.route('save-epub', '/s/script.epub', { out: '/s/out.epub' })).toEqual(
+      ['route', 'save-epub', '/s/script.epub', '--json', '--out', '/s/out.epub'],
+    );
+    expect(argv.route('save-kindle', '/s/script.epub', {
+      out: '/s/out.azw3', fountain: '/s/script.fountain', optionsJson: '{"a":1}',
+    })).toEqual([
+      'route', 'save-kindle', '/s/script.epub', '--json',
+      '--out', '/s/out.azw3', '--fountain', '/s/script.fountain', '--options-json', '{"a":1}',
+    ]);
+  });
+
+  test('the email setup builder is the one engine call behind "Open Amazon’s page", with no book on it', async () => {
+    // The Send page's email row offers Amazon's Personal Document Settings
+    // page (where the approved-sender list lives). The ENGINE opens it, by a
+    // key, so the window names no URL and needs no opener grant for it; the
+    // page has nothing to do with this script, so no book path rides along.
+    const { argv } = await import(join(UI, 'app.js'));
+    expect(argv.emailSetup()).toEqual(['route', 'kindle-email-setup', '--json']);
   });
 
   test('an optional flag brings its value and an absent one brings nothing', async () => {
@@ -1746,6 +1783,113 @@ describe('the folder picker door', () => {
   });
 });
 
+describe('the save dialog shares pickScreenplay\'s one-dialog guard', () => {
+  // Parity piece B: dialog:allow-save lets the window ask for a save path
+  // directly (ADR 2026-09-21). It must not be a second, independent guard,
+  // or Ctrl-O and a save button could put two native dialogs up at once,
+  // which is the exact defect the picker's own guard exists to prevent.
+  type AppModule = {
+    pickScreenplay: () => Promise<string | null>;
+    saveDialog: (opts: {
+      defaultPath: string;
+      filters: Array<{ name: string; extensions: string[] }>;
+    }) => Promise<string | null>;
+    isDialogOpen: () => boolean;
+    onDialogClosed: (handler: () => void) => void;
+  };
+
+  function stubDialogs() {
+    let pickCalls = 0;
+    let saveCalls = 0;
+    let lastSaveArgs: unknown = null;
+    let settlePick: ((path: string | null) => void) | null = null;
+    let settleSave: ((path: string | null) => void) | null = null;
+    (globalThis as unknown as { window: unknown }).window = {
+      __TAURI__: {
+        core: {
+          invoke: () => {
+            pickCalls += 1;
+            return new Promise((resolve) => { settlePick = resolve; });
+          },
+        },
+        dialog: {
+          save: (args: unknown) => {
+            saveCalls += 1;
+            lastSaveArgs = args;
+            return new Promise((resolve) => { settleSave = resolve; });
+          },
+        },
+      },
+    };
+    return {
+      get pickCalls() { return pickCalls; },
+      get saveCalls() { return saveCalls; },
+      get lastSaveArgs() { return lastSaveArgs; },
+      answerPick: (path: string | null) => settlePick!(path),
+      answerSave: (path: string | null) => settleSave!(path),
+    };
+  }
+
+  afterEach(() => { delete (globalThis as unknown as { window?: unknown }).window; });
+
+  test('it asks the OS with the given defaultPath and filters, and resolves the chosen path', async () => {
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    const dialogs = stubDialogs();
+    const filters = [{ name: 'EPUB', extensions: ['epub'] }];
+    const asked = app.saveDialog({ defaultPath: 'script.epub', filters });
+    await Promise.resolve();
+    expect(app.isDialogOpen()).toBe(true);
+    expect(dialogs.lastSaveArgs).toEqual({ defaultPath: 'script.epub', filters });
+    dialogs.answerSave('/s/out.epub');
+    expect(await asked).toBe('/s/out.epub');
+    expect(app.isDialogOpen()).toBe(false);
+  });
+
+  test('cancelling resolves null, same as a cancelled picker', async () => {
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    const dialogs = stubDialogs();
+    const asked = app.saveDialog({ defaultPath: 'script.epub', filters: [] });
+    await Promise.resolve();
+    dialogs.answerSave(null);
+    expect(await asked).toBeNull();
+  });
+
+  test('a picker already open blocks a save dialog, and a save dialog already open blocks a picker', async () => {
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    const dialogs = stubDialogs();
+
+    const picking = app.pickScreenplay();
+    await Promise.resolve();
+    expect(app.isDialogOpen()).toBe(true);
+    expect(await app.saveDialog({ defaultPath: 'x.epub', filters: [] })).toBeNull();
+    expect(`save dialogs opened: ${dialogs.saveCalls}`).toBe('save dialogs opened: 0');
+    dialogs.answerPick('/s/script.pdf');
+    expect(await picking).toBe('/s/script.pdf');
+    expect(app.isDialogOpen()).toBe(false);
+
+    const saving = app.saveDialog({ defaultPath: 'x.epub', filters: [] });
+    await Promise.resolve();
+    expect(app.isDialogOpen()).toBe(true);
+    expect(await app.pickScreenplay()).toBeNull();
+    expect(`pickers opened: ${dialogs.pickCalls}`).toBe('pickers opened: 1');
+    dialogs.answerSave('/s/out.epub');
+    expect(await saving).toBe('/s/out.epub');
+    expect(app.isDialogOpen()).toBe(false);
+  });
+
+  test('onDialogClosed handlers fire after a save dialog closes too, cancel or not', async () => {
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    const dialogs = stubDialogs();
+    let closed = 0;
+    app.onDialogClosed(() => { closed += 1; });
+    const asked = app.saveDialog({ defaultPath: 'x.epub', filters: [] });
+    await Promise.resolve();
+    dialogs.answerSave(null);
+    await asked;
+    expect(`closed: ${closed}`).toBe('closed: 1');
+  });
+});
+
 describe('what runEngine does with the answer it is handed', () => {
   // Scope, stated plainly, because these used to claim more than they
   // covered: `invoke` is a stub here, so NOTHING below tests a transport.
@@ -2034,6 +2178,36 @@ describe('the window knows when the engine is working, and can restart', () => {
       expect(app.engineBusy()).toBe(false);
       expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
       await call;
+      expect(app.engineBusy()).toBe(false);
+    } finally {
+      delete win.window;
+    }
+  });
+
+  test('a routes call is never counted, like devices; a route call is', async () => {
+    // send.js's poll swaps from `devices` to `routes` (parity piece B), and
+    // the reason routes must not count is the same one devices was excluded
+    // for: it is polled every 2 s while Send is open, never mid-job, and
+    // counting it would flash "Restarting after this finishes…" on a tab
+    // that is just sitting there polling. `route` actually writes: it saves
+    // a file or opens an app, so it counts like send or kfx-install.
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    win.window = {
+      __TAURI__: {
+        core: { invoke: () => new Promise((resolve) => setTimeout(() => resolve('{"ok":true}'), 10)) },
+      },
+    };
+    try {
+      const routes = app.runEngine(app.argv.routes('/s/script.epub'));
+      expect(app.engineBusy()).toBe(false);
+      expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
+      await routes;
+
+      const route = app.runEngine(app.argv.route('apple-books', '/s/script.epub'));
+      expect(app.engineBusy()).toBe(true);
+      expect(Bun.peek.status(app.whenIdle())).toBe('pending');
+      await route;
       expect(app.engineBusy()).toBe(false);
     } finally {
       delete win.window;
@@ -3992,7 +4166,13 @@ describe('the Send surface', () => {
   });
 
   test('it asks the engine what is connected rather than guessing', () => {
-    expect(send).toContain('argv.devices');
+    // It used to poll `argv.devices`. Since parity piece B it polls
+    // `argv.routes`, whose answer carries the connected devices among every
+    // other way out, so nothing on the page still asks `devices` (a second
+    // poll would double the reMarkable probe's 1.5 s every two seconds).
+    // Still the ENGINE's knowledge, never the window's.
+    expect(send).toContain('argv.routes(ctx.state.script.epubPath)');
+    expect(send).not.toContain('argv.devices');
     // A window that knew what a Kindle volume looks like would be the exact
     // duplication the ADR forbids.
     for (const knowledge of ['/Volumes', 'documents', 'system/version.txt', '.kobo']) {
@@ -4017,9 +4197,26 @@ describe('the Send surface', () => {
     expect(send).toContain('state.script.settings');
   });
 
-  test('nothing connected is an answer, not an error', () => {
-    expect(send).toContain('no reader');
-    expect(send).not.toContain('devices.length === 0 ? throw');
+  test('nothing connected is an answer, not an error', async () => {
+    // It used to be a "Nothing plugged in" paragraph over the reach table.
+    // Now the engine lists every reader kind that is not connected as a
+    // dimmed row with its fix, so nothing connected is still a page of rows
+    // (the engine's own answer for it is taken whole, never turned into the
+    // failure line) and those rows offer no button that could only fail.
+    const { routes, preselected } = await import('../src/export/routes');
+    const sendUi = await import(join(UI, 'send.js'));
+    for (const platform of ['darwin', 'win32', 'linux']) {
+      const list = routes({ platform, booksApp: true, sendToKindleApp: false, appleMailDefault: true, devices: [] });
+      const shown = sendUi.routesFrom({ ok: true, routes: list, chosen: preselected(list, undefined).id });
+      expect(shown, `${platform}: the no-device answer is refused`).not.toBe(null);
+      const readers = shown.routes.filter((r: { key: string }) => sendUi.isDeviceRoute(r));
+      expect(readers.length).toBeGreaterThan(0);
+      for (const r of readers) {
+        expect(`${platform} ${r.key} available: ${r.available}`).toBe(`${platform} ${r.key} available: false`);
+        expect(sendUi.buttonClassFor(r, shown.chosen)).toBe(null);
+      }
+      expect(sendUi.connectedDevices(shown)).toEqual([]);
+    }
   });
 
   test('the verb stays constant through the flow', () => {
@@ -4126,6 +4323,165 @@ describe('the Send surface', () => {
   });
 });
 
+describe('the Send page performs every route: shape', () => {
+  // The routes that are not a device (Apple Books, Send to Kindle, email,
+  // the two saves, and the email row's setup link) go through perform(),
+  // sendTo()'s twin. Pinned by shape for the same reason sendTo is: deleting
+  // a staleness check or the shared flag leaves every other test green.
+  const send = read('send.js');
+  /** A function's own body, from its head to the first unindented `}`. */
+  const body = (head: string) => {
+    const from = send.indexOf(head);
+    expect(from, `no ${head.trim()}`).toBeGreaterThan(-1);
+    const rest = send.slice(from);
+    return rest.slice(0, rest.indexOf('\n}'));
+  };
+  /** One branch of perform(): from its test to the next `} else`. */
+  const branch = (source: string, head: string) => {
+    const from = source.indexOf(head);
+    expect(from, `no ${head}`).toBeGreaterThan(-1);
+    const rest = source.slice(from + head.length);
+    return rest.slice(0, rest.indexOf('} else'));
+  };
+
+  test('one flag for every route: no two at once, and never during a KFX install', () => {
+    // The MOBI rung REWRITES the library EPUB in place, so a save of the
+    // EPUB during a Kindle build (or a send) is a race over one file.
+    const perform = body('async function perform(');
+    expect(perform.slice(0, 200)).toMatch(/if \(sending \|\| kfxInstalling\(\)\) return;/);
+    expect(perform.slice(0, 200)).toContain('sending = true;');
+    expect(perform.slice(perform.indexOf('} finally {'))).toContain('sending = false;');
+    // The SAME flag: the page has one, declared once.
+    expect([...send.matchAll(/^let sending\b/gm)].length).toBe(1);
+    expect(perform).not.toMatch(/\blet (performing|busy|running)\b/);
+    // Every button on the list goes dead, not only the one pressed.
+    expect(perform).toMatch(/for \(const button of buttons\(\)\) button\.disabled = true/);
+  });
+
+  test('a route in flight cannot report into a script that replaced it: a check after every await', () => {
+    const perform = body('async function perform(');
+    expect(perform.slice(0, 400)).toMatch(/const mine = era/);
+    expect(perform.slice(0, 400)).toMatch(/era !== mine/);
+    const awaits = [...perform.matchAll(/\bawait\s/g)].map((m) => m.index!);
+    expect(`perform has await boundaries: ${awaits.length}`).toBe('perform has await boundaries: 5');
+    for (const at of awaits) {
+      const rest = perform.slice(at);
+      const next = rest.slice(rest.indexOf(';') + 1).trimStart();
+      expect(`after ${rest.slice(0, 40)}: ${next.slice(0, 11)}`)
+        .toBe(`after ${rest.slice(0, 40)}: if (stale()`);
+    }
+  });
+
+  test('a save asks where before the engine writes, and a cancelled dialog asks nothing more', () => {
+    const perform = body('async function perform(');
+    const epub = branch(perform, "if (how === 'save-epub') {");
+    const kindle = branch(perform, "if (how === 'save-kindle') {");
+    expect(epub).toContain('saveDialog(');
+    expect(kindle).toContain('saveDialog(');
+    // One call writes, after either dialog.
+    expect(perform.match(/argv\.route\(/g)?.length).toBe(1);
+    expect(perform.indexOf('argv.route(')).toBeGreaterThan(perform.lastIndexOf('saveDialog('));
+    // The Kindle file is built first: its extension names the dialog's file.
+    const built = kindle.indexOf('argv.export(');
+    expect(built).toBeGreaterThan(-1);
+    expect(built).toBeLessThan(kindle.indexOf('saveDialog('));
+    // Its refusal is said, and nothing else happens, before any dialog.
+    const refused = kindle.indexOf("if (phase === 'failed')");
+    expect(refused).toBeGreaterThan(built);
+    expect(refused).toBeLessThan(kindle.indexOf('saveDialog('));
+    // null is a cancel: straight out, before any further engine call.
+    const cancels = [...perform.matchAll(/await saveDialog\([\s\S]*?\);\s*if \(stale\(\) \|\| out === null\) return;/g)];
+    expect(cancels.length).toBe(2);
+  });
+
+  test('the Kindle save carries this script’s own settings, fetched first, to both calls', () => {
+    const kindle = branch(body('async function perform('), "if (how === 'save-kindle') {");
+    const fetched = kindle.indexOf('await ensureSettings()');
+    expect(fetched, 'the Kindle save does not await ensureSettings()').toBeGreaterThan(-1);
+    expect(kindle.indexOf('optionsJsonFor(script)')).toBeGreaterThan(fetched);
+    expect(kindle).toContain("forFormat: 'kindle', ...settings");
+    expect(kindle).toContain('options = { out, ...settings };');
+  });
+
+  test('a device row still goes through sendTo, and every other row through perform', () => {
+    const choose = body('function choose(');
+    expect(choose).toContain("performerFor(route) === 'device'");
+    expect(choose).toContain('sendTo(route.device)');
+    expect(choose).toContain('perform(route)');
+    // The email row's setup link is performed too, under the same flag.
+    expect(send).toContain('perform({ key: hint.key, title: SETUP_TITLE })');
+    expect(body('async function perform(')).toContain('argv.emailSetup()');
+  });
+
+  test('every route, the setup link included, hands the keyboard back when it is done', () => {
+    // A route kills every button while it runs (a dead button drops the
+    // focus) and a Save box takes the focus too, so each press goes through
+    // keepFocus(), which puts it back on the same route's button.
+    const choose = body('function choose(');
+    expect(choose).toContain('keepFocus(route.id, () => sendTo(route.device))');
+    expect(choose).toContain('keepFocus(route.id, () => perform(route))');
+    expect(send).toContain('keepFocus(hint.key, () => perform({ key: hint.key, title: SETUP_TITLE }))');
+    const keep = body('async function keepFocus(');
+    const held = keep.indexOf('list.contains(document.activeElement)');
+    const ran = keep.indexOf('await run()');
+    expect(held, 'keepFocus() never asks where the keyboard was').toBeGreaterThan(-1);
+    expect(held).toBeLessThan(ran);
+    expect(keep.slice(ran)).toContain('if (held && era === mine && canFocus(list)) giveBackFocus(id);');
+  });
+
+  test('after a success the list is asked for again, and no older answer can undo it', () => {
+    for (const head of ['async function perform(', 'async function sendTo(']) {
+      const fn = body(head);
+      expect(fn.slice(fn.indexOf('} finally {')), `${head} does not repoll`)
+        .toContain('if (worked && !stale()) repoll();');
+    }
+    expect(body('async function sendTo(')).toContain('worked = true;');
+    expect(body('async function perform(')).toContain("worked = phase === 'done';");
+    // Every poll already out was asked before the engine remembered the
+    // route; the repoll puts them all behind it.
+    expect(body('function repoll(')).toContain('newest = asks;');
+    const refresh = body('async function refresh(');
+    expect(refresh).toContain('const mine = ++asks;');
+    expect([...refresh.matchAll(/mine <= newest/g)].length).toBe(2);
+    expect([...refresh.matchAll(/newest = mine;/g)].length).toBe(2);
+  });
+
+  test('the poll hands on what is connected, and draws a failure only when it cannot draw the list', () => {
+    const refresh = body('async function refresh(');
+    expect(refresh).toContain('const shown = routesFrom(answer);');
+    expect(refresh).toContain('ctx.state.devices = connectedDevices(shown);');
+    expect(refresh).toContain('if (sameRoutes(drawn, shown)) return;');
+    expect(refresh).toContain('fault(routesFailure(answer))');
+  });
+
+  test('a rebuild hands the keyboard back to the same route, or to the page’s plan', () => {
+    const rebuild = body('function rebuild(');
+    const had = rebuild.indexOf('list.contains(document.activeElement)');
+    expect(had, 'rebuild() never asks where the focus was').toBeGreaterThan(-1);
+    expect(had).toBeLessThan(rebuild.indexOf('clear(list)'));
+    const back = body('function giveBackFocus(');
+    expect(back).toContain('canFocus(same)');
+    expect(back).toContain('ctx.restoreFocus()');
+    expect(send).toContain("'data-route': route.id");
+  });
+
+  test('every class a route row adds is styled, from the tokens', () => {
+    // A class with no rule is a row drawn in the wrong clothes and nobody the
+    // wiser until a screenshot. A dimmed row is dimmed by the page's own
+    // muted ink (the brand's), never by opacity, which would dim the email
+    // row's setup link with it; the no-hex and no-raw-px-font rules above
+    // cover the rest of the file.
+    const css = read('surfaces.css');
+    for (const name of ['route-unavailable', 'route-detail', 'route-hint']) {
+      expect(send, `send.js no longer draws ${name}`).toContain(name);
+      expect(`${name} styled: ${new RegExp(`\\.${name}\\b[^{]*\\{`).test(css)}`).toBe(`${name} styled: true`);
+    }
+    const dimmed = /\.route-unavailable[^{]*\{([^}]*)\}/.exec(css)![1]!;
+    expect(dimmed).toContain('color: var(--ink-muted)');
+    expect(dimmed).not.toContain('opacity');
+  });
+});
+
 describe('what the Send surface decides', () => {
   type Device = { id: string; kind: string; name: string; volume: string | null };
   type SendModule = {
@@ -4139,9 +4495,9 @@ describe('what the Send surface decides', () => {
     undetectable: (platform: unknown) => string | null;
     provenNote: (platform: unknown) => string;
     caveatFor: (device: unknown, platform: unknown) => string | null;
-    deviceFrom: (entry: unknown) => Device | null;
-    devicesFrom: (answer: unknown) => Device[];
-    sameDevices: (a: unknown, b: unknown) => boolean;
+    routesFrom: (answer: unknown) => { routes: Record<string, unknown>[]; chosen: string } | null;
+    buttonClassFor: (route: unknown, chosenId: unknown) => string | null;
+    sameRoutes: (a: unknown, b: unknown) => boolean;
     forFormat: (device: unknown) => string;
     whereLine: (device: unknown) => string;
     blockedReason: (script: unknown) => string | null;
@@ -4251,42 +4607,58 @@ describe('what the Send surface decides', () => {
   });
 
   test('a device that cannot be addressed is not offered, and an unknown one still is', () => {
-    const answer = {
-      ok: true,
-      devices: [
-        kindle,
-        { kind: 'kobo', name: 'Kobo', volume: null },                 // no id to send to
-        { id: '/m/x', kind: 'tolino', name: '   ', volume: '/m/x' },  // nothing for the button
-        { id: '/m/y', name: 'Mystery', volume: '/m/y' },              // no kind
-        { id: '/m/z', kind: 'pocketbook', name: 'PocketBook', volume: '/m/z' },
-        'not a device',
-      ],
+    // This was devicesFrom(), which dropped a device with no id or no name
+    // and kept a kind this window had never heard of. The rows come from
+    // `routes` now, and routesFrom() holds the same line, stricter: a device
+    // row whose device cannot be addressed turns the WHOLE answer into the
+    // failure line (a quietly shorter list reads as a reader that is not
+    // there), and an unknown kind is kept, with a button and the caveat.
+    const pocketbook = {
+      id: 'device:pocketbook#/m/z', key: 'device:pocketbook', title: 'PocketBook',
+      detail: 'over USB', button: 'Copy to PocketBook', available: true,
+      device: { id: '/m/z', kind: 'pocketbook', name: 'PocketBook', volume: '/m/z' },
     };
-    const devices = send.devicesFrom(answer);
-    // Named, so a filter that dropped everything and one that dropped nothing
-    // both fail.
-    expect(devices.map((d) => d.id)).toEqual(['/m/Kindle', '/m/z']);
-    expect(send.devicesFrom({ ok: true, devices: 'nope' })).toEqual([]);
-    expect(send.devicesFrom(null)).toEqual([]);
-    expect(send.deviceFrom(kindle)).toEqual(kindle);
-    // A volume that is not a string is null, never the string "undefined".
-    expect(send.deviceFrom({ id: 'r', kind: 'remarkable', name: 'reMarkable' })!.volume).toBe(null);
+    const save = {
+      id: 'save-epub', key: 'save-epub', title: 'Save the EPUB', detail: 'for email',
+      button: 'Save the EPUB…', available: true,
+    };
+    const shown = send.routesFrom({ ok: true, routes: [pocketbook, save], chosen: 'save-epub' })!;
+    expect(shown.routes.map((r) => r.id)).toEqual([pocketbook.id, 'save-epub']);
+    expect(send.buttonClassFor(shown.routes[0], shown.chosen)).toBe('btn btn-outline');
+    expect(send.caveatFor(shown.routes[0]!.device, 'MacIntel')).toContain(send.UNPROVEN);
+    for (const device of [
+      { ...pocketbook.device, id: '' },                  // no id to send to
+      { ...pocketbook.device, name: '   ' },             // nothing for the row
+      { id: '/m/y', name: 'Mystery', volume: '/m/y' },   // no kind
+    ]) {
+      expect(send.routesFrom({ ok: true, routes: [{ ...pocketbook, device }, save], chosen: 'save-epub' }))
+        .toBe(null);
+    }
   });
 
   test('the list is rebuilt only when it really changed', () => {
-    // The poll ticks every two seconds; rebuilding on every tick steals the
-    // focus from anyone tabbing to a Send button. So this has to say "same"
-    // for a repeated answer — and it must not say "same" by agreeing on
-    // length alone, which is what the cheap implementation does.
-    expect(send.sameDevices([kindle, kobo], [{ ...kindle }, { ...kobo }])).toBe(true);
-    expect(send.sameDevices([kindle], [{ ...kindle, name: 'Kindle Oasis' }])).toBe(false);
-    expect(send.sameDevices([kindle], [{ ...kindle, kind: 'kobo' }])).toBe(false);
-    expect(send.sameDevices([kindle], [{ ...kindle, id: '/m/Kindle2' }])).toBe(false);
-    // Same two devices, opposite order: the rows would be drawn in the other
-    // order, so the screen is out of date either way.
-    expect(send.sameDevices([kindle, kobo], [kobo, kindle])).toBe(false);
-    expect(send.sameDevices([kindle], [])).toBe(false);
-    expect(send.sameDevices([kindle], 'nope')).toBe(false);
+    // This was sameDevices(); the rule is sameRoutes() now (more of it in
+    // tests/send-routes-ui.test.ts). The poll ticks every two seconds;
+    // rebuilding on every tick steals the focus from anyone tabbing to a
+    // button. So it has to say "same" for a repeated answer, and it must not
+    // say "same" by agreeing on length alone.
+    const row = (id: string, title: string) => ({
+      id, key: id, title, detail: 'd', button: title, available: true,
+    });
+    const shown = (routes: Record<string, unknown>[], chosen: string) =>
+      send.routesFrom({ ok: true, routes, chosen })!;
+    const a = shown([row('save-epub', 'Save'), row('save-kindle', 'Kindle file')], 'save-epub');
+    expect(send.sameRoutes(a, shown([row('save-epub', 'Save'), row('save-kindle', 'Kindle file')], 'save-epub')))
+      .toBe(true);
+    expect(send.sameRoutes(a, shown([row('save-epub', 'Save'), row('save-kindle', 'Kindle')], 'save-epub')))
+      .toBe(false);
+    // Same two rows, opposite order, or the brass moved: out of date either way.
+    expect(send.sameRoutes(a, shown([row('save-kindle', 'Kindle file'), row('save-epub', 'Save')], 'save-epub')))
+      .toBe(false);
+    expect(send.sameRoutes(a, shown([row('save-epub', 'Save'), row('save-kindle', 'Kindle file')], 'save-kindle')))
+      .toBe(false);
+    expect(send.sameRoutes(a, shown([row('save-epub', 'Save')], 'save-epub'))).toBe(false);
+    expect(send.sameRoutes(a, 'nope')).toBe(false);
   });
 
   test('only a Kindle is sent up the ladder, and every other kind takes the EPUB', () => {
@@ -6141,7 +6513,9 @@ describe('the reach table is available, not announced', () => {
   const send = read('send.js');
 
   test('it is a disclosure the reader opens, not a wall they scroll past', () => {
-    const at = send.indexOf('EMPTY.heading');
+    // REACH_HEADING was EMPTY.heading: the fold now stands under the route
+    // list whatever is connected, not only on an empty page.
+    const at = send.indexOf('REACH_HEADING)');
     expect(at).toBeGreaterThan(-1);
     const around = send.slice(Math.max(0, at - 500), at + 200);
     expect(around).toContain("'details'");
@@ -6879,8 +7253,15 @@ describe('the Send page’s KFX block: wiring', () => {
     // The poll keeps running through an install (it stops only for a send),
     // so a row it draws mid-install must be born disabled like the rest, or
     // it offers a button that silently does nothing.
-    const row = send.slice(send.indexOf('function deviceRow('));
-    expect(row.slice(0, row.indexOf('\n}'))).toContain('disabled: kfxInstalling()');
+    // Rows are route rows since parity piece B: the route's own button and
+    // the email row's setup link are both born dead mid-install.
+    const row = send.slice(send.indexOf('function routeRow('));
+    const rowBody = row.slice(0, row.indexOf('\n}'));
+    expect([...rowBody.matchAll(/disabled: kfxInstalling\(\)/g)].length).toBe(2);
+    // And the performer of every other route refuses to start mid-install,
+    // exactly as sendTo does.
+    const perform = send.slice(send.indexOf('async function perform('));
+    expect(perform.slice(0, 200)).toMatch(/if \(sending \|\| kfxInstalling\(\)\) return;/);
   });
 });
 
@@ -6988,16 +7369,20 @@ describe('the Send page’s KFX block: wiring, second pass', () => {
 
   test('the device list, the send flag and the busy hook reach the block', () => {
     // The body, not the file: the import line alone names kfxDevicesChanged.
+    // Since parity piece B the list is the route list (`drawn = shown`), and
+    // the block reads the connected devices off it, as it read `devices`.
     const refresh = body(send, 'async function refresh(');
-    const assigned = refresh.indexOf('drawn = devices;');
+    const assigned = refresh.indexOf('drawn = shown;');
     expect(assigned).toBeGreaterThan(-1);
     const told = refresh.indexOf('kfxDevicesChanged()');
     expect(told).toBeGreaterThan(assigned);
     // After the rows as well: a block that hides while it holds the focus
     // hands it to the page's first stop, which should be the new Send
     // button and not the pane (seen in a browser, 2026-09-23).
-    expect(told).toBeGreaterThan(refresh.indexOf('drawEmpty()'));
-    expect(told).toBeGreaterThan(refresh.indexOf('list.append(deviceRow(device))'));
+    const rows = refresh.indexOf('list.append(routeRow(route, shown.chosen))');
+    expect(rows).toBeGreaterThan(-1);
+    expect(told).toBeGreaterThan(rows);
+    expect(send).toContain('devices: () => connectedDevices(drawn)');
     expect(send).toContain('isSending: () => sending');
     expect(send).toContain('onBusy: (on) => { for (const button of buttons()) button.disabled = on; }');
   });

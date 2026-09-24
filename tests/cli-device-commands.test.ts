@@ -1,5 +1,5 @@
 import { afterAll, describe, test, expect } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -26,6 +26,11 @@ afterAll(() => silent.stop(true));
  * asks the CLI to do. A caller that cares passes its own roots. */
 const NO_MOUNTS = mkdtempSync(join(SCRATCH, 'empty-'));
 
+/** Where a spawned `send` that works remembers its route (the app settings
+ * file). Pinned by default like the two device seams, so no test here can
+ * write the real settings file of the machine running the suite. */
+const CONFIG = mkdtempSync(join(SCRATCH, 'config-'));
+
 async function runCli(args: string[], env: Record<string, string> = {}, cwd = ROOT) {
   const proc = Bun.spawn(['bun', `${ROOT}src/cli.ts`, ...args], {
     stdout: 'pipe',
@@ -35,6 +40,7 @@ async function runCli(args: string[], env: Record<string, string> = {}, cwd = RO
       ...process.env,
       SCREEPUB_VOLUME_ROOTS: NO_MOUNTS,
       SCREEPUB_REMARKABLE_ENDPOINT: SILENT_URL,
+      SCREEPUB_CONFIG_DIR: CONFIG,
       ...env,
     },
   });
@@ -143,8 +149,10 @@ describe('screepub send', () => {
   test('--json reports the device and the destination, and the bytes moved', async () => {
     const { root, volume } = kindleRoot();
     const file = book();
+    const config = mkdtempSync(join(SCRATCH, 'config-'));
     const { stdout, exitCode } = await runCli(['send', file, '--json'], {
       SCREEPUB_VOLUME_ROOTS: root,
+      SCREEPUB_CONFIG_DIR: config,
     });
     expect(exitCode).toBe(0);
     const result = soleJson(stdout);
@@ -152,6 +160,22 @@ describe('screepub send', () => {
     expect(result.device).toEqual({ id: volume, kind: 'kindle', name: 'Kindle' });
     expect(result.destination).toBe(join(volume, 'documents', 'Script.epub'));
     expect(readFileSync(result.destination, 'utf8')).toBe('book-bytes');
+    // It worked, so it is remembered: by kind, in the settings file under
+    // SCREEPUB_CONFIG_DIR, as the Send page's choice next time.
+    expect(JSON.parse(readFileSync(join(config, 'settings.json'), 'utf8'))).toEqual({
+      lastRoute: 'device:kindle',
+    });
+  });
+
+  test('a send that fails remembers nothing', async () => {
+    const config = mkdtempSync(join(SCRATCH, 'config-'));
+    const { stdout, exitCode } = await runCli(['send', book(), '--json'], {
+      SCREEPUB_VOLUME_ROOTS: mkdtempSync(join(SCRATCH, 'empty-')),
+      SCREEPUB_CONFIG_DIR: config,
+    });
+    expect(exitCode).toBe(1);
+    expect(soleJson(stdout).error.code).toBe('no-devices');
+    expect(existsSync(join(config, 'settings.json'))).toBe(false);
   });
 
   test('a reMarkable send reports uploaded:true and NO destination key', async () => {

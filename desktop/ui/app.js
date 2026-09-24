@@ -77,6 +77,29 @@ export const argv = {
    *  revealing now (owner decision, 2026-09-23): the window hands over a
    *  path it already has and nothing more. */
   reveal: (path) => ['reveal', path, '--json'],
+
+  /** Every route this script can be sent by, in the engine's order, read-only
+   *  (parity piece B). send.js polls this the way it used to poll `devices`. */
+  routes: (epub) => ['routes', epub, '--json'],
+
+  /** Perform one route: open an app (`apple-books`, `send-to-kindle`,
+   *  `email-to-kindle`), or write a copy (`save-epub`, `save-kindle`) when
+   *  `out` names where. `fountain`/`optionsJson` are only ever sent for a
+   *  save that has to build the file first (the Kindle route). Same
+   *  null-filter idiom as `export` above: an option left at its default
+   *  never reaches the engine as a flag. */
+  route: (key, epub, { out = null, fountain = null, optionsJson = null } = {}) =>
+    ['route', key, epub, '--json',
+      out ? '--out' : null, out,
+      fountain ? '--fountain' : null, fountain,
+      optionsJson ? '--options-json' : null, optionsJson].filter((a) => a !== null),
+
+  /** Open Amazon's Personal Document Settings page, where the Kindle's email
+   *  address and the approved-sender list live (the Send page's email row,
+   *  send.js's emailSetupHint). The ENGINE opens it by this key, as it opens
+   *  every other route's app or page, so the window names no URL. No book
+   *  rides along: the page is about the reader's Amazon account. */
+  emailSetup: () => ['route', 'kindle-email-setup', '--json'],
 };
 
 /** How much of an unparseable answer goes in the message a person reads.
@@ -138,6 +161,12 @@ let settleTimer = null;
  *  back, read-only and never mid-job. `kfx-install` is the one that
  *  actually writes (into Calibre) and stays counted.
  *
+ *  `routes` is not either, for the same reason again: it REPLACES the
+ *  `devices` poll (parity piece B), so it is the thing send.js now polls
+ *  every 2 s, read-only, never mid-job. `route` is the one that actually
+ *  does the work a route promises: it opens an app or writes a file, so
+ *  it stays counted, the way `send` and `kfx-install` already are.
+ *
  *  `app-settings` without `--set` is the same shape again: the Convert page
  *  rereads the settings file every time it is shown, read-only and never
  *  mid-job. WITH `--set` it writes that file, so only the write counts, the
@@ -148,7 +177,8 @@ let settleTimer = null;
  *  can keep running until the file manager window it opened is closed,
  *  which could hold a restart off for as long as that window stayed open. */
 function countsTowardBusy(args) {
-  if (args[0] === argv.devices()[0] || args[0] === argv.kfxStatus()[0]) return false;
+  if (args[0] === argv.devices()[0] || args[0] === argv.kfxStatus()[0]
+    || args[0] === argv.routes('')[0]) return false;
   if (args[0] === argv.appSettings()[0]) return args.includes('--set');
   if (args[0] === argv.reveal('')[0]) return false;
   return true;
@@ -259,43 +289,58 @@ export function isDialogOpen() {
   return dialogOpen;
 }
 
-/** Ask the OS for a screenplay. Null when the reader cancelled — and null,
- *  without opening anything, when a picker is already up. */
-export async function pickScreenplay() {
+/** The one guard every native dialog this window opens goes through, so at
+ *  most one is ever on screen: Ctrl-O and a save button must not be able to
+ *  put up two at once any more than Ctrl-O twice could. Runs `open`,
+ *  resolves whatever it resolves (or null, for a cancel), and always clears
+ *  the guard and calls every onDialogClosed handler afterward, in a
+ *  `finally`, so a rejection still cleans up and still reaches the caller
+ *  (main.js needs the keyboard back either way). */
+async function withOneDialog(open) {
   if (dialogOpen) return null;
   dialogOpen = true;
   try {
-    const path = await tauri().core.invoke('pick_file');
-    return path ?? null;
+    const result = await open();
+    return result ?? null;
   } finally {
     dialogOpen = false;
     for (const handler of dialogClosed) handler();
   }
 }
 
+/** Ask the OS for a screenplay. Null when the reader cancelled — and null,
+ *  without opening anything, when a picker is already up. */
+export async function pickScreenplay() {
+  return withOneDialog(() => tauri().core.invoke('pick_file'));
+}
+
 /** Ask the OS for a folder to save books into. Null when the reader
- *  cancelled, and null, without opening anything, when a picker is already
- *  up: it shares pickScreenplay's one-dialog-at-a-time guard and runs the
- *  same onDialogClosed handlers in its finally, because the two pickers are
- *  both modal and waiting on the same window. */
+ *  cancelled, and null, without opening anything, when a dialog is already
+ *  up: it goes through the same one-dialog guard as pickScreenplay and
+ *  saveDialog, because every one of them is modal and waits on the same
+ *  window. */
 export async function pickFolder({ defaultPath } = {}) {
-  if (dialogOpen) return null;
-  dialogOpen = true;
-  try {
-    const picked = await tauri().dialog.open({ directory: true, defaultPath });
-    // This plugin resolves a bare string for a single-folder pick on every
-    // platform this window ships for, but an array (the multi-select shape)
-    // or an object is normalised here rather than left for the caller to
-    // guess at.
-    if (Array.isArray(picked)) return picked[0] ?? null;
-    if (picked !== null && typeof picked === 'object') {
-      return typeof picked.path === 'string' ? picked.path : null;
-    }
-    return typeof picked === 'string' ? picked : null;
-  } finally {
-    dialogOpen = false;
-    for (const handler of dialogClosed) handler();
+  const picked = await withOneDialog(
+    () => tauri().dialog.open({ directory: true, defaultPath }));
+  // This plugin resolves a bare string for a single-folder pick on every
+  // platform this window ships for, but an array (the multi-select shape)
+  // or an object is normalised here rather than left for the caller to
+  // guess at.
+  if (Array.isArray(picked)) return picked[0] ?? null;
+  if (picked !== null && typeof picked === 'object') {
+    return typeof picked.path === 'string' ? picked.path : null;
   }
+  return typeof picked === 'string' ? picked : null;
+}
+
+/** Ask the OS where to save a copy. Resolves to the chosen path, or null on
+ *  cancel, and null, without opening anything, when a dialog is already up
+ *  (shares pickScreenplay's guard above, the one door this file ever opens
+ *  onto a native dialog). Owner-approved 2026-09-23: the window may show
+ *  this box, but it never writes the file itself. It hands the chosen path
+ *  to `argv.route`, and the engine is what writes there. */
+export async function saveDialog({ defaultPath, filters }) {
+  return withOneDialog(() => tauri().dialog.save({ defaultPath, filters }));
 }
 
 /** Every diagnostic line the engine writes, verbatim, as it writes it.

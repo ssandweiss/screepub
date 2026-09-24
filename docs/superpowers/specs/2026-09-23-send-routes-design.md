@@ -133,10 +133,13 @@ first available row.
 
 `routeFacts()` gathers `RouteFacts`: `listDevices()` (existing), Books at
 `/System/Applications/Books.app` or `/Applications/Books.app`, Amazon's app
-at `/Applications/Send to Kindle.app`, and the mailto handler from the
-`defaults` read above (macOS only; any failure reads as "not Apple Mail",
-which dims the row rather than offering a compose that loses the file).
-Each probe is an injectable seam.
+at `/Applications/Send to Kindle.app` or `~/Applications/Send to
+Kindle.app`, and the mailto handler from the `defaults` read above (macOS
+only). When `defaults` answers that LSHandlers "does not exist", nobody has
+changed a default app: no entry, so Apple Mail. Any other failure reads as
+"not Apple Mail", which dims the row rather than offering a compose that
+loses the file. Each probe is an injectable seam, and the mail probe's
+spawn is one too.
 
 ### Verbs
 
@@ -149,6 +152,9 @@ Each probe is an injectable seam.
   to your iPhone and iPad when Books uses iCloud."). Device routes keep
   their existing `export` then `send` flow, which already narrates its own
   phases; `send` remembers `device:<kind>` when it succeeds.
+- `screepub route kindle-email-setup [--json]`: takes no file, opens
+  Amazon's Personal Document Settings page (the email route's one-time
+  setup), is never remembered, and is available on every platform.
 - `screepub export ... --out <absolute path>`: copies the fresh artifact to
   the path (parents created, written atomically, an existing file replaced:
   the dialog already asked). The path's extension must match the
@@ -178,9 +184,11 @@ Best Kindle quality ...  (piece D, unchanged)
 
 - One row per route, each with its own button (the Send page already
   works row by row; a picker plus one button would be a second idiom).
-  The chosen route is drawn first with the brass button; every other
-  available route has an outline button; unavailable rows are dimmed, have
-  no button, and show their fix.
+  Rows stay in the engine's order, which never moves: the chosen route is
+  marked by the brass button, not by jumping to the top, because a list
+  that reshuffles after every send is a list you have to reread (decided
+  while building, 2026-09-23). Every other available route has an outline
+  button; unavailable rows are dimmed, have no button, and show their fix.
 - Device rows keep what they have today: the volume line, the unproven
   caveat, the export-then-send flow and its phases.
 - Save rows: "Save the EPUB…" opens the save dialog at `<stem>.epub`, then
