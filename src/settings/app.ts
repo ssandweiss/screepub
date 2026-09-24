@@ -19,6 +19,17 @@ export interface AppSettings {
   [other: string]: unknown;
 }
 
+/** The user's home folder as this engine sees it: HOME first (set on POSIX,
+ * and by some Windows shells), then USERPROFILE (Windows' own name for it),
+ * then the OS's own answer. The one copy of that rule: the settings file,
+ * the library's default folder, `app-settings`'s `home` answer and the Send
+ * to Kindle app's ~/Applications all read it here, so none of them can name
+ * a different folder `~` for the same environment. It lives in this module,
+ * the lowest of those, because library.ts already imports this one. */
+export function homeFolder(env: Env): string {
+  return env.HOME || env.USERPROFILE || homedir();
+}
+
 /** Folder + 'settings.json'. SCREEPUB_CONFIG_DIR wins everywhere.
  *
  * Platform and env are parameters, not read from the host, for the same
@@ -36,7 +47,7 @@ export function appSettingsPath(
   // path computed for win32 while running on posix (or back) has to use
   // win32's own join, not the host's.
   const path = platform === 'win32' ? win32 : posix;
-  const home = env.HOME || env.USERPROFILE || homedir();
+  const home = homeFolder(env);
 
   if (platform === 'darwin') {
     return path.join(home, 'Library', 'Application Support', 'Screepub', 'settings.json');

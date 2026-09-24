@@ -8,10 +8,10 @@
 // `defaults read`, never opens Books, and never reads the real disk for
 // Send to Kindle.app.
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { posix } from 'node:path';
 import { listDevices, type ListDevicesOptions } from '../device/list';
 import type { ConnectedDevice } from '../device/types';
+import { homeFolder } from '../settings/app';
 import type { RouteFacts } from './routes';
 
 /** What `mailtoHandler()` can answer:
@@ -61,10 +61,10 @@ const SEND_TO_KINDLE_APP = 'Send to Kindle.app';
 /** Where Amazon's app can be: the Mac's Applications folder, or the home
  *  folder's own (where an installer puts it for a person without admin
  *  rights, and `open -a` finds it there all the same). Home is found the
- *  way the settings file finds it (src/settings/app.ts). Mac paths, so
- *  POSIX joins whatever the host. */
+ *  way the settings file finds it (src/settings/app.ts's homeFolder). Mac
+ *  paths, so POSIX joins whatever the host. */
 function sendToKindleAppPaths(env: Env): string[] {
-  const home = env.HOME || env.USERPROFILE || homedir();
+  const home = homeFolder(env);
   return [
     posix.join('/Applications', SEND_TO_KINDLE_APP),
     posix.join(home, 'Applications', SEND_TO_KINDLE_APP),

@@ -8,9 +8,8 @@
 // do and what existing scripts already rely on.
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, dirname, extname, join, posix, resolve, win32 } from 'node:path';
-import { appSettingsPath, readAppSettings } from './settings/app';
+import { appSettingsPath, homeFolder, readAppSettings } from './settings/app';
 
 /** Names this folder's script, so a second PDF with the same stem cannot
  * quietly overwrite the first one's book. One file per script folder.
@@ -65,17 +64,6 @@ function xdgDocuments(home: string, env: Env): string | null {
   // by convention. Comments and every other XDG_*_DIR are ignored.
   const line = text.split('\n').find((l) => l.trimStart().startsWith('XDG_DOCUMENTS_DIR='));
   return line === undefined ? null : asDocuments(line.slice(line.indexOf('=') + 1));
-}
-
-/** The user's home folder as this engine sees it: HOME first (set on POSIX,
- * and by some Windows shells), then USERPROFILE (Windows' own name for it),
- * then the OS's own answer. Shared by `platformLibraryDefault` and by
- * `app-settings`'s `home` answer, so the two can never name a different
- * folder `~` for the same environment. (`src/settings/app.ts` keeps its own
- * copy of this rule for `appSettingsPath`, on purpose: it is shared with the
- * parallel piece B branch and is not touched here.) */
-export function homeFolder(env: Env): string {
-  return env.HOME || env.USERPROFILE || homedir();
 }
 
 /** SCREEPUB_LIBRARY, trimmed, or `null` when it is unset or blank. The one
