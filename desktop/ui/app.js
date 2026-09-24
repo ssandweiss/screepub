@@ -80,6 +80,13 @@ export const argv = {
       out ? '--out' : null, out,
       fountain ? '--fountain' : null, fountain,
       optionsJson ? '--options-json' : null, optionsJson].filter((a) => a !== null),
+
+  /** Open Amazon's Personal Document Settings page, where the Kindle's email
+   *  address and the approved-sender list live (the Send page's email row,
+   *  send.js's emailSetupHint). The ENGINE opens it by this key, as it opens
+   *  every other route's app or page, so the window names no URL. No book
+   *  rides along: the page is about the reader's Amazon account. */
+  emailSetup: () => ['route', 'kindle-email-setup', '--json'],
 };
 
 /** How much of an unparseable answer goes in the message a person reads.

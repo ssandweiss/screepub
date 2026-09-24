@@ -677,7 +677,23 @@
   max-width: var(--measure);
 }
 
-/* The standing list, shown when nothing is plugged in. */
+/* Every way the book can leave is a row (parity piece B). The detail is the
+ * engine's words for how a route goes, or on a dimmed row its fix: prose, so
+ * it wraps at words, unlike the volume path above it. */
+.route-detail {
+  font-family: var(--font-structure);
+  font-size: var(--text-note);
+  color: var(--ink-muted);
+  margin: var(--space-1) 0 0;
+  max-width: var(--measure);
+}
+/* A route that cannot fire here keeps its place and its fix, dimmed in the
+ * page's own muted ink. Never by opacity: that would dim the email row's
+ * setup link with it, and the link works whether or not the row can. */
+.route-unavailable .device-name { color: var(--ink-muted); }
+.route-hint { margin: var(--space-2) 0 0; max-width: var(--measure); }
+
+/* The standing list of what Screepub can reach, folded under the routes. */
 .reader-row {
   display: grid;
   grid-template-columns: 1fr auto;

@@ -13,10 +13,11 @@
 // combination worth naming, so a validator stricter than the engine (the
 // dangerous direction: the whole Send page would show a failure line
 // instead of routes) cannot pass on hand-written fixtures alone.
-import { beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import type { ConnectedDevice } from '../src/device/types';
 import { preselected, routes, type Route, type RouteFacts } from '../src/export/routes';
+import { kfxSetup } from '../src/export/kfx-setup';
 
 const UI = join(new URL('..', import.meta.url).pathname, 'desktop', 'ui');
 
@@ -27,6 +28,20 @@ type Status = { line: string; bad: boolean };
 type SendModule = {
   NO_MESSAGE: string;
   NO_NOTE: string;
+  NO_ROUTES: string;
+  NO_EXTENSION: string;
+  LEDE: string;
+  SETUP_BUTTON: string;
+  SETUP_TITLE: string;
+  connectedDevices: (shown: unknown) => RouteDevice[] | null;
+  sameRoutes: (a: unknown, b: unknown) => boolean;
+  performerFor: (route: unknown) => string | null;
+  routeLines: (route: unknown, platform: unknown) =>
+    { title: string; detail: string; where: string | null; caveat: string | null };
+  kindleFileFrom: (built: unknown) => [string, Record<string, unknown>];
+  routesFailure: (answer: unknown) => string;
+  caveatFor: (device: unknown, platform: unknown) => string | null;
+  whereLine: (device: unknown) => string;
   routesFrom: (answer: unknown) => { routes: Route[]; chosen: string } | null;
   isDeviceRoute: (route: unknown) => boolean;
   buttonClassFor: (route: unknown, chosenId: unknown) => string | null;
@@ -551,16 +566,799 @@ describe('emailSetupHint: the one route that needs a first-time step', () => {
   });
 });
 
+// ------------------------------------------------ what the page draws (W3)
+
+describe('connectedDevices: what is plugged in, read off the route list', () => {
+  test('the device of every available device row, in the engine’s order', () => {
+    const list = routes({
+      platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: true,
+      devices: [kindle, kobo, rm],
+    });
+    const shown = send.routesFrom(answerFor(list, undefined))!;
+    const got = send.connectedDevices(shown)!;
+    expect(got.map((d) => d.kind)).toEqual(['kindle', 'kobo', 'remarkable']);
+    // Exactly the device objects the rows carry, in the shape `send --device`
+    // takes, so the KFX block and ctx.state.devices read what they read from
+    // `devices` before.
+    expect(got).toEqual(shown.routes.filter((r) => r.device).map((r) => r.device!));
+    // Copies, so a reader of ctx.state.devices cannot edit the rows on screen.
+    expect(got[0]).not.toBe(shown.routes[0]!.device);
+  });
+
+  test('a dimmed device row is not a connected device', () => {
+    // Nothing plugged in: every device row is dimmed, and the answer is an
+    // empty list, which is what the KFX block reads as "the reader is still
+    // deciding" (kindleRelevant).
+    const list = routes({
+      platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: true, devices: [],
+    });
+    expect(send.connectedDevices(send.routesFrom(answerFor(list, undefined)))).toEqual([]);
+  });
+
+  test('no list on screen is not known, rather than nothing connected', () => {
+    // null keeps the KFX block from flashing up before the first answer.
+    for (const shown of [null, undefined, {}, { routes: 'x' }]) {
+      expect(send.connectedDevices(shown)).toBe(null);
+    }
+  });
+
+  test('on every engine answer, one device per available device row', () => {
+    for (const facts of everyFacts()) {
+      const list = routes(facts);
+      const got = send.connectedDevices(send.routesFrom(answerFor(list, undefined)))!;
+      expect(got.length).toBe(facts.devices.length);
+    }
+  });
+});
+
+describe('sameRoutes: the rows are rebuilt only when something on them changed', () => {
+  const list = routes({
+    platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: false,
+    devices: [kindle],
+  });
+  const shown = () => send.routesFrom(answerFor(list, undefined))!;
+
+  test('the same answer twice is the same list', () => {
+    // The poll ticks every two seconds; a rebuild on every tick would take
+    // the focus off a button someone had just tabbed to.
+    expect(send.sameRoutes(shown(), shown())).toBe(true);
+  });
+
+  test('a different choice, detail, availability, title, button or order is not', () => {
+    const base = shown();
+    const changed = (edit: (s: ReturnType<typeof shown>) => void) => {
+      const next = structuredClone(base);
+      edit(next);
+      return send.sameRoutes(base, next);
+    };
+    expect(changed((s) => { s.chosen = 'save-epub'; })).toBe(false);
+    expect(changed((s) => { s.routes[1]!.detail = 'something else'; })).toBe(false);
+    expect(changed((s) => { s.routes[1]!.title = 'Books'; })).toBe(false);
+    expect(changed((s) => { s.routes[1]!.button = 'Open'; })).toBe(false);
+    expect(changed((s) => { s.routes[0]!.id = 'device:kindle#/Volumes/KINDLE2'; })).toBe(false);
+    expect(changed((s) => {
+      const r = s.routes[1]!;
+      r.available = false;
+      (r as { unavailable?: string }).unavailable = 'setup';
+    })).toBe(false);
+    expect(changed((s) => { s.routes.reverse(); })).toBe(false);
+    expect(changed((s) => { s.routes.pop(); })).toBe(false);
+  });
+
+  test('nothing on screen is never the same as a list', () => {
+    expect(send.sameRoutes(null, shown())).toBe(false);
+    expect(send.sameRoutes(shown(), null)).toBe(false);
+    expect(send.sameRoutes(null, null)).toBe(false);
+  });
+});
+
+describe('performerFor: which flow a row’s button runs', () => {
+  test('a device or a reMarkable goes through export then send', () => {
+    for (const key of ['device:kindle', 'device:kobo', 'device:someday', 'remarkable']) {
+      expect(`${key}: ${send.performerFor({ key })}`).toBe(`${key}: device`);
+    }
+  });
+
+  test('each save is its own flow, and every app or page is opened by the engine', () => {
+    expect(send.performerFor({ key: 'save-epub' })).toBe('save-epub');
+    expect(send.performerFor({ key: 'save-kindle' })).toBe('save-kindle');
+    for (const key of ['apple-books', 'send-to-kindle', 'email-to-kindle']) {
+      expect(`${key}: ${send.performerFor({ key })}`).toBe(`${key}: open`);
+    }
+    // A route this window is older than is still handed to the engine, which
+    // performs it or refuses in its own words, rather than drawn as a dead
+    // button.
+    expect(send.performerFor({ key: 'someday-route' })).toBe('open');
+  });
+
+  test('the email row’s setup link is its own flow, and the three names for it agree', async () => {
+    const hint = send.emailSetupHint({ key: 'email-to-kindle' })!;
+    expect(send.performerFor({ key: hint.key })).toBe('setup');
+    // The key the hint carries is the one app.js's builder sends: one page,
+    // named once on each side of the boundary, checked here to match.
+    const { argv } = await import(join(UI, 'app.js'));
+    expect(argv.emailSetup()).toContain(hint.key);
+  });
+
+  test('a row with no key runs nothing', () => {
+    for (const route of [null, undefined, {}, { key: 7 }, { key: '  ' }]) {
+      expect(send.performerFor(route)).toBe(null);
+    }
+  });
+
+  test('on every engine answer, every available row has a flow', () => {
+    for (const facts of everyFacts()) {
+      for (const route of routes(facts)) {
+        if (!route.available) continue;
+        const how = send.performerFor(route);
+        expect(`${route.id}: ${how !== null && how !== 'setup'}`).toBe(`${route.id}: true`);
+        expect(how === 'device').toBe(route.device !== undefined);
+      }
+    }
+  });
+});
+
+describe('routeLines: what a row says', () => {
+  test('a device row keeps its volume line and its unproven caveat, as before routes', () => {
+    const list = routes({
+      platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: true,
+      devices: [kindle, kobo, rm],
+    });
+    const rows = send.routesFrom(answerFor(list, undefined))!.routes;
+    const [k, ko, r] = [rows[0]!, rows[1]!, rows[2]!];
+    expect(send.routeLines(k, 'MacIntel')).toEqual({
+      title: 'Kindle', detail: k.detail, where: '/Volumes/Kindle', caveat: null,
+    });
+    const kobos = send.routeLines(ko, 'MacIntel');
+    expect(kobos.where).toBe('/Volumes/KOBOeReader');
+    expect(kobos.caveat).toBe(send.caveatFor(ko.device, 'MacIntel'));
+    expect(kobos.caveat).not.toBe(null);
+    // The Kindle is proven on a Mac only.
+    expect(send.routeLines(k, 'Linux x86_64').caveat).not.toBe(null);
+    // A reMarkable never mounts: the same line it had before routes.
+    expect(send.routeLines(r, 'MacIntel').where).toBe(send.whereLine(r.device));
+  });
+
+  test('every other row, available or dimmed, is its title and the engine’s detail', () => {
+    const list = routes({
+      platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: false, devices: [],
+    });
+    for (const route of send.routesFrom(answerFor(list, undefined))!.routes) {
+      expect(send.routeLines(route, 'MacIntel')).toEqual({
+        title: route.title, detail: route.detail, where: null, caveat: null,
+      });
+    }
+  });
+});
+
+describe('kindleFileFrom: what the Kindle save learns from the export', () => {
+  test('the extension and the engine’s label for the file it built', () => {
+    expect(send.kindleFileFrom({
+      ok: true, path: '/lib/s.azw3', extension: 'azw3', label: 'AZW3 for USB sideload',
+    })).toEqual(['built', { extension: 'azw3', label: 'AZW3 for USB sideload' }]);
+    expect(send.kindleFileFrom({ ok: true, extension: '.kfx', label: '  KFX  ' }))
+      .toEqual(['built', { extension: 'kfx', label: 'KFX' }]);
+    // No label: the filter falls back to the extension (saveFiltersFor).
+    expect(send.kindleFileFrom({ ok: true, extension: 'mobi' }))
+      .toEqual(['built', { extension: 'mobi', label: null }]);
+  });
+
+  test('a refusal is the export’s own sentence, and nothing is saved', () => {
+    const refused = { ok: false, error: { code: 'export-failed', message: 'Calibre could not build it.' } };
+    expect(send.kindleFileFrom(refused)).toEqual(['failed', { detail: 'Calibre could not build it.' }]);
+    expect(send.kindleFileFrom({ ok: false })).toEqual(['failed', { detail: send.NO_MESSAGE }]);
+    expect(send.kindleFileFrom(null)).toEqual(['failed', { detail: send.NO_MESSAGE }]);
+    expect(send.statusFor(...send.kindleFileFrom(refused) as [string, { detail: string }]).bad).toBe(true);
+  });
+
+  test('a success that does not say what it built opens no dialog', () => {
+    // The extension names the file in the dialog and filters it; one that is
+    // missing, or is not a bare word, is not something to hand a Save box.
+    for (const extension of [undefined, null, '', '  ', 7, '../x', 'az w3', '.']) {
+      const [phase, detail] = send.kindleFileFrom({ ok: true, extension, label: 'AZW3' });
+      expect(`${JSON.stringify(extension)}: ${phase}`).toBe(`${JSON.stringify(extension)}: failed`);
+      expect(detail.detail).toBe(send.NO_EXTENSION);
+    }
+  });
+});
+
+describe('routesFailure: the line in place of a list the page cannot draw', () => {
+  test('a refusal is the engine’s own sentence', () => {
+    expect(send.routesFailure({ ok: false, error: { code: 'unreadable', message: 'Cannot read the book.' } }))
+      .toBe('Cannot read the book.');
+    expect(send.routesFailure({ ok: false })).toBe(send.NO_MESSAGE);
+    expect(send.routesFailure(null)).toBe(send.NO_MESSAGE);
+  });
+
+  test('an ok answer in the wrong shape says so, not that the engine refused', () => {
+    expect(send.routesFailure({ ok: true, routes: 'x' })).toBe(send.NO_ROUTES);
+    expect(send.NO_ROUTES).not.toBe(send.NO_MESSAGE);
+  });
+});
+
 describe('the words this adds', () => {
   test('carry no em dash', () => {
     const lines = [
       send.NO_NOTE,
+      send.NO_ROUTES,
+      send.NO_EXTENSION,
+      send.LEDE,
+      send.SETUP_BUTTON,
+      send.SETUP_TITLE,
       send.emailSetupHint({ key: 'email-to-kindle' })!.line,
       send.statusFor('opening', { route: { title: 'Apple Books' } }).line,
+      send.statusFor('opening', { route: { title: send.SETUP_TITLE } }).line,
       send.statusFor('opening').line,
       send.statusFor('saving').line,
       send.statusFor('building-kindle').line,
     ];
     for (const line of lines) expect(line).not.toContain(EM_DASH);
+  });
+
+  test('the page no longer promises that nothing leaves this computer', () => {
+    // It did when every row was a cable. Send to Kindle and email go through
+    // Amazon, so the page-wide promise would now be false; the device rows
+    // still say it, in the engine's words, where it is true.
+    expect(send.LEDE).not.toContain('nothing leaves');
+  });
+});
+
+// ------------------------------------------- the page, drawn and performed
+
+describe('the Send page, drawn from the route list and performed row by row', () => {
+  // A stub document just big enough for dom.js, focus.js and what send.js and
+  // kfx.js ask of a node; the model is desktop-ui.test.ts's "what a reader
+  // sees across redraws" block. activeElement falls back to the body when the
+  // focused node is detached, disabled or inside something hidden, as a
+  // browser's focus fixup does. The engine and the save dialog are queues of
+  // unanswered calls the test answers in whatever order it wants, and the
+  // two-second poll is a callback the test fires by hand.
+  class StubNode {
+    childNodes: StubNode[] = [];
+    parentNode: StubNode | null = null;
+    attrs = new Map<string, string>();
+    listeners = new Map<string, ((event: unknown) => void)[]>();
+    hidden = false;
+    disabled = false;
+    className = '';
+    data = '';
+    constructor(readonly tagName: string, readonly doc: StubDocument) {}
+    get firstChild() { return this.childNodes[0] ?? null; }
+    append(...nodes: (StubNode | string)[]) {
+      for (const each of nodes) {
+        const node = typeof each === 'string' ? this.doc.createTextNode(each) : each;
+        node.parentNode?.removeChild(node);
+        node.parentNode = this;
+        this.childNodes.push(node);
+      }
+    }
+    removeChild(node: StubNode) {
+      this.childNodes.splice(this.childNodes.indexOf(node), 1);
+      node.parentNode = null;
+      return node;
+    }
+    get textContent(): string {
+      return this.tagName === '#text' ? this.data : this.childNodes.map((c) => c.textContent).join('');
+    }
+    set textContent(value: string) {
+      if (this.tagName === '#text') { this.data = value; return; }
+      for (const child of this.childNodes) child.parentNode = null;
+      this.childNodes = [];
+      if (value !== '') this.append(value);
+    }
+    setAttribute(name: string, value: string) { this.attrs.set(name, value); }
+    getAttribute(name: string) { return this.attrs.get(name) ?? null; }
+    get dataset(): Record<string, string> {
+      return Object.fromEntries([...this.attrs].filter(([k]) => k.startsWith('data-'))
+        .map(([k, v]) => [k.slice(5).replace(/-(\w)/g, (_, c: string) => c.toUpperCase()), v]));
+    }
+    get classList() {
+      const names = () => this.className.split(/\s+/).filter(Boolean);
+      return {
+        contains: (name: string) => names().includes(name),
+        toggle: (name: string, on: boolean) => {
+          const rest = names().filter((n) => n !== name);
+          this.className = (on ? [...rest, name] : rest).join(' ');
+          return on;
+        },
+      };
+    }
+    addEventListener(type: string, fn: (event: unknown) => void) {
+      this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
+    }
+    click() {
+      if (this.disabled) return;
+      for (const fn of this.listeners.get('click') ?? []) fn({ type: 'click' });
+    }
+    get isConnected(): boolean {
+      let node: StubNode = this;
+      while (node.parentNode !== null) node = node.parentNode;
+      return node === this.doc.body;
+    }
+    contains(other: StubNode | null): boolean {
+      for (let node = other; node !== null; node = node.parentNode) if (node === this) return true;
+      return false;
+    }
+    closest(selector: string): StubNode | null {
+      if (selector !== '[hidden]') throw new Error(`the stub has no closest(${selector})`);
+      for (let node: StubNode | null = this; node !== null; node = node.parentNode) {
+        if (node.hidden) return node;
+      }
+      return null;
+    }
+    /** A bare tag name only, which is all anything here asks for. */
+    querySelectorAll(tag: string): StubNode[] {
+      const found: StubNode[] = [];
+      const walk = (node: StubNode) => {
+        for (const child of node.childNodes) {
+          if (child.tagName === tag.toUpperCase()) found.push(child);
+          walk(child);
+        }
+      };
+      walk(this);
+      return found;
+    }
+    focus() {
+      if (this.isConnected && !this.disabled && this.closest('[hidden]') === null) this.doc.focused = this;
+    }
+    /** Every node under this one, in document order. */
+    all(): StubNode[] {
+      const found: StubNode[] = [];
+      const walk = (node: StubNode) => { for (const c of node.childNodes) { found.push(c); walk(c); } };
+      walk(this);
+      return found;
+    }
+  }
+  class StubDocument {
+    body: StubNode;
+    focused: StubNode | null = null;
+    constructor() { this.body = new StubNode('BODY', this); }
+    createElement(tag: string) { return new StubNode(tag.toUpperCase(), this); }
+    createTextNode(value: string) {
+      const node = new StubNode('#text', this);
+      node.data = value;
+      return node;
+    }
+    get activeElement() {
+      const node = this.focused;
+      if (node === null || !node.isConnected || node.disabled || node.closest('[hidden]') !== null) {
+        return this.body;
+      }
+      return node;
+    }
+  }
+  type SendDrawing = {
+    mount: (node: StubNode, ctx: unknown) => void;
+    show: () => void;
+    hide: () => void;
+    scriptChanged: () => void;
+  };
+
+  const g = globalThis as unknown as {
+    window?: unknown; document?: unknown;
+    setInterval: typeof setInterval; clearInterval: typeof clearInterval;
+  };
+  const realSetInterval = g.setInterval;
+  const realClearInterval = g.clearInterval;
+  let hideLast: (() => void) | null = null;
+  afterEach(() => {
+    hideLast?.();
+    hideLast = null;
+    g.setInterval = realSetInterval;
+    g.clearInterval = realClearInterval;
+    delete g.window;
+    delete g.document;
+  });
+
+  const EPUB = '/lib/field-station/Field Station.epub';
+  const FOUNTAIN = '/lib/field-station/Field Station.fountain';
+  const script = () => ({
+    epubPath: EPUB, fountainPath: FOUNTAIN, settings: { dialogueSideMarginPct: 27 },
+  });
+  /** The engine's answer for these facts, remembering `last`. */
+  const listed = (devices: ConnectedDevice[], last?: string, mail = true) => {
+    const list = routes({ platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: mail, devices });
+    return { ok: true, routes: list, chosen: preselected(list, last).id };
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  let fresh = 0;
+  /** kfx.js's probe answer: by default "no checklist", which keeps the block
+   *  out of tests that are not about it. */
+  async function world(kfxAnswer: unknown = { ok: false }) {
+    const doc = new StubDocument();
+    const pending: { args: string[]; resolve: (stdout: string) => void }[] = [];
+    const dialogs: { options: { defaultPath: string; filters: unknown }; resolve: (path: string | null) => void }[] = [];
+    let tick: (() => void) | null = null;
+    g.document = doc;
+    g.window = {
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      __TAURI__: {
+        core: {
+          invoke: (_cmd: string, { args }: { args: string[] }) =>
+            new Promise<string>((resolve) => pending.push({ args, resolve })),
+        },
+        dialog: {
+          save: (options: { defaultPath: string; filters: unknown }) =>
+            new Promise<string | null>((resolve) => dialogs.push({ options, resolve })),
+        },
+      },
+    };
+    g.setInterval = ((fn: () => void) => { tick = fn; return 1; }) as unknown as typeof setInterval;
+    g.clearInterval = (() => { tick = null; }) as unknown as typeof clearInterval;
+    // A module of its own per test: send.js keeps the page's state at module
+    // level. kfx.js and app.js are shared, so every call a test starts is
+    // answered before it ends.
+    fresh += 1;
+    const send = (await import(`${join(UI, 'send.js')}?drawn-${fresh}`)) as SendDrawing;
+    const pane = doc.createElement('section');
+    doc.body.append(pane);
+    const ctx = {
+      state: { script: script() as unknown, devices: [] as unknown[] },
+      restored: 0,
+      goTo: () => undefined,
+      restoreFocus: () => { ctx.restored += 1; },
+    };
+    send.mount(pane, ctx);
+    const w = {
+      doc, send, pane, ctx, pending, dialogs,
+      /** The verbs asked so far and not yet answered. */
+      asked: () => pending.map((p) => p.args[0]),
+      /** Answer the oldest unanswered call to `verb`. */
+      async answer(verb: string, value: unknown) {
+        const at = pending.findIndex((p) => p.args[0] === verb);
+        if (at < 0) throw new Error(`nothing asked the engine for ${verb}: ${w.asked()}`);
+        const [call] = pending.splice(at, 1);
+        call!.resolve(JSON.stringify(value));
+        await settle();
+        return call!.args;
+      },
+      /** The newest unanswered call to `verb`, answered first (a race). */
+      async answerNewest(verb: string, value: unknown) {
+        const at = pending.map((p) => p.args[0]).lastIndexOf(verb);
+        if (at < 0) throw new Error(`nothing asked the engine for ${verb}`);
+        const [call] = pending.splice(at, 1);
+        call!.resolve(JSON.stringify(value));
+        await settle();
+      },
+      async choose(path: string | null) {
+        const dialog = dialogs.shift();
+        if (dialog === undefined) throw new Error('no save dialog is open');
+        dialog.resolve(path);
+        await settle();
+        return dialog.options;
+      },
+      poll() {
+        if (tick === null) throw new Error('the page is not polling');
+        tick();
+      },
+      polling: () => tick !== null,
+      list: () => pane.all().find((n) => n.className === 'devices')!,
+      rows: () => w.list().childNodes.filter((n) => n.className.includes('device-row')),
+      titles: () => w.rows().map((r) => r.all().find((n) => n.className === 'device-name')!.textContent),
+      buttons: () => w.list().querySelectorAll('button'),
+      button(label: string) {
+        const found = w.buttons().find((b) => b.textContent === label);
+        if (found === undefined) throw new Error(`no ${label} button: ${w.buttons().map((b) => b.textContent)}`);
+        return found;
+      },
+      status: () => pane.all().find((n) => n.className.split(' ').includes('send-status'))!,
+      fault: () => w.list().all().find((n) => n.className === 'fault-body')?.textContent ?? null,
+    };
+    send.show();
+    hideLast = () => send.hide();
+    // kfx.js asks what the machine can do when the page shows; its answer is
+    // not what these tests are about.
+    if (w.asked().includes('kfx-status')) await w.answer('kfx-status', kfxAnswer);
+    return w;
+  }
+
+  test('it polls routes, not devices, for this script’s book', async () => {
+    const w = await world();
+    expect(w.asked()).toEqual(['routes']);
+    expect(await w.answer('routes', listed([]))).toEqual(['routes', EPUB, '--json']);
+    w.poll();
+    expect(w.asked()).toEqual(['routes']);
+    await w.answer('routes', listed([]));
+    w.send.hide();
+    expect(w.polling()).toBe(false);
+  });
+
+  test('every row in the engine’s order: brass for the chosen one, outline for the rest, dimmed ones with no button', async () => {
+    const w = await world();
+    const answer = listed([kindle, kobo], 'apple-books');
+    await w.answer('routes', answer);
+    expect(w.titles()).toEqual(answer.routes.map((r) => r.title));
+    const rows = w.rows();
+    answer.routes.forEach((route, i) => {
+      const row = rows[i]!;
+      const buttons = row.querySelectorAll('button').filter((b) => b.getAttribute('data-route') === route.id);
+      if (route.available) {
+        expect(row.className).toBe('device-row');
+        expect(buttons.map((b) => b.className)).toEqual([route.id === 'apple-books' ? 'btn btn-brad' : 'btn btn-outline']);
+        expect(buttons[0]!.textContent).toBe(route.button);
+      } else {
+        expect(row.className).toBe('device-row route-unavailable');
+        expect(buttons).toEqual([]);
+      }
+      // The engine's detail on every row, as written (the fix on a dimmed one).
+      expect(row.all().find((n) => n.className === 'route-detail')!.textContent).toBe(route.detail);
+    });
+    // A Kindle row keeps its volume line, a Kobo row its unproven caveat.
+    expect(rows[0]!.all().find((n) => n.className === 'device-where')!.textContent).toBe('/Volumes/Kindle');
+    expect(rows[1]!.all().some((n) => n.className === 'device-caveat')).toBe(true);
+    // Dimmed readers say what the old "Nothing plugged in" said, per reader.
+    const tolino = rows[answer.routes.findIndex((r) => r.key === 'device:tolino')]!;
+    expect(tolino.textContent).toContain('plug in over USB to send');
+    // What is connected reaches the rest of the window.
+    expect((w.ctx.state.devices as { kind: string }[]).map((d) => d.kind)).toEqual(['kindle', 'kobo']);
+    // The reach table is still there, folded, after the list.
+    const reach = w.pane.childNodes.find((n) => n.tagName === 'DETAILS')!;
+    expect(reach.className).toBe('reach');
+    expect(w.pane.childNodes.indexOf(reach)).toBeGreaterThan(w.pane.childNodes.indexOf(w.list()));
+  });
+
+  test('a refusal draws the engine’s sentence and a malformed list draws its own line, never a short list', async () => {
+    const w = await world();
+    await w.answer('routes', { ok: false, error: { code: 'unreadable', message: 'Cannot read the book.' } });
+    expect(w.fault()).toBe('Cannot read the book.');
+    expect(w.buttons()).toEqual([]);
+    w.poll();
+    const broken = listed([]);
+    (broken.routes[0] as { title: unknown }).title = '';
+    await w.answer('routes', broken);
+    expect(w.fault()).toBe('The engine listed the ways to send this book in a shape this window cannot read.');
+    w.poll();
+    await w.answer('routes', listed([]));
+    expect(w.fault()).toBe(null);
+    expect(w.buttons().length).toBeGreaterThan(0);
+  });
+
+  test('the same answer again leaves every row alone, so the keyboard stays put', async () => {
+    const w = await world();
+    await w.answer('routes', listed([kindle]));
+    const save = w.button('Save the EPUB…');
+    save.focus();
+    w.poll();
+    await w.answer('routes', listed([kindle]));
+    expect(save.isConnected).toBe(true);
+    expect(w.doc.activeElement).toBe(save);
+    expect(w.ctx.restored).toBe(0);
+  });
+
+  test('a changed list is rebuilt, and the keyboard goes back to the same route’s button', async () => {
+    const w = await world();
+    await w.answer('routes', listed([]));
+    w.button('Save the EPUB…').focus();
+    w.poll();
+    await w.answer('routes', listed([kindle])); // a Kindle turned up: a new first row
+    const now = w.doc.activeElement;
+    expect(now.textContent).toBe('Save the EPUB…');
+    expect(now.isConnected).toBe(true);
+    expect(w.ctx.restored).toBe(0);
+  });
+
+  test('when the focused route is gone, the page’s own plan takes the keyboard', async () => {
+    const w = await world();
+    await w.answer('routes', listed([kindle]));
+    w.button('Copy to Kindle').focus();
+    w.poll();
+    await w.answer('routes', listed([])); // unplugged
+    expect(w.ctx.restored).toBe(1);
+  });
+
+  test('a poll that was out when a route began lands without touching the rows', async () => {
+    // A rebuild mid-route would hand back fresh, enabled buttons and let a
+    // second route (or a send) start while the first is still writing.
+    const w = await world();
+    await w.answer('routes', listed([]));
+    w.poll();
+    w.button('Add to Apple Books').click();
+    await w.answer('routes', listed([kindle])); // a Kindle turned up meanwhile
+    expect(w.titles()[0]).toBe('Apple Books'); // not the connected Kindle's row
+    expect(w.buttons().every((b) => b.disabled)).toBe(true);
+    await w.answer('route', { ok: true, note: 'Added to Apple Books.' });
+    await w.answer('routes', listed([kindle], 'apple-books'));
+    expect(w.titles()[0]).toBe('Kindle');
+  });
+
+  test('an answer about the last script is not drawn on the next one’s page', async () => {
+    // The routes answer is about a BOOK: a refusal for the old one ("cannot
+    // read it") would stand under the new one's title as if it were its.
+    const w = await world();
+    w.ctx.state.script = { ...script(), epubPath: '/lib/other/Other.epub' };
+    w.send.scriptChanged();
+    if (w.asked().includes('kfx-status')) await w.answer('kfx-status', { ok: false });
+    await w.answer('routes', { ok: false, error: { code: 'unreadable', message: 'Cannot read the book.' } });
+    expect(w.fault()).toBe(null);
+    expect(w.list().textContent).toBe('Looking for every way to send it…');
+    w.poll();
+    expect(await w.answer('routes', listed([]))).toEqual(['routes', '/lib/other/Other.epub', '--json']);
+    expect(w.buttons().length).toBeGreaterThan(0);
+  });
+
+  test('the KFX block waits for the first list, then follows what is plugged in', async () => {
+    // Kindle advice is for Kindles: shown with nothing connected (the reader
+    // is deciding) or a Kindle, hidden with only other readers, and not
+    // shown at all before the first answer, or it would flash up and vanish.
+    const notReady = {
+      ok: true,
+      ...kfxSetup({ calibre: true, previewer: true, pluginInstalled: false, ready: false }, 'darwin'),
+    };
+    const w = await world(notReady);
+    const block = w.pane.all().find((n) => n.className === 'kfx-setup')!;
+    expect(block.hidden).toBe(true);
+    await w.answer('routes', listed([]));
+    expect(block.hidden).toBe(false);
+    w.poll();
+    await w.answer('routes', listed([kobo]));
+    expect(block.hidden).toBe(true);
+    w.poll();
+    await w.answer('routes', listed([kobo, kindle]));
+    expect(block.hidden).toBe(false);
+  });
+
+  test('Apple Books: every button dead while it runs, the engine’s note after, then the list again', async () => {
+    const w = await world();
+    await w.answer('routes', listed([kindle], 'device:kindle'));
+    w.button('Add to Apple Books').click();
+    expect(w.status().textContent).toBe('Opening Apple Books…');
+    expect(w.buttons().every((b) => b.disabled)).toBe(true);
+    // The poll leaves the rows alone while it runs.
+    w.poll();
+    expect(w.asked()).toEqual(['route']);
+    const args = await w.answer('route', { ok: true, key: 'apple-books', note: 'Added to Apple Books.' });
+    expect(args).toEqual(['route', 'apple-books', EPUB, '--json']);
+    expect(w.status().textContent).toBe('Added to Apple Books.');
+    expect(w.status().classList.contains('bad')).toBe(false);
+    expect(w.buttons().every((b) => !b.disabled)).toBe(true);
+    // Asked again at once, so the brass moves to the route just used.
+    expect(w.asked()).toEqual(['routes']);
+    await w.answer('routes', listed([kindle], 'apple-books'));
+    expect(w.button('Add to Apple Books').className).toBe('btn btn-brad');
+    expect(w.button('Copy to Kindle').className).toBe('btn btn-outline');
+  });
+
+  test('a refused route says the engine’s sentence as an alarm, and asks for nothing more', async () => {
+    const w = await world();
+    await w.answer('routes', listed([]));
+    w.button('Send to Kindle web').click();
+    await w.answer('route', { ok: false, error: { code: 'open-failed', message: 'Could not open the page.' } });
+    expect(w.status().textContent).toBe('Could not open the page.');
+    expect(w.status().classList.contains('bad')).toBe(true);
+    expect(w.asked()).toEqual([]);
+  });
+
+  test('an older poll that lands after the repoll cannot put the brass back', async () => {
+    const w = await world();
+    await w.answer('routes', listed([], 'save-kindle'));
+    w.poll(); // out before the route below starts...
+    w.button('Add to Apple Books').click();
+    await w.answer('route', { ok: true, note: 'Added to Apple Books.' });
+    expect(w.asked()).toEqual(['routes', 'routes']);
+    await w.answerNewest('routes', listed([], 'apple-books'));
+    await w.answer('routes', listed([], 'save-kindle')); // ...and back last
+    expect(w.button('Add to Apple Books').className).toBe('btn btn-brad');
+  });
+
+  test('Save the EPUB: the Save box first, named after the book; a cancel does nothing and says nothing', async () => {
+    const w = await world();
+    await w.answer('routes', listed([]));
+    w.button('Save the EPUB…').click();
+    expect(w.asked()).toEqual([]);
+    const options = await w.choose(null);
+    expect(options).toEqual({ defaultPath: 'Field Station.epub', filters: [{ name: 'EPUB', extensions: ['epub'] }] });
+    expect(w.asked()).toEqual([]);
+    expect(w.status().textContent).toBe('');
+    expect(w.buttons().every((b) => !b.disabled)).toBe(true);
+
+    w.button('Save the EPUB…').click();
+    await w.choose('/Users/me/Desktop/Field Station.epub');
+    expect(w.status().textContent).toBe('Saving…');
+    const args = await w.answer('route', { ok: true, key: 'save-epub', path: '/Users/me/Desktop/Field Station.epub', note: 'Saved.' });
+    expect(args).toEqual(['route', 'save-epub', EPUB, '--json', '--out', '/Users/me/Desktop/Field Station.epub']);
+    expect(w.status().textContent).toBe('Saved.');
+    expect(w.asked()).toEqual(['routes']);
+    await w.answer('routes', listed([], 'save-epub'));
+  });
+
+  test('Save a Kindle file: built first with this script’s settings, then the Save box, then the copy', async () => {
+    const w = await world();
+    await w.answer('routes', listed([]));
+    w.button('Save a Kindle file…').click();
+    await settle(); // past ensureSettings(), which has nothing to fetch here
+    expect(w.status().textContent).toBe('Building the Kindle file (Kindle Previewer can take about twenty seconds)…');
+    expect(w.dialogs).toEqual([]);
+    const options = JSON.stringify({ dialogueSideMarginPct: 27 });
+    const built = await w.answer('export', {
+      ok: true, path: '/lib/field-station/Field Station.azw3', extension: 'azw3', label: 'AZW3 for USB sideload',
+    });
+    expect(built).toEqual(['export', EPUB, '--json', '--for', 'kindle', '--fountain', FOUNTAIN, '--options-json', options]);
+    // The wait is over while the Save box is up.
+    expect(w.status().textContent).toBe('');
+    const dialog = await w.choose('/Users/me/Desktop/Field Station.azw3');
+    expect(dialog).toEqual({
+      defaultPath: 'Field Station.azw3', filters: [{ name: 'AZW3 for USB sideload', extensions: ['azw3'] }],
+    });
+    const args = await w.answer('route', { ok: true, key: 'save-kindle', note: 'Saved the AZW3.' });
+    expect(args).toEqual([
+      'route', 'save-kindle', EPUB, '--json', '--out', '/Users/me/Desktop/Field Station.azw3',
+      '--fountain', FOUNTAIN, '--options-json', options,
+    ]);
+    expect(w.status().textContent).toBe('Saved the AZW3.');
+    await w.answer('routes', listed([], 'save-kindle'));
+  });
+
+  test('Save a Kindle file: a refused build is said, and no Save box opens; a cancel after it asks nothing more', async () => {
+    const w = await world();
+    await w.answer('routes', listed([]));
+    w.button('Save a Kindle file…').click();
+    await settle();
+    await w.answer('export', { ok: false, error: { code: 'export-failed', message: 'Calibre could not build it.' } });
+    expect(w.dialogs).toEqual([]);
+    expect(w.status().textContent).toBe('Calibre could not build it.');
+    expect(w.status().classList.contains('bad')).toBe(true);
+    expect(w.asked()).toEqual([]);
+
+    w.button('Save a Kindle file…').click();
+    await settle();
+    await w.answer('export', { ok: true, path: '/lib/x.kfx', extension: 'kfx', label: 'KFX' });
+    await w.choose(null);
+    expect(w.asked()).toEqual([]);
+    expect(w.status().textContent).toBe('');
+    expect(w.buttons().every((b) => !b.disabled)).toBe(true);
+  });
+
+  test('a script replaced mid-route hears nothing about it', async () => {
+    const w = await world();
+    await w.answer('routes', listed([]));
+    w.button('Add to Apple Books').click();
+    w.ctx.state.script = { ...script(), epubPath: '/lib/other/Other.epub' };
+    w.send.scriptChanged();
+    // The new page's KFX block asks about the machine; not this test's business.
+    if (w.asked().includes('kfx-status')) await w.answer('kfx-status', { ok: false });
+    await w.answer('route', { ok: true, note: 'Added to Apple Books.' });
+    expect(w.status().textContent).toBe('');
+    // No repoll for the old script's route either.
+    expect(w.asked()).toEqual([]);
+  });
+
+  test('the email row carries its first-time step, and the link asks the engine to open Amazon’s page', async () => {
+    const w = await world();
+    await w.answer('routes', listed([]));
+    const email = w.rows().find((r) => r.textContent.startsWith('Send to Kindle email'))!;
+    expect(email.textContent).toContain('First time? Amazon needs your sender address approved');
+    const link = email.querySelectorAll('button').find((b) => b.textContent === 'Open Amazon’s page')!;
+    expect(link.className).toBe('btn-quiet');
+    link.click();
+    expect(w.status().textContent).toBe('Opening Amazon’s page…');
+    expect(await w.answer('route', { ok: true, note: 'Opened Amazon’s page.' }))
+      .toEqual(['route', 'kindle-email-setup', '--json']);
+    expect(w.status().textContent).toBe('Opened Amazon’s page.');
+    await w.answer('routes', listed([]));
+  });
+
+  test('a dimmed email row still offers the setup link, and no send button', async () => {
+    const w = await world();
+    await w.answer('routes', listed([], undefined, false));
+    const email = w.rows().find((r) => r.textContent.startsWith('Send to Kindle email'))!;
+    expect(email.className).toContain('route-unavailable');
+    expect(email.querySelectorAll('button').map((b) => b.textContent)).toEqual(['Open Amazon’s page']);
+  });
+
+  test('a device row still exports then sends, and the list is asked for again after', async () => {
+    const w = await world();
+    await w.answer('routes', listed([kobo]));
+    w.button('Copy to KOBOeReader').click();
+    await settle();
+    const exported = await w.answer('export', { ok: true, path: EPUB, extension: 'epub', label: 'EPUB' });
+    expect(exported.slice(0, 5)).toEqual(['export', EPUB, '--json', '--for', 'epub']);
+    const sent = await w.answer('send', { ok: true, destination: '/Volumes/KOBOeReader/Field Station.epub' });
+    expect(sent).toEqual(['send', EPUB, '--json', '--device', '/Volumes/KOBOeReader']);
+    expect(w.status().textContent).toContain('Sent to KOBOeReader');
+    expect(w.asked()).toEqual(['routes']);
+    await w.answer('routes', listed([kobo], 'device:kobo'));
+    expect(w.button('Copy to KOBOeReader').className).toBe('btn btn-brad');
   });
 });

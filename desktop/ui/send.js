@@ -1,11 +1,14 @@
-// Send: what is plugged in, and the file that should go on it.
+// Send: every way the book can leave, and the file each one should get.
 //
-// The window knows nothing about devices. `screepub devices` says what is
-// connected, `screepub export` says which file a Kindle should get (KFX →
-// AZW3 → MOBI, the best rung this machine can reach), and `screepub send`
-// moves it. Each of those is tested TypeScript shared with the CLI; this
-// file draws their answers and never re-decides them. If anything here
-// starts to look like it knows what a Kindle is, it belongs in src/device/.
+// The window knows nothing about devices or routes. `screepub routes` lists
+// every way out in its own order (what is plugged in among them) and which
+// one was used last, `screepub export` says which file a Kindle should get
+// (KFX → AZW3 → MOBI, the best rung this machine can reach), `screepub send`
+// moves it to a reader, and `screepub route` performs the rest: it opens
+// Apple Books, Amazon or Mail, or writes a copy where the Save box said.
+// Each of those is tested TypeScript shared with the CLI; this file draws
+// their answers and never re-decides them. If anything here starts to look
+// like it knows what a Kindle is, it belongs in src/device/.
 //
 // The file is in two halves, the way convert.js, read.js and tune.js are.
 // Everything this surface DECIDES — which devices are offerable, which
@@ -14,9 +17,10 @@
 // a pure exported function above the line, tested directly by
 // tests/desktop-ui.test.ts. Below the line is drawing, which holds no rule
 // of its own and rides on the live run.
-import { runEngine, argv } from './app.js';
+import { runEngine, argv, saveDialog } from './app.js';
 import { settingsFrom } from './tune.js';
 import { el, clear, text } from './dom.js';
+import { canFocus } from './focus.js';
 import {
   HEADING, mountKfx, kfxShown, kfxHidden, kfxDevicesChanged, kfxRedraw, kfxInstalling,
 } from './kfx.js';
@@ -145,44 +149,6 @@ export function caveatFor(device, platform) {
   }
   return `Sending to a ${name} has ${UNPROVEN}. It is built and code-tested; nobody has `
     + 'plugged one in.';
-}
-
-/** One device from the engine's answer, or null if it is not one. An entry
- *  with no id cannot be addressed by `send` at all, and an entry with no
- *  name has nothing to put on a button, so both are dropped rather than
- *  drawn as a row that cannot work. A kind this window has never heard of is
- *  KEPT: the engine is the authority on what a device is, and a future
- *  vendor must not be invisible here just because this file is older than
- *  it. It simply gets the unproven treatment, which is the truth. */
-export function deviceFrom(entry) {
-  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return null;
-  const id = typeof entry.id === 'string' ? entry.id.trim() : '';
-  const name = typeof entry.name === 'string' ? entry.name.trim() : '';
-  const kind = typeof entry.kind === 'string' ? entry.kind.trim() : '';
-  if (id === '' || name === '' || kind === '') return null;
-  return { id, kind, name, volume: typeof entry.volume === 'string' ? entry.volume : null };
-}
-
-/** Everything connected, as this surface will draw it. A malformed answer
- *  reads as nothing connected rather than as an error: the empty state is
- *  already an honest, actionable thing to show, and "the engine broke its
- *  contract" is not something a reader can do anything about. */
-export function devicesFrom(answer) {
-  const devices = answer?.devices;
-  if (!Array.isArray(devices)) return [];
-  return devices.map(deviceFrom).filter((device) => device !== null);
-}
-
-/** Whether the list on screen is still the list the engine just described.
- *  The poll runs every two seconds; rebuilding the rows on every tick would
- *  steal the focus out from under anyone tabbing to a button and flicker the
- *  row they were about to press. Identity is id AND name AND kind: a volume
- *  remounted under the same path with a different reader on it is a
- *  different device. */
-export function sameDevices(a, b) {
-  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-  return a.every((device, i) =>
-    device.id === b[i].id && device.kind === b[i].kind && device.name === b[i].name);
 }
 
 /** Which rung of `screepub export` this device is asking for. A Kindle never
@@ -350,10 +316,14 @@ export function preparingPhase(device) {
 /** Why a listed row cannot fire, in the engine's three words. */
 const UNAVAILABLE = new Set(['connect', 'platform', 'setup']);
 
-/** A connected device as a row carries it, rebuilt clean, or null. Same
- *  fields as deviceFrom() above, held to the stricter standard of a route:
- *  `volume` has to be THERE (a string, or null for a reMarkable, which JSON
- *  keeps), because a missing one means the engine changed its shape. */
+/** A connected device as a row carries it, rebuilt clean, or null. An entry
+ *  with no id cannot be addressed by `send` at all, and one with no name has
+ *  nothing to put on its row. A kind this window has never heard of is KEPT:
+ *  the engine is the authority on what a device is, and a future vendor must
+ *  not be invisible here just because this file is older than it; it gets
+ *  the unproven caveat, which is the truth. `volume` has to be THERE (a
+ *  string, or null for a reMarkable, which JSON keeps), because a missing one
+ *  means the engine changed its shape. */
 function routeDeviceFrom(device) {
   if (typeof device !== 'object' || device === null || Array.isArray(device)) return null;
   if (!isText(device.id) || !isText(device.kind) || !isText(device.name)) return null;
@@ -408,7 +378,7 @@ export function routesFrom(answer) {
 
 /** Whether a row goes through `export` then `send`, the device flow with its
  *  own phases: a volume reader of any kind (a kind this file has never heard
- *  of included, as deviceFrom() keeps one), or a docked reMarkable. */
+ *  of included, as routeDeviceFrom() keeps one), or a docked reMarkable. */
 export function isDeviceRoute(route) {
   const key = route?.key;
   if (typeof key !== 'string') return false;
@@ -478,22 +448,113 @@ export function emailSetupHint(route) {
   if (route?.key !== 'email-to-kindle') return null;
   return {
     line: 'First time? Amazon needs your sender address approved, or it drops the email without a word.',
-    key: 'kindle-email-setup',
+    key: EMAIL_SETUP,
   };
 }
 
-export const EMPTY = {
-  slug: 'No reader connected',
-  // The empty state is what most people meet first, so it is an invitation
-  // and an explanation rather than a blank panel. It says what is true now,
-  // what will happen when that changes, and what Screepub can reach at all.
-  line: 'There is no reader connected right now. Plug one in over USB and it turns up here on '
-    + 'its own, within a couple of seconds — there is nothing to press first.',
-  heading: 'What Screepub can reach',
-};
+/** The key the email row's setup link is performed by: the same one
+ *  app.js's `argv.emailSetup()` hands the engine. */
+const EMAIL_SETUP = 'kindle-email-setup';
 
-export const LEDE = 'The book in your library, on the reader on your desk. Screepub builds the '
-  + 'file each reader can actually open, then copies it across — nothing leaves this computer.';
+/** The email row's setup link, and the name it is opened by on the status
+ *  line ("Opening Amazon’s page…"). */
+export const SETUP_BUTTON = 'Open Amazon’s page';
+export const SETUP_TITLE = 'Amazon’s page';
+
+/** Which flow a row's button runs. A device row (a reader over USB, or a
+ *  docked reMarkable) goes through `export` then `send`, sendTo() below,
+ *  with its own phases. Each save is its own flow, because each asks where
+ *  first. The email row's setup link opens Amazon's page. Every other key
+ *  is a route the ENGINE performs (it opens Books, Amazon's app or page, or
+ *  Mail), including one this window is older than: the engine performs it
+ *  or refuses in its own words, which beats a button that does nothing. */
+export function performerFor(route) {
+  if (isDeviceRoute(route)) return 'device';
+  const key = route?.key;
+  if (!isText(key)) return null;
+  if (key === 'save-epub' || key === 'save-kindle') return key;
+  if (key === EMAIL_SETUP) return 'setup';
+  return 'open';
+}
+
+/** What is plugged in, read off the route list: the device of every row
+ *  that carries one (routesFrom() lets a device ride only on an available
+ *  device row), in the engine's order, as copies. This is what
+ *  `ctx.state.devices` and the KFX block's relevance read, as they read
+ *  `devices` before routes. Null when there is no list, which the KFX block
+ *  takes as "not known yet" rather than "nothing connected". */
+export function connectedDevices(shown) {
+  if (!Array.isArray(shown?.routes)) return null;
+  return shown.routes.filter((route) => route.device !== undefined)
+    .map((route) => ({ ...route.device }));
+}
+
+/** Whether the list on screen is still the list the engine just described.
+ *  The poll runs every two seconds; rebuilding the rows on every tick would
+ *  steal the focus out from under anyone tabbing to a button and flicker the
+ *  row they were about to press. Everything a row draws counts (id,
+ *  availability, detail, title, button, device) and so does which one is
+ *  chosen, since that is where the brass goes. Both lists are routesFrom()'s
+ *  clean copies, built field by field in one order, so comparing them as
+ *  text compares exactly what is drawn. */
+export function sameRoutes(a, b) {
+  if (!Array.isArray(a?.routes) || !Array.isArray(b?.routes)) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** What a row says: its title and the engine's detail (the mechanism when it
+ *  can fire, the fix when it cannot), and on a connected device row the same
+ *  two lines it had before routes: where the file lands, and the unproven
+ *  caveat. */
+export function routeLines(route, platform) {
+  const device = route?.device ?? null;
+  return {
+    title: route?.title,
+    detail: route?.detail,
+    where: device === null ? null : whereLine(device),
+    caveat: device === null ? null : caveatFor(device, platform),
+  };
+}
+
+/** Stand-in when the export says it built the Kindle file but not what kind
+ *  of file it is, so there is nothing to name the Save box's file by. */
+export const NO_EXTENSION = 'The engine built the Kindle file without saying what kind of file it is.';
+
+/** What "Save a Kindle file" learns from `export --for kindle`, as a pair
+ *  like outcomeFor()'s: the extension and the engine's label, to name the
+ *  Save box's file and filter, or the failure line. The export decides the
+ *  rung (KFX, AZW3 or MOBI); this only reads which one it reached. An
+ *  extension that is not a bare word opens no dialog at all. */
+export function kindleFileFrom(built) {
+  if (built?.ok !== true) return ['failed', { detail: failureMessage(built) }];
+  const extension = typeof built.extension === 'string' ? bareExtension(built.extension.trim()) : '';
+  if (!/^[A-Za-z0-9]+$/.test(extension)) return ['failed', { detail: NO_EXTENSION }];
+  return ['built', { extension, label: isText(built.label) ? built.label.trim() : null }];
+}
+
+/** Shown in place of the list when `routes` said ok in a shape routesFrom()
+ *  will not draw. Not NO_MESSAGE: the engine did not refuse anything. */
+export const NO_ROUTES = 'The engine listed the ways to send this book in a shape this window cannot read.';
+
+/** The line in place of the list: the engine's own sentence for a refusal,
+ *  or NO_ROUTES for an ok answer that could not be drawn. */
+export function routesFailure(answer) {
+  return answer?.ok === true ? NO_ROUTES : failureMessage(answer);
+}
+
+/** The folded table of every reader and how it is reached, under the list.
+ *  "Nothing plugged in" used to stand above it; the dimmed device rows now
+ *  say that per reader, with the fix ("plug in over USB to send"). */
+export const REACH_HEADING = 'What Screepub can reach';
+
+/** Not "nothing leaves this computer" any more: that was true when every row
+ *  was a cable, and Send to Kindle and email go through Amazon. The device
+ *  rows still say it, in the engine's words, where it is true. */
+export const LEDE = 'Every way this book can go from here, the one you used last time in brass. '
+  + 'A reader plugged in over USB gets the file it can actually open.';
+
+/** Shown until the first `routes` answer arrives. */
+export const LOOKING = 'Looking for every way to send it…';
 
 export const NO_SCRIPT = {
   slug: 'Nothing to send yet',
@@ -508,13 +569,21 @@ let list = null;
 let statusLine = null;
 let artifactNote = null;
 let poll = null;
+/** The route list on screen (routesFrom()'s answer), or null when none is:
+ *  still looking, or a failure line in its place. */
 let drawn = null;
-/** A send in flight. Two sends at once would be a genuine race and not a
- *  cosmetic one: the MOBI rung of src/export/artifact.ts REWRITES the
- *  library EPUB in place before it writes the .mobi beside it. So the whole
- *  list goes dead for the duration, and the poll stops rebuilding rows
- *  underneath it — a redraw mid-send would hand back a fresh, enabled
- *  button and let a second one start. */
+/** Polls begun, and the newest one whose answer counts. An answer asked
+ *  before one already drawn is older than what is on screen and is dropped,
+ *  so a slow poll cannot put back a list a faster, later one replaced. */
+let asks = 0;
+let newest = 0;
+/** A send or a route in flight (sendTo() and perform() share it). Two at
+ *  once would be a genuine race and not a cosmetic one: the MOBI rung of
+ *  src/export/artifact.ts REWRITES the library EPUB in place before it
+ *  writes the .mobi beside it, and a save of the EPUB could copy it half
+ *  written. So the whole list goes dead for the duration, and the poll stops
+ *  rebuilding rows underneath it: a redraw mid-send would hand back a
+ *  fresh, enabled button and let a second one start. */
 let sending = false;
 /** Which script this surface is showing. A send already in flight cannot be
  *  cancelled — the engine has been asked — but it must not SAY anything once
@@ -585,7 +654,7 @@ function draw() {
   }
 
   list = el('div', { class: 'devices' },
-    el('p', { class: 'caption' }, 'Looking for readers…'));
+    el('p', { class: 'caption' }, LOOKING));
   statusLine = el('p', { class: 'caption send-status', role: 'status' }, '');
   artifactNote = el('p', { class: 'caption send-artifact' }, '');
   artifactNote.hidden = true;
@@ -593,17 +662,21 @@ function draw() {
   kfxNode.hidden = true;
 
   pane.append(
-    el('h2', { class: 'slug' }, 'Send to a reader'),
+    el('h2', { class: 'slug' }, 'Send it'),
     el('p', { class: 'prose' }, LEDE),
     list,
     statusLine,
     artifactNote,
     kfxNode,
+    reach(),
   );
   // After the append: kfx.js draws only into a node that is in the page.
   mountKfx(kfxNode, {
     isSending: () => sending,
-    devices: () => drawn,
+    // What is connected, read off the route list: the block's relevance
+    // (Kindle advice is for Kindles) reads it as it read `devices`. Null
+    // until the first answer, so the block does not flash up and vanish.
+    devices: () => connectedDevices(drawn),
     onBusy: (on) => { for (const button of buttons()) button.disabled = on; },
     // Its redraws hand the keyboard back through the same plan as every
     // other surface's (focus.js), when a control it held is gone.
@@ -611,64 +684,109 @@ function draw() {
   });
 }
 
+/** Every route this book can take, as `screepub routes` lists them, asked
+ *  again every two seconds so a reader plugged in turns up on its own. */
 async function refresh() {
   if (list === null) return;
   // Rows must not be rebuilt out from under a send in progress.
   if (sending) return;
+  const into = list;
+  const mine = ++asks;
   let answer;
   try {
-    answer = await runEngine(argv.devices());
+    answer = await runEngine(argv.routes(ctx.state.script.epubPath));
   } catch (err) {
-    if (list === null) return;
-    drawn = null;
-    clear(list);
-    list.append(el('p', { class: 'fault-body' }, err.message));
+    // The same three reasons to drop an answer as below.
+    if (list !== into || sending || mine <= newest) return;
+    newest = mine;
+    fault(err.message);
     return;
   }
-  if (list === null || sending) return;
-  const devices = devicesFrom(answer);
-  ctx.state.devices = devices;
+  // A new script's page, a send begun since, or a newer answer already
+  // drawn: this one is out of date, and drawing it would undo something.
+  if (list !== into || sending || mine <= newest) return;
+  newest = mine;
+  const shown = routesFrom(answer);
+  if (shown === null) {
+    fault(routesFailure(answer));
+    return;
+  }
+  ctx.state.devices = connectedDevices(shown);
   // Nothing changed, so nothing is redrawn: a rebuild every two seconds
   // would take the focus off a button someone had just tabbed to.
-  if (drawn !== null && sameDevices(drawn, devices)) return;
-  drawn = devices;
-  clear(list);
-  if (devices.length === 0) drawEmpty();
-  else for (const device of devices) list.append(deviceRow(device));
+  if (sameRoutes(drawn, shown)) return;
+  drawn = shown;
+  rebuild(() => {
+    for (const route of shown.routes) list.append(routeRow(route, shown.chosen));
+  });
   // After the rows, not before: a KFX block that hides now while it held
   // the keyboard hands it to the page's first stop, which should be a row.
   kfxDevicesChanged();
 }
 
-/** Nothing connected is an ANSWER, not an error — the same position
- *  `screepub devices` itself takes — so it is set in the page's own ink and
- *  never in alarm. */
-function drawEmpty() {
+/** A route or a send just worked, and the engine now remembers it: ask again
+ *  at once rather than at the next tick, so the brass moves to the route
+ *  just used. Every poll already out was asked before the engine remembered
+ *  it, so none of them may land after this one and put the brass back. */
+function repoll() {
+  newest = asks;
+  refresh();
+}
+
+/** The list could not be drawn: the engine's sentence (or NO_ROUTES) in its
+ *  place, never a list quietly short of the row that broke it. */
+function fault(line) {
+  drawn = null;
+  rebuild(() => list.append(el('p', { class: 'fault-body' }, line)));
+}
+
+/** Refill the list. Rebuilding throws away whatever button the keyboard
+ *  stood on, so where it stood is noted first and handed back after, the
+ *  way kfx.js does for its own rows. */
+function rebuild(fill) {
+  const focused = list.contains(document.activeElement) ? document.activeElement : null;
+  clear(list);
+  fill();
+  if (focused !== null) giveBackFocus(focused.dataset?.route ?? null);
+}
+
+/** The keyboard, back on the same route's button when it can still take the
+ *  focus (a new reader plugged in above it moved it down, the brass moved to
+ *  it). Otherwise focus.js's plan picks the page's first stop, as after
+ *  every other redraw in this window: the reader it sent to was unplugged. */
+function giveBackFocus(route) {
+  const same = route === null ? null
+    : buttons().find((button) => button.dataset.route === route);
+  if (canFocus(same)) same.focus();
+  else ctx.restoreFocus();
+}
+
+/** What Screepub can reach, and how, whatever is plugged in.
+ *
+ *  The table folds away. It is four readers, four honesty labels and two
+ *  caveats: good information, and not what someone came to this page to
+ *  find out. A <details> rather than a hand-rolled toggle: the open/shut
+ *  state, the keyboard and the announcement come from the platform. It is
+ *  drawn once per page, outside the list the poll rebuilds, so a reader who
+ *  opened it does not have it shut on them by a reader being plugged in.
+ *
+ *  Folded, never dropped. Everything that made the table honest travels with
+ *  it, including provenNote(), which carries the one fact the four statuses
+ *  cannot: WHERE the single proven route was proven.
+ *
+ *  Built through el() rather than appended straight to the node, because
+ *  el() drops a null child and Node.append() renders it as the word "null".
+ *  That is not hypothetical: the old empty state shipped a stray "null"
+ *  under the list on every platform but Windows until it was seen on screen. */
+function reach() {
   const platform = navigator.platform;
   const cannot = undetectable(platform);
-  // Built through el() rather than appended straight to the node, because
-  // el() drops a null child and Node.append() renders it as the word "null".
-  // That is not hypothetical: this state shipped a stray "null" under the
-  // list on every platform but Windows until it was seen on screen.
-  // The reach table folds away. It is four readers, four honesty labels and
-  // two caveats, and it was the bulk of this page — good information, and not
-  // what someone with nothing plugged in came here to find out. A <details>
-  // rather than a hand-rolled toggle: the open/shut state, the keyboard and
-  // the announcement come from the platform.
-  //
-  // Folded, never dropped. Everything that made the table honest travels with
-  // it, including provenNote(), which carries the one fact the four statuses
-  // cannot: WHERE the single proven route was proven.
-  list.append(el('div', { class: 'reader-list' },
-    el('p', { class: 'state-label' }, 'Nothing plugged in'),
-    el('p', { class: 'prose' }, EMPTY.line),
-    el('details', { class: 'reach' },
-      el('summary', { class: 'reach-summary' }, EMPTY.heading),
-      ...READERS.map((reader) => readerRow(reader, platform)),
-      el('p', { class: 'caption reader-note' }, provenNote(platform)),
-      cannot === null ? null : el('p', { class: 'caption device-caveat' }, cannot),
-    ),
-  ));
+  return el('details', { class: 'reach' },
+    el('summary', { class: 'reach-summary' }, REACH_HEADING),
+    ...READERS.map((reader) => readerRow(reader, platform)),
+    el('p', { class: 'caption reader-note' }, provenNote(platform)),
+    cannot === null ? null : el('p', { class: 'caption device-caveat' }, cannot),
+  );
 }
 
 function readerRow(reader, platform) {
@@ -680,23 +798,43 @@ function readerRow(reader, platform) {
   );
 }
 
-function deviceRow(device) {
-  const caveat = caveatFor(device, navigator.platform);
+/** One route: its title and the engine's detail, a device's volume line and
+ *  caveat, the email row's first-time step, and a button only when it can
+ *  fire. A dimmed row keeps its place and its fix; it has nothing to press.
+ *  Each button carries its route's id as data-route, which is how a rebuild
+ *  finds the same route's button again. */
+function routeRow(route, chosen) {
+  const lines = routeLines(route, navigator.platform);
+  const hint = emailSetupHint(route);
+  const style = buttonClassFor(route, chosen);
   // The poll keeps running through a KFX install (it stops only for a send),
-  // so a reader plugged in mid-install gets a row here; its button starts
-  // out as dead as the others, and the install's end brings them all back.
-  const button = el('button', {
-    type: 'button', class: 'btn btn-brad', disabled: kfxInstalling(),
-  }, sendLabel(device));
-  button.addEventListener('click', () => sendTo(device));
-  return el('div', { class: 'device-row' },
+  // so a row it draws mid-install has its buttons born as dead as the
+  // others', and the install's end brings them all back.
+  const button = style === null ? null : el('button', {
+    type: 'button', class: style, 'data-route': route.id, disabled: kfxInstalling(),
+    onclick: () => choose(route),
+  }, route.button);
+  return el('div', { class: route.available ? 'device-row' : 'device-row route-unavailable' },
     el('div', { class: 'device-what' },
-      el('p', { class: 'device-name' }, device.name),
-      el('p', { class: 'device-where' }, whereLine(device)),
-      caveat === null ? null : el('p', { class: 'device-caveat' }, caveat),
+      el('p', { class: 'device-name' }, lines.title),
+      el('p', { class: 'route-detail' }, lines.detail),
+      lines.where === null ? null : el('p', { class: 'device-where' }, lines.where),
+      lines.caveat === null ? null : el('p', { class: 'device-caveat' }, lines.caveat),
+      hint === null ? null : el('p', { class: 'caption route-hint' }, hint.line, ' ',
+        el('button', {
+          type: 'button', class: 'btn-quiet', 'data-route': hint.key, disabled: kfxInstalling(),
+          onclick: () => perform({ key: hint.key, title: SETUP_TITLE }),
+        }, SETUP_BUTTON)),
     ),
     button,
   );
+}
+
+/** A row's button: a device through sendTo(), with its phases; every other
+ *  route through perform(). */
+function choose(route) {
+  if (performerFor(route) === 'device') sendTo(route.device);
+  else perform(route);
 }
 
 /** Every Send button on the surface, so a send can take the whole list out
@@ -731,6 +869,8 @@ async function sendTo(device) {
   const mine = era;
   /** Another script was opened while this send was in flight. */
   const stale = () => era !== mine;
+  /** The copy happened; the engine now remembers this reader's kind. */
+  let worked = false;
   for (const button of buttons()) button.disabled = true;
   artifactNote.hidden = true;
   try {
@@ -766,6 +906,7 @@ async function sendTo(device) {
     const [phase, detail] = outcomeFor(built, sent, device);
     say(statusFor(phase, detail));
     if (phase !== 'sent') return;
+    worked = true;
     const what = artifactLine(built);
     text(artifactNote, what);
     artifactNote.hidden = what === '';
@@ -779,6 +920,92 @@ async function sendTo(device) {
     sending = false;
     for (const button of buttons()) button.disabled = false;
     kfxRedraw();
+    if (worked && !stale()) repoll();
+  }
+}
+
+/** Every route that is not a device, from the press to the line that says
+ *  how it went: sendTo()'s twin, under the SAME `sending` flag and the same
+ *  `era` discipline, so no two routes (or a route and a send) ever run at
+ *  once and no line is painted into a script that replaced this one.
+ *
+ *  The window never writes the file. A save asks where in the Save box and
+ *  hands the chosen path to `route save-* --out`; the engine writes there.
+ *  A cancelled box (null) is a change of mind: it goes straight out, asks
+ *  the engine nothing more, and says nothing. */
+async function perform(route) {
+  if (sending || kfxInstalling()) return;
+  sending = true;
+  const mine = era;
+  /** Another script was opened while this route was in flight. */
+  const stale = () => era !== mine;
+  const how = performerFor(route);
+  /** The engine said the route worked, so it now remembers it. */
+  let worked = false;
+  for (const button of buttons()) button.disabled = true;
+  artifactNote.hidden = true;
+  try {
+    // Inside the try, so a redraw that threw could never leave `sending` on.
+    kfxRedraw();
+    const script = ctx.state.script;
+    let options = {};
+    let what = '';
+    if (how === 'save-epub') {
+      const out = await saveDialog({
+        defaultPath: saveNameFor(script.epubPath, 'epub'),
+        filters: saveFiltersFor('epub', 'EPUB'),
+      });
+      if (stale() || out === null) return;
+      options = { out };
+      say(statusFor('saving'));
+    } else if (how === 'save-kindle') {
+      // The Kindle file is built (or found fresh) first, with this script's
+      // own settings: which rung it reaches (KFX, AZW3, MOBI) is what names
+      // the file in the Save box.
+      await ensureSettings();
+      if (stale()) return;
+      const settings = { fountain: script.fountainPath, optionsJson: optionsJsonFor(script) };
+      say(statusFor('building-kindle'));
+      const built = await runEngine(argv.export(script.epubPath, { forFormat: 'kindle', ...settings }));
+      if (stale()) return;
+      const [phase, file] = kindleFileFrom(built);
+      if (phase === 'failed') {
+        say(statusFor(phase, file));
+        return;
+      }
+      // The wait is over; the Save box is the next thing on screen.
+      say(statusFor('idle'));
+      const out = await saveDialog({
+        defaultPath: saveNameFor(script.epubPath, file.extension),
+        filters: saveFiltersFor(file.extension, file.label),
+      });
+      if (stale() || out === null) return;
+      options = { out, ...settings };
+      what = artifactLine(built);
+      say(statusFor('saving'));
+    } else {
+      say(statusFor('opening', { route }));
+    }
+    const answer = await runEngine(how === 'setup'
+      ? argv.emailSetup()
+      : argv.route(route.key, script.epubPath, options));
+    if (stale()) return;
+    const [phase, detail] = routeNoteFrom(answer);
+    say(statusFor(phase, detail));
+    worked = phase === 'done';
+    if (!worked) return;
+    text(artifactNote, what);
+    artifactNote.hidden = what === '';
+  } catch (err) {
+    // runEngine throws only when the engine could not run or broke its
+    // contract, and a Save box only when the OS refused one; both messages
+    // are already written for a person.
+    if (!stale()) say(statusFor('failed', { detail: err.message }));
+  } finally {
+    sending = false;
+    for (const button of buttons()) button.disabled = false;
+    kfxRedraw();
+    if (worked && !stale()) repoll();
   }
 }
 
