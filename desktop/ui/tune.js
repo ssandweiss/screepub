@@ -601,7 +601,10 @@ let timer = null;
  *  Part 3, closed 2026-09-24). One hold covers however many knobs move
  *  inside one settle; releaseHold() is the only thing that lets it go. */
 let hold = null;
+/** The queue withBook() describes: the last turn in it, and how many turns
+ *  are waiting or running, this surface's own saves included. */
 let running = Promise.resolve();
+let turns = 0;
 let pending = {};
 let statusLine = null;
 let controls = new Map();
@@ -643,6 +646,7 @@ export function scriptChanged() {
   keepNoteEl = null;
   pending = {};
   clearTimeout(timer);
+  timer = null;
   // What was owed belonged to the other script and has just been dropped,
   // so nothing is owed any more: the restart need not wait for it.
   releaseHold();
@@ -1131,12 +1135,58 @@ function refreshIdle() {
 function schedule() {
   clearTimeout(timer);
   if (hold === null) hold = holdEngine();
-  timer = setTimeout(() => {
+  timer = setTimeout(settle, SETTLE_MS);
+}
+
+/** The settle is over: what the moved knobs owe joins the queue. */
+function settle() {
+  timer = null;
+  enqueue(flush);
+}
+
+/** Start `job` once every turn already queued has finished, however it
+ *  finished, and hand back its own promise. With nothing queued it starts at
+ *  once, in the caller's own tick, as it would with no queue at all: a send
+ *  with nothing owed ahead of it asks the engine the moment it is pressed.
+ *  A job must not queue another from inside itself. */
+function enqueue(job) {
+  const idle = turns === 0;
+  turns += 1;
+  if (idle) {
+    try {
+      running = Promise.resolve(job());
+    } catch (err) {
+      running = Promise.reject(err);
+    }
+  } else {
     // Serialised behind whatever is already in flight: two conversions
     // writing the same EPUB is a race, and a slow early one finishing last
     // would leave the file disagreeing with the screen.
-    running = running.catch(() => {}).then(flush);
-  }, SETTLE_MS);
+    running = running.catch(() => {}).then(job);
+  }
+  const done = () => { turns -= 1; };
+  running.then(done, done);
+  return running;
+}
+
+/** Run `work` in turn with this surface's saves: the one queue for every
+ *  engine call that reads or writes the script's library EPUB. A save
+ *  rebuilds that file in place (flush()'s reconvert), and so can the Send
+ *  page's export, on its MOBI rung; nothing else ordered the two, so a send
+ *  could start before a moved knob's rebuild landed and ship the book
+ *  without it, or a rebuild could replace the file under a send reading it.
+ *
+ *  A settle still counting down is cut short, not waited out: its save
+ *  takes its turn now, ahead of `work`, so what is sent is what the reader
+ *  last set. A knob moved while `work` runs saves once `work` is done. The
+ *  queue never stops on a failure; `work`'s own result or failure is handed
+ *  back to its caller as it was. */
+export function withBook(work) {
+  if (timer !== null) {
+    clearTimeout(timer);
+    settle();
+  }
+  return enqueue(work);
 }
 
 /** Let the settle's hold go, if one is held. Safe to call any number of

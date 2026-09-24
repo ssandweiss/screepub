@@ -4024,6 +4024,7 @@ describe('the Tune surface: app defaults for new scripts', () => {
     const ctx = makeCtx(script);
     const pane = new FakeNode('div');
     tune.mount(pane, ctx);
+    mounted = true;
     tune.scriptChanged();
     const shown = tune.show();
     engine.resolve(engine.calls.length - 1, settingsAnswer(overrides));
@@ -4032,8 +4033,23 @@ describe('the Tune surface: app defaults for new scripts', () => {
   }
 
   let engine: ReturnType<typeof stubEngine>;
+  /** Whether this test mounted the pane through mountReady(). */
+  let mounted = false;
   beforeEach(() => { installFakeDocument(); engine = stubEngine(); });
-  afterEach(() => { removeFakeDocument(); removeStubEngine(); });
+  afterEach(async () => {
+    // tune.js's queue (withBook) is one module's for the whole run, so a
+    // save left waiting on an engine call nobody answers would hold up every
+    // later turn in it, the Send page's in send-routes-ui.test.ts included.
+    // So whatever a test left unanswered is refused here, and a settle still
+    // counting down (whose save would land in the next test's stub) is
+    // cancelled by a script change, as it is in the window.
+    for (let i = 0; i < engine.calls.length; i += 1) engine.resolve(i, { ok: false });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (mounted) tune.scriptChanged();
+    mounted = false;
+    removeFakeDocument();
+    removeStubEngine();
+  });
 
   test('the pane reads, then shows the knobs and the defaults foot; a failed load shows the fault screen instead', async () => {
     const script = { fountainPath: '/scripts/demo.fountain', epubPath: null, previewHtml: undefined, settings: null };
@@ -4132,6 +4148,65 @@ describe('the Tune surface: app defaults for new scripts', () => {
     await new Promise((resolve) => setTimeout(resolve, 320));
     expect(engine.calls.length).toBe(1);
     expect(app.engineBusy()).toBe(false);
+  });
+
+  // The Settings and Send pages both write the library EPUB: a moved knob's
+  // save rebuilds it in place (the reconvert, the argv with no verb of its
+  // own), and the Send page's export can rebuild it on its MOBI rung. withBook() is the one queue both take their turn in.
+  // Placed before the tests below that leave a save unanswered, because the
+  // queue is one module's for the whole file, as app.js's count is.
+  test('the book waits its turn: a moved knob’s save goes first, at once, and a knob moved meanwhile waits', async () => {
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const { pane, script } = await mountReady(engine);
+    (script as { epubPath: string | null }).epubPath = '/scripts/demo.epub';
+    const refused = { ok: false, error: { message: 'not what this test is about' } };
+
+    moveKnob(pane, 'dialogueSideMarginPct', '27');
+    expect(engine.calls.length).toBe(1);
+    let ran = false;
+    let finish: (value: string) => void = () => {};
+    const turn = tune.withBook(() => {
+      ran = true;
+      return new Promise<string>((resolve) => { finish = resolve; });
+    });
+    // The settle is not waited out: its save is asked for now, ahead of
+    // the turn that asked, and the turn waits for the rebuild behind it.
+    await tick();
+    expect(engine.calls.length).toBe(2);
+    expect(engine.calls[1].args[0]).toBe('settings');
+    expect(ran).toBe(false);
+    engine.resolve(1, settingsAnswer({ settings: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 27 } }));
+    await tick();
+    expect(engine.calls.length).toBe(3);
+    expect(engine.calls[2].args.slice(0, 5))
+      .toEqual(['/scripts/demo.fountain', '--json', '--preview-inline', '-o', '/scripts/demo.epub']);
+    expect(ran).toBe(false);
+    engine.resolve(2, refused);
+    await tick();
+    expect(ran).toBe(true);
+
+    // The other way round: a knob moved while the turn holds the book is
+    // saved (and the book rebuilt) only once the turn is over.
+    moveKnob(pane, 'dialogueSideMarginPct', '28');
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    expect(engine.calls.length).toBe(3);
+    finish('sent');
+    expect(await turn).toBe('sent');
+    await tick();
+    expect(engine.calls.length).toBe(4);
+    expect(engine.calls[3].args[0]).toBe('settings');
+    expect(engine.calls[3].args.join(' ')).toContain('"dialogueSideMarginPct":28');
+    engine.resolve(3, settingsAnswer({ settings: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 28 } }));
+    await tick();
+    expect(engine.calls[4].args.slice(3, 5)).toEqual(['-o', '/scripts/demo.epub']);
+    engine.resolve(4, refused);
+    await tick();
+
+    // A turn that fails hands its failure to its caller and does not stop
+    // the queue: the next turn still runs.
+    await expect(tune.withBook(() => Promise.reject(new Error('the copy failed')))).rejects.toThrow('the copy failed');
+    expect(await tune.withBook(() => 'next')).toBe('next');
+    expect(engine.calls.length).toBe(5);
   });
 
   test('"Use these for new scripts" sends this script’s CURRENT settings, moved after the foot was drawn, not the shipped or app defaults', async () => {
@@ -4649,6 +4724,32 @@ describe('the Send surface', () => {
     // formatting the reader never chose.
     expect(send).toContain('optionsJson');
     expect(send).toContain('state.script.settings');
+  });
+
+  test('every call on the library EPUB takes its turn with the Settings page’s saves', () => {
+    // A moved knob's save rebuilds the library EPUB in place, and an export
+    // can rebuild it too (the MOBI rung); a send, a save or an opened route
+    // reads it. tune.js's withBook() is the one queue for all of them, and
+    // the Tune test "the book waits its turn" drives it. What is pinned here
+    // is that send.js hands it every such call: one door, onBook(), and no
+    // export, send or route that reaches runEngine() around it.
+    const code = send.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/.*$/gm, ' ');
+    const imported = /import \{[^}]*\bwithBook\b[^}]*\} from '\.\/tune\.js'/.test(code);
+    expect(`send.js imports tune.js's withBook: ${imported}`).toBe('send.js imports tune.js\'s withBook: true');
+    const door = code.slice(code.indexOf('function onBook('));
+    expect(door.slice(0, door.indexOf('\n}'))).toMatch(/return withBook\(\(\) => runEngine\(args\)\)/);
+    const onTheBook = [...code.matchAll(/argv\.(export|send|route)\(/g)];
+    // Both exports (a device send, Save a Kindle file), the send, the route.
+    expect(onTheBook.map((m) => m[1]).sort()).toEqual(['export', 'export', 'route', 'send']);
+    for (const call of onTheBook) {
+      const before = code.slice(0, call.index);
+      expect(`${call[0]} is handed to ${before.slice(-12).trim()}`).toMatch(/is handed to .*onBook\($/);
+    }
+    // What still goes straight to runEngine reads nothing of the book's
+    // content: the route list, the settings read, Amazon's setup page. And
+    // `args`, which is onBook()'s own call, pinned above.
+    const direct = [...code.matchAll(/\brunEngine\(\s*(argv\.\w+|\w+)/g)].map((m) => m[1]).sort();
+    expect(direct).toEqual(['args', 'argv.emailSetup', 'argv.routes', 'argv.settings']);
   });
 
   test('nothing connected is an answer, not an error', async () => {
