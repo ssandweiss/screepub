@@ -779,6 +779,107 @@ describe('the Convert surface', () => {
   });
 });
 
+describe('converting a PDF again takes its turn on the book it rewrites', () => {
+  // A conversion writes the script's library EPUB afresh, the same file the
+  // Settings page's save rebuilds and the Send page's send copies, so it
+  // takes its turn on that book (book-queue.js). The window never works out
+  // a library path itself: it knows a PDF's book from the engine's answer
+  // the last time it converted it, and a PDF it has not converted has no
+  // book anything here can be holding, so that one converts at once.
+  //
+  // A stub document just big enough for dom.js and convert.js's drawing;
+  // the engine is a queue of unanswered calls the test answers itself.
+  class Node {
+    kids: Node[] = [];
+    parent: Node | null = null;
+    attrs = new Map<string, string>();
+    dataset: Record<string, string> = {};
+    className = '';
+    hidden = false;
+    disabled = false;
+    text = '';
+    constructor(readonly tag: string) {}
+    append(...nodes: (Node | string)[]) {
+      for (const n of nodes) {
+        const node = typeof n === 'string' ? Object.assign(new Node('#text'), { text: n }) : n;
+        node.parent = this;
+        this.kids.push(node);
+      }
+    }
+    get firstChild() { return this.kids[0] ?? null; }
+    removeChild(node: Node) { this.kids.splice(this.kids.indexOf(node), 1); node.parent = null; return node; }
+    get textContent(): string { return this.tag === '#text' ? this.text : this.kids.map((k) => k.textContent).join(''); }
+    set textContent(value: string) { this.kids = []; this.append(value); }
+    setAttribute(name: string, value: string) { this.attrs.set(name, value); }
+    getAttribute(name: string) { return this.attrs.get(name) ?? null; }
+    addEventListener() {}
+    querySelector() { return null; }
+    get classList() { return { toggle: () => true, contains: () => false, add: () => {}, remove: () => {} }; }
+  }
+  const g = globalThis as unknown as Record<string, unknown>;
+  afterEach(() => { delete g.window; delete g.document; delete g.CSSStyleSheet; });
+
+  test('a PDF converted before waits for whatever holds its book; one never converted does not', async () => {
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const asked: { args: string[]; resolve: (stdout: string) => void }[] = [];
+    g.document = {
+      createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
+      createTextNode: (value: string) => Object.assign(new Node('#text'), { text: value }),
+      adoptedStyleSheets: [],
+    };
+    g.CSSStyleSheet = class { replaceSync() {} };
+    g.window = {
+      __TAURI__: {
+        core: { invoke: (_cmd: string, { args }: { args: string[] }) => new Promise<string>((resolve) => asked.push({ args, resolve })) },
+        event: { listen: async () => () => {} },
+      },
+    };
+    const convert = await import(`${join(UI, 'convert.js')}?turns`);
+    const { inTurn } = await import(join(UI, 'book-queue.js'));
+    const ctx = { state: { script: null as unknown }, goTo: () => {}, restoreFocus: () => {}, scriptChanged: () => {} };
+    convert.mount(new Node('section'), ctx);
+    const conversions = () => asked.filter((call) => call.args[1] === '--json' && call.args[0].endsWith('.pdf'));
+    const answer = async (pdf: string, epubPath: string) => {
+      const call = conversions().find((c) => c.args[0] === pdf)!;
+      asked.splice(asked.indexOf(call), 1);
+      call.resolve(JSON.stringify({ ok: true, title: 'Field Station', epubPath, fountainPath: epubPath.replace(/epub$/, 'fountain'), previewHtml: '' }));
+      await tick();
+      await tick();
+    };
+    const BOOK = '/lib/field-station/Field Station.epub';
+
+    // The first conversion: no book known, asked at once.
+    const first = convert.convertPath('/s/Field Station.pdf');
+    await tick();
+    expect(conversions().map((c) => c.args[0])).toEqual(['/s/Field Station.pdf']);
+    await answer('/s/Field Station.pdf', BOOK);
+    await first;
+
+    // A send holds that book now.
+    let free: () => void = () => {};
+    const sending = inTurn(BOOK, 'send', () => new Promise<void>((resolve) => { free = resolve; }));
+
+    // Another PDF has no book this window has touched: at once.
+    const other = convert.convertPath('/s/Other.pdf');
+    await tick();
+    expect(conversions().map((c) => c.args[0])).toEqual(['/s/Other.pdf']);
+    await answer('/s/Other.pdf', '/lib/other/Other.epub');
+    await other;
+
+    // The same PDF again rewrites the book the send holds: it waits.
+    const again = convert.convertPath('/s/Field Station.pdf');
+    await tick();
+    expect(conversions()).toEqual([]);
+    free();
+    await sending;
+    await tick();
+    expect(conversions().map((c) => c.args[0])).toEqual(['/s/Field Station.pdf']);
+    await answer('/s/Field Station.pdf', BOOK);
+    await again;
+  });
+});
+
 describe('what the Convert surface decides', () => {
   // The decisions, exercised directly. The drawing over them is thin by
   // design; these are the rules a wrong implementation would get wrong.

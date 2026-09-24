@@ -10,6 +10,7 @@
 import {
   runEngine, pickScreenplay, pickFolder, onProgress, argv, FORCE_FLAG, openUrl,
 } from './app.js';
+import { inTurn } from './book-queue.js';
 import { el, clear, text } from './dom.js';
 import { newIssueUrl, osLabel } from './feedback.js';
 import { RELEASE } from './notes.js';
@@ -355,6 +356,14 @@ let pane = null;
 let chooseButton = null;
 let unlistenProgress = null;
 let busy = false;
+/** The library book each PDF converted in this window landed as, read off
+ *  the engine's answer. Converting one of them again writes that book
+ *  afresh, the same file the Settings page's save rebuilds and the Send
+ *  page's send copies, so it takes its turn on it (book-queue.js). A PDF
+ *  not in here has no book anything in this window has touched, so nothing
+ *  can be holding it, and it converts at once. The window never works out
+ *  a library path itself; the engine owns that (src/library.ts). */
+const landed = new Map();
 
 // Bumped every time drawWell rebuilds the page, so a probe or a Change/Reset
 // answer that arrives after the well has been redrawn (a refusal's "Back to
@@ -610,7 +619,9 @@ export async function convertPath(path, { force = false } = {}) {
   drawProgress(path);
   let answer;
   try {
-    answer = await runEngine(argv.convert(path, { force }));
+    const converting = () => runEngine(argv.convert(path, { force }));
+    const book = landed.get(path);
+    answer = await (book === undefined ? converting() : inTurn(book, 'convert', converting));
   } catch (err) {
     // Rust could not start the engine, or the engine printed something that
     // is not its contract. Its sentence is still the most useful one there
@@ -623,8 +634,12 @@ export async function convertPath(path, { force = false } = {}) {
     if (typeof stop === 'function') stop();
     unlistenProgress = null;
   }
-  if (answer.ok) drawResult(path, answer);
-  else drawFailure(answer.error, path);
+  if (answer.ok) {
+    if (typeof answer.epubPath === 'string') landed.set(path, answer.epubPath);
+    drawResult(path, answer);
+  } else {
+    drawFailure(answer.error, path);
+  }
 }
 
 function drawProgress(path) {
