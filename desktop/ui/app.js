@@ -348,7 +348,16 @@ async function withOneDialog(open) {
   } finally {
     dialogOpen = false;
     release();
-    for (const handler of dialogClosed) handler();
+    // Each handler on its own, as update-flow.js's notify() does: a throw
+    // here would otherwise replace the dialog's answer with its own error,
+    // losing the reader's pick, and skip every handler after it.
+    for (const handler of dialogClosed) {
+      try {
+        handler();
+      } catch (err) {
+        console.error('app.js: a dialog-closed handler threw', err);
+      }
+    }
   }
 }
 

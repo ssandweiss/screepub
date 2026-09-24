@@ -1620,6 +1620,35 @@ describe('one file dialog at a time', () => {
     expect(await again).toBeNull();
   });
 
+  test('a closed handler that throws neither loses the pick nor stops the handlers after it', async () => {
+    // Every onDialogClosed handler runs in withOneDialog's finally. One that
+    // threw used to replace the dialog's answer with its own error, so the
+    // reader's pick was lost, and every handler after it was skipped. A
+    // module of its own: the handlers list lives as long as app.js does, and
+    // a throwing one must not reach any other test's dialog.
+    const app = (await import(`${join(UI, 'app.js')}?closed-handlers`)) as AppModule;
+    const picker = stubPicker();
+    const heard: string[] = [];
+    app.onDialogClosed(() => { heard.push('first'); throw new Error('the keyboard had nowhere to go'); });
+    app.onDialogClosed(() => { heard.push('second'); });
+    const logged: unknown[][] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => { logged.push(args); };
+    try {
+      const asked = app.pickScreenplay();
+      await Promise.resolve();
+      picker.answer('/s/script.pdf');
+      expect(await asked).toBe('/s/script.pdf');
+    } finally {
+      console.error = realError;
+    }
+    expect(heard).toEqual(['first', 'second']);
+    expect(app.isDialogOpen()).toBe(false);
+    // Not swallowed either: said where a developer looks.
+    expect(logged.length).toBe(1);
+    expect(String(logged[0].at(-1))).toContain('the keyboard had nowhere to go');
+  });
+
   test('a dialog that fails still closes, and still hands the keyboard back', async () => {
     const app = (await import(join(UI, 'app.js'))) as AppModule;
     const picker = stubPicker();
@@ -8189,6 +8218,40 @@ describe('the Send page’s KFX block: what a reader sees across redraws', () =>
     // "Installing…" is disabled, so it cannot hold the focus.
     expect(w.labels()).toEqual(['Installing…']);
     expect(w.restored).toBe(1);
+  });
+
+  test('a busy hook that throws as the install ends does not lose what the install did', async () => {
+    // install()'s finally hands the list back through onBusy(false). A throw
+    // from it used to leave install() there, skipping the lines after the
+    // finally: the new checklist never stored, the status line never
+    // written, the Install button still up for a plugin already installed.
+    const w = await world();
+    await w.answer('kfx-status', status(true, true, false));
+    const busy: boolean[] = [];
+    w.kfx.mountKfx(w.host, {
+      isSending: () => false,
+      devices: () => [],
+      onBusy: (on: boolean) => {
+        busy.push(on);
+        if (!on) throw new Error('the list was already gone');
+      },
+      restoreFocus: () => { w.restored += 1; },
+    });
+    const logged: unknown[][] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => { logged.push(args); };
+    try {
+      w.button('Install').click();
+      await w.answer('kfx-install', installed(true, true));
+    } finally {
+      console.error = realError;
+    }
+    expect(busy).toEqual([true, false]);
+    expect(w.statusNode()!.textContent).toBe(INSTALLED_READY);
+    expect(w.labels()).toEqual([]);
+    expect(w.kfx.kfxInstalling()).toBe(false);
+    expect(logged.length).toBe(1);
+    expect(String(logged[0].at(-1))).toContain('the list was already gone');
   });
 
   test('a probe still out when an install finishes cannot undo it', async () => {

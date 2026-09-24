@@ -350,7 +350,14 @@ async function install() {
     outcome = afterInstall({ ok: false, error: { message: err?.message } }, setup);
   } finally {
     installingNow = false;
-    hooks?.onBusy?.(false);
+    // Guarded, as update-flow.js's notify() guards its listeners: a throw
+    // from the hook would end the install right here, and the lines below
+    // (the new checklist, the line that says what happened) would never run.
+    try {
+      hooks?.onBusy?.(false);
+    } catch (err) {
+      console.error('kfx.js: the busy hook threw', err);
+    }
   }
   setup = outcome.setup;
   justInstalled = outcome.justInstalled;
