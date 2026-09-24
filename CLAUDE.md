@@ -111,7 +111,11 @@ bun tools/capture-screens.ts   # retake README + site pictures (needs Chrome; ma
   preloads `tests/isolate-app-settings.ts` and root `.env.test` sets the
   same guard (SCREEPUB_CONFIG_DIR under `/dev/null/`). Run `bun test` from
   the repo root, not a subfolder, and give any test that needs settings its
-  own scratch path.
+  own scratch path. The same goes for Calibre: `tests/isolate-calibre-config.ts`
+  points `CALIBRE_CONFIG_DIRECTORY` at a scratch COPY of the real Calibre
+  folder for the whole run, and `.env.test` sets a guard path so a Calibre
+  started without the test's environment fails instead of reaching the real
+  one. Pass `process.env` to every Calibre spawn.
 - Fixture sweep + epubcheck after any stage-1/CSS change. Test
   end-to-end with real PDFs too; outputs land in the app library folder.
 - **The corpus diff is the tool for "does this actually matter?"** Convert
