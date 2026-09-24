@@ -36,6 +36,13 @@ pub const SIDECAR: &str = "screepub-engine";
 pub const LINE_EVENT: &str = "engine-line";
 
 pub async fn run(app: &AppHandle, args: Vec<String>) -> Result<String, String> {
+    // Nothing here kills the engine if the app quits while this call is
+    // running: the engine finishes its work in the background. Deliberate,
+    // and approved by the owner on 2026-09-24 after a code review. Killing
+    // it mid-write could leave a half-written book or a half-installed
+    // Calibre plugin; letting it finish is the safer failure, and every
+    // file the engine writes goes to a temporary file first and is renamed
+    // into place.
     let (mut rx, _child) = app
         .shell()
         .sidecar(SIDECAR)
