@@ -2,7 +2,7 @@ import { existsSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { convertFountain } from '../convert';
 import type { FormatOptions } from '../options';
-import { toAzw3 } from './calibre';
+import { azw3Sibling, toAzw3 } from './calibre';
 import { needsRegeneration } from './freshness';
 import type { ExportFormat } from './formats';
 import { kfxSibling, toKfx } from './kfx';
@@ -48,10 +48,11 @@ export interface FreshKindleArtifactOptions {
   onStage?: (stage: string) => void;
 }
 
-/** A Kindle-format file guaranteed current with `epub`. Calibre converts
- * straight from the present EPUB, so that branch is fresh by construction;
- * the MOBI branch re-runs the engine only when the staleness rule says the
- * file is out of date.
+/** A Kindle-format file guaranteed current with `epub`. Every rung reuses
+ * the file already beside the EPUB when the staleness rule (freshness.ts)
+ * says it is current, and builds it again only when it is not: KFX and AZW3
+ * convert straight from the present EPUB, and the MOBI branch re-runs the
+ * engine.
  *
  * NOTE: the MOBI branch REWRITES `epub` in place before it writes the .mobi
  * beside it — this function can mutate the EPUB it was handed, not just
@@ -71,6 +72,14 @@ export async function freshKindleArtifact(opts: FreshKindleArtifactOptions): Pro
   }
 
   if (calibreAvailable) {
+    // Same staleness rule as the KFX rung above, for the same reason: the
+    // EPUB is the sole input and the flags are constant. Without it, "Save a
+    // Kindle file" converted twice on a Calibre-only machine (the window's
+    // `export --for kindle` to learn the extension, then `route
+    // save-kindle`). toAzw3 writes scratch-then-rename, so a partial file
+    // never appears at this path to be trusted.
+    const azw3 = azw3Sibling(epub);
+    if (!needsRegeneration(azw3, epub)) return azw3;
     onStage?.('converting to AZW3 for Kindle…');
     return toAzw3(epub);
   }

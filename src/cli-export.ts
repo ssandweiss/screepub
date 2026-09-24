@@ -103,9 +103,8 @@ function checkOutExtension(out: string, wantExt: string): void {
  * writeFileAtomic, which this cannot import (that one takes bytes already
  * in memory; this one has a source file on disk to stream from instead). */
 async function copyArtifactAtomic(source: string, destination: string): Promise<void> {
-  const destDir = dirname(destination);
-  await mkdir(destDir, { recursive: true });
-  const tmp = join(destDir, `.${basename(destination)}.${process.pid}.tmp`);
+  await mkdir(dirname(destination), { recursive: true });
+  const tmp = tempPathFor(destination);
   try {
     await copyFile(source, tmp);
     await rename(tmp, destination);
@@ -115,17 +114,28 @@ async function copyArtifactAtomic(source: string, destination: string): Promise<
   }
 }
 
+/** The hidden temp sibling copyArtifactAtomic writes through. One
+ * derivation, so the failure message below can find it and take it out. */
+function tempPathFor(destination: string): string {
+  return join(dirname(destination), `.${basename(destination)}.${process.pid}.tmp`);
+}
+
 /** Resolve --out against the artifact the ladder (or the epub rung)
  * actually produced. Already sitting at `out`: answer without copying,
  * since it is already there, and copying a file onto itself is only ever a
  * footgun. Otherwise copy it there atomically. Either way the returned path
- * IS `out`, per the contract: every other field in the answer is unchanged. */
+ * IS `out`, per the contract: every other field in the answer is unchanged.
+ *
+ * A failed copy says where it was going, and the system's reason with the
+ * hidden temp file (`.<name>.<pid>.tmp`, which the person never chose and
+ * cannot find) replaced by the path they did choose. */
 async function resolveOut(artifactPath: string, out: string): Promise<string> {
   if (resolve(out) !== resolve(artifactPath)) {
     try {
       await copyArtifactAtomic(artifactPath, out);
     } catch (err) {
-      throw new CliError('export-failed', errorMessage(err));
+      const reason = errorMessage(err).split(tempPathFor(out)).join(out);
+      throw new CliError('export-failed', `could not save the copy to ${out}: ${reason}`);
     }
   }
   return out;

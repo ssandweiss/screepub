@@ -77,9 +77,13 @@ export async function sendViaAmazon(
     return "Opened Amazon's Send to Kindle app with the book.";
   }
   if (facts.platform === 'win32') {
+    // The folder, not `/select,<book>`: Bun quotes that whole argument when
+    // the path has a space in it, and explorer misreads the quoted form (a
+    // comma in the path breaks it too), so the book is not selected and the
+    // wrong folder can open. Opening the folder is what Linux does as well.
     // explorer exits 1 even when it did exactly what was asked, so its exit
     // code says nothing about whether the folder opened, and is not read.
-    await open(['explorer', `/select,${epub}`]);
+    await open(['explorer', dirname(epub)]);
   } else {
     const reveal = facts.platform === 'darwin' ? ['open', '-R', epub] : ['xdg-open', dirname(epub)];
     await openOrThrow(open, reveal, "the book's folder");

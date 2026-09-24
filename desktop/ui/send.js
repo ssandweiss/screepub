@@ -386,9 +386,10 @@ export function isDeviceRoute(route) {
 }
 
 /** The button a row gets: brass for the chosen route, outline for every
- *  other one that can fire, and none at all for a row that cannot. A chosen
- *  row that is unavailable (the Kindle you used last time, unplugged) keeps
- *  its place at the top and waits without a button. */
+ *  other one that can fire, and none at all for a row that cannot. The rows
+ *  keep the engine's order whichever is chosen; the brass is what marks the
+ *  choice. A chosen row that is unavailable (the Kindle you used last time,
+ *  unplugged) stays where the engine put it and waits without a button. */
 export function buttonClassFor(route, chosenId) {
   if (route?.available !== true) return null;
   return route.id === chosenId ? 'btn btn-brad' : 'btn btn-outline';
@@ -552,7 +553,7 @@ export const REACH_HEADING = 'What Screepub can reach';
 /** Not "nothing leaves this computer" any more: that was true when every row
  *  was a cable, and Send to Kindle and email go through Amazon. The device
  *  rows still say it, in the engine's words, where it is true. */
-export const LEDE = 'Every way this book can go from here, the one you used last time in brass. '
+export const LEDE = 'Every way this book can go from here, the one you used last time, or the best one here, in brass. '
   + 'A reader plugged in over USB gets the file it can actually open.';
 
 /** Shown until the first `routes` answer arrives. */

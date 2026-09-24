@@ -1,5 +1,6 @@
 import { afterAll, describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import {
+  chmodSync,
   mkdtempSync,
   mkdirSync,
   rmSync,
@@ -566,6 +567,49 @@ describe('exportCommand --out', () => {
     }
     expect((error as { code?: string } | undefined)?.code).toBe('export-failed');
     expect(readdirSync(destDir)).toEqual(['Saved.epub']);
+  });
+
+  // The system's own complaint names the hidden temp file the copy was
+  // going through (`.<name>.<pid>.tmp`), a file the person never asked for
+  // and cannot find. The answer names the path they chose instead.
+  test('a folder that cannot be written: says where the copy was going, never the temp file', async () => {
+    if (process.platform === 'win32') return; // chmod does not make a Windows folder read-only
+    const destDir = join(dir, 'read-only');
+    mkdirSync(destDir);
+    const out = join(destDir, 'Saved.epub');
+    chmodSync(destDir, 0o555);
+    let error: { code?: string; message?: string } | undefined;
+    try {
+      await exportCommand({ epub, for: 'epub', out });
+    } catch (err) {
+      error = err as typeof error;
+    } finally {
+      chmodSync(destDir, 0o755);
+    }
+    expect(error?.code).toBe('export-failed');
+    const message = error?.message ?? '';
+    expect(message.startsWith(`could not save the copy to ${out}: `)).toBe(true);
+    // A reason, not an empty tail.
+    expect(message.length).toBeGreaterThan(`could not save the copy to ${out}: `.length);
+    expect(message).not.toContain('.tmp');
+    expect(message).not.toContain('.Saved.epub.');
+    expect(readdirSync(destDir)).toEqual([]);
+  });
+
+  test('a copy that fails at the rename names the chosen path too, never the temp file', async () => {
+    const destDir = join(dir, 'rename-failure');
+    mkdirSync(destDir);
+    const out = join(destDir, 'Saved.epub');
+    mkdirSync(out); // a folder where the file must go: the copy lands, the rename cannot
+    let error: { code?: string; message?: string } | undefined;
+    try {
+      await exportCommand({ epub, for: 'epub', out });
+    } catch (err) {
+      error = err as typeof error;
+    }
+    expect(error?.code).toBe('export-failed');
+    expect(error?.message?.startsWith(`could not save the copy to ${out}: `)).toBe(true);
+    expect(error?.message).not.toContain('.tmp');
   });
 
   test('out equal to the epub artifact\'s own path answers without copying', async () => {

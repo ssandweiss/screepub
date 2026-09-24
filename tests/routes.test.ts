@@ -545,6 +545,41 @@ describe('row identity and the device a row carries', () => {
     expect(row.button).toBe('Copy to KOBOeReader');
   });
 
+  test('a device with a blank name is named by its kind: title, button and the device it carries', () => {
+    // A drive with no label (Windows reads that as ''), or one of spaces,
+    // would otherwise be a row with no title, and the window rejects a
+    // blank title by rejecting the WHOLE list, save rows and all.
+    const cases: [ConnectedDevice, string][] = [
+      [{ kind: 'kindle', name: '', volume: 'E:\\' }, 'Kindle'],
+      [{ kind: 'kobo', name: '   ', volume: '/Volumes/   ' }, 'Kobo'],
+      [{ kind: 'tolino', name: '\t\n', volume: '/media/x' }, 'tolino'],
+    ];
+    for (const [device, name] of cases) {
+      const row = routes(facts({ devices: [device] }))[0]!;
+      expect(row.title).toBe(name);
+      expect(row.button).toBe(`Copy to ${name}`);
+      expect(row.device!.name).toBe(name);
+      // Only the words change: the row still addresses that volume.
+      expect(row.device!.id).toBe(device.volume!);
+      expect(row.id).toBe(`device:${device.kind}#${device.volume}`);
+    }
+  });
+
+  test('a docked reMarkable with a blank name carries its kind name too', () => {
+    const blank: ConnectedDevice = { kind: 'remarkable', name: ' ', volume: null };
+    const row = routes(facts({ devices: [blank] })).find((r) => r.key === 'remarkable')!;
+    expect(row.title).toBe('reMarkable');
+    expect(row.device!.name).toBe('reMarkable');
+  });
+
+  test('a name that is not blank is kept exactly as the device gave it', () => {
+    const spaced: ConnectedDevice = { kind: 'kindle', name: ' My Kindle ', volume: '/Volumes/ My Kindle ' };
+    const row = routes(facts({ devices: [spaced] }))[0]!;
+    expect(row.title).toBe(' My Kindle ');
+    expect(row.button).toBe('Copy to  My Kindle ');
+    expect(row.device!.name).toBe(' My Kindle ');
+  });
+
   test('a device with no volume falls back to its id for the row id', () => {
     const odd: ConnectedDevice = { kind: 'kobo', name: 'Kobo', volume: null };
     expect(routes(facts({ devices: [odd] }))[0]!.id).toBe('device:kobo#kobo');

@@ -144,6 +144,29 @@ describe('routesFrom: the engine’s route list, taken whole or not at all', () 
     expect(checked).toBeGreaterThan(192 * 3);
   });
 
+  test('a connected device with a blank name still round-trips: the list is drawn, not refused', () => {
+    // A drive with no label reaches the engine as '' (or spaces). The
+    // validator refuses a blank title or device name by refusing the WHOLE
+    // list, so the engine has to name such a row itself, by its kind.
+    const blanks: ConnectedDevice[] = [
+      { kind: 'kindle', name: '', volume: 'E:\\' },
+      { kind: 'kobo', name: '   ', volume: 'F:\\' },
+      { kind: 'remarkable', name: ' ', volume: null },
+    ];
+    for (const platform of ['darwin', 'win32', 'linux']) {
+      const list = routes({
+        platform, booksApp: true, sendToKindleApp: false, appleMailDefault: false, devices: blanks,
+      });
+      for (const last of remembered(list)) {
+        const answer = answerFor(list, last);
+        const got = send.routesFrom(JSON.parse(JSON.stringify(answer)));
+        expect(got, `${platform}, remembered ${String(last)}`).toStrictEqual({ routes: list, chosen: answer.chosen });
+      }
+      const titles = list.filter((r) => r.device !== undefined).map((r) => r.title);
+      expect(titles).toEqual(['Kindle', 'Kobo', 'reMarkable']);
+    }
+  });
+
   test('the copies are clean: rebuilt, never the engine’s objects by reference', () => {
     const answer = sample();
     const extra = structuredClone(answer) as Record<string, unknown> & typeof answer;
@@ -804,6 +827,12 @@ describe('the words this adds', () => {
     // Amazon, so the page-wide promise would now be false; the device rows
     // still say it, in the engine's words, where it is true.
     expect(send.LEDE).not.toContain('nothing leaves');
+  });
+
+  test('the lede is true on a first run too: brass is last time’s route, or the best one here', () => {
+    // On a first run nothing was used last time; the engine chose the first
+    // row that can fire (preselected), and the page must not claim otherwise.
+    expect(send.LEDE).toContain('the one you used last time, or the best one here, in brass');
   });
 });
 

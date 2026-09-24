@@ -8,6 +8,8 @@
 // `defaults read`, never opens Books, and never reads the real disk for
 // Send to Kindle.app.
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { posix } from 'node:path';
 import { listDevices, type ListDevicesOptions } from '../device/list';
 import type { ConnectedDevice } from '../device/types';
 import type { RouteFacts } from './routes';
@@ -16,26 +18,66 @@ import type { RouteFacts } from './routes';
  *  - a bundle id string: that app is the mailto: handler.
  *  - null: no mailto entry in Launch Services at all, which is what an
  *    unmodified Mac reads as (Apple Mail is the system default with nothing
- *    registered).
- *  - undefined: the probe could not tell (spawn failed, non-zero exit,
- *    unparsable output). NEVER treated as Apple Mail: offering a mail
- *    compose when the real handler is unknown risks a compose that has no
- *    attachment support and silently drops the file. */
+ *    registered). That includes `defaults` saying LSHandlers itself does
+ *    not exist, which is a Mac where nobody has changed any default app.
+ *  - undefined: the probe could not tell (spawn failed, any other non-zero
+ *    exit). NEVER treated as Apple Mail: offering a mail compose when the
+ *    real handler is unknown risks a compose that has no attachment support
+ *    and silently drops the file. */
 export type MailtoHandlerResult = string | null | undefined;
+
+/** How one finished command went: its exit code and both streams. */
+export interface CommandResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** Runs one argv to completion. May throw when the program is not there. */
+export type CommandRunner = (argv: string[]) => Promise<CommandResult>;
+
+type Env = Record<string, string | undefined>;
 
 export interface RouteProbes {
   /** default: listDevices(deviceOptions) */
   devices?: () => Promise<ConnectedDevice[]>;
   /** default: existsSync */
   exists?: (path: string) => boolean;
-  /** default: `defaults read com.apple.LaunchServices/...` via Bun.spawn */
+  /** default: `defaults read com.apple.LaunchServices/...`, run through `run` */
   mailtoHandler?: () => Promise<MailtoHandlerResult>;
+  /** What the default mailtoHandler spawns `defaults` with.
+   *  default: Bun.spawn */
+  run?: CommandRunner;
+  /** Where the home folder is read from (HOME, then USERPROFILE), for the
+   *  Send to Kindle app in ~/Applications. default: process.env */
+  env?: Env;
   /** default: process.platform */
   platform?: string;
 }
 
 const BOOKS_APP_PATHS = ['/System/Applications/Books.app', '/Applications/Books.app'];
-const SEND_TO_KINDLE_APP_PATH = '/Applications/Send to Kindle.app';
+const SEND_TO_KINDLE_APP = 'Send to Kindle.app';
+
+/** Where Amazon's app can be: the Mac's Applications folder, or the home
+ *  folder's own (where an installer puts it for a person without admin
+ *  rights, and `open -a` finds it there all the same). Home is found the
+ *  way the settings file finds it (src/settings/app.ts). Mac paths, so
+ *  POSIX joins whatever the host. */
+function sendToKindleAppPaths(env: Env): string[] {
+  const home = env.HOME || env.USERPROFILE || homedir();
+  return [
+    posix.join('/Applications', SEND_TO_KINDLE_APP),
+    posix.join(home, 'Applications', SEND_TO_KINDLE_APP),
+  ];
+}
+
+/** The one question asked of Launch Services. */
+const MAILTO_HANDLER_ARGV = [
+  'defaults',
+  'read',
+  'com.apple.LaunchServices/com.apple.launchservices.secure',
+  'LSHandlers',
+];
 
 /** True when `dict` (one `{ ... }` entry, braces included) holds `key = value;`
  * at its OWN top level, never inside a nested `{ ... }` block. Tracked by
@@ -110,23 +152,39 @@ export function parseMailtoHandler(defaultsOutput: string): string | null {
   return null;
 }
 
-/** The real probe: asks Launch Services who owns `mailto:` links. Spawned
- * only when actually called (routeFacts skips it off darwin). A non-zero
- * exit or a spawn error is "could not tell" (undefined), never "no entry"
- * (null): those two must stay distinguishable so a read failure is never
- * offered as Apple Mail. */
-async function realMailtoHandler(): Promise<MailtoHandlerResult> {
+/** The real runner: Bun.spawn, both streams read. Throws only when the
+ *  program cannot be started at all; the caller reads that as "could not
+ *  tell". */
+const realRun: CommandRunner = async (argv) => {
+  const proc = Bun.spawn(argv, { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+  const [code, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  return { code, stdout, stderr };
+};
+
+/** The real probe: asks Launch Services who owns `mailto:` links. Run only
+ * when actually called (routeFacts skips it off darwin).
+ *
+ * `defaults` exits 1 when LSHandlers is not there at all, saying the
+ * "domain/default pair ... does not exist" (measured 2026-09-23). That is a
+ * Mac where nobody has changed any default app, so the system default,
+ * Apple Mail: no entry (null). Every other non-zero exit, and a runner that
+ * cannot start `defaults`, is "could not tell" (undefined). Those two must
+ * stay distinguishable, so a read failure is never offered as Apple Mail and
+ * an untouched Mac is not told to change a setting it already has. */
+async function mailtoHandlerVia(run: CommandRunner): Promise<MailtoHandlerResult> {
+  let result: CommandResult;
   try {
-    const proc = Bun.spawn(
-      ['defaults', 'read', 'com.apple.LaunchServices/com.apple.launchservices.secure', 'LSHandlers'],
-      { stdout: 'pipe', stderr: 'pipe' },
-    );
-    const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
-    if (code !== 0) return undefined;
-    return parseMailtoHandler(stdout);
+    result = await run(MAILTO_HANDLER_ARGV);
   } catch {
     return undefined;
   }
+  if (result.code === 0) return parseMailtoHandler(result.stdout);
+  if (`${result.stderr}\n${result.stdout}`.includes('does not exist')) return null;
+  return undefined;
 }
 
 /** Gathers RouteFacts for routes.ts. Every probe is injectable; the defaults
@@ -150,10 +208,10 @@ export async function routeFacts(
 
   if (onMac) {
     const exists = probes.exists ?? existsSync;
-    const mailtoHandler = probes.mailtoHandler ?? realMailtoHandler;
+    const mailtoHandler = probes.mailtoHandler ?? (() => mailtoHandlerVia(probes.run ?? realRun));
 
     booksApp = BOOKS_APP_PATHS.some((path) => exists(path));
-    sendToKindleApp = exists(SEND_TO_KINDLE_APP_PATH);
+    sendToKindleApp = sendToKindleAppPaths(probes.env ?? process.env).some((path) => exists(path));
 
     const handler = await mailtoHandler();
     // null: no mailto entry, which is the system default (Apple Mail).

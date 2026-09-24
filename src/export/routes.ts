@@ -85,8 +85,17 @@ const REMARKABLE = { title: 'reMarkable', button: 'Upload to reMarkable' } as co
 const APPLE_BOOKS = { title: 'Apple Books', button: 'Add to Apple Books' } as const;
 const EMAIL = { title: 'Send to Kindle email', button: 'Send to Kindle email' } as const;
 
+/** The name a connected device's row shows: its own, or its kind's when its
+ *  own is blank (a drive with no label reads as '' on Windows). A blank
+ *  title is not just an empty-looking row: the window refuses a list with a
+ *  blank title in it WHOLE, save rows and all. A name that is not blank is
+ *  kept exactly as the device gave it. */
+function nameOf(device: ConnectedDevice): string {
+  return device.name.trim() === '' ? DEVICE_DISPLAY_NAMES[device.kind] : device.name;
+}
+
 function summarize(device: ConnectedDevice): RouteDevice {
-  return { id: deviceId(device), kind: device.kind, name: device.name, volume: device.volume };
+  return { id: deviceId(device), kind: device.kind, name: nameOf(device), volume: device.volume };
 }
 
 function row(key: RouteKey, title: string, detail: string, button: string): Route {
@@ -115,8 +124,9 @@ export function routes(facts: RouteFacts): Route[] {
 
   for (const device of volumeDevices) {
     const key = `device:${device.kind}`;
+    const name = nameOf(device);
     list.push({
-      ...row(key, device.name, DEVICE_DETAIL, `Copy to ${device.name}`),
+      ...row(key, name, DEVICE_DETAIL, `Copy to ${name}`),
       id: `${key}#${device.volume ?? deviceId(device)}`,
       device: summarize(device),
     });

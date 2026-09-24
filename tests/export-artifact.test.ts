@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
 import { mobiSibling, availableFormats, freshKindleArtifact, CannotRegenerateError } from '../src/export/artifact';
 import { kfxSibling, KfxToolchainNotReadyError } from '../src/export/kfx';
-import { CalibreMissingError, CalibreFailedError } from '../src/export/calibre';
+import { azw3Sibling, CalibreMissingError, CalibreFailedError } from '../src/export/calibre';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-export-artifact-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
@@ -188,6 +188,69 @@ test('kfxReady with a stale .kfx attempts a KFX rebuild rather than silently reu
   ).toBe(true);
 });
 
+// The AZW3 rung reuses its own previous answer, by the SAME rule as the KFX
+// and MOBI rungs (freshness.ts): "Save a Kindle file" on a Calibre-only
+// machine runs `export --for kindle` to learn the extension and then
+// `route save-kindle`, and without this the second one converted again.
+
+test('a fresh .azw3 is reused with no Calibre call, even though Calibre is available', async () => {
+  const dir = scratch();
+  const epub = join(dir, 'Script.epub');
+  writeFileSync(epub, 'epub');
+  const azw3 = azw3Sibling(epub);
+  writeFileSync(azw3, 'existing-azw3');
+  const now = new Date();
+  utimesSync(epub, new Date(now.getTime() - 10_000), new Date(now.getTime() - 10_000));
+  utimesSync(azw3, now, now);
+  const stages: string[] = [];
+
+  const out = await freshKindleArtifact({
+    epub,
+    fountainPath: null,
+    format: DEFAULT_FORMAT_OPTIONS,
+    calibreAvailable: true,
+    kfxReady: false,
+    onStage: (stage) => stages.push(stage),
+  });
+  // A call to Calibre would either have failed on this placeholder EPUB
+  // (Calibre installed) or thrown CalibreMissingError (not installed); and
+  // either way it would have announced the conversion first.
+  expect(out).toBe(azw3);
+  expect(readFileSync(azw3, 'utf8')).toBe('existing-azw3');
+  expect(stages).toEqual([]);
+});
+
+test('a stale .azw3 (the EPUB is newer) is rebuilt, not reused', async () => {
+  const dir = scratch();
+  const epub = join(dir, 'Script.epub');
+  writeFileSync(epub, 'epub');
+  const azw3 = azw3Sibling(epub);
+  writeFileSync(azw3, 'stale-azw3');
+  const now = new Date();
+  utimesSync(azw3, new Date(now.getTime() - 10_000), new Date(now.getTime() - 10_000));
+  utimesSync(epub, now, now);
+  const stages: string[] = [];
+
+  // Same environment-independent assertion as the precedence tests below:
+  // reaching Calibre surfaces as CalibreMissingError (absent) or
+  // CalibreFailedError (present, placeholder input rejected). A reuse would
+  // instead return the stale path without throwing.
+  const error = await freshKindleArtifact({
+    epub,
+    fountainPath: null,
+    format: DEFAULT_FORMAT_OPTIONS,
+    calibreAvailable: true,
+    kfxReady: false,
+    onStage: (stage) => stages.push(stage),
+  }).catch((e) => e);
+  expect(error).toBeInstanceOf(Error);
+  expect([CalibreMissingError, CalibreFailedError].some((C) => error instanceof C)).toBe(true);
+  expect(stages).toEqual(['converting to AZW3 for Kindle…']);
+  // A conversion that failed leaves the old file alone: it is still stale,
+  // so the next try rebuilds it again.
+  expect(readFileSync(azw3, 'utf8')).toBe('stale-azw3');
+}, 120_000);
+
 test('calibreAvailable is used over an existing fresh .mobi, not reused as a shortcut', async () => {
   const dir = scratch();
   const epub = join(dir, 'Script.epub');
@@ -197,10 +260,11 @@ test('calibreAvailable is used over an existing fresh .mobi, not reused as a sho
   const now = new Date();
   utimesSync(mobi, now, now);
 
-  // calibreAvailable=true means the AZW3 branch is always taken (it's fresh
-  // by construction) — a wrong implementation might instead notice a fresh
-  // .mobi already satisfies "kindle" and reuse it, skipping Calibre
-  // entirely. Same environment-independent precedence assertion as above:
+  // calibreAvailable=true means the AZW3 branch is always taken (and with no
+  // .azw3 beside the EPUB, a conversion). A wrong implementation might
+  // instead notice a fresh .mobi already satisfies "kindle" and reuse it,
+  // skipping Calibre entirely. Same environment-independent precedence
+  // assertion as above:
   // the correct branch surfaces as CalibreMissingError or
   // CalibreFailedError, never CannotRegenerateError (which would mean
   // execution fell through to the MOBI branch instead).

@@ -6,12 +6,15 @@
 // app, a URL or a folder, read the real mail handler, or write the real app
 // settings file.
 //
-// The spawned-CLI tests cover only refusals, --help and `routes` (which is
-// read-only). Every spawn gets SCREEPUB_CONFIG_DIR, SCREEPUB_LIBRARY and
-// SCREEPUB_VOLUME_ROOTS in SCRATCH, the reMarkable probe pointed at a port
-// that refuses at once, and a PATH whose first folder holds a fake `open`,
-// `xdg-open` and `defaults`: each one logs its argv and exits 1. So the mail
-// probe reads a canned "could not tell" instead of this machine's handler,
+// The spawned-CLI tests cover refusals, --help, `routes` (which is
+// read-only) and one route that succeeds, `save-epub`, which opens nothing
+// and writes only inside SCRATCH. Every spawn gets SCREEPUB_CONFIG_DIR,
+// SCREEPUB_LIBRARY and SCREEPUB_VOLUME_ROOTS in SCRATCH, the reMarkable
+// probe pointed at a port that refuses at once, and a PATH whose first
+// folder holds a fake `open`, `xdg-open` and `defaults`: each one logs its
+// argv and exits 1, printing nothing else. So the mail probe reads a canned
+// "could not tell" (a failure that does not say the key does not exist)
+// instead of this machine's handler,
 // and a refusal that ever stopped refusing would log an open here instead of
 // opening anything. The last test in this file reads that log.
 import { afterAll, describe, expect, test } from 'bun:test';
@@ -337,16 +340,20 @@ describe('route: Send to Kindle', () => {
     expect(answer.note).toBe(PAGE_NOTE);
   });
 
-  test('Windows: explorer selects the book, then the page; the app is a Mac thing', async () => {
-    // explorer exits 1 even when it did what was asked: not a failure.
-    const epub = book();
+  test("Windows: explorer opens the book's folder, then the page; the app is a Mac thing", async () => {
+    // explorer exits 1 even when it did what was asked: not a failure. The
+    // folder, not `/select,<book>`: Bun quotes that whole argument when the
+    // path has a space in it, and explorer misreads the quoted form (a comma
+    // in the path breaks it too), so a book called "My Script.epub" would
+    // open the wrong folder.
+    const epub = book('My Script, draft 2.epub');
     const r = rig({
       facts: { platform: 'win32', sendToKindleApp: true, booksApp: false, appleMailDefault: false },
       codeFor: (argv) => (argv[0] === 'explorer' ? 1 : 0),
     });
     const answer = await routeCommand({ key: 'send-to-kindle', epub }, r.deps);
     expect(r.calls).toEqual([
-      ['explorer', `/select,${epub}`],
+      ['explorer', dirname(epub)],
       ['rundll32', 'url.dll,FileProtocolHandler', STK_URL],
     ]);
     expect(answer.note).toBe(PAGE_NOTE);
@@ -818,7 +825,8 @@ describe('screepub routes (through the CLI)', () => {
 });
 
 describe('screepub route (through the CLI)', () => {
-  // Refusals and --help ONLY. No spawned run here names a key that opens
+  // Refusals and --help ONLY (the one spawned success, a save, has its own
+  // block below). No spawned run here names a key that opens
   // anything (apple-books, send-to-kindle, email-to-kindle,
   // kindle-email-setup): what those open is proven in process, above, with a
   // fake Opener. Every run below uses a device key, an unknown key, or a
@@ -964,12 +972,52 @@ describe('screepub route (through the CLI)', () => {
   });
 });
 
+describe('screepub route save-epub (through the CLI): the one route that works when spawned', () => {
+  // The only key it is safe to let succeed in a spawned run: a save opens
+  // nothing, and --out, the settings folder, the library and the mounts are
+  // all inside SCRATCH. What the verb prints on success is proven here, for
+  // real, rather than read out of cli.ts's source.
+  function saveRun() {
+    const config = mkdtempSync(join(SCRATCH, 'config-'));
+    const out = join(mkdtempSync(join(SCRATCH, 'save-')), 'nested dir', 'Copy.epub');
+    return { config, out, settings: join(config, 'settings.json') };
+  }
+
+  test('--json: one object, ok with the key, the path written and the note; the copy is there and remembered', async () => {
+    const epub = book();
+    const { config, out, settings } = saveRun();
+    const { stdout, stderr, exitCode } = await runCli(
+      ['route', 'save-epub', epub, '--out', out, '--json'],
+      { SCREEPUB_CONFIG_DIR: config },
+    );
+    expect(stderr).toBe('');
+    expect(exitCode).toBe(0);
+    expect(soleJson(stdout)).toEqual({ ok: true, key: 'save-epub', path: out, note: `Saved to ${out}.` });
+    expect(readFileSync(out, 'utf8')).toBe('book-bytes');
+    expect(JSON.parse(readFileSync(settings, 'utf8'))).toEqual({ lastRoute: 'save-epub' });
+  });
+
+  test('for a person: the note alone, one line, no JSON', async () => {
+    const epub = book();
+    const { config, out, settings } = saveRun();
+    const { stdout, stderr, exitCode } = await runCli(
+      ['route', 'save-epub', epub, '--out', out],
+      { SCREEPUB_CONFIG_DIR: config },
+    );
+    expect(stderr).toBe('');
+    expect(exitCode).toBe(0);
+    expect(stdout).toBe(`Saved to ${out}.\n`);
+    expect(existsSync(out)).toBe(true);
+    expect(JSON.parse(readFileSync(settings, 'utf8'))).toEqual({ lastRoute: 'save-epub' });
+  });
+});
+
 describe("cli.ts's route branch, in the source", () => {
-  // A route that WORKS is never spawned here (it would open Books, Amazon or
-  // Mail on the machine running the suite, or at best write a copy), so what
-  // the branch prints on success is pinned in the source instead, the way
-  // tests/cli-kfx.test.ts pins its own branch. The handler's answer itself
-  // is proven in process above.
+  // What the branch prints on success is proven by the spawned save above;
+  // the two pins that read it out of the source are gone. This one stays,
+  // because it covers keys no spawned run may let through: every refusal
+  // the branch makes itself comes before the handler is called, so a
+  // refusal moved below it could not open Books first and refuse after.
   const START = "if (verb === 'route') {";
   const END = "// verb === 'send'";
   const REFUSAL = "fail({ code: 'usage'";
@@ -982,17 +1030,6 @@ describe("cli.ts's route branch, in the source", () => {
     expect(end, 'the route branch lost its end marker').toBeGreaterThan(start);
     return source.slice(start, end);
   }
-
-  test('--json answers the handler whole: ok, then its key, path and note', async () => {
-    expect(await branch()).toContain('console.log(JSON.stringify({ ok: true, ...answer }));');
-  });
-
-  test('a person reads the note, not JSON', async () => {
-    const text = await branch();
-    const person = text.slice(text.indexOf('if (jsonMode)'));
-    expect(person).toContain('console.log(answer.note);');
-    expect(person.split('JSON.stringify').length - 1).toBe(1);
-  });
 
   test('every refusal in the branch comes before the handler is called', async () => {
     const text = await branch();

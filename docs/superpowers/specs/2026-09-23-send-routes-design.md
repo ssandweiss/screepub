@@ -133,10 +133,13 @@ first available row.
 
 `routeFacts()` gathers `RouteFacts`: `listDevices()` (existing), Books at
 `/System/Applications/Books.app` or `/Applications/Books.app`, Amazon's app
-at `/Applications/Send to Kindle.app`, and the mailto handler from the
-`defaults` read above (macOS only; any failure reads as "not Apple Mail",
-which dims the row rather than offering a compose that loses the file).
-Each probe is an injectable seam.
+at `/Applications/Send to Kindle.app` or `~/Applications/Send to
+Kindle.app`, and the mailto handler from the `defaults` read above (macOS
+only). When `defaults` answers that LSHandlers "does not exist", nobody has
+changed a default app: no entry, so Apple Mail. Any other failure reads as
+"not Apple Mail", which dims the row rather than offering a compose that
+loses the file. Each probe is an injectable seam, and the mail probe's
+spawn is one too.
 
 ### Verbs
 
@@ -149,6 +152,9 @@ Each probe is an injectable seam.
   to your iPhone and iPad when Books uses iCloud."). Device routes keep
   their existing `export` then `send` flow, which already narrates its own
   phases; `send` remembers `device:<kind>` when it succeeds.
+- `screepub route kindle-email-setup [--json]`: takes no file, opens
+  Amazon's Personal Document Settings page (the email route's one-time
+  setup), is never remembered, and is available on every platform.
 - `screepub export ... --out <absolute path>`: copies the fresh artifact to
   the path (parents created, written atomically, an existing file replaced:
   the dialog already asked). The path's extension must match the
