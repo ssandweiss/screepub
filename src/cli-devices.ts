@@ -9,6 +9,7 @@ import { listDevices, type ListDevicesOptions } from './device/list';
 import { deviceId, type ConnectedDevice, type DeviceKind } from './device/types';
 import { copyToDevice } from './device/transfer';
 import { remarkableAccepts, uploadToRemarkable } from './device/remarkable';
+import { rememberRoute } from './cli-routes';
 
 export const VERBS = [
   'devices',
@@ -20,6 +21,7 @@ export const VERBS = [
   'kfx-status',
   'kfx-install',
   'routes',
+  'route',
 ] as const;
 export type Verb = (typeof VERBS)[number];
 
@@ -111,6 +113,10 @@ export interface SendOptions extends ListDevicesOptions {
   file: string;
   /** The id `devices` reports. Omitted: the single connected device. */
   deviceId?: string;
+  /** Where a send that worked is remembered (the app settings file), so the
+   *  Send page chooses this reader first next time. default:
+   *  appSettingsPath(), which SCREEPUB_CONFIG_DIR overrides. */
+  settingsPath?: string;
 }
 
 export interface SendResult {
@@ -125,7 +131,12 @@ export interface SendResult {
  *
  * The file is checked FIRST, before the device list is built: a typo in the
  * filename must not be reported as "no devices", and must not pay the
- * reMarkable probe's timeout to find that out. */
+ * reMarkable probe's timeout to find that out.
+ *
+ * A send that WORKED is remembered as `device:<kind>` (never the volume: a
+ * path goes stale the moment the reader is unplugged) or `remarkable`, the
+ * Send page's first choice next time. A failed send remembers nothing, and a
+ * settings file that cannot be written never fails a send (rememberRoute). */
 export async function sendCommand(options: SendOptions): Promise<SendResult> {
   let isFile = false;
   try {
@@ -157,12 +168,16 @@ export async function sendCommand(options: SendOptions): Promise<SendResult> {
     } catch (err) {
       throw new CliError('send-failed', errorMessage(err));
     }
+    rememberRoute('remarkable', options.settingsPath);
     return { device: identity, uploaded: true };
   }
 
+  let destination: string;
   try {
-    return { device: identity, destination: copyToDevice(options.file, device) };
+    destination = copyToDevice(options.file, device);
   } catch (err) {
     throw new CliError('send-failed', errorMessage(err));
   }
+  rememberRoute(`device:${device.kind}`, options.settingsPath);
+  return { device: identity, destination };
 }

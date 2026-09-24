@@ -24,7 +24,7 @@ import { updateDecisionCommand, updateShouldCheckCommand } from './cli-update';
 import { settingsCommand } from './cli-settings';
 import { exportCommand } from './cli-export';
 import { kfxInstallCommand, kfxStatusCommand, installLines, setupLines } from './cli-kfx';
-import { routesCommand, routesLines } from './cli-routes';
+import { routeCommand, routesCommand, routesLines } from './cli-routes';
 import { kfxPossible } from './export/kfx-setup';
 import { routeFacts } from './export/route-facts';
 import type { ListDevicesOptions } from './device/list';
@@ -81,6 +81,8 @@ Commands:
   screepub kfx-status [--json]              can this computer make KFX for a Kindle?
   screepub kfx-install [--json]             add the KFX plugin to Calibre (online)
   screepub routes <file.epub> [--json]      every way this book can leave, best first
+  screepub route <key> <file.epub> [--out <path>] [--json]
+                                            send it to Apple Books, Amazon, Mail, or save a copy
   screepub update-decision --offered <v> --current <v> [--json]
                                             should this update be offered? (offline)
   screepub update-should-check [--opted-in] [--last-checked <ms>] [--json]
@@ -206,6 +208,41 @@ Options:
   -h, --help             show this help
 `;
 
+const ROUTE_USAGE = `screepub route: send a book to Apple Books, Amazon or Mail, or save a copy
+
+Usage:
+  screepub route <key> <file.epub> [--out <path>] [--json]
+  screepub route kindle-email-setup [--json]
+
+Performs one route \`screepub routes\` lists and, when it works, remembers it
+as the one to choose next time. Readers over USB and a docked reMarkable go
+through \`screepub send\` instead. A route that cannot fire here is refused
+with what would fix it.
+
+Keys:
+  apple-books            add the book to Apple Books, which syncs it to an
+                         iPhone and iPad (on a Mac)
+  send-to-kindle         open Amazon's Send to Kindle app with the book, or
+                         its web page and the book's folder
+  email-to-kindle        open a Mail message with the book attached (on a
+                         Mac, with Apple Mail as the default mail app)
+  save-epub              save a copy of the EPUB at --out
+  save-kindle            save a Kindle file (KFX, AZW3 or MOBI) at --out
+  kindle-email-setup     open Amazon's settings page, where your Kindle's
+                         email address and the approved senders are. Takes
+                         no book, and is not remembered
+
+Options:
+  --out <path>           where a save writes the copy: an absolute path whose
+                         extension matches the file (the two saves only)
+  --fountain <file>      the script's .fountain, needed to rebuild a MOBI
+                         (save-kindle only)
+  --options-json <json>  this script's settings, so a rebuild keeps them
+                         (save-kindle only)
+  --json                 machine-readable result on stdout (for the app)
+  -h, --help             show this help
+`;
+
 const UPDATE_DECISION_USAGE = `screepub update-decision — should this update be offered?
 
 Usage:
@@ -251,6 +288,7 @@ function verbUsage(verb: Verb): string {
   if (verb === 'kfx-status') return KFX_STATUS_USAGE;
   if (verb === 'kfx-install') return KFX_INSTALL_USAGE;
   if (verb === 'routes') return ROUTES_USAGE;
+  if (verb === 'route') return ROUTE_USAGE;
   if (verb === 'update-decision') return UPDATE_DECISION_USAGE;
   if (verb === 'update-should-check') return UPDATE_SHOULD_CHECK_USAGE;
   return SEND_USAGE;
@@ -447,11 +485,12 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       }
     }
 
-    // --out is export's own flag (route gains it too, once it exists): the
-    // window's save dialog hands the engine a chosen path, and every verb
-    // that cannot write a file there must refuse it loud, the same way
-    // --for and --fountain are refused everywhere but export.
-    if (verb !== 'export' && values.out !== undefined) {
+    // --out belongs to export and route: the window's save dialog hands the
+    // engine a chosen path, and every verb that cannot write a file there
+    // must refuse it loud, the same way --for is refused everywhere but
+    // export. (route takes it for its two saves only, and refuses it for
+    // every other key itself.)
+    if (verb !== 'export' && verb !== 'route' && values.out !== undefined) {
       fail({ code: 'usage', message: `${verb} takes no --out (--out belongs to export and route)` });
     }
 
@@ -469,10 +508,10 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
         fail({ code: 'usage', message: 'devices takes no --for (--for belongs to export)' });
       }
       if (values.fountain !== undefined) {
-        fail({ code: 'usage', message: 'devices takes no --fountain (--fountain belongs to export)' });
+        fail({ code: 'usage', message: 'devices takes no --fountain (--fountain belongs to export and route)' });
       }
       if (values['options-json'] !== undefined) {
-        fail({ code: 'usage', message: 'devices takes no --options-json (--options-json belongs to export)' });
+        fail({ code: 'usage', message: 'devices takes no --options-json (--options-json belongs to export and route)' });
       }
       if (positionals.length > 0) {
         fail({ code: 'usage', message: `devices takes no arguments (got "${positionals[0]}")` });
@@ -497,8 +536,8 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
         [values.device, '--device', 'send'],
         [values.set, '--set', 'settings'],
         [values.for, '--for', 'export'],
-        [values.fountain, '--fountain', 'export'],
-        [values['options-json'], '--options-json', 'export'],
+        [values.fountain, '--fountain', 'export and route'],
+        [values['options-json'], '--options-json', 'export and route'],
       ];
       if (verb === 'update-decision') {
         foreign.push([values['last-checked'], '--last-checked', 'update-should-check']);
@@ -558,8 +597,8 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
         [values.device, '--device', 'send'],
         [values.set, '--set', 'settings'],
         [values.for, '--for', 'export'],
-        [values.fountain, '--fountain', 'export'],
-        [values['options-json'], '--options-json', 'export'],
+        [values.fountain, '--fountain', 'export and route'],
+        [values['options-json'], '--options-json', 'export and route'],
       ];
       for (const [value, flag, owner] of foreign) {
         if (value !== undefined) {
@@ -639,8 +678,8 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
         [values.device, '--device', 'send'],
         [values.set, '--set', 'settings'],
         [values.for, '--for', 'export'],
-        [values.fountain, '--fountain', 'export'],
-        [values['options-json'], '--options-json', 'export'],
+        [values.fountain, '--fountain', 'export and route'],
+        [values['options-json'], '--options-json', 'export and route'],
       ];
       for (const [value, flag, owner] of foreign) {
         if (value !== undefined) {
@@ -661,6 +700,40 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       return;
     }
 
+    if (verb === 'route') {
+      // Rejected rather than ignored, the same rule every verb follows. The
+      // update flags are refused above in the shared block; --out,
+      // --fountain and --options-json are route's own, and routeCommand
+      // refuses each for every key that cannot act on it, before it probes
+      // or opens anything.
+      const foreign: [unknown, string, string][] = [
+        [values.device, '--device', 'send'],
+        [values.set, '--set', 'settings'],
+        [values.for, '--for', 'export'],
+      ];
+      for (const [value, flag, owner] of foreign) {
+        if (value !== undefined) {
+          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
+        }
+      }
+      if (positionals.length < 1 || positionals.length > 2) {
+        fail({ code: 'usage', message: 'expected a route key and one .epub (see --help)' });
+      }
+      const answer = await routeCommand({
+        key: positionals[0],
+        epub: positionals[1],
+        out: values.out,
+        fountain: values.fountain,
+        optionsJson: values['options-json'],
+      });
+      if (jsonMode) {
+        console.log(JSON.stringify({ ok: true, ...answer }));
+        return;
+      }
+      console.log(answer.note);
+      return;
+    }
+
     // verb === 'send'
     if (values.set !== undefined) {
       fail({ code: 'usage', message: 'send takes no --set (--set belongs to settings)' });
@@ -669,10 +742,10 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       fail({ code: 'usage', message: 'send takes no --for (--for belongs to export)' });
     }
     if (values.fountain !== undefined) {
-      fail({ code: 'usage', message: 'send takes no --fountain (--fountain belongs to export)' });
+      fail({ code: 'usage', message: 'send takes no --fountain (--fountain belongs to export and route)' });
     }
     if (values['options-json'] !== undefined) {
-      fail({ code: 'usage', message: 'send takes no --options-json (--options-json belongs to export)' });
+      fail({ code: 'usage', message: 'send takes no --options-json (--options-json belongs to export and route)' });
     }
     if (positionals.length !== 1) {
       fail({ code: 'usage', message: 'expected exactly one file to send (see --help)' });

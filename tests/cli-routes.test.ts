@@ -26,9 +26,18 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { CliError } from '../src/cli-errors';
-import { routesCommand, routesLines } from '../src/cli-routes';
+import {
+  routeCommand,
+  routesCommand,
+  routesLines,
+  type RouteDeps,
+  type RouteOptions,
+} from '../src/cli-routes';
+import type { FreshKindleArtifactOptions } from '../src/export/artifact';
+import type { KfxStatus } from '../src/export/kfx';
+import { realOpener, type Opener } from '../src/export/route-perform';
 import { routes, type RouteFacts } from '../src/export/routes';
 import { resolveCommand } from '../src/cli-devices';
 import type { ConnectedDevice } from '../src/device/types';
@@ -196,6 +205,461 @@ describe('routes for a person', () => {
   });
 });
 
+// ---- route: the performer and the handler -------------------------------
+
+const BOOKS_NOTE = 'Added to Apple Books. It syncs to your iPhone and iPad when Books uses iCloud.';
+const APP_NOTE = "Opened Amazon's Send to Kindle app with the book.";
+const PAGE_NOTE = "Opened Amazon's Send to Kindle page, and the book's folder so you can drag it in.";
+const MAIL_NOTE = "Opened a Mail message with the book attached. Address it to your Kindle's email address.";
+const SETUP_NOTE =
+  "Opened Amazon's settings page. Find your Kindle's email address there, and add the address you send from to the approved list.";
+const STK_URL = 'https://www.amazon.com/sendtokindle';
+const PDOC_URL = 'https://www.amazon.com/hz/mycd/myx#/home/settings/pdoc';
+const TO_SEND = 'send to a reader with screepub send; route performs the others';
+
+const noToolchain: KfxStatus = { calibre: false, previewer: false, pluginInstalled: false, ready: false };
+
+/** Everything routeCommand can reach, faked and counted: the facts, an
+ *  Opener that records argv and answers `codeFor(argv)` (0 unless told), the
+ *  Kindle ladder (throws unless a test replaces it), and a settings file in
+ *  its own SCRATCH folder that starts absent. */
+function rig(over: {
+  facts?: Partial<RouteFacts>;
+  codeFor?: (argv: string[]) => number;
+  stderr?: string;
+  platform?: string;
+  ladder?: (opts: FreshKindleArtifactOptions) => Promise<string>;
+} = {}) {
+  const { counter, facts } = factsOf(over.facts);
+  const calls: string[][] = [];
+  const open: Opener = async (argv) => {
+    calls.push(argv);
+    return { code: (over.codeFor ?? (() => 0))(argv), stderr: over.stderr ?? '' };
+  };
+  const ladder = { calls: [] as FreshKindleArtifactOptions[] };
+  const settingsPath = settingsFile();
+  const deps: RouteDeps = {
+    facts,
+    open,
+    settingsPath,
+    ...(over.platform === undefined ? {} : { platform: over.platform }),
+    exportDeps: {
+      calibreAvailable: () => over.ladder !== undefined,
+      kfxStatus: async () => noToolchain,
+      freshKindleArtifact: async (opts) => {
+        ladder.calls.push(opts);
+        if (over.ladder) return over.ladder(opts);
+        throw new Error('the Kindle ladder was not expected to run');
+      },
+    },
+  };
+  return { deps, calls, counter, ladder, settingsPath };
+}
+
+function remembered(path: string): unknown {
+  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : undefined;
+}
+
+describe('route: Apple Books', () => {
+  test('opens the book with Books, answers the note, and remembers it', async () => {
+    const epub = book();
+    const r = rig();
+    const answer = await routeCommand({ key: 'apple-books', epub }, r.deps);
+    expect(r.calls).toEqual([['open', '-a', 'Books', epub]]);
+    expect(answer).toEqual({ key: 'apple-books', note: BOOKS_NOTE });
+    expect('path' in answer).toBe(false);
+    expect(remembered(r.settingsPath)).toEqual({ lastRoute: 'apple-books' });
+  });
+
+  test('a book path with spaces reaches Books as one argument', async () => {
+    const epub = book('My Script (draft 2).epub');
+    const r = rig();
+    await routeCommand({ key: 'apple-books', epub }, r.deps);
+    expect(r.calls).toEqual([['open', '-a', 'Books', epub]]);
+  });
+
+  test('remembering keeps the settings file\'s other keys', async () => {
+    const r = rig();
+    writeFileSync(r.settingsPath, JSON.stringify({ lastRoute: 'save-epub', libraryPath: '/kept' }));
+    await routeCommand({ key: 'apple-books', epub: book() }, r.deps);
+    expect(remembered(r.settingsPath)).toEqual({ lastRoute: 'apple-books', libraryPath: '/kept' });
+  });
+
+  test('Books failing to open is route-failed, naming Apple Books and why, and is NOT remembered', async () => {
+    const r = rig({ codeFor: () => 1, stderr: 'LSOpenURLsWithRole() failed with error -10810\n' });
+    writeFileSync(r.settingsPath, JSON.stringify({ lastRoute: 'save-epub' }));
+    const err = await thrown(() => routeCommand({ key: 'apple-books', epub: book() }, r.deps));
+    expect(err.code).toBe('route-failed');
+    expect(err.message).toBe('could not open Apple Books: LSOpenURLsWithRole() failed with error -10810');
+    expect(remembered(r.settingsPath)).toEqual({ lastRoute: 'save-epub' });
+  });
+
+  test('a failure that printed nothing still says why: its exit code', async () => {
+    const r = rig({ codeFor: () => 3 });
+    const err = await thrown(() => routeCommand({ key: 'apple-books', epub: book() }, r.deps));
+    expect(err.message).toBe('could not open Apple Books: it exited with code 3');
+  });
+
+  test('off a Mac it is unavailable with its fix, and nothing opens', async () => {
+    const r = rig({ facts: { platform: 'linux', booksApp: false } });
+    const err = await thrown(() => routeCommand({ key: 'apple-books', epub: book() }, r.deps));
+    expect(err.code).toBe('route-unavailable');
+    expect(err.message).toBe('On a Mac only');
+    expect(r.calls).toEqual([]);
+    expect(existsSync(r.settingsPath)).toBe(false);
+  });
+
+  test('on a Mac without Books.app (the row is hidden) it is unavailable, and nothing opens', async () => {
+    const r = rig({ facts: { booksApp: false } });
+    const err = await thrown(() => routeCommand({ key: 'apple-books', epub: book() }, r.deps));
+    expect(err.code).toBe('route-unavailable');
+    expect(err.message).toContain('Apple Books');
+    expect(r.calls).toEqual([]);
+    expect(existsSync(r.settingsPath)).toBe(false);
+  });
+});
+
+describe('route: Send to Kindle', () => {
+  test("Amazon's app installed on a Mac: one open, with the book", async () => {
+    const epub = book();
+    const r = rig({ facts: { sendToKindleApp: true } });
+    const answer = await routeCommand({ key: 'send-to-kindle', epub }, r.deps);
+    expect(r.calls).toEqual([['open', '-a', 'Send to Kindle', epub]]);
+    expect(answer).toEqual({ key: 'send-to-kindle', note: APP_NOTE });
+    expect(remembered(r.settingsPath)).toEqual({ lastRoute: 'send-to-kindle' });
+  });
+
+  test('no app on a Mac: reveal the book, THEN open the page', async () => {
+    const epub = book();
+    const r = rig({ facts: { sendToKindleApp: false } });
+    const answer = await routeCommand({ key: 'send-to-kindle', epub }, r.deps);
+    expect(r.calls).toEqual([['open', '-R', epub], ['open', STK_URL]]);
+    expect(answer.note).toBe(PAGE_NOTE);
+  });
+
+  test('Windows: explorer selects the book, then the page; the app is a Mac thing', async () => {
+    // explorer exits 1 even when it did what was asked: not a failure.
+    const epub = book();
+    const r = rig({
+      facts: { platform: 'win32', sendToKindleApp: true, booksApp: false, appleMailDefault: false },
+      codeFor: (argv) => (argv[0] === 'explorer' ? 1 : 0),
+    });
+    const answer = await routeCommand({ key: 'send-to-kindle', epub }, r.deps);
+    expect(r.calls).toEqual([
+      ['explorer', `/select,${epub}`],
+      ['rundll32', 'url.dll,FileProtocolHandler', STK_URL],
+    ]);
+    expect(answer.note).toBe(PAGE_NOTE);
+    expect(remembered(r.settingsPath)).toEqual({ lastRoute: 'send-to-kindle' });
+  });
+
+  test("Windows: the page failing to open IS a failure (only explorer's code is ignored)", async () => {
+    const r = rig({
+      facts: { platform: 'win32', booksApp: false, appleMailDefault: false },
+      codeFor: (argv) => (argv[0] === 'rundll32' ? 1 : 0),
+    });
+    const err = await thrown(() => routeCommand({ key: 'send-to-kindle', epub: book() }, r.deps));
+    expect(err.code).toBe('route-failed');
+    expect(err.message).toContain("could not open Amazon's Send to Kindle page");
+    expect(existsSync(r.settingsPath)).toBe(false);
+  });
+
+  test("Linux: xdg-open the book's folder, then the page", async () => {
+    const epub = book();
+    const r = rig({ facts: { platform: 'linux', booksApp: false, appleMailDefault: false } });
+    await routeCommand({ key: 'send-to-kindle', epub }, r.deps);
+    expect(r.calls).toEqual([['xdg-open', dirname(epub)], ['xdg-open', STK_URL]]);
+  });
+
+  test('a Mac reveal that fails is route-failed, and the page is never opened', async () => {
+    const r = rig({ codeFor: (argv) => (argv[1] === '-R' ? 1 : 0), stderr: 'no such file' });
+    const err = await thrown(() => routeCommand({ key: 'send-to-kindle', epub: book() }, r.deps));
+    expect(err.code).toBe('route-failed');
+    expect(err.message).toBe("could not open the book's folder: no such file");
+    expect(r.calls).toHaveLength(1);
+    expect(existsSync(r.settingsPath)).toBe(false);
+  });
+
+  test('the page failing on a Mac is route-failed too', async () => {
+    const r = rig({ codeFor: (argv) => (argv[1] === STK_URL ? 1 : 0) });
+    const err = await thrown(() => routeCommand({ key: 'send-to-kindle', epub: book() }, r.deps));
+    expect(err.code).toBe('route-failed');
+    expect(err.message).toBe("could not open Amazon's Send to Kindle page: it exited with code 1");
+  });
+});
+
+describe('route: email to Kindle', () => {
+  test('Apple Mail the default: opens a Mail message with the book', async () => {
+    const epub = book();
+    const r = rig({ facts: { appleMailDefault: true } });
+    const answer = await routeCommand({ key: 'email-to-kindle', epub }, r.deps);
+    expect(r.calls).toEqual([['open', '-a', 'Mail', epub]]);
+    expect(answer).toEqual({ key: 'email-to-kindle', note: MAIL_NOTE });
+    expect(remembered(r.settingsPath)).toEqual({ lastRoute: 'email-to-kindle' });
+  });
+
+  test('another mail app the default: unavailable with the setup fix, nothing opened or remembered', async () => {
+    const r = rig({ facts: { appleMailDefault: false } });
+    const err = await thrown(() => routeCommand({ key: 'email-to-kindle', epub: book() }, r.deps));
+    expect(err.code).toBe('route-unavailable');
+    expect(err.message).toBe(
+      'Needs Apple Mail as the default mail app, the one mail app the attachment survives',
+    );
+    expect(r.counter.calls).toBe(1);
+    expect(r.calls).toEqual([]);
+    expect(existsSync(r.settingsPath)).toBe(false);
+  });
+
+  test('off a Mac: unavailable, with the platform fix', async () => {
+    const r = rig({ facts: { platform: 'win32', booksApp: false, appleMailDefault: false } });
+    const err = await thrown(() => routeCommand({ key: 'email-to-kindle', epub: book() }, r.deps));
+    expect(err.code).toBe('route-unavailable');
+    expect(err.message).toBe('On a Mac only; save the EPUB and attach it yourself');
+    expect(r.calls).toEqual([]);
+  });
+
+  test('Mail failing to open is route-failed, NOT remembered', async () => {
+    const r = rig({ codeFor: () => 1, stderr: 'Unable to find application named Mail' });
+    const err = await thrown(() => routeCommand({ key: 'email-to-kindle', epub: book() }, r.deps));
+    expect(err.code).toBe('route-failed');
+    expect(err.message).toBe('could not open Mail: Unable to find application named Mail');
+    expect(existsSync(r.settingsPath)).toBe(false);
+  });
+});
+
+describe("route kindle-email-setup: Amazon's settings page", () => {
+  const cases: [string, string[]][] = [
+    ['darwin', ['open', PDOC_URL]],
+    ['win32', ['rundll32', 'url.dll,FileProtocolHandler', PDOC_URL]],
+    ['linux', ['xdg-open', PDOC_URL]],
+  ];
+  for (const [platform, argv] of cases) {
+    test(`${platform}: opens the page with the platform's URL opener, no book, no probe`, async () => {
+      const r = rig({ platform });
+      const answer = await routeCommand({ key: 'kindle-email-setup' }, r.deps);
+      expect(r.calls).toEqual([argv]);
+      expect(answer).toEqual({ key: 'kindle-email-setup', note: SETUP_NOTE });
+      expect(r.counter.calls).toBe(0);
+    });
+  }
+
+  test('is never remembered: it is a setup step, not a way out', async () => {
+    const r = rig({ platform: 'darwin' });
+    await routeCommand({ key: 'kindle-email-setup' }, r.deps);
+    expect(existsSync(r.settingsPath)).toBe(false);
+    writeFileSync(r.settingsPath, JSON.stringify({ lastRoute: 'email-to-kindle' }));
+    await routeCommand({ key: 'kindle-email-setup' }, r.deps);
+    expect(remembered(r.settingsPath)).toEqual({ lastRoute: 'email-to-kindle' });
+  });
+
+  test('available on every platform, even where email to Kindle is not', async () => {
+    const r = rig({ platform: 'linux', facts: { platform: 'linux', appleMailDefault: false } });
+    const answer = await routeCommand({ key: 'kindle-email-setup' }, r.deps);
+    expect(answer.note).toBe(SETUP_NOTE);
+  });
+
+  test('the page failing to open is route-failed', async () => {
+    const r = rig({ platform: 'darwin', codeFor: () => 1 });
+    const err = await thrown(() => routeCommand({ key: 'kindle-email-setup' }, r.deps));
+    expect(err.code).toBe('route-failed');
+    expect(err.message).toBe("could not open Amazon's settings page: it exited with code 1");
+  });
+
+  test('the host platform is the default', async () => {
+    const r = rig();
+    await routeCommand({ key: 'kindle-email-setup' }, r.deps);
+    expect(r.calls).toHaveLength(1);
+    expect(r.calls[0]).toEqual(
+      process.platform === 'darwin'
+        ? ['open', PDOC_URL]
+        : process.platform === 'win32'
+          ? ['rundll32', 'url.dll,FileProtocolHandler', PDOC_URL]
+          : ['xdg-open', PDOC_URL],
+    );
+  });
+});
+
+describe('route: save a copy', () => {
+  test('save-epub writes the book to --out, answers its path, and remembers it; nothing opens or is probed', async () => {
+    const epub = book();
+    const out = join(mkdtempSync(join(SCRATCH, 'save-')), 'nested', 'Saved.epub');
+    const r = rig();
+    const answer = await routeCommand({ key: 'save-epub', epub, out }, r.deps);
+    expect(answer).toEqual({ key: 'save-epub', path: out, note: `Saved to ${out}.` });
+    expect(readFileSync(out, 'utf8')).toBe('book-bytes');
+    expect(remembered(r.settingsPath)).toEqual({ lastRoute: 'save-epub' });
+    expect(r.calls).toEqual([]);
+    expect(r.counter.calls).toBe(0);
+    expect(r.ladder.calls).toEqual([]);
+  });
+
+  test("save-kindle builds with the script's fountain and settings, then copies the file to --out", async () => {
+    const epub = book();
+    const fountain = join(dirname(epub), 'Script.fountain');
+    writeFileSync(fountain, 'INT. ROOM - DAY\n');
+    const built = join(dirname(epub), 'Script.azw3');
+    writeFileSync(built, 'azw3-bytes');
+    const out = join(mkdtempSync(join(SCRATCH, 'save-')), 'Copy.azw3');
+    const r = rig({ ladder: async () => built });
+    const answer = await routeCommand(
+      { key: 'save-kindle', epub, out, fountain, optionsJson: '{"showSceneNumbers":true}' },
+      { ...r.deps, exportDeps: { ...r.deps.exportDeps, kfxStatus: async () => ({ ...noToolchain, calibre: true }) } },
+    );
+    expect(answer).toEqual({ key: 'save-kindle', path: out, note: `Saved to ${out}.` });
+    expect(readFileSync(out, 'utf8')).toBe('azw3-bytes');
+    expect(r.ladder.calls).toHaveLength(1);
+    expect(r.ladder.calls[0]!.fountainPath).toBe(fountain);
+    expect(r.ladder.calls[0]!.format.showSceneNumbers).toBe(true);
+    expect(remembered(r.settingsPath)).toEqual({ lastRoute: 'save-kindle' });
+    expect(r.calls).toEqual([]);
+    expect(r.counter.calls).toBe(0);
+  });
+
+  test('save-kindle whose ladder fails is export-failed, and NOT remembered', async () => {
+    const r = rig({
+      ladder: async () => {
+        throw new Error('Calibre stopped');
+      },
+    });
+    const out = join(mkdtempSync(join(SCRATCH, 'save-')), 'Copy.azw3');
+    const err = await thrown(() => routeCommand({ key: 'save-kindle', epub: book(), out }, r.deps));
+    expect(err.code).toBe('export-failed');
+    expect(existsSync(out)).toBe(false);
+    expect(existsSync(r.settingsPath)).toBe(false);
+  });
+
+  test("save-epub to a name that is not .epub is export's usage refusal, nothing written or remembered", async () => {
+    const out = join(mkdtempSync(join(SCRATCH, 'save-')), 'Copy.azw3');
+    const r = rig();
+    const err = await thrown(() => routeCommand({ key: 'save-epub', epub: book(), out }, r.deps));
+    expect(err.code).toBe('usage');
+    expect(err.message).toContain('.epub');
+    expect(existsSync(out)).toBe(false);
+    expect(existsSync(r.settingsPath)).toBe(false);
+  });
+});
+
+describe('route: remembering never fails a route that worked', () => {
+  test('a settings path that cannot be written: the route still answers its note', async () => {
+    const blocker = join(mkdtempSync(join(SCRATCH, 'block-')), 'a-file');
+    writeFileSync(blocker, 'x');
+    const r = rig();
+    const answer = await routeCommand(
+      { key: 'apple-books', epub: book() },
+      { ...r.deps, settingsPath: join(blocker, 'config', 'settings.json') },
+    );
+    expect(answer.note).toBe(BOOKS_NOTE);
+    expect(r.calls).toHaveLength(1);
+  });
+
+  test('a read-only settings folder: a save still answers its path', async () => {
+    const folder = mkdtempSync(join(SCRATCH, 'readonly-'));
+    chmodSync(folder, 0o555);
+    const out = join(mkdtempSync(join(SCRATCH, 'save-')), 'Saved.epub');
+    const r = rig();
+    try {
+      const answer = await routeCommand(
+        { key: 'save-epub', epub: book(), out },
+        { ...r.deps, settingsPath: join(folder, 'settings.json') },
+      );
+      expect(answer.path).toBe(out);
+      expect(existsSync(out)).toBe(true);
+    } finally {
+      chmodSync(folder, 0o755);
+    }
+  });
+});
+
+describe('route refuses before it probes, opens, builds or remembers anything', () => {
+  // Every usage refusal, each counted: zero opener calls, zero facts calls,
+  // zero ladder runs, and no settings file. A refusal that moved below the
+  // probe, the ladder or an open shows up here as a count, not as a pass.
+  const REFUSALS: [string, (b: string) => RouteOptions, string][] = [
+    ['a device key', (b) => ({ key: 'device:kindle', epub: b }), TO_SEND],
+    ['another device key', (b) => ({ key: 'device:kobo', epub: b }), TO_SEND],
+    ['a bare device: prefix', (b) => ({ key: 'device:', epub: b }), TO_SEND],
+    ['remarkable', (b) => ({ key: 'remarkable', epub: b }), TO_SEND],
+    ['an unknown key', (b) => ({ key: 'carrier-pigeon', epub: b }), 'no route is called "carrier-pigeon"'],
+    ['an empty key', (b) => ({ key: '', epub: b }), 'no route is called ""'],
+    ['a key in the wrong case', (b) => ({ key: 'Apple-Books', epub: b }), 'no route is called "Apple-Books"'],
+    ['no book for apple-books', () => ({ key: 'apple-books' }), 'route apple-books needs the book'],
+    ['no book for save-epub', () => ({ key: 'save-epub', out: '/x/Saved.epub' }), 'route save-epub needs the book'],
+    ['a book for kindle-email-setup', (b) => ({ key: 'kindle-email-setup', epub: b }), 'kindle-email-setup takes no book'],
+    ['--out on kindle-email-setup', () => ({ key: 'kindle-email-setup', out: '/x/Saved.epub' }), 'kindle-email-setup takes no --out'],
+    ['--fountain on kindle-email-setup', () => ({ key: 'kindle-email-setup', fountain: '/x.fountain' }), 'kindle-email-setup takes no --fountain'],
+    ['--options-json on kindle-email-setup', () => ({ key: 'kindle-email-setup', optionsJson: '{}' }), 'kindle-email-setup takes no --options-json'],
+    ['save-epub without --out', (b) => ({ key: 'save-epub', epub: b }), 'route save-epub needs --out'],
+    ['save-kindle without --out', (b) => ({ key: 'save-kindle', epub: b }), 'route save-kindle needs --out'],
+    ['a relative --out', (b) => ({ key: 'save-epub', epub: b, out: 'Saved.epub' }), 'must be absolute'],
+    ['a relative --out on save-kindle', (b) => ({ key: 'save-kindle', epub: b, out: 'Saved.azw3' }), 'must be absolute'],
+    ['--out on apple-books', (b) => ({ key: 'apple-books', epub: b, out: '/x/Saved.epub' }), 'route apple-books takes no --out'],
+    ['--out on send-to-kindle', (b) => ({ key: 'send-to-kindle', epub: b, out: '/x/Saved.epub' }), 'route send-to-kindle takes no --out'],
+    ['--out on email-to-kindle', (b) => ({ key: 'email-to-kindle', epub: b, out: '/x/Saved.epub' }), 'route email-to-kindle takes no --out'],
+    ['--fountain on apple-books', (b) => ({ key: 'apple-books', epub: b, fountain: '/x.fountain' }), 'route apple-books takes no --fountain'],
+    ['--options-json on send-to-kindle', (b) => ({ key: 'send-to-kindle', epub: b, optionsJson: '{}' }), 'route send-to-kindle takes no --options-json'],
+    ['--fountain on save-epub', (b) => ({ key: 'save-epub', epub: b, out: '/x/Saved.epub', fountain: '/x.fountain' }), 'route save-epub takes no --fountain'],
+    ['--options-json on save-epub', (b) => ({ key: 'save-epub', epub: b, out: '/x/Saved.epub', optionsJson: '{}' }), 'route save-epub takes no --options-json'],
+  ];
+
+  for (const [name, options, fragment] of REFUSALS) {
+    test(`${name}: usage, and nothing ran`, async () => {
+      const r = rig({ ladder: async () => join(SCRATCH, 'never.azw3') });
+      const err = await thrown(() => routeCommand(options(book()), r.deps));
+      expect(err.code).toBe('usage');
+      expect(err.message).toContain(fragment);
+      expect(err.message).not.toContain(EM_DASH);
+      expect(r.calls).toEqual([]);
+      expect(r.counter.calls).toBe(0);
+      expect(r.ladder.calls).toEqual([]);
+      expect(existsSync(r.settingsPath)).toBe(false);
+    });
+  }
+
+  test('an unknown key names every key route takes', async () => {
+    const err = await thrown(() => routeCommand({ key: 'carrier-pigeon', epub: book() }, rig().deps));
+    for (const key of ['apple-books', 'send-to-kindle', 'email-to-kindle', 'save-epub', 'save-kindle', 'kindle-email-setup']) {
+      expect(err.message).toContain(key);
+    }
+  });
+
+  test('a book that is not there is unreadable, before any probe or open', async () => {
+    for (const key of ['apple-books', 'save-epub']) {
+      const r = rig();
+      const err = await thrown(() =>
+        routeCommand({ key, epub: join(SCRATCH, 'ghost.epub'), out: key === 'save-epub' ? '/x/Saved.epub' : undefined }, r.deps),
+      );
+      expect(err.code).toBe('unreadable');
+      expect(err.message).toContain('ghost.epub');
+      expect(r.calls).toEqual([]);
+      expect(r.counter.calls).toBe(0);
+      expect(existsSync(r.settingsPath)).toBe(false);
+    }
+  });
+
+  test('the device check comes before the book check: a device key with no book still points at send', async () => {
+    const r = rig();
+    const err = await thrown(() => routeCommand({ key: 'device:kindle' }, r.deps));
+    expect(err.code).toBe('usage');
+    expect(err.message).toBe(TO_SEND);
+  });
+});
+
+describe('the default Opener', () => {
+  // Runs `sh`, never `open`: what is under test is how a real process's exit
+  // code and stderr come back, and that a missing program is an answer, not
+  // a throw.
+  test('returns the exit code and stderr of what it ran', async () => {
+    expect(await realOpener(['sh', '-c', 'echo nope >&2; exit 3'])).toEqual({ code: 3, stderr: 'nope\n' });
+    expect(await realOpener(['sh', '-c', 'exit 0'])).toEqual({ code: 0, stderr: '' });
+  });
+
+  test('a program that is not there is a non-zero code with a reason, not a throw', async () => {
+    const answer = await realOpener([join(SCRATCH, 'no-such-program')]);
+    expect(answer.code).not.toBe(0);
+    expect(answer.stderr.length).toBeGreaterThan(0);
+  });
+});
+
 // ---- the spawned CLI ----------------------------------------------------
 
 const CONFIG = join(SCRATCH, 'config');
@@ -350,6 +814,194 @@ describe('screepub routes (through the CLI)', () => {
   test('the main usage lists it', async () => {
     const { stdout } = await runCli(['--help']);
     expect(stdout).toContain('screepub routes <file.epub> [--json]');
+  });
+});
+
+describe('screepub route (through the CLI)', () => {
+  // Refusals and --help ONLY. No spawned run here names a key that opens
+  // anything (apple-books, send-to-kindle, email-to-kindle,
+  // kindle-email-setup): what those open is proven in process, above, with a
+  // fake Opener. Every run below uses a device key, an unknown key, or a
+  // save aimed inside SCRATCH, so even a refusal that stopped refusing could
+  // at worst write a file into SCRATCH.
+  const OUT = join(SCRATCH, 'never', 'Saved.epub');
+
+  test('is a verb, and a file of that name still converts', () => {
+    expect(resolveCommand(['route', 'save-epub', 'x.epub'], () => false)).toEqual({
+      kind: 'verb', verb: 'route', args: ['save-epub', 'x.epub'],
+    });
+    expect(resolveCommand(['route'], (p) => p === 'route')).toEqual({ kind: 'convert' });
+  });
+
+  test('--help is its own usage, naming every key, kindle-email-setup included', async () => {
+    const { stdout, exitCode } = await runCli(['route', '--help', '--json']);
+    expect(exitCode).toBe(0);
+    const { usage } = soleJson(stdout);
+    expect(usage).toContain('screepub route <key> <file.epub>');
+    expect(usage).toContain('screepub route kindle-email-setup');
+    for (const key of ['apple-books', 'send-to-kindle', 'email-to-kindle', 'save-epub', 'save-kindle', 'kindle-email-setup']) {
+      expect(usage).toContain(key);
+    }
+    expect(usage).toContain('--out');
+    expect(usage).not.toContain('--mobi');
+    expect(usage).not.toContain('--device');
+    expect(usage).not.toContain(EM_DASH);
+  });
+
+  test('the main usage lists it', async () => {
+    const { stdout } = await runCli(['--help']);
+    expect(stdout).toContain('screepub route <key> <file.epub> [--out <path>] [--json]');
+  });
+
+  test('a device key and remarkable point at send', async () => {
+    for (const key of ['device:kindle', 'remarkable']) {
+      const { stdout, exitCode } = await runCli(['route', key, book(), '--json']);
+      expect(exitCode).toBe(1);
+      expect(soleJson(stdout).error).toEqual({ code: 'usage', message: TO_SEND });
+    }
+  });
+
+  test('an unknown key is usage, naming the keys', async () => {
+    const { stdout, exitCode } = await runCli(['route', 'carrier-pigeon', book(), '--json']);
+    expect(exitCode).toBe(1);
+    const { error } = soleJson(stdout);
+    expect(error.code).toBe('usage');
+    expect(error.message).toContain('save-epub');
+  });
+
+  test('no key at all is usage', async () => {
+    const { stdout, exitCode } = await runCli(['route', '--json']);
+    expect(exitCode).toBe(1);
+    expect(soleJson(stdout).error.code).toBe('usage');
+  });
+
+  test('a second book is usage', async () => {
+    const { stdout, exitCode } = await runCli(['route', 'save-epub', book(), book(), '--out', OUT, '--json']);
+    expect(exitCode).toBe(1);
+    expect(soleJson(stdout).error.code).toBe('usage');
+    expect(existsSync(OUT)).toBe(false);
+  });
+
+  const FOREIGN_ROUTE: [string[], string, string][] = [
+    [['--device', 'x'], '--device', 'send'],
+    [['--set', '{}'], '--set', 'settings'],
+    [['--for', 'kindle'], '--for', 'export'],
+    [['--offered', '1.0'], '--offered', 'update-decision'],
+    [['--opted-in'], '--opted-in', 'update-should-check'],
+  ];
+
+  test("refuses every other verb's flags as usage errors, naming the flag's owner", async () => {
+    for (const [flags, name, owner] of FOREIGN_ROUTE) {
+      const { stdout, exitCode } = await runCli(['route', 'save-epub', book(), '--out', OUT, ...flags, '--json']);
+      const answer = soleJson(stdout);
+      expect(`route ${name}: ${exitCode} ${answer.ok} ${answer.error?.code}`).toBe(`route ${name}: 1 false usage`);
+      expect(answer.error.message).toContain(`route takes no ${name} (${name} belongs to ${owner})`);
+    }
+    expect(existsSync(OUT)).toBe(false);
+  });
+
+  test('a save without --out is usage naming --out', async () => {
+    const { stdout, exitCode } = await runCli(['route', 'save-epub', book(), '--json']);
+    expect(exitCode).toBe(1);
+    const { error } = soleJson(stdout);
+    expect(error.code).toBe('usage');
+    expect(error.message).toContain('--out');
+  });
+
+  test('--out passes the verb and reaches the handler', async () => {
+    // Not refused as a flag route does not take: a missing book is the
+    // handler's own unreadable, and a relative --out its own refusal.
+    const ghost = await runCli(['route', 'save-epub', join(SCRATCH, 'ghost.epub'), '--out', OUT, '--json']);
+    expect(soleJson(ghost.stdout).error.code).toBe('unreadable');
+    const relative = await runCli(['route', 'save-epub', book(), '--out', 'Saved.epub', '--json']);
+    const { error } = soleJson(relative.stdout);
+    expect(error.code).toBe('usage');
+    expect(error.message).toContain('must be absolute');
+  });
+
+  test('--fountain and --options-json reach the handler, which refuses them for save-epub', async () => {
+    // Refused by routeCommand, not by the verb: a verb that dropped either
+    // flag on the way would let this save go ahead (into SCRATCH).
+    for (const [flag, value] of [['--fountain', '/x.fountain'], ['--options-json', '{}']] as const) {
+      const { stdout, exitCode } = await runCli(['route', 'save-epub', book(), '--out', OUT, flag, value, '--json']);
+      expect(exitCode).toBe(1);
+      expect(soleJson(stdout).error).toEqual({
+        code: 'usage',
+        message: `route save-epub takes no ${flag} (only save-kindle builds a file)`,
+      });
+    }
+    expect(existsSync(OUT)).toBe(false);
+  });
+
+  test('--fountain and --options-json pass the verb for save-kindle', async () => {
+    const { stdout } = await runCli([
+      'route', 'save-kindle', join(SCRATCH, 'ghost.epub'), '--out', join(SCRATCH, 'never', 'Saved.azw3'),
+      '--fountain', join(SCRATCH, 'ghost.fountain'), '--options-json', '{}', '--json',
+    ]);
+    expect(soleJson(stdout).error.code).toBe('unreadable');
+  });
+
+  test('without --json a refusal is one line on stderr, not JSON', async () => {
+    const { stdout, stderr, exitCode } = await runCli(['route', 'remarkable', book()]);
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr.trim()).toBe(`screepub: ${TO_SEND}`);
+  });
+
+  test('every verb that refuses --fountain and --options-json now names route as an owner too', async () => {
+    const fountain = soleJson((await runCli(['devices', '--fountain', 'x', '--json'])).stdout);
+    expect(fountain.error.message).toBe('devices takes no --fountain (--fountain belongs to export and route)');
+    const optionsJson = soleJson((await runCli(['send', book(), '--options-json', '{}', '--json'])).stdout);
+    expect(optionsJson.error.message).toBe(
+      'send takes no --options-json (--options-json belongs to export and route)',
+    );
+    const routesFountain = soleJson((await runCli(['routes', book(), '--fountain', 'x', '--json'])).stdout);
+    expect(routesFountain.error.message).toBe('routes takes no --fountain (--fountain belongs to export and route)');
+  });
+
+  test('no refusal remembered anything', () => {
+    expect(existsSync(join(CONFIG, 'settings.json'))).toBe(false);
+  });
+});
+
+describe("cli.ts's route branch, in the source", () => {
+  // A route that WORKS is never spawned here (it would open Books, Amazon or
+  // Mail on the machine running the suite, or at best write a copy), so what
+  // the branch prints on success is pinned in the source instead, the way
+  // tests/cli-kfx.test.ts pins its own branch. The handler's answer itself
+  // is proven in process above.
+  const START = "if (verb === 'route') {";
+  const END = "// verb === 'send'";
+  const REFUSAL = "fail({ code: 'usage'";
+
+  async function branch(): Promise<string> {
+    const source = await Bun.file(`${ROOT}src/cli.ts`).text();
+    const start = source.indexOf(START);
+    const end = start === -1 ? -1 : source.indexOf(END, start);
+    expect(start, 'the route branch moved').toBeGreaterThan(-1);
+    expect(end, 'the route branch lost its end marker').toBeGreaterThan(start);
+    return source.slice(start, end);
+  }
+
+  test('--json answers the handler whole: ok, then its key, path and note', async () => {
+    expect(await branch()).toContain('console.log(JSON.stringify({ ok: true, ...answer }));');
+  });
+
+  test('a person reads the note, not JSON', async () => {
+    const text = await branch();
+    const person = text.slice(text.indexOf('if (jsonMode)'));
+    expect(person).toContain('console.log(answer.note);');
+    expect(person.split('JSON.stringify').length - 1).toBe(1);
+  });
+
+  test('every refusal in the branch comes before the handler is called', async () => {
+    const text = await branch();
+    const called = text.indexOf('routeCommand(');
+    expect(called).toBeGreaterThan(-1);
+    const count = (s: string) => s.split(REFUSAL).length - 1;
+    // The foreign-flag loop and the positional check.
+    expect(count(text.slice(0, called))).toBe(2);
+    expect(count(text.slice(called))).toBe(0);
   });
 });
 

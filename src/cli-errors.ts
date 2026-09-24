@@ -23,7 +23,12 @@ export interface JsonError {
     | 'bad-settings'
     | 'export-failed'
     // The KFX plugin install (parity piece D). Same contract, same stdout rule.
-    | 'kfx-install-failed';
+    | 'kfx-install-failed'
+    // The route verb (parity piece B): a route that cannot fire here (its
+    // message is the row's fix), and one whose app, page or folder did not
+    // open (its message names which).
+    | 'route-unavailable'
+    | 'route-failed';
   message: string;
 }
 
