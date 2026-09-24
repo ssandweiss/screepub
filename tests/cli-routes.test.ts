@@ -40,7 +40,7 @@ import {
 } from '../src/cli-routes';
 import type { FreshKindleArtifactOptions } from '../src/export/artifact';
 import type { KfxStatus } from '../src/export/kfx';
-import { realOpener, type Opener } from '../src/export/route-perform';
+import { realOpener, sendViaAmazon, type Opener } from '../src/export/route-perform';
 import { routes, type RouteFacts } from '../src/export/routes';
 import { resolveCommand } from '../src/cli-devices';
 import type { ConnectedDevice } from '../src/device/types';
@@ -332,15 +332,15 @@ describe('route: Send to Kindle', () => {
     expect(remembered(r.settingsPath)).toEqual({ lastRoute: 'send-to-kindle' });
   });
 
-  test('no app on a Mac: reveal the book, THEN open the page', async () => {
+  test('no app on a Mac: open the page, THEN reveal the book', async () => {
     const epub = book();
     const r = rig({ facts: { sendToKindleApp: false } });
     const answer = await routeCommand({ key: 'send-to-kindle', epub }, r.deps);
-    expect(r.calls).toEqual([['open', '-R', epub], ['open', STK_URL]]);
+    expect(r.calls).toEqual([['open', STK_URL], ['open', '-R', epub]]);
     expect(answer.note).toBe(PAGE_NOTE);
   });
 
-  test("Windows: explorer opens the book's folder, then the page; the app is a Mac thing", async () => {
+  test("Windows: the page opens, then explorer opens the book's folder; the app is a Mac thing", async () => {
     // explorer exits 1 even when it did what was asked: not a failure. The
     // folder, not `/select,<book>`: Bun quotes that whole argument when the
     // path has a space in it, and explorer misreads the quoted form (a comma
@@ -353,14 +353,14 @@ describe('route: Send to Kindle', () => {
     });
     const answer = await routeCommand({ key: 'send-to-kindle', epub }, r.deps);
     expect(r.calls).toEqual([
-      ['explorer', dirname(epub)],
       ['rundll32', 'url.dll,FileProtocolHandler', STK_URL],
+      ['explorer', dirname(epub)],
     ]);
     expect(answer.note).toBe(PAGE_NOTE);
     expect(remembered(r.settingsPath)).toEqual({ lastRoute: 'send-to-kindle' });
   });
 
-  test("Windows: the page failing to open IS a failure (only explorer's code is ignored)", async () => {
+  test("Windows: the page failing to open IS a failure, and explorer never runs (only explorer's own code is ignored)", async () => {
     const r = rig({
       facts: { platform: 'win32', booksApp: false, appleMailDefault: false },
       codeFor: (argv) => (argv[0] === 'rundll32' ? 1 : 0),
@@ -368,30 +368,55 @@ describe('route: Send to Kindle', () => {
     const err = await thrown(() => routeCommand({ key: 'send-to-kindle', epub: book() }, r.deps));
     expect(err.code).toBe('route-failed');
     expect(err.message).toContain("could not open Amazon's Send to Kindle page");
+    expect(r.calls).toEqual([['rundll32', 'url.dll,FileProtocolHandler', STK_URL]]);
     expect(existsSync(r.settingsPath)).toBe(false);
   });
 
-  test("Linux: xdg-open the book's folder, then the page", async () => {
+  test("Linux: xdg-open the page, then the book's folder", async () => {
     const epub = book();
     const r = rig({ facts: { platform: 'linux', booksApp: false, appleMailDefault: false } });
     await routeCommand({ key: 'send-to-kindle', epub }, r.deps);
-    expect(r.calls).toEqual([['xdg-open', dirname(epub)], ['xdg-open', STK_URL]]);
+    expect(r.calls).toEqual([['xdg-open', STK_URL], ['xdg-open', dirname(epub)]]);
   });
 
-  test('a Mac reveal that fails is route-failed, and the page is never opened', async () => {
+  test('a Mac reveal that fails is still route-failed, but only after the page already opened', async () => {
+    const epub = book();
     const r = rig({ codeFor: (argv) => (argv[1] === '-R' ? 1 : 0), stderr: 'no such file' });
-    const err = await thrown(() => routeCommand({ key: 'send-to-kindle', epub: book() }, r.deps));
+    const err = await thrown(() => routeCommand({ key: 'send-to-kindle', epub }, r.deps));
     expect(err.code).toBe('route-failed');
     expect(err.message).toBe("could not open the book's folder: no such file");
-    expect(r.calls).toHaveLength(1);
+    expect(r.calls).toEqual([['open', STK_URL], ['open', '-R', epub]]);
     expect(existsSync(r.settingsPath)).toBe(false);
   });
 
-  test('the page failing on a Mac is route-failed too', async () => {
+  test('the page failing on a Mac is route-failed too, and the folder is never opened', async () => {
     const r = rig({ codeFor: (argv) => (argv[1] === STK_URL ? 1 : 0) });
     const err = await thrown(() => routeCommand({ key: 'send-to-kindle', epub: book() }, r.deps));
     expect(err.code).toBe('route-failed');
     expect(err.message).toBe("could not open Amazon's Send to Kindle page: it exited with code 1");
+    expect(r.calls).toEqual([['open', STK_URL]]);
+  });
+
+  test("the page's argv is issued before the folder's, and a folder opener that never resolves does not stop the page from opening", async () => {
+    // Some Linux desktops' xdg-open does not return until the file manager
+    // window it opened is closed (desktop/ui/app.js excludes `reveal` from
+    // the busy count for the same reason), so a folder open that never
+    // settles must never hold up the page. Bounded with a short race, not a
+    // real wait: a bug that hung forever would hang this suite too.
+    const epub = book();
+    const calls: string[][] = [];
+    const open: Opener = async (argv) => {
+      calls.push(argv);
+      if (argv[0] === 'open' && argv[1] === '-R') return new Promise(() => {});
+      return { code: 0, stderr: '' };
+    };
+    const settled = sendViaAmazon(epub, { platform: 'darwin', sendToKindleApp: false }, open);
+    const race = await Promise.race([
+      settled.then(() => 'settled' as const),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 50)),
+    ]);
+    expect(race).toBe('timeout');
+    expect(calls).toEqual([['open', STK_URL], ['open', '-R', epub]]);
   });
 });
 
@@ -520,6 +545,27 @@ describe('route: save a copy', () => {
     expect(remembered(r.settingsPath)).toEqual({ lastRoute: 'save-kindle' });
     expect(r.calls).toEqual([]);
     expect(r.counter.calls).toBe(0);
+  });
+
+  test("save-kindle's format defaults follow RouteDeps.settingsPath, not the production settings file", async () => {
+    // settingsPath is what keeps lastRoute out of a real settings file in
+    // every other test here; this proves it also keeps the format defaults
+    // out of one, by writing a formatDefaults override to the SAME scratch
+    // path and never mentioning appSettingsPath in exportDeps at all.
+    const epub = book();
+    const fountain = join(dirname(epub), 'Script.fountain');
+    writeFileSync(fountain, 'INT. ROOM - DAY\n');
+    const built = join(dirname(epub), 'Script.azw3');
+    writeFileSync(built, 'azw3-bytes');
+    const out = join(mkdtempSync(join(SCRATCH, 'save-')), 'Copy.azw3');
+    const r = rig({ ladder: async () => built });
+    writeFileSync(r.settingsPath, JSON.stringify({ formatDefaults: { showSceneNumbers: true } }));
+    const answer = await routeCommand(
+      { key: 'save-kindle', epub, out, fountain },
+      { ...r.deps, exportDeps: { ...r.deps.exportDeps, kfxStatus: async () => ({ ...noToolchain, calibre: true }) } },
+    );
+    expect(answer).toEqual({ key: 'save-kindle', path: out, note: `Saved to ${out}.` });
+    expect(r.ladder.calls[0]!.format.showSceneNumbers).toBe(true);
   });
 
   test('save-kindle whose ladder fails is export-failed, and NOT remembered', async () => {

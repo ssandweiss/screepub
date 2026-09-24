@@ -61,7 +61,8 @@ Options:
                          input: <library>/<stem>/<stem>.epub. The library is
                          <Documents>/Screepub — ~/Documents on macOS and
                          Windows, and XDG_DOCUMENTS_DIR (else ~/Documents)
-                         elsewhere; $SCREEPUB_LIBRARY overrides it
+                         elsewhere; a folder chosen with screepub app-settings
+                         overrides that, and $SCREEPUB_LIBRARY overrides both
   --fountain <file>      Fountain output path (default: <input>.fountain for PDF input)
   --no-fountain          skip writing the intermediate .fountain file
   --title <text>         override detected title

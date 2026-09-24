@@ -65,8 +65,15 @@ export async function addToAppleBooks(epub: string, open: Opener = realOpener): 
 }
 
 /** Amazon's app when it is installed (a Mac app), else its web uploader with
- *  the book's folder shown beside it, so the file is one drag away. The
- *  folder is shown FIRST: the page then opens in front of it. */
+ *  the book's folder shown beside it, so the file is one drag away. The PAGE
+ *  is opened FIRST, the folder after: on some Linux desktops `xdg-open` does
+ *  not return until the file manager window it opened is closed (the reason
+ *  `reveal` is excluded from the busy count in desktop/ui/app.js), and
+ *  opening the folder first would leave the Send to Kindle page waiting on
+ *  the reader to close that window before it ever appeared. The folder open
+ *  is still awaited, just after the page: a failure to show the folder is
+ *  still a real thing to report, and nothing here depends on it settling
+ *  before the page did. */
 export async function sendViaAmazon(
   epub: string,
   facts: { platform: string; sendToKindleApp: boolean },
@@ -76,6 +83,7 @@ export async function sendViaAmazon(
     await openOrThrow(open, ['open', '-a', 'Send to Kindle', epub], "Amazon's Send to Kindle app");
     return "Opened Amazon's Send to Kindle app with the book.";
   }
+  await openOrThrow(open, urlArgv(facts.platform, SEND_TO_KINDLE_URL), "Amazon's Send to Kindle page");
   if (facts.platform === 'win32') {
     // The folder, not `/select,<book>`: Bun quotes that whole argument when
     // the path has a space in it, and explorer misreads the quoted form (a
@@ -88,7 +96,6 @@ export async function sendViaAmazon(
     const reveal = facts.platform === 'darwin' ? ['open', '-R', epub] : ['xdg-open', dirname(epub)];
     await openOrThrow(open, reveal, "the book's folder");
   }
-  await openOrThrow(open, urlArgv(facts.platform, SEND_TO_KINDLE_URL), "Amazon's Send to Kindle page");
   return "Opened Amazon's Send to Kindle page, and the book's folder so you can drag it in.";
 }
 

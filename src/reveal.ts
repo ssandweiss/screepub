@@ -5,13 +5,15 @@
 // and exists BEFORE this ever runs, so revealFile itself does neither check.
 import { posix, win32 } from 'node:path';
 import { CliError, errorMessage } from './cli-errors';
+import type { Opener } from './export/route-perform';
 
 /** One child process, run to completion, with its exit code and stderr
- *  captured. Piece B's performer (src/export/route-perform.ts, on a
- *  different branch) uses the same one-line shape for the same reason: the
- *  two "open something in the system" verbs should agree on what running an
- *  opener means, without importing across the parity split. */
-export type Opener = (argv: string[]) => Promise<{ code: number; stderr: string }>;
+ *  captured: `reveal` and piece B's routes (src/export/route-perform.ts)
+ *  are both "open something in the system" verbs, so they share this one
+ *  definition of what running an opener means, imported from there rather
+ *  than kept as a second copy here. Re-exported so cli-reveal.ts and this
+ *  file's tests can keep importing it from `./reveal`. */
+export type { Opener };
 
 /** The real thing, via Bun.spawn. Kept tiny on purpose: revealFile's own
  *  tests all pass a fake in its place, and never a real Finder/Explorer

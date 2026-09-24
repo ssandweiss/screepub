@@ -95,9 +95,9 @@ Nothing stores a layer of the user's own underneath the per-script sidecar.
   the app defaults differ from Screepub's own, `Reset new scripts to
   Screepub's defaults`. One caption says which defaults a new script starts
   from.
-- Show in Finder (result screen and reader) calls the engine's `reveal`,
-  so it works wherever the library is. The window's reveal permission is
-  then unused and is removed, with the ADR amendment piece B writes.
+- Show in Finder (the result screen) calls the engine's `reveal`, so it
+  works wherever the library is. The window's reveal permission is then
+  unused and is removed, with the ADR amendment piece B writes.
 
 ## Out of scope
 

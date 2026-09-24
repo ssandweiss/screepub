@@ -80,7 +80,17 @@ export function readAppSettings(path: string = appSettingsPath()): AppSettings {
  * discipline `src/settings/sidecar.ts` uses), and creates the folder.
  *
  * A key set to `undefined` in `patch` is removed rather than written as
- * `null`, so callers can delete a key without knowing the rest of the file. */
+ * `null`, so callers can delete a key without knowing the rest of the file.
+ *
+ * The read and the write are not one atomic operation, so two engine calls
+ * landing at the same moment (a route saving `lastRoute` while an
+ * `app-settings --set` runs) can still interleave: both read the same
+ * starting file, and whichever renames its temp file second wins, silently
+ * dropping the other's key. Accepted rather than fixed with a lock: the
+ * window is a single JSON read-modify-write, not a long-running job, and
+ * both writers are a person doing one thing at a time (choosing a route,
+ * opening the settings gear), not a background process that could pile up
+ * concurrent calls. */
 export function writeAppSettings(
   patch: Partial<AppSettings>,
   path: string = appSettingsPath(),

@@ -10,6 +10,18 @@
 
 **Spec:** [2026-09-23-app-settings-gear-design.md](../specs/2026-09-23-app-settings-gear-design.md).
 
+> **As built (2026-09-24).** Task 3b's win32 `reveal` opens the folder
+> (`explorer <folder>`), not `/select,<path>`: that flag breaks on a SPACE
+> in the path alone (the spawn layer's quoting) or a COMMA in it alone
+> (explorer reads the first comma as the end of the `/select,` token), so
+> opening the containing folder sidesteps both instead of trying to escape
+> around them. Also true but not in this plan: the engine saves a script's
+> starting settings on its first `--library` PDF conversion. Why: without
+> that, changing the app defaults later would silently change the tuning of
+> a script someone had already converted and was relying on. Limit: a
+> script converted BEFORE this landed, or before its own first `--library`
+> conversion, still follows the app defaults until it is tuned once itself.
+
 ---
 
 ## Ground rules for every task

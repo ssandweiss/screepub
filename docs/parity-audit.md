@@ -62,7 +62,7 @@ the remembered route's button in brass.
 | Save a copy | 15 | 0 | **done 2026-09-23** (piece B) |
 | Cancel during conversion | 54 | 0 | **OUT, decided twice** |
 | **Feedback / Report a Bug** | 17 | 0 | **in nobody's list** |
-| **Show in Finder (two places)** | 2 | 0 | **in nobody's list** |
+| **Show in Finder (two places)** | 2 | 0 | **done 2026-09-23** (piece C: the result screen) |
 | **KFX plugin install** | button | 0 | **done 2026-09-23** (piece D: `kfx-status`, `kfx-install`, Send page) |
 | **The gear (three things)** | 3 | 0 | **done 2026-09-23** (piece C: output folder, app defaults, Show in Finder) |
 | First-run welcome screen | 1 | 0 | lower confidence |

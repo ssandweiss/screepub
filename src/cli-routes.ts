@@ -103,7 +103,10 @@ export const ROUTE_KEYS = [...Object.keys(PERFORMED), ...SAVES, EMAIL_SETUP];
 export interface RouteDeps extends RoutesDeps {
   /** default: realOpener, which spawns the program */
   open?: Opener;
-  /** Handed to exportCommand for the two saves. */
+  /** Handed to exportCommand for the two saves. Its own appSettingsPath, if
+   *  given, wins; otherwise `settingsPath` (above) covers it too, so one
+   *  injected path keeps BOTH lastRoute and the format defaults out of the
+   *  production settings file, rather than only the first. */
   exportDeps?: ExportDeps;
   /** kindle-email-setup's platform; the others read it off the facts.
    *  default: process.platform */
@@ -228,7 +231,7 @@ export async function routeCommand(options: RouteOptions, deps: RouteDeps = {}):
         optionsJson: options.optionsJson,
         out: options.out,
       },
-      deps.exportDeps,
+      { ...deps.exportDeps, appSettingsPath: deps.exportDeps?.appSettingsPath ?? deps.settingsPath },
     );
     rememberRoute(key, deps.settingsPath);
     return { key, path: result.path, note: `Saved to ${result.path}.` };
