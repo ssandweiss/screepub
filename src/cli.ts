@@ -25,6 +25,7 @@ import { updateDecisionCommand, updateShouldCheckCommand } from './cli-update';
 import { settingsCommand } from './cli-settings';
 import { exportCommand } from './cli-export';
 import { appSettingsCommand } from './cli-app-settings';
+import { revealCommand } from './cli-reveal';
 import { kfxInstallCommand, kfxStatusCommand, installLines, setupLines } from './cli-kfx';
 import { kfxPossible } from './export/kfx-setup';
 import type { ListDevicesOptions } from './device/list';
@@ -84,6 +85,7 @@ Commands:
                                             the file you would put on a reader
   screepub app-settings [--set <json>] [--json]
                                             where books land, and what new scripts start from
+  screepub reveal <file> [--json]           show a file in the system's file manager
   screepub kfx-status [--json]              can this computer make KFX for a Kindle?
   screepub kfx-install [--json]             add the KFX plugin to Calibre (online)
   screepub update-decision --offered <v> --current <v> [--json]
@@ -187,6 +189,23 @@ Options:
   -h, --help             show this help
 `;
 
+const REVEAL_USAGE = `screepub reveal: show a file in the system's file manager
+
+Usage:
+  screepub reveal <file> [--json]
+
+<file> must be a full path to a file that already exists. On macOS, Finder
+opens with the file itself selected. On Windows and Linux, the file's
+containing folder opens instead: Windows because \`explorer /select,<file>\`
+breaks on a folder name with both a space and a comma in it, and Linux
+because there is no "select this file" convention to rely on across file
+managers.
+
+Options:
+  --json                 machine-readable result on stdout (for the app)
+  -h, --help             show this help
+`;
+
 const KFX_STATUS_USAGE = `screepub kfx-status: can this computer make KFX for a Kindle?
 
 Usage:
@@ -266,6 +285,7 @@ function verbUsage(verb: Verb): string {
   if (verb === 'update-decision') return UPDATE_DECISION_USAGE;
   if (verb === 'update-should-check') return UPDATE_SHOULD_CHECK_USAGE;
   if (verb === 'app-settings') return APP_SETTINGS_USAGE;
+  if (verb === 'reveal') return REVEAL_USAGE;
   return SEND_USAGE;
 }
 
@@ -671,6 +691,36 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
           ? 'new scripts start from: your own defaults'
           : "new scripts start from: Screepub's defaults",
       );
+      return;
+    }
+
+    if (verb === 'reveal') {
+      // Same discipline as `devices` and `app-settings`: every flag this
+      // verb cannot act on is refused, not silently ignored.
+      if (values.device !== undefined) {
+        fail({ code: 'usage', message: 'reveal takes no --device (--device belongs to send)' });
+      }
+      if (values.set !== undefined) {
+        fail({ code: 'usage', message: 'reveal takes no --set (--set belongs to settings and app-settings)' });
+      }
+      if (values.for !== undefined) {
+        fail({ code: 'usage', message: 'reveal takes no --for (--for belongs to export)' });
+      }
+      if (values.fountain !== undefined) {
+        fail({ code: 'usage', message: 'reveal takes no --fountain (--fountain belongs to export)' });
+      }
+      if (values['options-json'] !== undefined) {
+        fail({ code: 'usage', message: 'reveal takes no --options-json (--options-json belongs to export)' });
+      }
+      if (positionals.length !== 1) {
+        fail({ code: 'usage', message: 'expected exactly one file to reveal (see --help)' });
+      }
+      const result = await revealCommand(positionals[0]);
+      if (jsonMode) {
+        console.log(JSON.stringify({ ok: true, ...result }));
+      }
+      // Human mode: nothing on success. There is nothing left to say once
+      // the file manager is the thing showing the answer.
       return;
     }
 

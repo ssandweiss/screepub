@@ -78,7 +78,9 @@ test('VERBS is the single list of known verbs', () => {
   // purpose, since a file called `update-decision` is far less likely to
   // exist than one called `update`. The two KFX verbs joined on 2026-09-23
   // for the same reason. app-settings joined on 2026-09-23 too (parity
-  // piece C: where books land, and what new scripts start from).
+  // piece C: where books land, and what new scripts start from), and
+  // reveal joined the same day (parity piece C: show a file in the
+  // system's file manager).
   expect([...VERBS]).toEqual([
     'devices',
     'send',
@@ -89,6 +91,7 @@ test('VERBS is the single list of known verbs', () => {
     'kfx-status',
     'kfx-install',
     'app-settings',
+    'reveal',
   ]);
 });
 

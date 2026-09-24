@@ -23,7 +23,9 @@ export interface JsonError {
     | 'bad-settings'
     | 'export-failed'
     // The KFX plugin install (parity piece D). Same contract, same stdout rule.
-    | 'kfx-install-failed';
+    | 'kfx-install-failed'
+    // Showing a file in the file manager (parity piece C).
+    | 'reveal-failed';
   message: string;
 }
 

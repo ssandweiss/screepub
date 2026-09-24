@@ -22,6 +22,10 @@ export const VERBS = [
   // 2026-09-23: app-settings joined for parity piece C (where books land,
   // and what new scripts start from).
   'app-settings',
+  // 2026-09-23: reveal joined for parity piece C too (the engine shows a
+  // file in the system's file manager; the window's own fixed reveal
+  // permission goes away once a later task points Show in Finder at this).
+  'reveal',
 ] as const;
 export type Verb = (typeof VERBS)[number];
 
