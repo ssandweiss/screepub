@@ -49,7 +49,11 @@ const PUNCTUATION_EXCLUDE = /[!?;,]/;
 // it both fall through to action.
 const DIALOGUE_EXTENSIONS =
   /\((?:V\.O\.?|O\.S\.?|O\.C\.?|CONT'D|CONT\.|INTO PHONE|FILTERED|PRE-LAP)\)/i;
-const CHARACTER_EXTENSIONS = /(\s*\([^)]+\))+\s*$/g;
+/** Every trailing parenthetical on a cue: "JACK (V.O.) (CONT'D)" -> "JACK".
+ *  classify.ts strips a cue's name with this same one. Global, but only ever
+ *  handed to `replace`, which resets lastIndex itself: never `.test()` or
+ *  `.exec()` it, or a shared lastIndex leaks from one call into the next. */
+export const CHARACTER_EXTENSIONS = /(\s*\([^)]+\))+\s*$/g;
 
 /**
  * Is this text shaped like a character cue? Says nothing about where it

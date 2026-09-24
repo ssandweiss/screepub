@@ -1,4 +1,4 @@
-import { isCueText } from './cue';
+import { CHARACTER_EXTENSIONS, isCueText } from './cue';
 import type { ScreenplayElement } from './types';
 import type { TextBlock } from './types';
 import { INDENT_RANGES } from './types';
@@ -29,8 +29,9 @@ const PAGE_NUMBER_LABELED = /^(?:page|p\.)\s*\d+\.?$/i;
 const SCENE_NUMBER = /^\d+[A-Z]?(?:[.\-](?:\d+[A-Z]?|[A-Z]))*\.?$/;
 const PARENTHETICAL = /^\([^)]+\)$/;
 const PARENTHETICAL_TRUNCATED = /^\([^)]+\)\.{3}$/;
-// Cue SHAPE lives in cue.ts, imported above; these moved there with it.
-const CHARACTER_EXTENSIONS = /(\s*\([^)]+\))+\s*$/g;
+// Cue SHAPE lives in cue.ts, imported above; these moved there with it, and
+// so did CHARACTER_EXTENSIONS, which classify imports back: one copy, so the
+// name stripped here cannot drift from the name cue.ts judges.
 
 // Mini-slug shape (see isMiniSlugShaped). A slugline ends bare or on a
 // colon; the last character carries most of the signal. A closing paren is
