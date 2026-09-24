@@ -216,7 +216,9 @@ export function hostTarget(): Target | undefined {
  *  and must still find package.json and src/cli.ts. */
 export const REPO_DIR = join(import.meta.dir, '..');
 
-const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
+/** A release version, MAJOR.MINOR.PATCH with an optional prerelease: the
+ *  one rule every release tool checks its --version against. */
+export const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
 
 export interface BuildArgs {
   version: string;
