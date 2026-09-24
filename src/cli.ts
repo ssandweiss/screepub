@@ -24,7 +24,9 @@ import { updateDecisionCommand, updateShouldCheckCommand } from './cli-update';
 import { settingsCommand } from './cli-settings';
 import { exportCommand } from './cli-export';
 import { kfxInstallCommand, kfxStatusCommand, installLines, setupLines } from './cli-kfx';
+import { routesCommand, routesLines } from './cli-routes';
 import { kfxPossible } from './export/kfx-setup';
+import { routeFacts } from './export/route-facts';
 import type { ListDevicesOptions } from './device/list';
 
 const USAGE = `screepub — screenplay PDF → reflowable EPUB3 (via Fountain)
@@ -78,6 +80,7 @@ Commands:
                                             the file you would put on a reader
   screepub kfx-status [--json]              can this computer make KFX for a Kindle?
   screepub kfx-install [--json]             add the KFX plugin to Calibre (online)
+  screepub routes <file.epub> [--json]      every way this book can leave, best first
   screepub update-decision --offered <v> --current <v> [--json]
                                             should this update be offered? (offline)
   screepub update-should-check [--opted-in] [--last-checked <ms>] [--json]
@@ -187,6 +190,22 @@ Options:
   -h, --help             show this help
 `;
 
+const ROUTES_USAGE = `screepub routes: every way this book can leave, best first
+
+Usage:
+  screepub routes <file.epub> [--json]
+
+Lists every route: readers plugged in over USB, a docked reMarkable, Apple
+Books, Amazon's Send to Kindle, email, and saving a copy. The route chosen
+last time is marked, even while it cannot fire; otherwise the first one that
+can. A route that cannot fire right now is still listed, with what would fix
+it. Reads the app settings file, never writes it.
+
+Options:
+  --json                 machine-readable result on stdout (for the app)
+  -h, --help             show this help
+`;
+
 const UPDATE_DECISION_USAGE = `screepub update-decision — should this update be offered?
 
 Usage:
@@ -231,6 +250,7 @@ function verbUsage(verb: Verb): string {
   if (verb === 'export') return EXPORT_USAGE;
   if (verb === 'kfx-status') return KFX_STATUS_USAGE;
   if (verb === 'kfx-install') return KFX_INSTALL_USAGE;
+  if (verb === 'routes') return ROUTES_USAGE;
   if (verb === 'update-decision') return UPDATE_DECISION_USAGE;
   if (verb === 'update-should-check') return UPDATE_SHOULD_CHECK_USAGE;
   return SEND_USAGE;
@@ -609,6 +629,35 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       }
       for (const stage of result.stages) console.log(`  ${stage}`);
       console.log(`${result.label}\n  ${result.path}`);
+      return;
+    }
+
+    if (verb === 'routes') {
+      // Rejected rather than ignored, the same rule every verb follows.
+      // --out is refused above, with the update flags, in the shared blocks.
+      const foreign: [unknown, string, string][] = [
+        [values.device, '--device', 'send'],
+        [values.set, '--set', 'settings'],
+        [values.for, '--for', 'export'],
+        [values.fountain, '--fountain', 'export'],
+        [values['options-json'], '--options-json', 'export'],
+      ];
+      for (const [value, flag, owner] of foreign) {
+        if (value !== undefined) {
+          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
+        }
+      }
+      if (positionals.length !== 1) {
+        fail({ code: 'usage', message: 'expected exactly one .epub (see --help)' });
+      }
+      const answer = await routesCommand(positionals[0], {
+        facts: () => routeFacts({}, deviceSeams()),
+      });
+      if (jsonMode) {
+        console.log(JSON.stringify({ ok: true, ...answer }));
+        return;
+      }
+      for (const line of routesLines(answer)) console.log(line);
       return;
     }
 

@@ -19,6 +19,7 @@ export const VERBS = [
   'update-should-check',
   'kfx-status',
   'kfx-install',
+  'routes',
 ] as const;
 export type Verb = (typeof VERBS)[number];
 

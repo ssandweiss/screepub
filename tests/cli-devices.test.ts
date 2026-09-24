@@ -77,7 +77,8 @@ test('VERBS is the single list of known verbs', () => {
   // The two update verbs joined on 2026-09-21; both are hyphenated on
   // purpose, since a file called `update-decision` is far less likely to
   // exist than one called `update`. The two KFX verbs joined on 2026-09-23
-  // for the same reason.
+  // for the same reason. `routes` joined on 2026-09-23 too (parity piece B):
+  // the Send page's list of every way a book can leave.
   expect([...VERBS]).toEqual([
     'devices',
     'send',
@@ -87,6 +88,7 @@ test('VERBS is the single list of known verbs', () => {
     'update-should-check',
     'kfx-status',
     'kfx-install',
+    'routes',
   ]);
 });
 
