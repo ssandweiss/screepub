@@ -40,30 +40,33 @@ it better evidence than any grep.
 | --- | --- | --- |
 | `device` (Kindle, Kobo, tolino over USB) | **yes** | ported by piece A |
 | `remarkable` | **yes** | ported by piece A |
-| `appleBooks` | no | the product's only route to an iPhone |
-| `sendToKindle` (Amazon web) | no | |
-| `emailToKindle` | no | |
-| `saveCopy` | no | |
+| `appleBooks` | **yes** | done 2026-09-23 (piece B) |
+| `sendToKindle` (Amazon web) | **yes** | done 2026-09-23 (piece B) |
+| `emailToKindle` | **yes** | done 2026-09-23 (piece B) |
+| `saveCopy` | **yes** | done 2026-09-23 (piece B) |
 
-Two of six. The ranking and the remembered choice are missing too:
-`desktop/ui/send.js` has no notion of remembering a destination.
+Six of six. The ranking and the remembered choice are done too:
+`screepub routes` ranks every route and marks the one to preselect,
+`screepub route <key>` performs a non-device route and remembers it, and
+`desktop/ui/send.js` polls `routes` and draws the list in that order, with
+the remembered route's button in brass.
 
 ## Everything missing, including four gate 2 does not name
 
 | | Swift refs | Tauri UI | Status |
 | --- | --- | --- | --- |
 | Self-update (check, compare, decode, errors, install) | 109 | 0 | `port`, not started |
-| Apple Books | 30 | 0 | `port`, not started |
-| Send-to-Kindle web | 59 | 0 | `port`, not started |
-| Email to Kindle | 38 | 0 | `port`, not started |
-| Save a copy | 15 | 0 | `port`, not started |
+| Apple Books | 30 | 0 | **done 2026-09-23** (piece B) |
+| Send-to-Kindle web | 59 | 0 | **done 2026-09-23** (piece B) |
+| Email to Kindle | 38 | 0 | **done 2026-09-23** (piece B) |
+| Save a copy | 15 | 0 | **done 2026-09-23** (piece B) |
 | Cancel during conversion | 54 | 0 | **OUT, decided twice** |
 | **Feedback / Report a Bug** | 17 | 0 | **in nobody's list** |
 | **Show in Finder (two places)** | 2 | 0 | **in nobody's list** |
 | **KFX plugin install** | button | 0 | **done 2026-09-23** (piece D: `kfx-status`, `kfx-install`, Send page) |
 | **The gear (three things)** | 3 | 0 | **in nobody's list** |
 | First-run welcome screen | 1 | 0 | lower confidence |
-| "Open Amazon's settings page" | 1 | 0 | rides with email-to-Kindle |
+| "Open Amazon's settings page" | 1 | 0 | **done 2026-09-23** (piece B: `route kindle-email-setup`) |
 
 ### The four gate 2 does not name
 
