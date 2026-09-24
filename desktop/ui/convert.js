@@ -120,11 +120,25 @@ export function withoutCliRemedy(message, flag) {
  *  Reuses failureFor, so a reveal refusal renders through the same rule as
  *  every other one this surface shows: the engine's own sentence, and the
  *  same fallback when it broke its contract and sent none. Success has
- *  nothing to say here, the file manager showing the file already answers
+ *  nothing to say here: the file manager showing the file already answers
  *  the question. */
 export function revealFailureMessage(answer) {
   if (answer === null || answer === undefined || answer.ok) return null;
   return failureFor(answer.error).message;
+}
+
+/** What Show in Finder should say after asking the engine to reveal `path`:
+ *  a refusal, through revealFailureMessage's same rule as every other one
+ *  this surface shows; the message from a crash or a broken answer (a
+ *  rejected `run`, the same shape runEngine throws for either one); or ''
+ *  on success. `run` is runEngine, injected here so a test can drive this
+ *  without a real engine and without a real file manager. */
+export async function revealNote(run, path) {
+  try {
+    return revealFailureMessage(await run(argv.reveal(path))) ?? '';
+  } catch (err) {
+    return err.message;
+  }
 }
 
 /** What a failing answer means for the reader. The message is the engine's
@@ -449,25 +463,18 @@ function drawResult(path, answer) {
 
   // Show in Finder asks the ENGINE now (owner decision, 2026-09-23): the
   // window's old reveal permission was fixed to the library's old path, and
-  // a library that can move needs a door that moves with it. Success says
-  // nothing, the file manager showing the file already answers the
-  // question; a refusal is shown the same way every other one on this
-  // screen is, through revealFailureMessage.
-  let revealNote = null;
+  // a library that can move needs a door that moves with it. The note below
+  // is built into THIS result's own DOM right here, not appended once the
+  // engine answers: an answer that arrives after the reader has converted
+  // another script, or opened a different book, would otherwise land on
+  // whatever the pane shows by then, not on the book it was actually about,
+  // and a stale refusal would survive a later success too. Every update
+  // below only ever touches this one element, wherever it still is.
+  const note = el('p', { class: 'caption', hidden: true }, '');
   async function showInFinder() {
-    let said;
-    try {
-      said = revealFailureMessage(await runEngine(argv.reveal(script.epubPath)));
-    } catch (err) {
-      said = err.message;
-    }
-    if (said === null) return;
-    if (revealNote === null) {
-      revealNote = el('p', { class: 'caption' }, said);
-      pane.append(revealNote);
-    } else {
-      text(revealNote, said);
-    }
+    const said = await revealNote(runEngine, script.epubPath);
+    text(note, said);
+    note.hidden = said === '';
   }
 
   pane.append(
@@ -498,6 +505,7 @@ function drawResult(path, answer) {
       ),
     ),
     el('p', { class: 'path-note' }, script.epubPath),
+    note,
   );
 
   ctx.scriptChanged();

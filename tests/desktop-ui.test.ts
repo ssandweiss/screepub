@@ -516,15 +516,33 @@ describe('the Convert surface', () => {
     // Owner decision, 2026-09-23: the window's old reveal permission was
     // fixed to the library's old path, and a library that can move needs a
     // door that moves with it. The engine's own reveal verb does the
-    // showing now.
-    expect(convert).toContain('runEngine(argv.reveal(');
-    expect(convert).toContain('revealFailureMessage(');
+    // showing now, through revealNote.
+    expect(convert).toContain('revealNote(runEngine,');
     // Gone from every file in this directory, not just renamed here.
     for (const name of jsFiles()) {
       expect(`${name} mentions revealItem: ${/revealItem/.test(read(name))}`).toBe(
         `${name} mentions revealItem: false`,
       );
     }
+  });
+
+  test('the reveal note is built into the result the moment it is drawn, not appended once the engine answers', () => {
+    // A note appended only after the engine answers lands wherever the
+    // shared pane happens to be showing BY THEN: a reader who converts
+    // another script, or opens a different book, while a reveal is still in
+    // flight would see the answer land on the wrong screen, and a stale
+    // refusal would survive a later success. Building it into this result's
+    // own DOM at draw time, and only ever updating that same element, is
+    // what keeps a late answer on the book it was actually about.
+    const drawResult = convert.slice(convert.indexOf('function drawResult'));
+    const note = drawResult.slice(0, drawResult.indexOf('async function showInFinder'));
+    expect(note).toContain("hidden: true");
+    const handler = drawResult.slice(
+      drawResult.indexOf('async function showInFinder'),
+      drawResult.indexOf('pane.append('),
+    );
+    expect(handler).toContain('note.hidden');
+    expect(handler).not.toContain('pane.append');
   });
 });
 
@@ -553,6 +571,7 @@ describe('what the Convert surface decides', () => {
     scriptFrom: (path: string, answer: unknown) => Record<string, unknown>;
     droppedPath: (paths: unknown) => string | null;
     revealFailureMessage: (answer: unknown) => string | null;
+    revealNote: (run: (args: string[]) => Promise<unknown>, path: string) => Promise<string>;
   };
   let convert: ConvertModule;
 
@@ -792,6 +811,36 @@ describe('what the Convert surface decides', () => {
     // the same fallback failureFor uses everywhere else on this screen.
     expect(convert.revealFailureMessage({ ok: false, error: {} })).toBe(convert.NO_MESSAGE);
     expect(convert.revealFailureMessage(undefined)).toBeNull();
+  });
+
+  test('revealNote asks the engine through the injected runner, and decides what to say', async () => {
+    const calls: unknown[] = [];
+    const refused = async (args: unknown) => {
+      calls.push(args);
+      return {
+        ok: false,
+        error: { code: 'reveal-failed', message: 'could not show /x/a.epub in the file manager' },
+      };
+    };
+    expect(await convert.revealNote(refused, '/x/a.epub')).toBe(
+      'could not show /x/a.epub in the file manager',
+    );
+    // The path is handed to argv.reveal, exactly as runEngine expects it.
+    expect(calls).toEqual([['reveal', '/x/a.epub', '--json']]);
+
+    // A crash (Rust could not start the engine) and a non-JSON answer both
+    // reach here as a REJECTED promise, the same shape runEngine throws for
+    // either one, so both are covered by the same catch and shown the same
+    // way: the thrown message, verbatim.
+    const crashed = async () => { throw new Error('could not start the Screepub engine'); };
+    expect(await convert.revealNote(crashed, '/x/a.epub')).toBe('could not start the Screepub engine');
+    const notJson = async () => { throw new Error('the engine did not answer in JSON:\n<html>'); };
+    expect(await convert.revealNote(notJson, '/x/a.epub'))
+      .toBe('the engine did not answer in JSON:\n<html>');
+
+    // Success says nothing.
+    const succeeded = async () => ({ ok: true, revealed: '/x/a.epub' });
+    expect(await convert.revealNote(succeeded, '/x/a.epub')).toBe('');
   });
 
   test('the working line names the file, not its path', () => {
@@ -1211,6 +1260,7 @@ describe('the folder picker door', () => {
     pickFolder: (opts?: { defaultPath?: string }) => Promise<string | null>;
     pickScreenplay: () => Promise<string | null>;
     isDialogOpen: () => boolean;
+    onDialogClosed: (handler: () => void) => void;
   };
 
   function stubDialog(open: (options: unknown) => Promise<unknown>) {
@@ -1244,7 +1294,7 @@ describe('the folder picker door', () => {
     expect(await app.pickFolder()).toBeNull();
   });
 
-  test('a folder picker already open refuses a second one, the same guard pickScreenplay uses', async () => {
+  test('a folder picker already open refuses pickScreenplay too, the same guard both share', async () => {
     const app = (await import(join(UI, 'app.js'))) as AppModule;
     let calls = 0;
     let settle: ((v: string | null) => void) | null = null;
@@ -1261,6 +1311,84 @@ describe('the folder picker door', () => {
     expect(`dialogs opened: ${calls}`).toBe('dialogs opened: 1');
     settle!('/picked');
     expect(await first).toBe('/picked');
+    expect(app.isDialogOpen()).toBe(false);
+  });
+
+  test('a second pickFolder while one is open opens nothing, and the first still answers', async () => {
+    // The mirror of the mixed-picker test above, with the SAME kind of
+    // picker on both ends: two folder pickers must not disagree with
+    // themselves any more than a folder picker and the file picker do.
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    let calls = 0;
+    let settle: ((v: string | null) => void) | null = null;
+    stubDialog(() => {
+      calls += 1;
+      return new Promise((resolve) => { settle = resolve; });
+    });
+    const first = app.pickFolder();
+    await Promise.resolve();
+    expect(app.isDialogOpen()).toBe(true);
+    expect(await app.pickFolder()).toBeNull();
+    expect(await app.pickFolder()).toBeNull();
+    expect(`dialogs opened: ${calls}`).toBe('dialogs opened: 1');
+    settle!('/picked');
+    expect(await first).toBe('/picked');
+    expect(app.isDialogOpen()).toBe(false);
+  });
+
+  test('pickScreenplay open, then pickFolder resolves null without ever asking the dialog plugin', async () => {
+    // The reverse direction of the mixed-picker test above: a file picker
+    // already open must hold a folder picker off too, and the dialog
+    // plugin's open() must never be CALLED, not merely have its answer
+    // ignored.
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    let fileSettle: ((v: string | null) => void) | null = null;
+    let dialogCalls = 0;
+    (globalThis as unknown as { window: unknown }).window = {
+      __TAURI__: {
+        core: { invoke: () => new Promise((resolve) => { fileSettle = resolve; }) },
+        dialog: { open: () => { dialogCalls += 1; return Promise.resolve('/never'); } },
+      },
+    };
+    try {
+      const first = app.pickScreenplay();
+      await Promise.resolve();
+      expect(app.isDialogOpen()).toBe(true);
+      expect(await app.pickFolder()).toBeNull();
+      expect(`dialog.open calls: ${dialogCalls}`).toBe('dialog.open calls: 0');
+      fileSettle!('/s/script.pdf');
+      expect(await first).toBe('/s/script.pdf');
+      expect(app.isDialogOpen()).toBe(false);
+    } finally {
+      delete (globalThis as unknown as { window?: unknown }).window;
+    }
+  });
+
+  test('onDialogClosed handlers fire for pickFolder too, on a resolve and on a rejection', async () => {
+    // pickScreenplay's own onDialogClosed guarantee (tested in "one file
+    // dialog at a time" above) needs the same proof for pickFolder: a guard
+    // left standing by a throw would lock the window out of ever opening a
+    // folder picker again, and the keyboard would never be put back.
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    let closed = 0;
+    app.onDialogClosed(() => { closed += 1; });
+
+    let resolveOpen: ((v: string | null) => void) | null = null;
+    stubDialog(() => new Promise((resolve) => { resolveOpen = resolve; }));
+    const picked = app.pickFolder();
+    await Promise.resolve();
+    resolveOpen!('/picked');
+    expect(await picked).toBe('/picked');
+    expect(`closed after resolve: ${closed}`).toBe('closed after resolve: 1');
+    expect(app.isDialogOpen()).toBe(false);
+
+    let rejectOpen: ((err: unknown) => void) | null = null;
+    stubDialog(() => new Promise((_resolve, reject) => { rejectOpen = reject; }));
+    const asked = app.pickFolder().then(() => 'resolved', () => 'rejected');
+    await Promise.resolve();
+    rejectOpen!(new Error('no portal'));
+    expect(await asked).toBe('rejected');
+    expect(`closed after reject: ${closed}`).toBe('closed after reject: 2');
     expect(app.isDialogOpen()).toBe(false);
   });
 });

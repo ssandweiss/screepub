@@ -66,8 +66,10 @@ export const argv = {
   kfxInstall: () => ['kfx-install', '--json'],
 
   /** Read the app's own settings (the library folder, the format defaults)
-   *  with no `set`; write them when `set` is a JSON string, or the literal
-   *  string "null" to clear one field back to its default. */
+   *  with no `set`; write them when `set` is a JSON object string, for
+   *  example '{"libraryPath":"/abs"}'. A field resets to its default by
+   *  naming it null INSIDE that object, for example '{"libraryPath":null}':
+   *  the engine refuses a bare "null" for --set itself. */
   appSettings: (set = null) =>
     ['app-settings', '--json', set ? '--set' : null, set].filter((a) => a !== null),
 
@@ -136,20 +138,19 @@ let settleTimer = null;
  *  back, read-only and never mid-job. `kfx-install` is the one that
  *  actually writes (into Calibre) and stays counted.
  *
- *  `app-settings` without `--set` is the same shape again: the gear rereads
- *  the settings file every time it is shown, read-only and never mid-job.
- *  WITH `--set` it writes that file, so only the write counts, the same
- *  split as kfx-status and kfx-install above.
+ *  `app-settings` without `--set` is the same shape again: the Convert page
+ *  rereads the settings file every time it is shown, read-only and never
+ *  mid-job. WITH `--set` it writes that file, so only the write counts, the
+ *  same split as kfx-status and kfx-install above.
  *
  *  `reveal` is not counted either, but for a different reason: it writes
  *  nothing at all, and on some Linux desktops the xdg-open call behind it
- *  can keep running until the file manager window it opened is closed.
- *  Counting it could hold a restart off for as long as that window stayed
- *  open, which is the controller's reason for leaving it out. */
+ *  can keep running until the file manager window it opened is closed,
+ *  which could hold a restart off for as long as that window stayed open. */
 function countsTowardBusy(args) {
   if (args[0] === argv.devices()[0] || args[0] === argv.kfxStatus()[0]) return false;
   if (args[0] === argv.appSettings()[0]) return args.includes('--set');
-  if (args[0] === 'reveal') return false;
+  if (args[0] === argv.reveal('')[0]) return false;
   return true;
 }
 

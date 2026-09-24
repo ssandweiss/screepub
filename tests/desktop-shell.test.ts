@@ -456,6 +456,37 @@ describe('the window is granted no more than it needs', () => {
     expect(raw).not.toContain('opener:allow-reveal-item-in-dir');
   });
 
+  test('the opener is never granted its default set, only the two scoped doors it needs', () => {
+    // opener:default would grant every opener command (open-url, open-path,
+    // reveal-item-in-dir) with no scope at all, exactly the "open anything"
+    // the ADR refuses by name. Checked on the JSON text, the same pattern as
+    // "the window may restart itself, and may not quit itself" above, so
+    // the same identifier arriving as an object rather than a bare string
+    // (`{identifier: "opener:default"}`) is caught too.
+    const raw = JSON.stringify(capability().permissions);
+    expect(raw).not.toMatch(/"opener:default"/);
+  });
+
+  test('the dialog plugin is never granted its default set, only the one folder-picker door it needs', () => {
+    // dialog:default would grant every dialog command (open, save, message,
+    // ask, confirm) with no scope at all. Piece B adds dialog:allow-save on
+    // a parallel branch, merged in by hand later; this only refuses the
+    // unscoped default, which leaves room for that second door to arrive
+    // without this test needing to change.
+    const raw = JSON.stringify(capability().permissions);
+    expect(raw).not.toMatch(/"dialog:default"/);
+  });
+
+  test('the description matches the grants: no reveal clause for the window, still points at the ADR, no em dash', () => {
+    const description = capability().description as string;
+    // The old clause claimed the WINDOW could reveal a file; the window no
+    // longer has that grant, so the sentence that promised it must be gone
+    // too, not merely reworded around the same claim.
+    expect(description).not.toContain('to reveal a file');
+    expect(description).toContain('ADR 2026-09-21');
+    expect(description).not.toContain(String.fromCharCode(0x2014));
+  });
+
   test('the opener may reach the issue tracker and the KFX download pages, and nothing else', async () => {
     const { KFX_LINKS } = await import('../src/export/kfx-setup');
     const opener = capability().permissions.find(
