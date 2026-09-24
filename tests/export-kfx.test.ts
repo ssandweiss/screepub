@@ -284,16 +284,39 @@ describe('listsKfxOutput', () => {
     expect(listsKfxOutput(listingOf(narrow, narrow.companion))).toBe(false);
   });
 
-  test('only the exact name counts: a fork or a name ending in it is not the plugin', () => {
-    // A fork registers the same package under another NAME (the old Swift
-    // app shipped "KFX Output (Fix Traditional Chinese)"). Reported as not
-    // installed, the page offers Install, and the installer clears the fork
-    // before adding the real one (INSTALL_SNIPPET): the one action that
-    // leaves this machine able to convert.
-    const fork = [measured.line('Conversion output', 'KFX Output (Fix Traditional Chinese)', '(2, 12, 0)'), ''];
-    const suffix = [measured.line('Conversion output', 'Legacy KFX Output', '(1, 0, 0)'), ''];
-    expect(listsKfxOutput(listingOf(measured, fork))).toBe(false);
-    expect(listsKfxOutput(listingOf(measured, suffix))).toBe(false);
+  test('the plugin, or a renamed copy of it, counts; the companion and look-alikes do not', () => {
+    // The old Swift app installed renamed copies of the plugin, such as
+    // "KFX Output (Fix Traditional Chinese)". They are working KFX
+    // converters, so the reader who has one keeps KFX. The rule is the name
+    // itself or the name followed by " (": the companion metadata writer,
+    // "Set KFX metadata (from KFX Output)", only ENDS in the name, and
+    // neither a longer word nor a prefix of another name is a copy.
+    const named = (name: string) =>
+      listsKfxOutput(listingOf(measured, [measured.line('Conversion output', name, '(2, 12, 0)'), '']));
+    expect(named('KFX Output')).toBe(true);
+    expect(named('KFX Output (Fix Traditional Chinese)')).toBe(true);
+    expect(named('KFX Output (fork)')).toBe(true);
+    expect(named('Set KFX metadata (from KFX Output)')).toBe(false);
+    expect(named('Legacy KFX Output')).toBe(false);
+    expect(named('KFX Outputs')).toBe(false);
+    expect(named('KFX Output(fork)')).toBe(false);
+    // A renamed copy's own companion is not a converter either.
+    expect(named('Set KFX metadata (from KFX Output (Fix Traditional Chinese))')).toBe(false);
+  });
+
+  test('a plugin Calibre lists as disabled still counts, because ebook-convert still converts with it', () => {
+    // Measured 2026-09-24, calibre 9.11, on a scratch CALIBRE_CONFIG_DIRECTORY
+    // holding a copy of KFX Output 2.20.1: after `calibre-customize
+    // --disable-plugin "KFX Output"` the Disabled column reads True (False
+    // otherwise), and `ebook-convert book.epub book.kfx` still wrote a real
+    // KFX (a CONT container). calibre's plugin_for_output_format() does not
+    // consult the disabled list; only the calibre window's own format menu
+    // (available_output_formats) hides a disabled one. Screepub converts
+    // through ebook-convert, so the column says nothing about whether it can.
+    const disabled = [measured.line('Conversion output', 'KFX Output', '(2, 20, 1)', 'True'), ''];
+    const enabled = [measured.line('Conversion output', 'KFX Output', '(2, 20, 1)', 'False'), ''];
+    expect(listsKfxOutput(listingOf(measured, measured.companion, disabled))).toBe(true);
+    expect(listsKfxOutput(listingOf(measured, measured.companion, enabled))).toBe(true);
   });
 
   test('a description line that mentions it is not a plugin row', () => {
