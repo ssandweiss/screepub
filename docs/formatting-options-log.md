@@ -28,7 +28,15 @@ file it used and names it as `settingsPath` in the `--json` answer.
 between the script's sidecar and these shipped defaults, holds the app-wide
 format defaults set with `screepub app-settings`. The precedence: explicit
 flags > the script's saved settings > app defaults > these shipped
-defaults.
+defaults. The desktop window's per-script Settings page reaches the same
+layer from its foot: "Use these for new scripts" promotes that script's
+current settings to the app defaults, and "Reset new scripts to Screepub's
+defaults" (shown only when the two differ) puts the shipped defaults back.
+The first `--library` conversion of a PDF with no sidecar of its own saves
+the settings it started from as that script's own, so a later change to
+the app defaults reaches only scripts converted afterwards; a script
+already in the library from before this change has no saved settings, and
+keeps following the app defaults until it is tuned once.
 
 **Coverage of these entries by the committed torture fixture is tracked in
 `tools/torture-manifest.json`**, one row per entry, and

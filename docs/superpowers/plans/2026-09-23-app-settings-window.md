@@ -10,6 +10,20 @@
 
 **Spec:** [2026-09-23-app-settings-gear-design.md](../specs/2026-09-23-app-settings-gear-design.md) ("The window"). **Depends on** the engine half ([plan](2026-09-23-app-settings-engine.md)): `app-settings`, `reveal`, `appDefaults` in the `settings` answer.
 
+> **As built (2026-09-24), two places this plan is now stale.** `reveal`
+> does NOT count toward busy: it writes nothing, and on some Linux
+> desktops `xdg-open` can keep running until the file manager itself
+> closes, so waiting on it would block a restart on the reader's window
+> manager. Show in Finder moved from Task CW2 into CW1, so removing the
+> reveal permission and wiring the button to the engine landed in the
+> same commit and the button was never left broken in between. Also true
+> but not a correction: the library line lives in one slot `drawWell`
+> builds empty, probed fresh on every `drawWell`. And the engine half
+> grew one thing this plan does not mention: it saves a script's starting
+> settings on its first library conversion, so a later change to the app
+> defaults reaches only scripts converted afterwards, not ones already
+> sitting in the library untuned.
+
 ---
 
 ## Ground rules for every task

@@ -331,18 +331,29 @@ Precedence is `SCREEPUB_LIBRARY` > the chosen folder > the platform default.
 Choosing a new folder moves nothing: books already converted stay where they
 are, and conversions from then on land in the new one. A script converted
 again after the change starts a fresh folder there, without the tuning
-saved in its old one.
+saved in its old one. The desktop window offers the same choice from the
+Convert page: a Change… button next to the library line opens a folder
+picker, and Reset goes back to the default.
 
 The same command sets the app's format defaults too: what a new script
 starts from. Precedence there is explicit flags > the script's saved
 settings (`screepub settings`) > these app defaults > Screepub's own.
 `screepub app-settings [--set <json>] [--json]` reads or writes both
 `libraryPath` and `formatDefaults` in one call (`formatDefaults` replaces
-the whole set; see `--help`).
+the whole set; see `--help`). The per-script Settings page's foot has the
+window's equivalent, "Use these for new scripts", which sends that
+script's current settings as the new app defaults.
 
-`screepub reveal <file>` (a full path) `[--json]` shows a converted file in
-the system's file manager: Finder with the file selected on macOS, the
-containing folder on Windows and Linux.
+The first `--library` conversion of a PDF that has no settings sidecar of
+its own saves the settings it started from as that script's own, so a
+later change to the app defaults reaches only scripts converted
+afterwards. Scripts already in the library from before this release saved
+nothing, so they keep following the app defaults until a knob is moved
+once on their own Settings page.
+
+`screepub reveal <file> [--json]` shows a converted file (given as a full
+path) in the system's file manager: Finder with the file selected on
+macOS, the containing folder on Windows and Linux.
 
 Both settings live in one small file outside the library:
 `~/Library/Application Support/Screepub/settings.json` on macOS,

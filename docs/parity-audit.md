@@ -61,7 +61,7 @@ Two of six. The ranking and the remembered choice are missing too:
 | **Feedback / Report a Bug** | 17 | 0 | **in nobody's list** |
 | **Show in Finder (two places)** | 2 | 0 | **in nobody's list** |
 | **KFX plugin install** | button | 0 | **done 2026-09-23** (piece D: `kfx-status`, `kfx-install`, Send page) |
-| **The gear (three things)** | 3 | 0 | **in nobody's list** |
+| **The gear (three things)** | 3 | 0 | **done 2026-09-23** (piece C: output folder, app defaults, Show in Finder) |
 | First-run welcome screen | 1 | 0 | lower confidence |
 | "Open Amazon's settings page" | 1 | 0 | rides with email-to-Kindle |
 
@@ -104,6 +104,14 @@ promotes one script's settings to app-wide, and `ScreepubApp.swift:221`
 all. Today the library location is engine-owned and overridable only by
 `$SCREEPUB_LIBRARY`, so **nobody can change where their books land without
 setting an environment variable.**
+
+**Closed 2026-09-23 (piece C).** The Convert page has a library line under
+the drop area with Change… and Reset; the per-script Settings page's foot
+has "Use these for new scripts" and, when the app defaults differ from
+Screepub's own, "Reset new scripts to Screepub's defaults"; and Show in
+Finder goes through the engine's `reveal`, so it works wherever the
+library is. See
+[the spec](superpowers/specs/2026-09-23-app-settings-gear-design.md).
 
 ## Two structural facts that shape any port
 

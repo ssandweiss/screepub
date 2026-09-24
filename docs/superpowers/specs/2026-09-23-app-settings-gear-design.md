@@ -115,3 +115,32 @@ Nothing stores a layer of the user's own underneath the per-script sidecar.
    user picks. Recommended: the engine reveals the file instead (the same
    answer as piece B's question 2), and the window's reveal permission is
    retired once nothing uses it. OK?
+
+## Decided during the build (2026-09-24)
+
+**Pin the script's settings on its first library conversion.** A PDF
+converted with `--library` and no settings sidecar of its own now saves
+the app defaults it converted from as that script's own, the moment it
+first lands in the library (before any one-off `--options` flag for that
+single run is layered on top; a flag used once must never freeze into the
+script's standing choice). Without
+this, "Use these for new scripts" or "Reset new scripts to Screepub's
+defaults" would reach BACKWARD into a library already on a reader's
+device: the book on disk was built at one set of knobs, and the next
+`screepub settings` call for it would silently start answering with
+another. App defaults are the starting point for NEW scripts, not a live
+wire into every old one. **Limit:** scripts already converted into the
+library before this change have no saved settings of their own, so they
+keep following the app defaults until they are tuned once (any knob moved
+on their Settings page saves them from then on).
+
+**Reveal on Windows opens the folder, not the file.** The design above
+says `explorer /select,` picks the file itself; built, it does not.
+`/select,` breaks on a folder or script name with a SPACE in it alone (the
+spawn layer quotes the whole argv element, and explorer reads the quotes
+as part of the path instead of as `/select,` followed by one) or a COMMA
+in it alone (explorer reads the first comma it finds as the end of the
+`/select,` token, wherever that actually falls). Both are ordinary in a
+screenplay title. `reveal` opens the containing folder on Windows instead,
+the same as it already does on Linux, which sidesteps the quoting problem
+rather than escaping around it.
