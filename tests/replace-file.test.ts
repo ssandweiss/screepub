@@ -1,8 +1,8 @@
 import { afterAll, test, expect } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { replaceFile } from '../src/replace-file';
+import { basename, dirname, join } from 'node:path';
+import { partialPathFor, replaceFile } from '../src/replace-file';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-replace-file-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
@@ -65,7 +65,7 @@ test('a copy that lands but cannot be put in place is taken away again', () => {
   const dest = join(dir, 'b.txt');
   mkdirSync(dest);
   writeFileSync(join(dest, 'inside.txt'), 'kept');
-  expect(() => replaceFile(src, dest)).toThrow();
+  expect(() => replaceFile(src, dest)).toThrow(`rename '${dest}'`);
   expect(readdirSync(dir).sort()).toEqual(['a.txt', 'b.txt']);
   expect(readFileSync(join(dest, 'inside.txt'), 'utf8')).toBe('kept');
 });
@@ -76,8 +76,74 @@ test('a partial copy left by an earlier send that died is written over, not trip
   const dest = join(dir, 'b.txt');
   writeFileSync(src, 'v2');
   writeFileSync(dest, 'v1');
-  writeFileSync(join(dir, '.b.txt.screepub-partial'), 'half of v');
+  writeFileSync(partialPathFor(dest), 'half of v');
   replaceFile(src, dest);
   expect(readFileSync(dest, 'utf8')).toBe('v2');
   expect(readdirSync(dir).sort()).toEqual(['a.txt', 'b.txt']);
+});
+
+// The partial's name used to be the book's own with 18 characters added, so
+// a book named with 238 to 255 characters, which copied fine before, failed:
+// FAT32 and exFAT (and APFS) stop a name at 255.
+
+test('a book with a 250-character name still goes across', () => {
+  const dir = temp('replace');
+  const src = join(dir, 'a.txt');
+  writeFileSync(src, 'v1');
+  const dest = join(dir, `${'x'.repeat(245)}.azw3`);
+  replaceFile(src, dest);
+  expect(readFileSync(dest, 'utf8')).toBe('v1');
+});
+
+test('the partial is short, hidden, beside the book, and the same one for the same book', () => {
+  const dest = join('/Volumes', 'Kindle', 'documents', `${'x'.repeat(245)}.azw3`);
+  const partial = partialPathFor(dest);
+  expect(dirname(partial)).toBe(dirname(dest));
+  expect(basename(partial)).toMatch(/^\.screepub-[0-9a-f]{8}\.partial$/);
+  expect(partialPathFor(dest)).toBe(partial);
+  expect(partialPathFor(join(dirname(dest), 'Another.azw3'))).not.toBe(partial);
+});
+
+// cli-devices.ts hands a failed copy's message to the reader as it is, so
+// the message must name the book, never the hidden file it went through.
+
+test('a failed copy names the book it was writing, with the system’s code, never the partial', () => {
+  const dir = temp('replace');
+  const dest = join(dir, 'Field Station.azw3');
+  writeFileSync(dest, 'old');
+  let thrown: unknown;
+  try {
+    replaceFile(join(dir, 'gone.azw3'), dest);
+  } catch (err) {
+    thrown = err;
+  }
+  const error = thrown as NodeJS.ErrnoException;
+  expect(error).toBeInstanceOf(Error);
+  expect(error.code).toBe('ENOENT');
+  expect(error.message).toStartWith('ENOENT');
+  expect(error.message).toContain(dest);
+  expect(error.message).not.toContain('.screepub-');
+  expect(error.message).not.toContain('partial');
+});
+
+test('a clean-up that fails too does not hide why the copy failed', () => {
+  // A directory where the partial goes: the copy onto it fails (EISDIR),
+  // and taking it away fails as well, since it is not empty. The copy's
+  // failure is the one that says what went wrong.
+  const dir = temp('replace');
+  const src = join(dir, 'a.txt');
+  writeFileSync(src, 'v1');
+  const dest = join(dir, 'b.txt');
+  writeFileSync(dest, 'old');
+  mkdirSync(partialPathFor(dest));
+  writeFileSync(join(partialPathFor(dest), 'inside'), 'x');
+  let thrown: unknown;
+  try {
+    replaceFile(src, dest);
+  } catch (err) {
+    thrown = err;
+  }
+  expect((thrown as NodeJS.ErrnoException).code).toBe('EISDIR');
+  expect((thrown as Error).message).toContain(dest);
+  expect(readFileSync(dest, 'utf8')).toBe('old');
 });
