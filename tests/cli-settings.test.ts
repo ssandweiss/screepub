@@ -213,6 +213,15 @@ describe('settingsCommand: app-wide defaults underneath the sidecar', () => {
     expect(result.appDefaults).toEqual(DEFAULT_FORMAT_OPTIONS);
   });
 
+  test('the answer carries keepScriptSettings, so the Settings page can draw that choice from this one round trip', () => {
+    // true when nothing is stored: keeping a script's settings is the
+    // default (spec 2026-09-24-keep-script-settings-choice-design.md).
+    expect(settingsCommand({ fountain, appSettingsPath: appSettings() }).keepScriptSettings).toBe(true);
+    const path = appSettings();
+    writeAppSettings({ keepScriptSettings: false }, path);
+    expect(settingsCommand({ fountain, appSettingsPath: path }).keepScriptSettings).toBe(false);
+  });
+
   test('with no appSettingsPath given, it defaults to the production path (test-guarded)', () => {
     // No injected path at all: settingsCommand must fall back to
     // appSettingsPath() itself, which the test-run guard (SCREEPUB_CONFIG_DIR

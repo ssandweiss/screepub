@@ -18,7 +18,7 @@ import {
 import { mapConversionError, CliError, errorMessage, type JsonError } from './cli-errors';
 import { adoptSidecar, existingLibraryOutput, libraryOutput, libraryRoot } from './library';
 import { resolveFormatOptions, type FormatOptions } from './options';
-import { appDefaultOptions } from './settings/app-defaults';
+import { appDefaultOptions, keepsScriptSettings } from './settings/app-defaults';
 import { readScriptSettings, saveScriptSettings, sidecarPath } from './settings/sidecar';
 import { resolveCommand, devicesCommand, sendCommand, VERBS, type Verb } from './cli-devices';
 import { updateDecisionCommand, updateShouldCheckCommand } from './cli-update';
@@ -49,7 +49,10 @@ folder, under --library — this run renders with it and says so on stderr.
 --options/--options-json override it knob by knob. Write one with the
 settings command. The first --library conversion of a PDF with none saves
 the settings it started from as the script's own, so a later change to the
-app defaults reaches only new scripts.
+app defaults reaches only new scripts. Turn that off with
+app-settings --set '{"keepScriptSettings":false}': scripts converted from
+then on follow the app defaults until they are tuned, and a script that
+already has saved settings keeps them.
 
 Underneath those saved settings and any --options you pass, a conversion
 starts from the format defaults you chose in the app, if you chose any, and
@@ -180,11 +183,18 @@ const APP_SETTINGS_USAGE = `screepub app-settings: where books land, and what ne
 Usage:
   screepub app-settings [--set <json>] [--json]
 
-Reads the app-wide settings: the folder converted books are saved into, and
-the format defaults a new script starts from. --set takes a JSON object
-with either or both of:
-  libraryPath     a full path, or null to go back to the default folder
-  formatDefaults  a FormatOptions object, or null to go back to Screepub's own
+Reads the app-wide settings: the folder converted books are saved into, the
+format defaults a new script starts from, and whether a converted PDF keeps
+the settings it was made with. --set takes a JSON object with any of:
+  libraryPath         a full path, or null to go back to the default folder
+  formatDefaults      a FormatOptions object, or null to go back to
+                      Screepub's own
+  keepScriptSettings  true (the default): the first --library conversion of
+                      a PDF with no saved settings saves the ones it started
+                      from as its own. false: it saves nothing, so the script
+                      follows the format defaults until it is tuned. Either
+                      way a script that already has saved settings keeps
+                      them. null goes back to true.
 
 formatDefaults REPLACES the stored defaults: any knob it leaves out goes
 back to Screepub's own, unlike screepub settings --set, which moves only
@@ -194,7 +204,8 @@ When SCREEPUB_LIBRARY is set, it wins over the chosen folder: books land
 there no matter what libraryPath says.
 
 Options:
-  --set <json>           libraryPath and/or formatDefaults, see above
+  --set <json>           libraryPath, formatDefaults and/or
+                         keepScriptSettings, see above
   --json                 machine-readable result on stdout (for the app)
   -h, --help             show this help
 `;
@@ -762,6 +773,11 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
           ? 'new scripts start from: your own defaults'
           : "new scripts start from: Screepub's defaults",
       );
+      console.log(
+        result.keepScriptSettings
+          ? 'when a PDF is converted: keep its settings'
+          : 'when a PDF is converted: follow the defaults',
+      );
       return;
     }
 
@@ -1024,6 +1040,11 @@ async function main() {
   // in principle disagree if the app settings file were rewritten between
   // them (the app changing it while a long conversion runs).
   const appDefaults = appDefaultOptions();
+  // The Settings page's "When a PDF is converted" choice, read in the same
+  // breath as the defaults it governs, so one conversion decides whether to
+  // pin from the same look at the settings file it took its defaults from.
+  // Only a --library conversion ever pins, so only one reads it.
+  const keepSettings = values.library && keepsScriptSettings();
   let settings: FormatOptions | undefined;
   let settingsPath: string | undefined;
   const sidecarCandidates: string[] = [];
@@ -1211,7 +1232,16 @@ async function main() {
   // sidecar here would have no library .fountain for `screepub settings`
   // to read it against, while still outranking the user's own sidecar
   // beside their .fountain input on the next conversion.
-  if (values.library && isPdf) {
+  //
+  // And only while the app says to keep a script's settings (the default;
+  // keepScriptSettings, spec 2026-09-24). Off, nothing is saved here and an
+  // untuned script goes on following the app defaults. Off NEVER undoes a
+  // save made while it was on: a sidecar this block wrote and one the
+  // reader tuned are the same file, and nothing records which is which, so
+  // removing or rewriting one here could wipe real tuning. The existsSync
+  // check below already leaves any sidecar that is there alone; turning
+  // the choice off adds nothing that touches one.
+  if (keepSettings && isPdf) {
     // Checked fresh rather than trusted from adoptSidecar's return value:
     // the library can already hold a sidecar from an EARLIER conversion of
     // this same script (adoptSidecar only ever copies from beside the
