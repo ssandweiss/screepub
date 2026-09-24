@@ -37,7 +37,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { mountDmgApp } from './dmg';
-import type { RunResult, Runner } from './smoke-cli';
+import { realRun, type RunResult, type Runner } from './smoke-cli';
 
 /** UpdateInstaller.teamID. */
 export const TEAM_ID = 'XSRB3D643J';
@@ -274,15 +274,6 @@ export function describeVerdict(
 
   return { ok, lines };
 }
-
-const realRun: Runner = (argv) => {
-  const proc = Bun.spawnSync(argv, { stdout: 'pipe', stderr: 'pipe' });
-  return {
-    exitCode: proc.exitCode ?? 1,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-  };
-};
 
 if (import.meta.main) {
   const { values } = parseArgs({

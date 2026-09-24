@@ -21,7 +21,8 @@ export interface RunResult {
 }
 export type Runner = (argv: string[]) => RunResult;
 
-const realRun: Runner = (argv) => {
+/** The real runner, shared by every tool that takes a Runner seam. */
+export const realRun: Runner = (argv) => {
   const proc = Bun.spawnSync(argv, { stdout: 'pipe', stderr: 'pipe' });
   return {
     exitCode: proc.exitCode ?? 1,

@@ -54,19 +54,11 @@ import {
 import {
   checkConvertResult,
   checkEpubBytes,
+  realRun,
   soleJson,
   type RunResult,
   type Runner,
 } from './smoke-cli';
-
-const realRun: Runner = (argv) => {
-  const proc = Bun.spawnSync(argv, { stdout: 'pipe', stderr: 'pipe' });
-  return {
-    exitCode: proc.exitCode ?? 1,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-  };
-};
 
 /** The engine's own `--version --json`, checked against the version the
  *  bundle claims to be. soleJson enforces the one-object contract, so a
