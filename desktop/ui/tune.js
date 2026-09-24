@@ -618,10 +618,13 @@ let hold = null;
 let pending = {};
 let statusLine = null;
 let controls = new Map();
-/** Which script these knobs belong to. A flush already chained onto
- *  `running` cannot be cancelled, so it checks this before it paints
- *  anything: converting a second PDF while a save is in flight must not put
- *  the first script's pages back into the reader. */
+/** Which script these knobs belong to; scriptChanged() moves it on. A save
+ *  waiting its turn on its book checks it before it starts (settle()), and
+ *  one already running, whose engine call cannot be taken back, checks it
+ *  before it paints anything (flush()): converting a second PDF while a
+ *  save is waiting or in flight must neither run the second script's
+ *  changes on the first one's turn nor put the first script's pages back
+ *  into the reader. */
 let era = 0;
 
 /** Long enough that a dragged slider is one conversion rather than a
@@ -1156,10 +1159,16 @@ function schedule() {
  *  status line says so until the save starts and says "Saving". */
 function settle() {
   timer = null;
+  const mine = era;
   const book = bookOf(ctx.state.script);
   const ahead = holder(book);
   if (ahead !== null) say(statusFor('waiting', ahead));
-  inTurn(book, 'save', flush);
+  // Tied to the script it was queued for. Its turn can come long after
+  // (behind a minute-long KFX send), and flush() reads the script on screen
+  // and what it owes when it runs: by then another script's changes, whose
+  // own settle saves them on their own book. scriptChanged() already dropped
+  // what this one owed and let its hold go, so skipping it loses nothing.
+  inTurn(book, 'save', () => (era === mine ? flush() : undefined));
 }
 
 /** Which book a save takes its turn on: the script's library EPUB, which

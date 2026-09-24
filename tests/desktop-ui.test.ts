@@ -3582,7 +3582,9 @@ describe('the Tune surface', () => {
     // Serialised as a turn on the book (book-queue.js), one at a time with
     // every other page's calls on that book.
     const settle = source.slice(source.indexOf('function settle('));
-    expect(settle.slice(0, settle.indexOf('\n}'))).toMatch(/inTurn\(book, 'save', flush\)/);
+    const body = settle.slice(0, settle.indexOf('\n}'));
+    expect(body).toMatch(/inTurn\(book, 'save', \(\) => \(era === mine \? flush\(\) : undefined\)\)/);
+    expect(body).toMatch(/const mine = era;/);
   });
 
   test('a knob held in the settle is held against a restart too, and let go once its save has started', () => {
@@ -4353,6 +4355,59 @@ describe('the Tune surface: app defaults for new scripts', () => {
     await tick();
     expect(engine.calls[4].args.slice(3, 5)).toEqual(['-o', '/scripts/demo.epub']);
     engine.resolve(4, refused);
+    await tick();
+  });
+
+  test('a save queued for one script never runs another script’s changes when its turn comes', async () => {
+    // A's save waits behind a send holding A's book. The reader opens B and
+    // moves a knob there. When A's send ends, A's waiting save must not pick
+    // up B's change and run it on A's turn: B's own settle saves it, on B's
+    // book, and B's hold against a restart stays until then. scriptChanged()
+    // already dropped what A owed and let A's hold go, so skipping A's save
+    // loses nothing.
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle();
+    expect(app.engineBusy(), 'an earlier test left a counted engine call running').toBe(false);
+    const { inTurn } = await import(join(UI, 'book-queue.js'));
+    const { pane, ctx, script } = await mountReady(engine);
+    (script as { epubPath: string | null }).epubPath = '/scripts/demo.epub';
+
+    let free: () => void = () => {};
+    const sending = inTurn('/scripts/demo.epub', 'send', () => new Promise<void>((resolve) => { free = resolve; }));
+    moveKnob(pane, 'dialogueSideMarginPct', '27');
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    expect(engine.calls.length).toBe(1); // A's save is waiting for the send
+
+    // Script B, on the same page.
+    const other = { fountainPath: '/scripts/other.fountain', epubPath: '/scripts/other.epub', previewHtml: undefined, settings: null };
+    (ctx.state as { script: unknown }).script = other;
+    tune.scriptChanged();
+    const shown = tune.show();
+    engine.resolve(1, settingsAnswer());
+    await shown;
+    moveKnob(pane, 'cueIndentPct', '31');
+    expect(app.engineBusy()).toBe(true);
+
+    free();
+    await sending;
+    await tick();
+    // Nothing ran on A's turn: no settings call yet, and B's hold is what
+    // still keeps a restart off.
+    expect(engine.calls.length).toBe(2);
+    expect(app.engineBusy()).toBe(true);
+
+    // B's own settle saves B's change, once, on B's book.
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    const saves = engine.calls.filter((call) => call.args[0] === 'settings' && call.args.includes('--set'));
+    expect(saves.length).toBe(1);
+    expect(saves[0].args[1]).toBe('/scripts/other.fountain');
+    expect(saves[0].args.join(' ')).toContain('"cueIndentPct":31');
+    expect(saves[0].args.join(' ')).not.toContain('dialogueSideMarginPct');
+    engine.resolve(2, settingsAnswer({ settings: { ...DEFAULT_FORMAT_OPTIONS, cueIndentPct: 31 } }));
+    await tick();
+    expect(engine.calls[3].args.slice(3, 5)).toEqual(['-o', '/scripts/other.epub']);
+    engine.resolve(3, { ok: false, error: { message: 'not what this test is about' } });
     await tick();
   });
 
