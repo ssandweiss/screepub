@@ -11,7 +11,7 @@
 // above the line is a pure function with no DOM in it, exercised directly by
 // tests/desktop-ui.test.ts. Below the line is drawing, which holds no rule of
 // its own and rides on the live run.
-import { runEngine, argv } from './app.js';
+import { runEngine, argv, holdEngine } from './app.js';
 import { el, clear, text } from './dom.js';
 import { render as renderReader, splitPreview, dressFrame } from './read.js';
 
@@ -592,6 +592,15 @@ let previewFrame = null;
 let previewCss = '';
 let loaded = false;
 let timer = null;
+/** The release for the hold schedule() takes while a moved knob waits out
+ *  SETTLE_MS, or null when none is held. Between a knob moving and its
+ *  save's engine call starting, no engine call is running at all, so an
+ *  update restart already waiting on app.js's whenIdle() would otherwise be
+ *  free to fire and drop the change (the known gap in
+ *  docs/superpowers/specs/2026-09-23-update-notice-and-window-drag-design.md,
+ *  Part 3, closed 2026-09-24). One hold covers however many knobs move
+ *  inside one settle; releaseHold() is the only thing that lets it go. */
+let hold = null;
 let running = Promise.resolve();
 let pending = {};
 let statusLine = null;
@@ -634,6 +643,9 @@ export function scriptChanged() {
   keepNoteEl = null;
   pending = {};
   clearTimeout(timer);
+  // What was owed belonged to the other script and has just been dropped,
+  // so nothing is owed any more: the restart need not wait for it.
+  releaseHold();
   draw();
 }
 
@@ -1118,6 +1130,7 @@ function refreshIdle() {
 
 function schedule() {
   clearTimeout(timer);
+  if (hold === null) hold = holdEngine();
   timer = setTimeout(() => {
     // Serialised behind whatever is already in flight: two conversions
     // writing the same EPUB is a race, and a slow early one finishing last
@@ -1126,12 +1139,27 @@ function schedule() {
   }, SETTLE_MS);
 }
 
+/** Let the settle's hold go, if one is held. Safe to call any number of
+ *  times: app.js's release is idempotent, and this forgets it after the
+ *  first call either way. */
+function releaseHold() {
+  if (hold === null) return;
+  const release = hold;
+  hold = null;
+  release();
+}
+
 async function flush() {
   const script = ctx.state.script;
   const mine = era;
   const owed = pending;
   pending = {};
-  if (!isPending(owed) || !script?.fountainPath) return;
+  if (!isPending(owed) || !script?.fountainPath) {
+    // Nothing to save after all (a later flush already carried it, or the
+    // script went away): nothing for a restart to wait on either.
+    releaseHold();
+    return;
+  }
 
   /** A change that was not stored is still owed. Clearing `pending` before
    *  the engine is asked is what makes a knob moved DURING the save land in
@@ -1145,8 +1173,13 @@ async function flush() {
 
   say(statusFor('saving'));
   try {
-    const saved = settingsFrom(await runEngine(
-      argv.settings(script.fountainPath, JSON.stringify(owed))));
+    const saving = runEngine(argv.settings(script.fountainPath, JSON.stringify(owed)));
+    // The save's engine call is counted from the moment runEngine() is
+    // called, before its first await, so the settle's hold can go now with
+    // no gap between the two. Released before awaiting rather than after:
+    // held through the save, it would count the same work twice.
+    releaseHold();
+    const saved = settingsFrom(await saving);
     if (stale()) return;
     if (saved === null) {
       giveBack();

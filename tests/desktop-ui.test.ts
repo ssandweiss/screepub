@@ -2226,6 +2226,84 @@ describe('the window knows when the engine is working, and can restart', () => {
     expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
   });
 
+  test('a hold counts like a running call: busy at once, and whenIdle waits for its release plus the quiet period', async () => {
+    // tune.js holds a moved knob for SETTLE_MS before it asks the engine to
+    // save it, and during that settle no engine call is running at all. A
+    // restart already waiting on whenIdle() used to fire in that gap and
+    // drop the change (spec 2026-09-23-update-notice-and-window-drag-design
+    // Part 3, the known gap). A hold is how a surface says "work is owed".
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+    expect(app.engineBusy()).toBe(false);
+
+    const release = app.holdEngine();
+    try {
+      expect(typeof release).toBe('function');
+      expect(app.engineBusy()).toBe(true);
+      let idle = false;
+      const waiting = app.whenIdle().then(() => { idle = true; });
+      await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+      // Held longer than the quiet period, and still not idle: no engine
+      // call ran, but the hold is what a restart must wait for.
+      expect(idle).toBe(false);
+
+      release();
+      expect(app.engineBusy()).toBe(false);
+      await new Promise((r) => setTimeout(r, 0));
+      // Released, but the quiet period starts from the release, exactly as
+      // it starts from the end of a counted call.
+      expect(idle).toBe(false);
+      await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+      await waiting;
+      expect(idle).toBe(true);
+    } finally {
+      release();
+    }
+  });
+
+  test('releasing a hold twice is releasing it once: the count never goes below zero', async () => {
+    // A surface can have more than one way out of a hold (its save starts,
+    // its schedule is cancelled, the script is closed). If the second
+    // release subtracted again, the count would sit at -1, and the next
+    // real call would read as idle while it ran.
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    const release = app.holdEngine();
+    release();
+    release();
+    expect(app.engineBusy()).toBe(false);
+
+    let answer: (v: string) => void = () => {};
+    win.window = {
+      __TAURI__: { core: { invoke: () => new Promise<string>((resolve) => { answer = resolve; }) } },
+    };
+    try {
+      const call = app.runEngine(['send', 'x.epub', '--json']);
+      expect(app.engineBusy()).toBe(true);
+      expect(Bun.peek.status(app.whenIdle())).toBe('pending');
+      answer('{"ok":true}');
+      await call;
+      expect(app.engineBusy()).toBe(false);
+    } finally {
+      answer('{}');
+      await new Promise((r) => setTimeout(r, 0));
+      delete win.window;
+    }
+  });
+
+  test('two holds and a call overlap and are each counted once', async () => {
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    const first = app.holdEngine();
+    const second = app.holdEngine();
+    first();
+    first();
+    expect(app.engineBusy()).toBe(true); // the second is still held
+    second();
+    expect(app.engineBusy()).toBe(false);
+  });
+
   test('restart is offered only when the process plugin is in this build', async () => {
     const app = await import(join(UI, 'app.js'));
     let relaunched = 0;
@@ -3282,6 +3360,45 @@ describe('the Tune surface', () => {
     expect(source).toMatch(/running\s*=\s*running/);
   });
 
+  test('a knob held in the settle is held against a restart too, and let go once its save has started', () => {
+    // Between a knob moving and the save's engine call starting, no engine
+    // call is running, so an update restart already waiting on whenIdle()
+    // used to fire in that SETTLE_MS gap and drop the change. schedule()
+    // takes a hold (app.js's holdEngine) and flush() lets it go only once
+    // the save's own engine call has started, and so is counted itself.
+    expect(source).toMatch(/import \{[^}]*\bholdEngine\b[^}]*\} from '\.\/app\.js'/);
+    const schedule = source.slice(source.indexOf('function schedule('), source.indexOf('async function flush('));
+    expect(schedule).toContain('holdEngine()');
+    // One hold for however many knobs move inside one settle: taken only
+    // when none is held, never stacked per keystroke.
+    expect(schedule).toMatch(/if \(hold === null\) hold = holdEngine\(\)/);
+
+    // Comments out: the claims below are about CODE, and the comment that
+    // explains the release rightly mentions both `runEngine()` and `await`.
+    const flush = source.slice(source.indexOf('async function flush('), source.indexOf('function say('))
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/.*$/gm, ' ');
+    // Released AFTER the save's engine call is issued (runEngine counts it
+    // synchronously, before its first await) and BEFORE that call is
+    // awaited: never a moment with neither the hold nor the call counted.
+    const issued = flush.indexOf('runEngine(');
+    const released = flush.indexOf('releaseHold()', issued);
+    expect(issued).toBeGreaterThan(-1);
+    expect(released).toBeGreaterThan(issued);
+    expect(flush.slice(issued, released)).not.toContain('await');
+    // A flush that finds nothing to save lets the hold go too, rather than
+    // holding a restart off for a save that is never coming.
+    const early = /if \(!isPending\(owed\) \|\| !script\?\.fountainPath\) \{([\s\S]*?)\}/.exec(flush);
+    expect(early, 'flush() has no early return').not.toBe(null);
+    expect(early![1]).toContain('releaseHold()');
+
+    // A cancelled schedule lets it go: a new script clears what was owed.
+    const changed = source.slice(
+      source.indexOf('export function scriptChanged('), source.indexOf('export async function show('));
+    expect(changed).toContain('releaseHold()');
+    expect(changed.indexOf('releaseHold()')).toBeLessThan(changed.indexOf('draw()'));
+  });
+
 
   test('the sentence beside a knob is the CURRENT one, in both directions', () => {
     // Found live, after idleReason() was tested hard and then bound wrongly:
@@ -3408,8 +3525,11 @@ describe('the Tune surface', () => {
     expect(changed.slice(0, 200)).toContain('era += 1');
     const flush = source.slice(source.indexOf('async function flush('));
     expect(flush.slice(0, 900)).toMatch(/const mine = era/);
-    // Checked after every await, and before anything is painted.
-    const awaits = [...flush.matchAll(/await runEngine/g)].length;
+    // Checked after every engine call, and before anything is painted.
+    // Counted as calls rather than as `await runEngine`: the save's call is
+    // issued, then its settle hold released, then awaited (see the hold
+    // test above), so that one is not written as `await runEngine(` at all.
+    const awaits = [...flush.replace(/\/\/.*$/gm, ' ').matchAll(/runEngine\(/g)].length;
     expect(awaits).toBe(2);
     expect([...flush.matchAll(/stale\(\)/g)].length).toBeGreaterThanOrEqual(awaits + 1);
     expect(flush.indexOf('stale()')).toBeLessThan(flush.indexOf('renderReader'));
@@ -3891,6 +4011,49 @@ describe('the Tune surface: app defaults for new scripts', () => {
   test('a malformed app-defaults answer draws no foot at all, rather than a wrong caption', async () => {
     const { pane } = await mountReady(engine, { appDefaults: { fontFamily: 'serif' } });
     expect(pane.find('tune-defaults')).toBeNull();
+  });
+
+  // The update restart's known gap, closed (spec 2026-09-23-update-notice-
+  // and-window-drag-design.md, Part 3). Placed before any test here that
+  // leaves a save's engine call unanswered: app.js's count is one module
+  // for the whole file, and this test reads it.
+  test('a moved knob holds a restart off through its settle, and its save call takes over from the hold', async () => {
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle();
+    expect(app.engineBusy(), 'an earlier test left a counted engine call running').toBe(false);
+    const { pane } = await mountReady(engine);
+
+    moveKnob(pane, 'dialogueSideMarginPct', '27');
+    // No engine call yet, and still busy: the settle is owed work.
+    expect(engine.calls.length).toBe(1);
+    expect(app.engineBusy()).toBe(true);
+    expect(Bun.peek.status(app.whenIdle())).toBe('pending');
+
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    expect(engine.calls.length).toBe(2);
+    expect(engine.calls[1].args[0]).toBe('settings');
+    expect(app.engineBusy()).toBe(true);
+
+    engine.resolve(1, settingsAnswer({ settings: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 27 } }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The hold went when the call started, and the call has ended: nothing
+    // is counted twice, and nothing is left holding a restart off.
+    expect(app.engineBusy()).toBe(false);
+  });
+
+  test('a settle cancelled by a new script lets its hold go, and sends nothing', async () => {
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle();
+    expect(app.engineBusy(), 'an earlier test left a counted engine call running').toBe(false);
+    const { pane } = await mountReady(engine);
+    moveKnob(pane, 'dialogueSideMarginPct', '27');
+    expect(app.engineBusy()).toBe(true);
+    tune.scriptChanged();
+    expect(app.engineBusy()).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    expect(engine.calls.length).toBe(1);
+    expect(app.engineBusy()).toBe(false);
   });
 
   test('"Use these for new scripts" sends this script’s CURRENT settings, moved after the foot was drawn, not the shipped or app defaults', async () => {

@@ -126,16 +126,15 @@ let idleWaiters = [];
 // the count touches zero BETWEEN two calls that belong to the same job, not
 // just after the job ends. 500 ms covers that gap.
 //
-// It does NOT cover every knob move. tune.js debounces a change behind its
-// own 300 ms settle timer (SETTLE_MS; schedule()) before the change ever
-// reaches the engine as a save. That debounce is
-// covered only for a knob moved DURING a save, or within the 200 ms after
-// one ends: only then has the 300 ms timer fired, and the engine call it
-// produces started, by the time this quiet period would otherwise expire. A
-// knob moved after a LONGER quiet has no engine call running yet when the
-// debounce starts, so a restart already waiting on whenIdle() can fire and
-// drop the change before tune.js ever asks the engine to save it. That gap
-// is not closed here.
+// It does not, on its own, cover every knob move. tune.js debounces a change
+// behind its own 300 ms settle timer (SETTLE_MS; schedule()) before the
+// change ever reaches the engine as a save, and a knob moved after a long
+// quiet has no engine call running during that settle, so a restart already
+// waiting on whenIdle() could fire and drop the change before tune.js ever
+// asked the engine to save it. holdEngine() below closes that gap
+// (2026-09-24): tune.js takes a hold when it schedules a save, and lets it
+// go once the save's own engine call has started and is counted in its
+// place.
 export const ENGINE_QUIET_MS = 500;
 
 // performance.now() when a counted call last finished. -Infinity so a
@@ -205,26 +204,59 @@ function settle() {
   for (const resolve of waiters) resolve();
 }
 
+/** One counted piece of work has ended, a call or a hold: the one place the
+ *  count goes down, so a hold ends exactly the way a call does, and the
+ *  quiet period starts again from this moment either way. */
+function workEnded() {
+  inFlight -= 1;
+  lastEnded = performance.now();
+  settle();
+}
+
 /** Run the engine and parse its one line of stdout, counted while it runs
  *  (countsTowardBusy names the read-only calls this skips). See
- *  runEngineOnce for what the answer means. */
+ *  runEngineOnce for what the answer means.
+ *
+ *  The count goes up synchronously, before the first await, so a caller
+ *  that holds a restart off with holdEngine() can release its hold on the
+ *  very next line after calling this, with no moment in between where
+ *  neither is counted. */
 export async function runEngine(args) {
   const counted = countsTowardBusy(args);
   if (counted) inFlight += 1;
   try {
     return await runEngineOnce(args);
   } finally {
-    if (counted) {
-      inFlight -= 1;
-      lastEnded = performance.now();
-      settle();
-    }
+    if (counted) workEnded();
   }
 }
 
-/** True while any COUNTED engine call is running. Unlike whenIdle, this asks
- *  nothing about the quiet period: it is the instantaneous fact, not the
- *  promise a restart waits on. Its only reader is update.js's 'waiting'
+/** Count as busy while no engine call is running yet: for a surface that
+ *  owes the engine some work it has not asked for, because it is waiting on
+ *  something first. tune.js holds a moved knob for SETTLE_MS before asking
+ *  the engine to save it, and a restart waiting on whenIdle() must wait for
+ *  that save exactly as it waits for a running call.
+ *
+ *  A hold counts exactly like an in-flight counted call: engineBusy() is
+ *  true while it is held, and whenIdle() resolves only once it is released
+ *  AND the quiet period has passed since. Returns the release. Releasing a
+ *  second time does nothing, so a surface with more than one way out of its
+ *  hold (the save starts, the schedule is cancelled, the script is closed)
+ *  can never drive the count below zero and let a restart through while
+ *  someone else's call is running. */
+export function holdEngine() {
+  inFlight += 1;
+  let held = true;
+  return () => {
+    if (!held) return;
+    held = false;
+    workEnded();
+  };
+}
+
+/** True while any COUNTED engine call is running, or a holdEngine() hold
+ *  is held. Unlike whenIdle, this asks nothing about the quiet period: it is
+ *  the instantaneous fact, not the promise a restart waits on. Its only reader is update.js's 'waiting'
  *  label (wired through update-flow.js's `busy: engineBusy`); no surface
  *  reads it to disable a button. */
 export function engineBusy() {

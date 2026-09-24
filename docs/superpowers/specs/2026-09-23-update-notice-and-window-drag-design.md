@@ -117,12 +117,20 @@ people will never turn it on and never hear about an update.
   `await whenIdle()` then `restartApp()`. A settings write counts on
   purpose: restarting halfway through saving a sidecar would be worse than a
   slow restart.
-  **Known gap:** the 500 ms quiet period also covers tune.js's own 300 ms
-  settle timer (`SETTLE_MS`), but only for a knob moved during a save or
-  within 200 ms after one ends. A knob moved after a longer quiet has no
-  engine call running yet when the debounce starts, so a restart already
-  waiting on `whenIdle()` can fire and drop the change before tune.js ever
-  asks the engine to save it. Not closed by this plan.
+  **Known gap, closed 2026-09-24:** the 500 ms quiet period also covers
+  tune.js's own 300 ms settle timer (`SETTLE_MS`), but only for a knob
+  moved during a save or within 200 ms after one ends. A knob moved after a
+  longer quiet had no engine call running yet when the debounce started, so
+  a restart already waiting on `whenIdle()` could fire and drop the change
+  before tune.js ever asked the engine to save it. Closed by `holdEngine()`
+  in `app.js`: it returns a release function, and a hold counts exactly
+  like an in-flight counted call for `engineBusy()` and `whenIdle()`
+  (releasing it twice does nothing, so the count cannot go below zero).
+  tune.js's `schedule()` takes one hold when a knob moves, and `flush()`
+  releases it on the line after it calls `runEngine()` for the save (which
+  counts the call before its first await, so there is no moment with
+  neither counted), or when it finds nothing left to save; a new script
+  (`scriptChanged()`) releases it with the rest of what was owed.
 - **Fallback:** if `restartReady()` is false, the label ends on today's
   `installedLine`: "Update installed. Quit and reopen Screepub to use 0.7.3."
   A refused `restart()` call (the realistic cause is a build missing
