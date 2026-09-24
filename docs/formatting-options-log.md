@@ -24,6 +24,12 @@ those defaults reached the reader. An unusable sidecar is ignored (the
 conversion still succeeds) and, either way, the engine says on stderr which
 file it used and names it as `settingsPath` in the `--json` answer.
 
+**App defaults now sit in that chain too (2026-09-23):** one more layer,
+between the script's sidecar and these shipped defaults, holds the app-wide
+format defaults set with `screepub app-settings`. The precedence: explicit
+flags > the script's saved settings > app defaults > these shipped
+defaults.
+
 **Coverage of these entries by the committed torture fixture is tracked in
 `tools/torture-manifest.json`**, one row per entry, and
 `tests/torture-coverage.test.ts` fails when an entry has no decision
@@ -903,6 +909,11 @@ and the suite will say so if you forget.
 - **App option:** the reader rail's Dialogue group → "Dual dialogue". Known
   limitation: a short action line immediately after a dual block with no
   intervening cue can absorb into the left speech.
+- **Merge bug, fixed 2026-09-23:** before that date, once a base held
+  `dualDialogue: 'sequential'`, nothing downstream, including the window's
+  toggle back to side by side, could move it: an explicit `'sideBySide'`
+  was read the same as absent and fell through to the base. The merge now
+  accepts either value explicitly.
 - **Code:** `src/parser/extract.ts` (`deinterleaveDualDialogue`).
 
 ### 10b. Tall dual exchanges degrade to sequential (2026-07-30)

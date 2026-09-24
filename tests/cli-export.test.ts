@@ -441,8 +441,10 @@ describe('exportCommand: app-wide defaults underneath --options-json', () => {
 // its base is THIS SCRIPT'S settings, resolved over the app defaults, same
 // as a conversion's own precedence: flags > sidecar > app defaults >
 // shipped. --fountain is optional (a bare `--for epub` never needs it, and
-// a window whose settings read failed sends none), so when it is absent the
-// base stays the app defaults, exactly as before this fix.
+// it is left out only when the script has no .fountain, for example one
+// converted from Fountain input; a window whose settings read failed drops
+// --options-json instead, never --fountain), so when it is absent the base
+// stays the app defaults, exactly as before this fix.
 describe('exportCommand: the script\'s own sidecar, when --fountain names one', () => {
   function appSettingsWith(formatDefaults: Record<string, unknown>): string {
     const path = join(dir, `app-settings-${Math.random()}.json`);

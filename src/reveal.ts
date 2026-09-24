@@ -20,8 +20,10 @@ export type Opener = (argv: string[]) => Promise<{ code: number; stderr: string 
  *  subprocess (never `open`, `explorer` or `xdg-open`) for the exit-code
  *  and stderr-capture plumbing, and against a program name that cannot
  *  exist for the ENOENT path. `stdin: 'ignore'` is explicit, matching piece
- *  B's performer: none of these tools read from stdin, and inheriting the
- *  caller's is how a spawned child ends up waiting on input nobody sends. */
+ *  B's performer: none of these tools read from stdin, and Bun 1.3.14
+ *  already gives a spawned child no input by default. Spelling it out here
+ *  changes nothing today; it only stops that guarantee from depending on
+ *  the default instead of being written down. */
 export const spawnOpener: Opener = async (argv) => {
   const proc = Bun.spawn(argv, { stdout: 'ignore', stderr: 'pipe', stdin: 'ignore' });
   const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
@@ -58,9 +60,9 @@ export async function revealFile(
   // (a trailing "\." segment, meaning "this same file") is not normalised
   // by dirname on its own, which strips only the LAST segment and returns
   // `C:\x\a.exe` right back: the file itself, not its folder. resolve
-  // collapses the trailing "\." away first, the same way a shell would, so
-  // dirname always sees an already-normalised path to strip a real
-  // filename off.
+  // collapses the trailing "\." away first, through Windows' own path
+  // normalisation rules, not a shell's, so dirname always sees an
+  // already-normalised path to strip a real filename off.
   const argv =
     platform === 'darwin'
       ? ['open', '-R', path]

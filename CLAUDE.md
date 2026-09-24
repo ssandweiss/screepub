@@ -96,6 +96,11 @@ bun tools/capture-screens.ts   # retake README + site pictures (needs Chrome; ma
   `tools/make-fixture.py`); root `/fixtures/` holds real scripts and is
   gitignored — never commit it, and never let a real title, author, or
   character name reach an assertion, a doc, or a screenshot.
+- No test may read or write the real app settings file: `bunfig.toml`
+  preloads `tests/isolate-app-settings.ts` and root `.env.test` sets the
+  same guard (SCREEPUB_CONFIG_DIR under `/dev/null/`). Run `bun test` from
+  the repo root, not a subfolder, and give any test that needs settings its
+  own scratch path.
 - Committed fixtures: `screenplay.pdf` (clean happy path), `prose.pdf` and
   `blank-pages.pdf` (the not-a-screenplay and scanned guards), and
   **`torture.pdf`** — 14 sheets exercising every content-driven registry
