@@ -506,8 +506,13 @@ describe('the CLI with --library', () => {
     expect(existsSync(answer.epubPath)).toBe(true);
     expect(existsSync(answer.fountainPath)).toBe(true);
     // A library root that did not exist is made on demand, not up front.
+    // Bright Angel.screepub.json is the pin: this script had no sidecar of
+    // its own, so the settings it just converted with become its own.
     expect(readdirSync(folder).sort())
-      .toEqual(['Bright Angel.epub', 'Bright Angel.fountain', 'source.json'].sort());
+      .toEqual(
+        ['Bright Angel.epub', 'Bright Angel.fountain', 'Bright Angel.screepub.json', 'source.json']
+          .sort(),
+      );
   }, 90000);
 
   test('without --library the CLI still writes beside its input', async () => {

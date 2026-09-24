@@ -19,7 +19,7 @@ import { mapConversionError, CliError, errorMessage, type JsonError } from './cl
 import { adoptSidecar, existingLibraryOutput, libraryOutput, libraryRoot } from './library';
 import { resolveFormatOptions, type FormatOptions } from './options';
 import { appDefaultOptions } from './settings/app-defaults';
-import { readScriptSettings } from './settings/sidecar';
+import { readScriptSettings, saveScriptSettings, sidecarPath } from './settings/sidecar';
 import { resolveCommand, devicesCommand, sendCommand, VERBS, type Verb } from './cli-devices';
 import { updateDecisionCommand, updateShouldCheckCommand } from './cli-update';
 import { settingsCommand } from './cli-settings';
@@ -45,7 +45,9 @@ A script's saved settings are used by the conversion that finds them: if
 <script>.screepub.json sits beside the input — or in the script's library
 folder, under --library — this run renders with it and says so on stderr.
 --options/--options-json override it knob by knob. Write one with the
-settings command.
+settings command. A --library run that finds none pins what it just built
+as the script's own, so a later change to the app defaults reaches only
+scripts converted afterward.
 
 Underneath those saved settings and any --options you pass, a conversion
 starts from the format defaults you chose in the app, if you chose any, and
@@ -1016,6 +1018,42 @@ async function main() {
       // is the whole of the fix; "cannot open the library folder" alone
       // would send them looking for a location we never named.
       fail({ code: 'library', message: `cannot open the library folder — ${errorMessage(err)}` });
+    }
+
+    // A script that reaches the library with no sidecar of its own, a
+    // fresh PDF, or an old one with nothing adopted above, has been
+    // reading its settings off the app defaults on every conversion. Left
+    // that way, a later "Reset new scripts to Screepub's defaults" or "Use
+    // these for new scripts" reaches BACKWARD into a library already on a
+    // reader's device: the book on disk was built at one set of knobs, and
+    // the next `screepub settings` call for it silently starts answering
+    // with another. The owner's spec says app defaults are the starting
+    // point for NEW scripts, not a live wire into every old one, so this
+    // run's fully-resolved options become the script's own the moment it
+    // first lands here: pinned, not inherited, from here on.
+    //
+    // Checked fresh rather than trusted from adoptSidecar's return value:
+    // the library can already hold a sidecar from an EARLIER conversion of
+    // this same script (adoptSidecar only ever copies from beside the
+    // PDF), and that earlier pin, or a hand-edited one, must never be
+    // overwritten. Flags do not save either way: formatForConvert already
+    // has them baked in, so pinning it here would freeze a one-off
+    // override as if it were the script's standing choice, which is why
+    // this only fires when nothing is there yet.
+    const pinPath = sidecarPath(inputStem);
+    if (!existsSync(pinPath)) {
+      try {
+        saveScriptSettings(formatForConvert, inputStem);
+      } catch (err) {
+        // The conversion already succeeded: the book is written and
+        // correct. Losing the pin loses only the CONVENIENCE of it staying
+        // put through a later app-default change, not the book itself, so
+        // this is said and survived, the same shrug loadScriptSettings
+        // already gives a sidecar it cannot read.
+        process.stderr.write(
+          `screepub: could not save this script's settings to ${pinPath}: ${errorMessage(err)}\n`,
+        );
+      }
     }
   }
   const epubPath = values.output ?? `${inputStem}.epub`;

@@ -8,11 +8,12 @@
 // and without the sidecar, must produce different CSS, and the value asserted
 // is one the defaults do not carry.
 import { afterAll, beforeAll, describe, test, expect } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import JSZip from 'jszip';
 import { libraryOutput } from '../src/library';
+import { writeAppSettings } from '../src/settings/app';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const FIXTURES = new URL('./fixtures/', import.meta.url).pathname;
@@ -202,5 +203,137 @@ describe('a conversion renders with the script it is converting', () => {
     expect(exitCode).toBe(0);
     expect(stderr).toBe('');
     expect(JSON.parse(stdout).settingsPath).toBeUndefined();
+  }, 120000);
+});
+
+// Piece C's app defaults (parity gear) meant a script with no sidecar reads
+// its settings off the app defaults on EVERY conversion, forever. Changing
+// the app defaults later (the Settings page's "Reset new scripts to
+// Screepub's defaults") then silently redraws every untuned book already
+// in the library, including ones already on a reader's device. The fix:
+// a --library conversion that finds no sidecar pins the exact options the
+// book was built with, so the script becomes its own from then on.
+describe('a library conversion pins the settings it was built with', () => {
+  const APP_MARGIN = 19;
+
+  beforeAll(() => {
+    // Same guard as the suite above: a "distinctive" app-default value that
+    // happened to equal the shipped default would make every assertion
+    // below pass against a no-op implementation.
+    expect(DEFAULTS.dialogueSideMarginPct).not.toBe(APP_MARGIN);
+  });
+
+  /** A scratch SCREEPUB_CONFIG_DIR holding an app-wide formatDefaults, and
+   * the settings.json path inside it: matching appSettingsPath's own rule
+   * for a SCREEPUB_CONFIG_DIR override (folder + 'settings.json'), so
+   * writing here is writing exactly what the spawned CLI will read. */
+  function appConfig(formatDefaults: Record<string, unknown>): { dir: string; file: string } {
+    const dir = scratch('config');
+    const file = join(dir, 'settings.json');
+    writeAppSettings({ formatDefaults }, file);
+    return { dir, file };
+  }
+
+  test(
+    'the FIRST --library conversion of an untuned script pins this run\'s ' +
+      'settings, so a later app-default change no longer reaches it',
+    async () => {
+      const { dir: configDir } = appConfig({ dialogueSideMarginPct: APP_MARGIN });
+      const scripts = await scriptFolder('Pinned.pdf');
+      const root = scratch('lib');
+
+      const { stdout, exitCode } = await runCli(
+        [join(scripts, 'Pinned.pdf'), '--library', '--json'],
+        { SCREEPUB_LIBRARY: root, SCREEPUB_CONFIG_DIR: configDir },
+      );
+      expect(exitCode).toBe(0);
+      const answer = JSON.parse(stdout);
+      expect(answer.ok).toBe(true);
+      // The book itself was built at the app default, same as before this
+      // change: pinning is about what happens to LATER reads, not this
+      // conversion's own output.
+      expect(await epubCss(answer.epubPath)).toContain(`margin-left: ${APP_MARGIN}%`);
+
+      const sidecar = join(root, 'Pinned', 'Pinned.screepub.json');
+      expect(existsSync(sidecar)).toBe(true);
+      const pinned = JSON.parse(readFileSync(sidecar, 'utf8'));
+      // The FULL resolved options, not just the one knob a partial
+      // formatDefaults named: resolveFormatOptions already filled every
+      // other key from the shipped defaults, and that whole object is what
+      // got saved.
+      expect(pinned.dialogueSideMarginPct).toBe(APP_MARGIN);
+      expect(pinned.cueAlignment).toBe(DEFAULTS.cueAlignment);
+      expect(Object.keys(pinned).length).toBe(Object.keys(DEFAULTS).length);
+
+      // The regression test proper: change the app defaults afterward (the
+      // Settings page's Reset, modelled by overwriting the same file this
+      // run read), and ask the engine what THIS script's settings are now.
+      // Before the fix this returns the NEW app default, because a
+      // sidecar-less script always re-read the live app defaults.
+      appConfig({ dialogueSideMarginPct: 31 });
+      const said = await runCli(
+        ['settings', answer.fountainPath, '--json'],
+        { SCREEPUB_CONFIG_DIR: configDir },
+      );
+      expect(said.exitCode).toBe(0);
+      const settings = JSON.parse(said.stdout);
+      expect(settings.settings.dialogueSideMarginPct).toBe(APP_MARGIN);
+    },
+    120000,
+  );
+
+  test('a SECOND --library conversion with a sidecar already present leaves it unchanged, even when a flag overrides a knob', async () => {
+    const { dir: configDir } = appConfig({ dialogueSideMarginPct: APP_MARGIN });
+    const scripts = await scriptFolder('Twice.pdf');
+    const root = scratch('lib');
+
+    const first = await runCli(
+      [join(scripts, 'Twice.pdf'), '--library', '--json'],
+      { SCREEPUB_LIBRARY: root, SCREEPUB_CONFIG_DIR: configDir },
+    );
+    expect(first.exitCode).toBe(0);
+    const sidecar = join(root, 'Twice', 'Twice.screepub.json');
+    const before = readFileSync(sidecar, 'utf8');
+
+    const second = await runCli(
+      [
+        join(scripts, 'Twice.pdf'), '--library', '--json',
+        '--options-json', JSON.stringify({ dialogueSideMarginPct: 25 }),
+      ],
+      { SCREEPUB_LIBRARY: root, SCREEPUB_CONFIG_DIR: configDir },
+    );
+    expect(second.exitCode).toBe(0);
+    const answer = JSON.parse(second.stdout);
+    // The flag won for THIS conversion...
+    expect(await epubCss(answer.epubPath)).toContain('margin-left: 25%');
+    // ...but flags do not save: the sidecar written by the first
+    // conversion is untouched, byte for byte.
+    expect(readFileSync(sidecar, 'utf8')).toBe(before);
+  }, 120000);
+
+  test('a sidecar beside the PDF is still adopted, not overwritten by the pin', async () => {
+    const scripts = await scriptFolder('Adopted.pdf');
+    writeFileSync(join(scripts, 'Adopted.screepub.json'), '{"cueIndentPct":41}\n');
+    const root = scratch('lib');
+
+    const { exitCode } = await runCli(
+      [join(scripts, 'Adopted.pdf'), '--library', '--json'], { SCREEPUB_LIBRARY: root },
+    );
+    expect(exitCode).toBe(0);
+    const sidecar = join(root, 'Adopted', 'Adopted.screepub.json');
+    // Exactly the file that was beside the PDF, unexpanded: had the pin
+    // fired here too, this would hold every FormatOptions key rather than
+    // the one adoptSidecar carried in.
+    expect(JSON.parse(readFileSync(sidecar, 'utf8'))).toEqual({ cueIndentPct: 41 });
+  }, 120000);
+
+  test('a plain conversion, without --library, writes no sidecar beside the input', async () => {
+    const scripts = await scriptFolder('NoLibrary.pdf');
+    const { exitCode } = await runCli([
+      join(scripts, 'NoLibrary.pdf'), '-o', join(scratch('out'), 'no-library.epub'),
+      '--no-fountain', '--json',
+    ]);
+    expect(exitCode).toBe(0);
+    expect(existsSync(join(scripts, 'NoLibrary.screepub.json'))).toBe(false);
   }, 120000);
 });
