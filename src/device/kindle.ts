@@ -26,10 +26,6 @@ export function isKindleVolume(volume: string): boolean {
   return existsSync(join(volume, 'system'));
 }
 
-export function kindleVolumeName(volume: string): string {
-  return basename(volume);
-}
-
 /** Copy a book into the device's documents folder, replacing any previous
  * copy. Returns the destination path. */
 export function copyToKindleVolume(file: string, volume: string): string {

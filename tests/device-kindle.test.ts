@@ -2,7 +2,7 @@ import { afterAll, test, expect } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isKindleVolume, kindleVolumeName, copyToKindleVolume } from '../src/device/kindle';
+import { isKindleVolume, copyToKindleVolume } from '../src/device/kindle';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-device-kindle-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
@@ -67,8 +67,4 @@ test('copy lands in documents/, preserves content, and overwrites on re-copy', (
   writeFileSync(src, 'v2');
   copyToKindleVolume(src, vol);
   expect(readFileSync(dest, 'utf8')).toBe('v2');
-});
-
-test('the volume name is its own directory name', () => {
-  expect(kindleVolumeName(volume('Kindle', ['documents']))).toBe('Kindle');
 });
