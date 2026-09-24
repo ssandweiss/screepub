@@ -38,7 +38,37 @@ export function previewerPath(): string | null {
 async function pluginInstalled(customize: string): Promise<boolean> {
   const proc = Bun.spawn([customize, '--list-plugins'], { stdout: 'pipe', stderr: 'pipe' });
   const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
-  return code === 0 && stdout.includes('KFX Output');
+  return code === 0 && listsKfxOutput(stdout);
+}
+
+/** Whether a `calibre-customize --list-plugins` listing holds a plugin NAMED
+ * exactly "KFX Output". Exported (marked internal, like computeReady) only so
+ * the parse can be tested against captured listings on every platform.
+ *
+ * A substring test is not enough: the companion metadata writer that ships in
+ * the same zip is named "Set KFX metadata (from KFX Output)", so with only
+ * that one present the toolchain read as ready and the ladder tried a KFX
+ * conversion that died with "No plugin to handle output format: kfx" instead
+ * of falling back to AZW3. (INSTALL_SNIPPET below guards against the same
+ * name for the same reason.)
+ *
+ * The listing is a table, not a line per name: each plugin row is its type,
+ * then its name, then its version, padded into columns, with its description
+ * indented beneath it. calibre pads the header row through the same format
+ * string, sized to the longest type and name it holds, so the header says
+ * where the name column starts and ends on this machine; reading it from
+ * there is what keeps a name that merely ENDS in "KFX Output" from counting.
+ * The header is a literal in calibre (checked in 9.11: it is not passed
+ * through translation), and a listing without one names nothing: "not
+ * installed" degrades to AZW3, where a guess could strand a send. */
+export function listsKfxOutput(listing: string): boolean {
+  const lines = listing.split(/\r?\n/);
+  const header = lines.find((line) => /^Type +Name +Version\b/.test(line));
+  if (header === undefined) return false;
+  const nameAt = header.indexOf('Name');
+  const versionAt = header.indexOf('Version');
+  return lines.some((line) =>
+    line !== header && /^\S/.test(line) && line.slice(nameAt, versionAt).trim() === 'KFX Output');
 }
 
 /** The conjunction behind `KfxStatus.ready`, pulled out as a pure function

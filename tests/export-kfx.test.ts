@@ -11,6 +11,7 @@ import {
   kfxSibling,
   kfxScratchPath,
   computeReady,
+  listsKfxOutput,
   KfxToolchainNotReadyError,
 } from '../src/export/kfx';
 import { calibreTool, CALIBRE_FORMAT_GUARDS } from '../src/export/calibre';
@@ -217,6 +218,117 @@ test('a failed conversion removes Kindle Previewer’s temp folder too', async (
   expect(fake.after()).toEqual({ tmp: false, leftover: false });
 });
 
+// --- listsKfxOutput: which plugin the listing names, read by column ------
+//
+// `calibre-customize --list-plugins` prints a table, not "a line per name".
+// Captured from calibre 9.11 on macOS, 2026-09-24:
+//
+//   Type                  Name                                                  Version        Disabled       Site Customization
+//
+//   Conversion output     KFX Output                                            (2, 20, 1)     False
+//   	 Convert e-books to the KFX format
+//
+//   Metadata writer       Set KFX metadata (from KFX Output)                    (2, 20, 1)     False
+//   	 Set metadata in KFX files
+//
+// calibre builds that with '%-{T+1}s%-{N+1}s%-15s%-15s%s', where T and N are
+// the longest type and name it holds, and prints the header through the same
+// format. So the widths below are this machine's, not a constant: the
+// narrower listing further down is the same table on a calibre with shorter
+// names. The companion metadata plugin ships in the same zip, and its NAME
+// contains "KFX Output", which is how a bare substring test reported the
+// toolchain ready on a machine that could not write a KFX at all.
+const calibreTable = (typeWidth: number, nameWidth: number) => {
+  const line = (type: string, name: string, version: string, disabled = 'False') =>
+    type.padEnd(typeWidth) + name.padEnd(nameWidth) + version.padEnd(15) + disabled.padEnd(15);
+  return {
+    header: 'Type'.padEnd(typeWidth) + 'Name'.padEnd(nameWidth) + 'Version'.padEnd(15)
+      + 'Disabled'.padEnd(15) + 'Site Customization',
+    kfxOutput: [line('Conversion output', 'KFX Output', '(2, 20, 1)'), '\t Convert e-books to the KFX format', ''],
+    companion: [
+      line('Metadata writer', 'Set KFX metadata (from KFX Output)', '(2, 20, 1)'), '\t Set metadata in KFX files', '',
+    ],
+    epubOutput: [line('Conversion output', 'EPUB Output', '(1, 0, 0)'), '\t Convert e-books to the EPUB format', ''],
+    line,
+  };
+};
+const measured = calibreTable(22, 54);
+const listingOf = (table: ReturnType<typeof calibreTable>, ...rows: string[][]) =>
+  [table.header, '', ...rows.flat()].join('\n');
+
+describe('listsKfxOutput', () => {
+  test('the companion metadata plugin alone is not the KFX Output plugin', () => {
+    expect(listsKfxOutput(listingOf(measured, measured.epubOutput, measured.companion))).toBe(false);
+  });
+
+  test('both plugins, as the one zip installs them, is installed', () => {
+    expect(listsKfxOutput(listingOf(measured, measured.kfxOutput, measured.companion, measured.epubOutput)))
+      .toBe(true);
+  });
+
+  test('the conversion plugin alone is installed', () => {
+    expect(listsKfxOutput(listingOf(measured, measured.epubOutput, measured.kfxOutput))).toBe(true);
+  });
+
+  test('the columns are read off the header, not assumed, so a narrower table still reads', () => {
+    // A calibre whose longest type is "Conversion output" leaves ONE space
+    // between the type and the name, and splitting on runs of spaces would
+    // then read "output KFX Output" as the name.
+    const narrow = calibreTable(18, 36);
+    expect(listsKfxOutput(listingOf(narrow, narrow.companion, narrow.kfxOutput))).toBe(true);
+    expect(listsKfxOutput(listingOf(narrow, narrow.companion))).toBe(false);
+  });
+
+  test('only the exact name counts: a fork or a name ending in it is not the plugin', () => {
+    // A fork registers the same package under another NAME (the old Swift
+    // app shipped "KFX Output (Fix Traditional Chinese)"). Reported as not
+    // installed, the page offers Install, and the installer clears the fork
+    // before adding the real one (INSTALL_SNIPPET): the one action that
+    // leaves this machine able to convert.
+    const fork = [measured.line('Conversion output', 'KFX Output (Fix Traditional Chinese)', '(2, 12, 0)'), ''];
+    const suffix = [measured.line('Conversion output', 'Legacy KFX Output', '(1, 0, 0)'), ''];
+    expect(listsKfxOutput(listingOf(measured, fork))).toBe(false);
+    expect(listsKfxOutput(listingOf(measured, suffix))).toBe(false);
+  });
+
+  test('a description line that mentions it is not a plugin row', () => {
+    // Descriptions are printed indented by a tab, under their own row.
+    const quoting = [
+      measured.line('User interface action', 'KFX Helper', '(1, 0, 0)'),
+      '\t Works alongside KFX Output',
+      `\t${' '.repeat(21)}KFX Output`,
+      '',
+    ];
+    expect(listsKfxOutput(listingOf(measured, quoting))).toBe(false);
+  });
+
+  test('Windows line endings read the same', () => {
+    const crlf = listingOf(measured, measured.companion, measured.kfxOutput).split('\n').join('\r\n');
+    expect(listsKfxOutput(crlf)).toBe(true);
+  });
+
+  test('a listing with no header row is not trusted to name anything', () => {
+    // Without the header there are no columns to read; "not installed"
+    // degrades to AZW3, where a guess could send the ladder into a KFX
+    // conversion that cannot run.
+    expect(listsKfxOutput(['', ...measured.kfxOutput].join('\n'))).toBe(false);
+    expect(listsKfxOutput('')).toBe(false);
+  });
+
+  test('this machine’s Calibre, when it has one, still prints the header the columns come from', async () => {
+    // The unit tests above pin the parse to a captured table. This pins the
+    // capture to the real thing wherever the real thing exists, so a calibre
+    // that changes its table fails here rather than quietly dropping every
+    // Kindle to AZW3.
+    const customize = calibreTool('calibre-customize');
+    if (customize === null) return;
+    const proc = Bun.spawn([customize, '--list-plugins'], { stdout: 'pipe', stderr: 'pipe' });
+    const [, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
+    const header = stdout.split(/\r?\n/)[0];
+    expect(header).toMatch(/^Type +Name +Version +Disabled +Site Customization$/);
+  });
+});
+
 // --- pluginInstalled: exercised directly against a fake calibre-customize
 // so the "KFX Output" substring check is actually proven, not just assumed.
 // Without these, a mutant that hardcodes pluginInstalled to `calibre`
@@ -247,7 +359,7 @@ function withFakeCustomize(pluginListing: string, run: (dir: string) => Promise<
 
 test(
   'pluginInstalled is true when calibre-customize lists KFX Output',
-  withFakeCustomize('Plugin: KFX Output (2, 17, 1) by jhowell', async () => {
+  withFakeCustomize(listingOf(measured, measured.kfxOutput, measured.companion), async () => {
     const status = await kfxStatus();
     expect(status.calibre).toBe(true);
     expect(status.pluginInstalled).toBe(true);
@@ -256,10 +368,20 @@ test(
 
 test(
   'pluginInstalled is false when calibre-customize lists other plugins but not KFX Output',
-  withFakeCustomize('Plugin: Quality Check (1, 0, 0) by someone\nPlugin: Kobo Utilities (1, 0, 0) by someone', async () => {
+  withFakeCustomize(listingOf(measured, measured.epubOutput), async () => {
     const status = await kfxStatus();
     expect(status.calibre).toBe(true);
     expect(status.pluginInstalled).toBe(false);
+  }),
+);
+
+test(
+  'pluginInstalled is false when calibre-customize lists only the companion metadata plugin',
+  withFakeCustomize(listingOf(measured, measured.epubOutput, measured.companion), async () => {
+    const status = await kfxStatus();
+    expect(status.calibre).toBe(true);
+    expect(status.pluginInstalled).toBe(false);
+    expect(status.ready).toBe(false);
   }),
 );
 
