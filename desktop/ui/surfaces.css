@@ -559,8 +559,9 @@
 }
 
 /* The foot of the Settings page: which defaults a new script starts from,
- * and the two quiet buttons that change it. Only the row's own gap is new —
- * everything else rides on .caption and .btn-quiet, already declared above. */
+ * and the two quiet buttons that change it. Two small rules only, the foot's
+ * own top margin and the row's gap between its buttons: everything else
+ * rides on .caption and .btn-quiet, already declared above. */
 .tune-defaults { margin: var(--space-8) 0 0; }
 .tune-defaults-row { display: flex; flex-wrap: wrap; gap: var(--space-4); margin: var(--space-2) 0 0; }
 

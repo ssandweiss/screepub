@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, test, expect } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, test, expect } from 'bun:test';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -3170,15 +3170,12 @@ describe('the Tune surface', () => {
     expect(drawKnob).toMatch(/state\(controls\.get/);
     const refresh = source.slice(source.indexOf('function refreshIdle('));
     expect(refresh.slice(0, 400)).toMatch(/state\(control\)/);
-    // Nothing enables, disables or describes a KNOB control behind its back.
-    // Scoped to the knob-drawing functions themselves: the defaults foot at
-    // the page's foot disables its own two buttons while a write is in
-    // flight, which is a different control answering to a different rule
-    // (busy-disabled, like convert.js's library Change/Reset), not a second
-    // binding of this one.
-    const knobControls = source.slice(
-      source.indexOf('function drawKnob('), source.indexOf('function applyAll('));
-    expect([...knobControls.matchAll(/\.disabled\s*=/g)].length).toBe(1);
+    // Nothing enables, disables or describes a control behind its back,
+    // checked over the WHOLE file: the defaults foot at the page's foot
+    // disables its two buttons too, but as a `disabled:` prop on a freshly
+    // built element (drawDefaultsFoot's own rule, read from module state on
+    // every rebuild), never as a second imperative `.disabled =` binding.
+    expect([...source.matchAll(/\.disabled\s*=/g)].length).toBe(1);
     // Attribute(...) rather than the bare word, so the comment that
     // explains the defect does not count as a second binding.
     expect([...source.matchAll(/Attribute\('aria-describedby'/g)].length).toBe(2);
@@ -3252,12 +3249,10 @@ describe('the Tune surface', () => {
 
   test('emptyPaneMode: FAULT only when this draw is reporting a load that failed', async () => {
     const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
-    // A freshly mounted pane, or one whose script just changed: no load has
-    // been asked for yet, so there is nothing to call a failure.
-    expect(tune.emptyPaneMode(null, undefined)).toBe('reading');
-    // A load in flight: nothing redraws between load() starting and it
-    // answering, so this is the same call mount() and scriptChanged() made —
-    // still reading, never fault, for as long as no answer has arrived.
+    // A freshly mounted pane, one whose script just changed, or one waiting
+    // on a load in flight: all three are the identical call, `(null,
+    // undefined)`, because nothing redraws between load() starting and it
+    // answering. Reading, never fault, for as long as no answer has arrived.
     expect(tune.emptyPaneMode(null, undefined)).toBe('reading');
     // load()'s own two failure branches are the only calls that ever pass a
     // bad status alongside a null settings.
@@ -3271,7 +3266,7 @@ describe('the Tune surface', () => {
   test('load() never draws FAULT for a null settings that is not itself a failure', () => {
     // Pinned by shape: the defect was draw() gating FAULT on `settings ===
     // null` alone. mount() and scriptChanged() both call draw() with no
-    // status while settings is still null — that must not resolve to fault.
+    // status while settings is still null: that must not resolve to fault.
     const mountFn = source.slice(source.indexOf('export function mount('), source.indexOf('export function scriptChanged('));
     expect(mountFn).toMatch(/draw\(\);?\s*$/m);
     expect(mountFn).not.toMatch(/statusFor\('failed'/);
@@ -3304,6 +3299,8 @@ describe('the Tune surface: app defaults for new scripts', () => {
     ({ DEFAULT_FORMAT_OPTIONS } = await import('../src/options'));
   });
 
+  // ---- the pure decisions, driven directly -------------------------------
+
   test('appDefaultsFrom and shippedDefaultsFrom read the settings answer through settingsFrom', () => {
     const answer = {
       settings: { ...DEFAULT_FORMAT_OPTIONS },
@@ -3334,34 +3331,40 @@ describe('the Tune surface: app defaults for new scripts', () => {
       appDefaults: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 12 },
       shippedDefaults: { ...DEFAULT_FORMAT_OPTIONS },
     });
-    // The engine's own sentence, verbatim — the same rule every refusal on
+    // The engine's own sentence, verbatim: the same rule every refusal on
     // this surface follows.
     expect(tune.appSettingsAfter({
       ok: false, error: { code: 'bad-settings', message: 'formatDefaults must be an object' },
     })).toEqual({ ok: false, message: 'formatDefaults must be an object' });
-    // A broken contract — ok with nothing usable inside, or a refusal with
-    // no sentence at all — falls back to the same NO_MESSAGE every other
+    // A broken contract, ok with nothing usable inside, or a refusal with no
+    // sentence at all, falls back to the same NO_MESSAGE every other
     // refusal on this surface uses when the engine says nothing.
     expect(tune.appSettingsAfter({ ok: true })).toEqual({ ok: false, message: tune.NO_MESSAGE });
     expect(tune.appSettingsAfter({ ok: false })).toEqual({ ok: false, message: tune.NO_MESSAGE });
   });
 
-  test('defaultsCaption says which defaults a new script starts from, knob by knob', () => {
+  test('defaultsCaption and canResetDefaults compare knob by knob, not by JSON string', () => {
     const shipped = { ...DEFAULT_FORMAT_OPTIONS };
     expect(tune.defaultsCaption({ ...shipped }, shipped))
       .toBe('New scripts start from Screepub’s own defaults.');
     expect(tune.defaultsCaption({ ...shipped, fontFamily: 'serif' }, shipped))
       .toBe('New scripts start from your own defaults.');
-  });
-
-  test('canResetDefaults is true only when the app defaults differ from Screepub’s own', () => {
-    const shipped = { ...DEFAULT_FORMAT_OPTIONS };
     expect(tune.canResetDefaults({ ...shipped }, shipped)).toBe(false);
     expect(tune.canResetDefaults({ ...shipped, justifyText: !shipped.justifyText }, shipped)).toBe(true);
     // An app default this window could not validate is not something a
     // button can honestly offer to reset.
     expect(tune.canResetDefaults(null, shipped)).toBe(false);
     expect(tune.canResetDefaults(shipped, null)).toBe(false);
+    // Same values, different KEY ORDER: two settings objects built by
+    // rebuilding one property at a time (applyAll, a fresh engine answer)
+    // are not guaranteed to insert their keys in the same order. A
+    // comparison that stringified and compared would call these different;
+    // sameSettings compares by key, so it must not.
+    const reordered: Record<string, unknown> = {};
+    for (const key of [...Object.keys(shipped)].reverse()) reordered[key] = shipped[key];
+    expect(JSON.stringify(reordered)).not.toBe(JSON.stringify(shipped));
+    expect(tune.defaultsCaption(reordered, shipped)).toBe('New scripts start from Screepub’s own defaults.');
+    expect(tune.canResetDefaults(reordered, shipped)).toBe(false);
   });
 
   test('defaultsWriteArgs is the --set value for either button', () => {
@@ -3377,73 +3380,422 @@ describe('the Tune surface: app defaults for new scripts', () => {
       tune.USE_DEFAULTS_LABEL, tune.RESET_DEFAULTS_LABEL,
       tune.USE_DEFAULTS_NOTE, tune.RESET_DEFAULTS_NOTE,
     ]) {
-      expect(line).not.toContain('—');
+      expect(line).not.toContain('\u2014');
     }
   });
 
-  test('"Use these for new scripts" sends this script’s CURRENT settings, never defaults or appDefaults', () => {
-    const foot = source.slice(
-      source.indexOf('function drawDefaultsFoot('), source.indexOf('function groupStartsOpen('));
-    expect(foot).toMatch(/onclick: \(\) => writeDefaults\(settings, USE_DEFAULTS_NOTE\)/);
-    // Not `defaults` and not `appDefaults` — those name what a new script
-    // starts from today, not what this one is currently tuned to.
-    expect(foot).not.toMatch(/writeDefaults\(defaults[,)]/);
-    expect(foot).not.toMatch(/writeDefaults\(appDefaults[,)]/);
+  test('defaultsWriteOutcome: stale is dropped, success is applied, a refusal is reported, neither ever mixed up', () => {
+    const shipped = { ...DEFAULT_FORMAT_OPTIONS };
+    const written = { ...DEFAULT_FORMAT_OPTIONS, fontFamily: 'serif' };
+    const okAnswer = { ok: true, formatDefaults: written, shippedDefaults: shipped };
+    // The page moved to another script before the answer arrived: dropped,
+    // whatever the answer said, era mismatch checked BEFORE the answer is
+    // even read.
+    expect(tune.defaultsWriteOutcome(1, 2, okAnswer, 'confirmed')).toEqual({
+      applied: false, stale: true, message: '',
+    });
+    // Same era: a clean answer is applied, and carries the exact
+    // confirmation message the caller asked for, not a generic one.
+    expect(tune.defaultsWriteOutcome(1, 1, okAnswer, 'confirmed')).toEqual({
+      applied: true, stale: false, message: 'confirmed',
+      appDefaults: written, shippedDefaults: shipped,
+    });
+    // A refusal is reported, not applied, and the message is the engine's
+    // own, not the confirmation the caller hoped for.
+    const refusal = { ok: false, error: { message: 'formatDefaults must be an object' } };
+    expect(tune.defaultsWriteOutcome(1, 1, refusal, 'confirmed')).toEqual({
+      applied: false, stale: false, message: 'formatDefaults must be an object',
+    });
   });
 
-  test('"Reset new scripts to Screepub’s defaults" sends formatDefaults: null', () => {
-    const foot = source.slice(
-      source.indexOf('function drawDefaultsFoot('), source.indexOf('function groupStartsOpen('));
-    expect(foot).toMatch(/onclick: \(\) => writeDefaults\(null, RESET_DEFAULTS_NOTE\)/);
+  test('scriptChanged resets the app-defaults state, not only this script’s own settings', () => {
+    // Not independently observable through the pane: drawDefaultsFoot only
+    // ever runs once settings has ALSO loaded again (the ready branch), and
+    // load() unconditionally overwrites appDefaults/shippedDefaults/
+    // defaultsBusy/defaultsNote on every answer regardless of what this
+    // reset did or did not do first. Pinned by shape instead, as the
+    // hygiene it is: the five variables drawDefaultsFoot reads are declared
+    // and reset together, so a later one added to the group cannot be left
+    // out of either.
+    const changed = source.slice(
+      source.indexOf('export function scriptChanged('), source.indexOf('export async function show('));
+    for (const line of [
+      'appDefaults = null', 'shippedDefaults = null', 'defaultsBusy = false', "defaultsNote = ''",
+    ]) {
+      expect(changed).toContain(line);
+    }
   });
 
-  test('neither button calls argv.settings(: this surface writes the APP defaults, not the script’s own', () => {
-    const foot = source.slice(
-      source.indexOf('function drawDefaultsFoot('), source.indexOf('function groupStartsOpen('));
-    expect(foot).not.toContain('argv.settings(');
-    expect(foot).toContain('argv.appSettings(');
+  // ---- drawing, driven through a minimal DOM and engine stub -------------
+  //
+  // Mutation testing found that most of what used to live here only checked
+  // the SOURCE TEXT of drawDefaultsFoot and writeDefaults: whether a call
+  // was spelled a certain way, not what happened when it ran. A mutant that
+  // re-enabled the buttons before the engine call, or dropped the era check
+  // on the success path, or never actually wrote the confirmation into the
+  // note, passed every one of those. What follows drives the real mount(),
+  // show() and a real button click, against a tiny local stand-in for the
+  // DOM (desktop/ui/dom.js's whole surface is three generic calls: element
+  // creation, event listeners, and text) and for the engine (Tauri's
+  // invoke, with the answer held back so a test can inspect the pane before
+  // and after it arrives).
+
+  /** Enough of a DOM node for desktop/ui/dom.js's el()/clear()/text() to run
+   *  against: attributes, children, event listeners, nothing else. No
+   *  layout, no rendering; a structural stand-in, not a browser. */
+  class FakeNode {
+    tagName: string;
+    isText = false;
+    textValue = '';
+    attrs = new Map<string, string>();
+    kids: FakeNode[] = [];
+    parent: FakeNode | null = null;
+    handlers = new Map<string, Array<() => unknown>>();
+    className = '';
+    disabled = false;
+    hidden = false;
+    checked = false;
+    value = '';
+
+    constructor(tagName: string) { this.tagName = tagName; }
+
+    setAttribute(name: string, value: string) { this.attrs.set(name, value); }
+    getAttribute(name: string) { return this.attrs.has(name) ? this.attrs.get(name)! : null; }
+    addEventListener(type: string, fn: () => unknown) {
+      const list = this.handlers.get(type) ?? [];
+      list.push(fn);
+      this.handlers.set(type, list);
+    }
+    /** Runs the (one) registered handler and returns what it returns, so a
+     *  click on a button whose handler is an async function hands back the
+     *  promise a test can resolve the engine stub into and then await. */
+    click(): unknown {
+      const [fn] = this.handlers.get('click') ?? [];
+      return fn?.();
+    }
+    append(...nodes: Array<FakeNode | null | undefined>) {
+      for (const n of nodes) {
+        if (n == null) continue;
+        n.parent = this;
+        this.kids.push(n);
+      }
+    }
+    get firstChild() { return this.kids[0] ?? null; }
+    removeChild(child: FakeNode) {
+      const i = this.kids.indexOf(child);
+      if (i >= 0) this.kids.splice(i, 1);
+      child.parent = null;
+      return child;
+    }
+    replaceWith(...nodes: FakeNode[]) {
+      const p = this.parent;
+      if (!p) return;
+      const i = p.kids.indexOf(this);
+      if (i < 0) return;
+      p.kids.splice(i, 1, ...nodes);
+      for (const n of nodes) n.parent = p;
+      this.parent = null;
+    }
+    get textContent(): string {
+      return this.isText ? this.textValue : this.kids.map((k) => k.textContent).join('');
+    }
+    set textContent(value: string) {
+      this.kids = [];
+      const t = new FakeNode('#text');
+      t.isText = true;
+      t.textValue = String(value ?? '');
+      t.parent = this;
+      this.kids.push(t);
+    }
+    /** The first descendant carrying `cls`, depth first, or null. */
+    find(cls: string): FakeNode | null {
+      for (const k of this.kids) {
+        if (k.className.split(' ').includes(cls)) return k;
+        const found = k.find(cls);
+        if (found) return found;
+      }
+      return null;
+    }
+    /** Every descendant with this tag name. */
+    findTag(tag: string): FakeNode[] {
+      const out: FakeNode[] = [];
+      for (const k of this.kids) {
+        if (k.tagName === tag) out.push(k);
+        out.push(...k.findTag(tag));
+      }
+      return out;
+    }
+    /** Only `.toggle` is ever called on the real thing here (state(),
+     *  say()), so only `.toggle` is implemented; add/remove/contains ride
+     *  along on the same className string for anything that grows to need
+     *  them later. */
+    get classList() {
+      const self = this;
+      return {
+        toggle(cls: string, force?: boolean) {
+          const parts = self.className.split(' ').filter(Boolean);
+          const has = parts.includes(cls);
+          const want = force === undefined ? !has : force;
+          self.className = parts.filter((c) => c !== cls).concat(want ? [cls] : []).join(' ');
+          return want;
+        },
+        contains(cls: string) { return self.className.split(' ').filter(Boolean).includes(cls); },
+      };
+    }
+  }
+
+  function installFakeDocument() {
+    (globalThis as unknown as { document: unknown }).document = {
+      createElement: (tag: string) => new FakeNode(tag),
+      createTextNode: (value: string) => {
+        const t = new FakeNode('#text');
+        t.isText = true;
+        t.textValue = String(value);
+        return t;
+      },
+    };
+  }
+  function removeFakeDocument() { delete (globalThis as unknown as { document?: unknown }).document; }
+
+  type PendingCall = { args: string[]; resolve: (json: string) => void; reject: (err: unknown) => void };
+
+  /** Routes every `runEngine` call this window's own argv builders can
+   *  produce to a pending, manually-settled promise, exactly the shape
+   *  desktop-ui.test.ts already stubs `window.__TAURI__.core.invoke` with
+   *  elsewhere in this file (see "what runEngine does with the answer it is
+   *  handed"), held back here instead of answered immediately, so a test
+   *  can inspect the pane BEFORE the engine has answered, not only after. */
+  function stubEngine() {
+    const calls: PendingCall[] = [];
+    (globalThis as unknown as { window: unknown }).window = {
+      __TAURI__: {
+        core: {
+          invoke: (_cmd: string, payload: { args: string[] }) =>
+            new Promise<string>((resolve, reject) => { calls.push({ args: payload.args, resolve, reject }); }),
+        },
+      },
+    };
+    return {
+      calls,
+      resolve(i: number, answer: unknown) { calls[i].resolve(JSON.stringify(answer)); },
+      reject(i: number, message: unknown) { calls[i].reject(message); },
+    };
+  }
+  function removeStubEngine() { delete (globalThis as unknown as { window?: unknown }).window; }
+
+  function makeCtx(script: unknown) { return { state: { script }, goTo: () => {} }; }
+
+  /** The two foot buttons, found by their exact label rather than by class
+   *  (both share `btn-quiet`), re-queried fresh every call: drawDefaultsFoot
+   *  rebuilds the whole foot on every redraw, so a button reference taken
+   *  before one is stale afterwards. */
+  function footButtons(pane: FakeNode) {
+    const buttons = pane.findTag('button');
+    return {
+      use: buttons.find((b) => b.textContent === tune.USE_DEFAULTS_LABEL) ?? null,
+      reset: buttons.find((b) => b.textContent === tune.RESET_DEFAULTS_LABEL) ?? null,
+    };
+  }
+
+  /** A clean settings answer: this script's current settings, Screepub's
+   *  shipped defaults, and (by default) app defaults equal to the shipped
+   *  set, so Reset starts hidden unless a test asks for something else. */
+  function settingsAnswer(overrides: Record<string, unknown> = {}) {
+    return {
+      ok: true,
+      settings: { ...DEFAULT_FORMAT_OPTIONS },
+      defaults: { ...DEFAULT_FORMAT_OPTIONS },
+      appDefaults: { ...DEFAULT_FORMAT_OPTIONS },
+      preset: null,
+      presets: [],
+      ...overrides,
+    };
+  }
+
+  /** Mounts a fresh script, drains the settings load with `answer`, and
+   *  returns the pane once the ready state (knobs and foot) is on screen.
+   *  scriptChanged() before show() guarantees a clean module state
+   *  regardless of what an earlier test in this describe block left behind:
+   *  tune.js is one module instance for the whole file, so `era`,
+   *  `settings`, `appDefaults` and the rest persist between tests unless
+   *  something resets them, the same way a real script switch would. */
+  async function mountReady(engine: ReturnType<typeof stubEngine>, overrides: Record<string, unknown> = {}) {
+    const script = { fountainPath: '/scripts/demo.fountain', epubPath: null, previewHtml: undefined, settings: null };
+    const ctx = makeCtx(script);
+    const pane = new FakeNode('div');
+    tune.mount(pane, ctx);
+    tune.scriptChanged();
+    const shown = tune.show();
+    engine.resolve(engine.calls.length - 1, settingsAnswer(overrides));
+    await shown;
+    return { pane, ctx, script };
+  }
+
+  let engine: ReturnType<typeof stubEngine>;
+  beforeEach(() => { installFakeDocument(); engine = stubEngine(); });
+  afterEach(() => { removeFakeDocument(); removeStubEngine(); });
+
+  test('the pane reads, then shows the knobs and the defaults foot; a failed load shows the fault screen instead', async () => {
+    const script = { fountainPath: '/scripts/demo.fountain', epubPath: null, previewHtml: undefined, settings: null };
+    const ctx = makeCtx(script);
+    const pane = new FakeNode('div');
+    tune.mount(pane, ctx);
+    tune.scriptChanged();
+    // Before load() has answered: a quiet caption, not the fault screen and
+    // not the knobs (M31: the reading branch falling through into them).
+    expect(pane.textContent).toContain(tune.READING);
+    expect(pane.find('fault-body-block')).toBeNull();
+    expect(pane.find('tune-defaults')).toBeNull();
+
+    const shown = tune.show();
+    engine.resolve(0, settingsAnswer({ appDefaults: { ...DEFAULT_FORMAT_OPTIONS, fontFamily: 'serif' } }));
+    await shown;
+
+    expect(pane.find('fault-body-block')).toBeNull();
+    expect(pane.textContent).not.toContain(tune.READING);
+    const foot = pane.find('tune-defaults');
+    expect(foot).not.toBeNull();
+    expect(foot!.textContent).toContain('New scripts start from your own defaults.');
+    // Placed at the foot: after the knob groups, inside the knobs column.
+    const knobs = pane.find('tune-knobs')!;
+    expect(knobs.kids.indexOf(foot!)).toBeGreaterThan(knobs.kids.findIndex((k) => k.tagName === 'DETAILS'));
   });
 
-  test('the Reset button is gated by canResetDefaults, not drawn unconditionally', () => {
-    const foot = source.slice(
-      source.indexOf('function drawDefaultsFoot('), source.indexOf('function groupStartsOpen('));
-    expect(foot).toMatch(/resetButton\.hidden = !canResetDefaults\(appDefaults, shippedDefaults\)/);
+  test('a load that fails (a throw from the engine call) shows the fault screen, not the reading caption', async () => {
+    const script = { fountainPath: '/scripts/demo.fountain', epubPath: null, previewHtml: undefined, settings: null };
+    const ctx = makeCtx(script);
+    const pane = new FakeNode('div');
+    tune.mount(pane, ctx);
+    tune.scriptChanged();
+    const shown = tune.show();
+    engine.reject(0, 'the sidecar could not be read');
+    await shown;
+    expect(pane.find('fault-body-block')).not.toBeNull();
+    expect(pane.textContent).toContain('the sidecar could not be read');
+    expect(pane.textContent).not.toContain(tune.READING);
   });
 
-  test('both buttons are disabled for the whole write, not just the one pressed', () => {
-    const write = source.slice(
-      source.indexOf('async function writeDefaults('), source.indexOf('function groupStartsOpen('));
-    // Both go quiet before the engine is asked anything.
-    const beforeAwait = write.slice(0, write.indexOf('await runEngine'));
-    expect(beforeAwait).toContain('useButton.disabled = true');
-    expect(beforeAwait).toContain('resetButton.disabled = true');
-    // And both come back, on every way out.
-    expect([...write.matchAll(/useButton\.disabled = false/g)].length).toBeGreaterThanOrEqual(1);
-    expect([...write.matchAll(/resetButton\.disabled = false/g)].length).toBeGreaterThanOrEqual(1);
+  test('the Reset button is hidden when the app defaults equal Screepub’s own, shown when they differ', async () => {
+    const equal = await mountReady(engine);
+    expect(footButtons(equal.pane).reset!.hidden).toBe(true);
+
+    engine = stubEngine();
+    const different = await mountReady(
+      engine, { appDefaults: { ...DEFAULT_FORMAT_OPTIONS, fontFamily: 'serif' } },
+    );
+    expect(footButtons(different.pane).reset!.hidden).toBe(false);
   });
 
-  test('a write in flight is guarded by the same era a stale flush already checks', () => {
-    // Follows convert.js's own generation pattern (libraryGeneration) and
-    // this file's flush(): a write started from one script must not paint
-    // its answer onto whatever script is on screen by the time it resolves.
-    const write = source.slice(
-      source.indexOf('async function writeDefaults('), source.indexOf('function groupStartsOpen('));
-    expect(write).toMatch(/const mine = era/);
-    expect([...write.matchAll(/era !== mine/g)].length).toBeGreaterThanOrEqual(1);
+  test('a malformed app-defaults answer draws no foot at all, rather than a wrong caption', async () => {
+    const { pane } = await mountReady(engine, { appDefaults: { fontFamily: 'serif' } });
+    expect(pane.find('tune-defaults')).toBeNull();
   });
 
-  test('the foot is placed after the knob groups, at the bottom of the tune-knobs column', () => {
-    const draw = source.slice(source.indexOf('function draw(status)'), source.indexOf('function drawPreview('));
-    expect(draw.indexOf('...GROUPS.map(drawGroup)')).toBeLessThan(draw.indexOf('drawDefaultsFoot()'));
-    expect(draw.indexOf('statusLine,')).toBeLessThan(draw.indexOf('drawDefaultsFoot()'));
+  test('"Use these for new scripts": both buttons disable before the engine answers, both re-enable and the caption refreshes after', async () => {
+    const { pane } = await mountReady(
+      engine, { appDefaults: { ...DEFAULT_FORMAT_OPTIONS, fontFamily: 'serif' } },
+    );
+    expect(footButtons(pane).reset!.hidden).toBe(false);
+
+    const write = footButtons(pane).use!.click() as Promise<void>;
+    // Before the engine has answered: both quiet, not just the one pressed
+    // (a second click racing this one is exactly what disabling only the
+    // clicked button would allow), and it asked app-settings, never the
+    // settings( call this surface's own save path uses.
+    expect(footButtons(pane).use!.disabled).toBe(true);
+    expect(footButtons(pane).reset!.disabled).toBe(true);
+    expect(engine.calls[1].args[0]).toBe('app-settings');
+    expect(engine.calls[1].args).toContain(tune.defaultsWriteArgs({ ...DEFAULT_FORMAT_OPTIONS }));
+
+    engine.resolve(1, {
+      ok: true, formatDefaults: { ...DEFAULT_FORMAT_OPTIONS }, shippedDefaults: { ...DEFAULT_FORMAT_OPTIONS },
+    });
+    await write;
+
+    expect(footButtons(pane).use!.disabled).toBe(false);
+    expect(footButtons(pane).reset!.disabled).toBe(false);
+    // Applied, not left showing the pre-write state: the caption changed,
+    // and Reset (now equal to shipped) is hidden again.
+    expect(pane.find('tune-defaults')!.textContent).toContain(tune.USE_DEFAULTS_NOTE);
+    expect(pane.find('tune-defaults')!.textContent).toContain('New scripts start from Screepub’s own defaults.');
+    expect(footButtons(pane).reset!.hidden).toBe(true);
   });
 
-  test('a malformed app-defaults answer draws nothing rather than a wrong caption', () => {
-    // The same call drawPresets() makes for an empty preset list: absent
-    // rather than a claim this window never actually checked.
-    const foot = source.slice(
-      source.indexOf('function drawDefaultsFoot('), source.indexOf('function drawDefaultsFoot(') + 400);
-    expect(foot).toMatch(/if \(appDefaults === null \|\| shippedDefaults === null\) return null;/);
+  test('"Reset new scripts to Screepub’s defaults": a refusal is shown verbatim, and changes nothing', async () => {
+    const { pane } = await mountReady(
+      engine, { appDefaults: { ...DEFAULT_FORMAT_OPTIONS, fontFamily: 'serif' } },
+    );
+    const write = footButtons(pane).reset!.click() as Promise<void>;
+    expect(engine.calls[1].args[0]).toBe('app-settings');
+    expect(engine.calls[1].args).toContain(tune.defaultsWriteArgs(null));
+
+    engine.resolve(1, { ok: false, error: { code: 'bad-settings', message: 'the app defaults could not be reset' } });
+    await write;
+
+    expect(footButtons(pane).use!.disabled).toBe(false);
+    expect(footButtons(pane).reset!.disabled).toBe(false);
+    const note = pane.find('tune-defaults')!.textContent;
+    expect(note).toContain('the app defaults could not be reset');
+    expect(note).not.toContain(tune.RESET_DEFAULTS_NOTE);
+    // Nothing applied: still "your own", Reset still offered.
+    expect(pane.find('tune-defaults')!.textContent).toContain('New scripts start from your own defaults.');
+    expect(footButtons(pane).reset!.hidden).toBe(false);
+  });
+
+  test('a redraw for any other reason mid-write still shows the busy state, and the write still lands on it', async () => {
+    // Stands in for applyAll's redraw on a preset click, or flush()'s own
+    // correcting one: both rebuild the whole pane through draw() while a
+    // defaults write may be in flight. Driven here through a second
+    // mount() on the SAME pane, which reaches the identical draw() path
+    // without scheduling flush()'s debounce timer, which would otherwise
+    // outlive this test and fire a stray engine call into whatever runs
+    // next.
+    const { pane, ctx } = await mountReady(
+      engine, { appDefaults: { ...DEFAULT_FORMAT_OPTIONS, fontFamily: 'serif' } },
+    );
+    const write = footButtons(pane).use!.click() as Promise<void>;
+    expect(footButtons(pane).use!.disabled).toBe(true);
+
+    // The redraw: a fresh foot is built from the SAME module state, so it
+    // must come up already disabled rather than wrongly idle.
+    tune.mount(pane, ctx);
+    expect(footButtons(pane).use!.disabled).toBe(true);
+    expect(footButtons(pane).reset!.disabled).toBe(true);
+
+    engine.resolve(1, {
+      ok: true, formatDefaults: { ...DEFAULT_FORMAT_OPTIONS }, shippedDefaults: { ...DEFAULT_FORMAT_OPTIONS },
+    });
+    await write;
+
+    // The confirmation lands on the box that redraw just built, not on the
+    // detached one writeDefaults was originally called from.
+    expect(pane.find('tune-defaults')!.textContent).toContain(tune.USE_DEFAULTS_NOTE);
+    expect(footButtons(pane).use!.disabled).toBe(false);
+    expect(footButtons(pane).reset!.disabled).toBe(false);
+  });
+
+  test('a write started from one script is dropped, not painted, once the page has moved to another', async () => {
+    const { pane } = await mountReady(
+      engine, { appDefaults: { ...DEFAULT_FORMAT_OPTIONS, fontFamily: 'serif' } },
+    );
+    const write = footButtons(pane).use!.click() as Promise<void>;
+    expect(footButtons(pane).use!.disabled).toBe(true);
+
+    // The reader converts a different script while this write is in
+    // flight: scriptChanged() bumps era and resets the module state on its
+    // own, independent of whatever this write is about to answer.
+    tune.scriptChanged();
+
+    engine.resolve(1, {
+      ok: true, formatDefaults: { ...DEFAULT_FORMAT_OPTIONS }, shippedDefaults: { ...DEFAULT_FORMAT_OPTIONS },
+    });
+    await write;
+
+    // Nothing from the stale write reached the pane: it is back on the
+    // reading caption for whatever script scriptChanged() left it showing,
+    // not a defaults foot the old write refreshed.
+    expect(pane.find('tune-defaults')).toBeNull();
+    expect(pane.textContent).toContain(tune.READING);
   });
 });
 
