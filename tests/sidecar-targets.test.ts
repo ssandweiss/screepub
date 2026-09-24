@@ -202,7 +202,13 @@ describe('hostSidecarTarget', () => {
     const expected = /^host:\s*(\S+)/m.exec(proc.stdout.toString())?.[1];
     expect(expected).toBeDefined();
     expect(hostSidecarTarget().rustTriple).toBe(expected as string);
-  });
+    // Two real rustc runs, on purpose: sharing one answer would make the
+    // check agree with itself. On a warm machine they take well under a
+    // second, but on a cold CI runner the first rustc (through the rustup
+    // proxy) has pushed the pair past bun's default 5 s: the engine job
+    // failed exactly that way on 2026-09-24 and passed on a rerun. A minute
+    // absorbs a cold start and still fails a rustc that has actually hung.
+  }, 60_000);
 });
 
 describe('parseRustcHost', () => {
