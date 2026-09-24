@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { settingsCommand } from '../src/cli-settings';
+import { writeAppSettings } from '../src/settings/app';
 import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-cli-settings-'));
@@ -142,6 +143,74 @@ describe('settingsCommand', () => {
     // only checked existsSync (rather than isFile()) would sail past this
     // and go on to compute a nonsense sidecar path next to the directory.
     expect(() => settingsCommand({ fountain: dir })).toThrow(/cannot read/);
+  });
+});
+
+describe('settingsCommand: app-wide defaults underneath the sidecar', () => {
+  function appSettings(): string {
+    return join(dir, 'app-settings.json');
+  }
+
+  test('no app settings file: appDefaults is exactly the shipped defaults', () => {
+    const result = settingsCommand({ fountain, appSettingsPath: appSettings() });
+    expect(result.appDefaults).toEqual(DEFAULT_FORMAT_OPTIONS);
+    // defaults stays Screepub's own regardless of appDefaults, so the app
+    // can always show BOTH "your defaults" and "Screepub's defaults".
+    expect(result.defaults).toEqual(DEFAULT_FORMAT_OPTIONS);
+  });
+
+  test('an untouched script with app defaults set reports THEM, not the shipped defaults', () => {
+    const path = appSettings();
+    writeAppSettings({ formatDefaults: { dialogueSideMarginPct: 5 } }, path);
+    const result = settingsCommand({ fountain, appSettingsPath: path });
+    expect(result.settings.dialogueSideMarginPct).toBe(5);
+    expect(result.appDefaults.dialogueSideMarginPct).toBe(5);
+    // The shipped object never moves, even though the reported settings did.
+    expect(result.defaults.dialogueSideMarginPct).toBe(DEFAULT_FORMAT_OPTIONS.dialogueSideMarginPct);
+  });
+
+  test('a sidecar already on disk outranks the app defaults', () => {
+    const path = appSettings();
+    writeAppSettings({ formatDefaults: { dialogueSideMarginPct: 5 } }, path);
+    // Write a sidecar directly (not through --set, which would overlay on
+    // the CURRENT read rather than proving a PRE-EXISTING one wins).
+    const sidecar = join(dir, 'Script.screepub.json');
+    writeFileSync(sidecar, JSON.stringify({ dialogueSideMarginPct: 12 }));
+    const result = settingsCommand({ fountain, appSettingsPath: path });
+    expect(result.settings.dialogueSideMarginPct).toBe(12);
+    // Knobs the sidecar never mentioned still come from the app defaults,
+    // not the shipped ones: proof the sidecar was overlaid ON TOP of
+    // appDefaults rather than resolved straight over DEFAULT_FORMAT_OPTIONS.
+    writeAppSettings({ formatDefaults: { dialogueSideMarginPct: 5, justifyText: true } }, path);
+    const second = settingsCommand({ fountain, appSettingsPath: path });
+    expect(second.settings.justifyText).toBe(true);
+  });
+
+  test('--set overlays on the app defaults when there is no sidecar yet', () => {
+    const path = appSettings();
+    writeAppSettings({ formatDefaults: { dialogueSideMarginPct: 5 } }, path);
+    const result = settingsCommand({
+      fountain, appSettingsPath: path, set: '{"justifyText":true}',
+    });
+    expect(result.settings.justifyText).toBe(true);
+    expect(result.settings.dialogueSideMarginPct).toBe(5);
+  });
+
+  test('a corrupt app settings file changes nothing: shipped defaults throughout', () => {
+    const path = appSettings();
+    writeFileSync(path, '{ not json');
+    const result = settingsCommand({ fountain, appSettingsPath: path });
+    expect(result.settings).toEqual(DEFAULT_FORMAT_OPTIONS);
+    expect(result.appDefaults).toEqual(DEFAULT_FORMAT_OPTIONS);
+  });
+
+  test('with no appSettingsPath given, it defaults to the production path (test-guarded)', () => {
+    // No injected path at all: settingsCommand must fall back to
+    // appSettingsPath() itself, which the test-run guard (SCREEPUB_CONFIG_DIR
+    // under /dev/null) points away from any real file, so this still reads
+    // as the shipped defaults rather than throwing.
+    const result = settingsCommand({ fountain });
+    expect(result.appDefaults).toEqual(DEFAULT_FORMAT_OPTIONS);
   });
 });
 

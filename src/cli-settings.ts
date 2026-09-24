@@ -4,6 +4,7 @@
 import { statSync } from 'node:fs';
 import { CliError } from './cli-errors';
 import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from './options';
+import { appDefaultOptions } from './settings/app-defaults';
 import {
   DEVICE_PRESETS,
   matchingPreset,
@@ -13,7 +14,13 @@ import { loadScriptSettings, saveScriptSettings, sidecarPath } from './settings/
 
 export interface SettingsResult {
   settings: FormatOptions;
+  /** Screepub's own shipped defaults (`format-defaults.json`), never the
+   * user's app-wide ones: the window uses this to mean "reset to
+   * Screepub's own", which has to stay put even when appDefaults differs. */
   defaults: FormatOptions;
+  /** The user's app-wide format defaults (piece C): the base this script's
+   * settings were read over, when it has no sidecar of its own. */
+  appDefaults: FormatOptions;
   preset: DevicePresetId | null;
   presets: { id: DevicePresetId; displayName: string; settings: FormatOptions }[];
   sidecar: string;
@@ -25,6 +32,10 @@ export interface SettingsOptions {
   /** A PARTIAL FormatOptions as JSON. Overlaid on what is stored, never
    * replacing it, so a window that sends one moved knob moves one knob. */
   set?: string;
+  /** Where to read the app-wide format defaults from. Defaults to the
+   * production app settings file (`appSettingsPath()`); a test points this
+   * at a scratch file so it never touches a real one. */
+  appSettingsPath?: string;
 }
 
 export function settingsCommand(options: SettingsOptions): SettingsResult {
@@ -38,7 +49,13 @@ export function settingsCommand(options: SettingsOptions): SettingsResult {
     throw new CliError('unreadable', `cannot read the script: ${options.fountain}`);
   }
 
-  let settings = loadScriptSettings(options.fountain, DEFAULT_FORMAT_OPTIONS);
+  // The app-wide defaults are the base a script with no sidecar of its own
+  // reads over, one layer under the shipped defaults (piece C). Read once:
+  // both the plain read below and a --set that follows use the SAME base,
+  // so a --set on an untouched script overlays onto the user's own tuning
+  // rather than resetting it to Screepub's.
+  const appDefaults = appDefaultOptions(options.appSettingsPath);
+  let settings = loadScriptSettings(options.fountain, appDefaults);
 
   if (options.set !== undefined) {
     let parsed: unknown;
@@ -61,6 +78,7 @@ export function settingsCommand(options: SettingsOptions): SettingsResult {
   return {
     settings,
     defaults: DEFAULT_FORMAT_OPTIONS,
+    appDefaults,
     preset: matchingPreset(settings),
     presets: ids.map((id) => ({
       id,

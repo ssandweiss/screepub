@@ -13,7 +13,8 @@ import {
 import { isCalibreAvailable } from './export/calibre';
 import { fileExtension, formatLabel, type ExportFormat } from './export/formats';
 import { kfxStatus as realKfxStatus, type KfxStatus } from './export/kfx';
-import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from './options';
+import { resolveFormatOptions, type FormatOptions } from './options';
+import { appDefaultOptions } from './settings/app-defaults';
 
 export interface ExportResult {
   path: string;
@@ -54,10 +55,23 @@ export interface ExportDeps {
   calibreAvailable?: CalibreProbe;
   kfxStatus?: KfxProbe;
   freshKindleArtifact?: KindleLadder;
+  /** Where to read the app-wide format defaults from. Defaults to the
+   * production app settings file (`appSettingsPath()`); a test points this
+   * at a scratch file so it never touches a real one. */
+  appSettingsPath?: string;
 }
 
-function readFormat(optionsJson: string | undefined): FormatOptions {
-  if (optionsJson === undefined) return DEFAULT_FORMAT_OPTIONS;
+/** `--options-json`, overlaid on the app-wide format defaults (piece C) so
+ * the same precedence a conversion honours (flags > sidecar > app defaults
+ * > shipped) holds here too: a rebuild through the MOBI rung must start
+ * from the user's own defaults, not Screepub's, when the caller mentioned
+ * no `--options-json` knob at all, or only some of them. A FULL object (what
+ * the window actually sends: `screepub settings`'s answer, read back
+ * whole) leaves nothing for the app defaults to fill, so this changes
+ * nothing observable for it. */
+function readFormat(optionsJson: string | undefined, appSettingsPath: string | undefined): FormatOptions {
+  const base = appDefaultOptions(appSettingsPath);
+  if (optionsJson === undefined) return base;
   let parsed: unknown;
   try {
     parsed = JSON.parse(optionsJson);
@@ -67,7 +81,7 @@ function readFormat(optionsJson: string | undefined): FormatOptions {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new CliError('bad-options', '--options-json must be a JSON object');
   }
-  return resolveFormatOptions(parsed as Record<string, unknown>);
+  return resolveFormatOptions(parsed as Record<string, unknown>, base);
 }
 
 export async function exportCommand(
@@ -97,7 +111,7 @@ export async function exportCommand(
   // VALUE (it converts nothing), but a window sending malformed JSON must
   // hear the same 'bad-options' either way, or the same argv is valid and
   // invalid at once.
-  const formatOptions = readFormat(options.optionsJson);
+  const formatOptions = readFormat(options.optionsJson, deps.appSettingsPath);
 
   const calibreAvailable = (deps.calibreAvailable ?? isCalibreAvailable)();
   const available = availableFormats(options.epub, calibreAvailable);

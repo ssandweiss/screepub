@@ -630,6 +630,41 @@ describe('a capture run cleans up after itself, whatever happens', () => {
     }
   });
 
+  test('the engine gets its own SCREEPUB_CONFIG_DIR, never the developer\'s real settings', async () => {
+    // Piece C makes the app read its own format defaults on every
+    // conversion. Without a SCREEPUB_CONFIG_DIR of the run's own, this
+    // tool's pictures would pick up whatever the developer running it last
+    // chose in their own app settings, and drift.
+    const s = scene();
+    try {
+      const seen: { configDir?: string } = {};
+      const ENGINE = ['/bin/sh', '-c', 'printf %s "$SCREEPUB_CONFIG_DIR"'];
+      const boom = new Error('one engine call is enough for this test');
+      const browser: Browser = {
+        version: 'FakeChrome/1.0',
+        async capture({ url }) {
+          if (!url.includes('/capture/window.html')) return PNG;
+          const html = await (await fetch(url)).text();
+          const token = /"token":"([^"]+)"/.exec(html)![1]!;
+          const r = await fetch(new URL('/engine', url), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-capture-token': token },
+            body: JSON.stringify({ args: argv.version() }),
+          });
+          seen.configDir = await r.text();
+          throw boom;
+        },
+        async close() {},
+      };
+      const shots = SHOTS.filter((x) => x.name === 'drop');
+      const err = await thrown(s.run({ shots, engine: ENGINE, launch: async () => browser }));
+      expect(err).toBe(boom);
+      // Under the run's own scratch library, and a folder this run never
+      // creates or writes into itself, so a read there finds nothing.
+      expect(seen.configDir).toBe(join(s.library, '.capture-app-settings'));
+    } finally { s.done(); }
+  });
+
   test('a library the tool did not make is refused and left exactly as it was', async () => {
     const s = scene();
     try {

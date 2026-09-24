@@ -6,6 +6,7 @@ import { exportCommand } from '../src/cli-export';
 import { availableFormats, type FreshKindleArtifactOptions } from '../src/export/artifact';
 import { isCalibreAvailable } from '../src/export/calibre';
 import type { KfxStatus } from '../src/export/kfx';
+import { DEFAULT_FORMAT_OPTIONS, type FormatOptions } from '../src/options';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-cli-export-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
@@ -318,6 +319,118 @@ describe('exportCommand', () => {
       code = (err as { code: string }).code;
     }
     expect(code).toBe('unreadable');
+  });
+});
+
+describe('exportCommand: app-wide defaults underneath --options-json', () => {
+  // No app settings file at this path at all: readAppSettings reads a
+  // missing file as {}, same as the production test-run guard.
+  function noAppSettings(): string {
+    return join(dir, 'no-such-settings.json');
+  }
+  function appSettingsWith(formatDefaults: Record<string, unknown>): string {
+    const path = join(dir, `app-settings-${Math.random()}.json`);
+    writeFileSync(path, JSON.stringify({ formatDefaults }));
+    return path;
+  }
+
+  test('no --options-json, no app settings: the ladder gets the shipped defaults', async () => {
+    const seen: { format?: FormatOptions } = {};
+    await exportCommand(
+      { epub, for: 'kindle', fountain },
+      {
+        calibreAvailable: () => true,
+        kfxStatus: async () => calibreOnlyStatus,
+        appSettingsPath: noAppSettings(),
+        freshKindleArtifact: async (opts) => {
+          seen.format = opts.format;
+          return join(dir, 'Script.azw3');
+        },
+      },
+    );
+    expect(seen.format).toEqual(DEFAULT_FORMAT_OPTIONS);
+  });
+
+  test('no --options-json, app defaults set: the ladder gets THEM, not the shipped defaults', async () => {
+    const seen: { format?: FormatOptions } = {};
+    await exportCommand(
+      { epub, for: 'kindle', fountain },
+      {
+        calibreAvailable: () => true,
+        kfxStatus: async () => calibreOnlyStatus,
+        appSettingsPath: appSettingsWith({ dialogueSideMarginPct: 5 }),
+        freshKindleArtifact: async (opts) => {
+          seen.format = opts.format;
+          return join(dir, 'Script.azw3');
+        },
+      },
+    );
+    expect(seen.format?.dialogueSideMarginPct).toBe(5);
+  });
+
+  // The controller's decision: WITH --options-json too, it overlays on the
+  // app defaults rather than on the shipped ones, so the precedence rule
+  // (flags > app defaults > shipped) holds for export the same as it does
+  // for a conversion.
+  test('a PARTIAL --options-json overlays on the app defaults, not the shipped ones', async () => {
+    const seen: { format?: FormatOptions } = {};
+    await exportCommand(
+      { epub, for: 'kindle', fountain, optionsJson: '{"justifyText":true}' },
+      {
+        calibreAvailable: () => true,
+        kfxStatus: async () => calibreOnlyStatus,
+        appSettingsPath: appSettingsWith({ dialogueSideMarginPct: 5 }),
+        freshKindleArtifact: async (opts) => {
+          seen.format = opts.format;
+          return join(dir, 'Script.azw3');
+        },
+      },
+    );
+    // The knob --options-json actually named:
+    expect(seen.format?.justifyText).toBe(true);
+    // The knob it never mentioned: still the app default, not the shipped
+    // one, proving the overlay landed on appDefaults and not on
+    // DEFAULT_FORMAT_OPTIONS.
+    expect(seen.format?.dialogueSideMarginPct).toBe(5);
+  });
+
+  // What the window actually sends (desktop/ui/send.js's optionsJsonFor):
+  // a FULL FormatOptions object read back from `screepub settings`, so an
+  // app default the ladder would otherwise supply is already baked in and
+  // this changes nothing observable for it. Proven here rather than
+  // asserted from memory.
+  test('a FULL --options-json wins outright, same as before this change', async () => {
+    const full = { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 1 };
+    const seen: { format?: FormatOptions } = {};
+    await exportCommand(
+      { epub, for: 'kindle', fountain, optionsJson: JSON.stringify(full) },
+      {
+        calibreAvailable: () => true,
+        kfxStatus: async () => calibreOnlyStatus,
+        appSettingsPath: appSettingsWith({ dialogueSideMarginPct: 5 }),
+        freshKindleArtifact: async (opts) => {
+          seen.format = opts.format;
+          return join(dir, 'Script.azw3');
+        },
+      },
+    );
+    expect(seen.format).toEqual(full);
+  });
+
+  test('with no appSettingsPath given, it defaults to the production path (test-guarded)', async () => {
+    const seen: { format?: FormatOptions } = {};
+    await exportCommand(
+      { epub, for: 'kindle', fountain },
+      {
+        calibreAvailable: () => true,
+        kfxStatus: async () => calibreOnlyStatus,
+        freshKindleArtifact: async (opts) => {
+          seen.format = opts.format;
+          return join(dir, 'Script.azw3');
+        },
+      },
+    );
+    expect(seen.format).toEqual(DEFAULT_FORMAT_OPTIONS);
   });
 });
 

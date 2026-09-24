@@ -17,7 +17,8 @@ import {
 } from './convert';
 import { mapConversionError, CliError, errorMessage, type JsonError } from './cli-errors';
 import { adoptSidecar, existingLibraryOutput, libraryOutput, libraryRoot } from './library';
-import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from './options';
+import { resolveFormatOptions, type FormatOptions } from './options';
+import { appDefaultOptions } from './settings/app-defaults';
 import { readScriptSettings } from './settings/sidecar';
 import { resolveCommand, devicesCommand, sendCommand, VERBS, type Verb } from './cli-devices';
 import { updateDecisionCommand, updateShouldCheckCommand } from './cli-update';
@@ -37,6 +38,9 @@ and rejoinSplitDialogue are applied when a PDF is read, so they do not take
 effect here (asking to strip (CONT'D) warns rather than failing silently),
 and the scanned-PDF and not-a-screenplay guards are PDF-only. See the
 README's "Fountain input" section.
+
+Every conversion starts from your app-wide format defaults, when you have
+set any, underneath all of this.
 
 A script's saved settings are used by the conversion that finds them: if
 <script>.screepub.json sits beside the input — or in the script's library
@@ -755,11 +759,17 @@ async function main() {
   // flag would be the stranger rule. What keeps that from being a surprise
   // is that it is SAID, on stderr, every time it happens.
   //
-  // Precedence: explicit flag > sidecar > defaults, knob by knob, through
-  // the one merge resolveFormatOptions already is — no second rule. A
-  // partial --options therefore moves the knobs it names and leaves the rest
-  // of the script's tuning standing, which is what cli-settings' --set does
-  // with the same call.
+  // Precedence: explicit flag > sidecar > app defaults > shipped defaults,
+  // knob by knob, through the one merge resolveFormatOptions already is,
+  // no second rule. A partial --options therefore moves the knobs it names
+  // and leaves the rest of the script's tuning standing, which is what
+  // cli-settings' --set does with the same call.
+  //
+  // Read once per conversion, not once per sidecar candidate below: the
+  // user's own settings do not change mid-conversion, and two reads could
+  // in principle disagree if the app settings file were rewritten between
+  // them (the app changing it while a long conversion runs).
+  const appDefaults = appDefaultOptions();
   let settings: FormatOptions | undefined;
   let settingsPath: string | undefined;
   const sidecarCandidates: string[] = [];
@@ -787,7 +797,10 @@ async function main() {
   }
   sidecarCandidates.push(input);
   for (const candidate of sidecarCandidates) {
-    const read = readScriptSettings(candidate, DEFAULT_FORMAT_OPTIONS);
+    // The sidecar is read OVER the app defaults, not the shipped ones: a
+    // knob the sidecar never mentions still comes from what the user chose
+    // as their own starting point, not from Screepub's.
+    const read = readScriptSettings(candidate, appDefaults);
     if (read === null) continue;
     if (read.settings === null) {
       // Malformed must never break a conversion that would otherwise
@@ -807,8 +820,15 @@ async function main() {
     );
     break;
   }
-  // One object, one merge: the flags over the sidecar over the defaults.
-  const formatForConvert = settings === undefined ? format : resolveFormatOptions(format, settings);
+  // One object, one merge: the flags over the sidecar over the app defaults
+  // over the shipped ones. No sidecar applied, so the base one layer down is
+  // the app defaults rather than convertPdf/convertFountain's own
+  // shipped-defaults base. A FULL object here (resolveFormatOptions always
+  // returns one) is what keeps that base from being resolved away when
+  // convert.ts merges it again over DEFAULT_FORMAT_OPTIONS.
+  const formatForConvert = settings === undefined
+    ? resolveFormatOptions(format, appDefaults)
+    : resolveFormatOptions(format, settings);
 
   // Progress goes to STDERR, never stdout. --json's contract is that stdout
   // is exactly one parseable object, and the app decodes it as such; a

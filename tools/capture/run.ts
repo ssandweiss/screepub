@@ -164,7 +164,14 @@ function engineRunner(engine: string[], library: string, running: Set<Running>, 
         stdin: 'ignore',
         stdout: 'pipe',
         stderr: 'pipe',
-        env: { ...process.env, SCREEPUB_LIBRARY: library },
+        // Piece C's app defaults (src/settings/app-defaults.ts) would
+        // otherwise become the base under every conversion this run makes,
+        // which means the pictures would drift with whatever the developer
+        // running this tool last chose in their own app settings. A folder
+        // under the SCRATCH library that this run never creates or writes
+        // to reads back as no settings at all, the same guarantee the test
+        // suite's own SCREEPUB_CONFIG_DIR gives it.
+        env: { ...process.env, SCREEPUB_LIBRARY: library, SCREEPUB_CONFIG_DIR: join(library, '.capture-app-settings') },
       });
     } catch (e) {
       return { code: null, stdout: '', stderr: `capture: could not start the engine: ${messageOf(e)}` };
