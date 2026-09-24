@@ -76,8 +76,8 @@ async function pluginInstalled(customize: string): Promise<boolean> {
  * Screepub converts through ebook-convert, not that menu. */
 export function listsKfxOutput(listing: string): boolean {
   const lines = listing.split(/\r?\n/);
-  const header = lines.find((line) => /^Type +Name +Version\b/.test(line));
-  if (header === undefined) return false;
+  const header = pluginTableHeader(listing);
+  if (header === null) return false;
   const nameAt = header.indexOf('Name');
   const versionAt = header.indexOf('Version');
   return lines.some((line) => {
@@ -85,6 +85,15 @@ export function listsKfxOutput(listing: string): boolean {
     const name = line.slice(nameAt, versionAt).trim();
     return name === 'KFX Output' || name.startsWith('KFX Output (');
   });
+}
+
+/** The header row of a `calibre-customize --list-plugins` table, found
+ * wherever it is in the listing rather than assumed to be its first line,
+ * or null when there is none. listsKfxOutput() reads the columns off it;
+ * exported so the test that checks a real Calibre's table finds it the same
+ * way. */
+export function pluginTableHeader(listing: string): string | null {
+  return listing.split(/\r?\n/).find((line) => /^Type +Name +Version\b/.test(line)) ?? null;
 }
 
 /** The conjunction behind `KfxStatus.ready`, pulled out as a pure function

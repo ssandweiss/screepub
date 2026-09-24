@@ -12,6 +12,7 @@ import {
   kfxScratchPath,
   computeReady,
   listsKfxOutput,
+  pluginTableHeader,
   KfxToolchainNotReadyError,
 } from '../src/export/kfx';
 import { calibreTool, CALIBRE_FORMAT_GUARDS } from '../src/export/calibre';
@@ -348,12 +349,22 @@ describe('listsKfxOutput', () => {
     // capture to the real thing wherever the real thing exists, so a calibre
     // that changes its table fails here rather than quietly dropping every
     // Kindle to AZW3.
+    // Found the way listsKfxOutput() finds it, not assumed to be line 0: a
+    // calibre that printed a warning first would still parse, and this must
+    // not fail on it any more than the parse does.
     const customize = calibreTool('calibre-customize');
     if (customize === null) return;
     const proc = Bun.spawn([customize, '--list-plugins'], { stdout: 'pipe', stderr: 'pipe' });
     const [, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
-    const header = stdout.split(/\r?\n/)[0];
-    expect(header).toMatch(/^Type +Name +Version +Disabled +Site Customization$/);
+    expect(pluginTableHeader(stdout)).toMatch(/^Type +Name +Version +Disabled +Site Customization$/);
+  });
+
+  test('the header is found wherever it is, and nowhere it is not', () => {
+    const table = listingOf(measured, measured.kfxOutput);
+    expect(pluginTableHeader(table)).toBe(measured.header);
+    expect(pluginTableHeader(`calibre: a warning printed first\n${table}`)).toBe(measured.header);
+    expect(listsKfxOutput(`calibre: a warning printed first\n${table}`)).toBe(true);
+    expect(pluginTableHeader(measured.kfxOutput.join('\n'))).toBe(null);
   });
 });
 
