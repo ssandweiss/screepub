@@ -157,6 +157,14 @@ against a ceiling of 200.
 > granted. And `core:window:allow-start-dragging`, so the strip along the
 > top of the window, and the gaps in the tab bar, can move it. Double-click
 > zoom was already in `core:default`. Still two commands.
+>
+> On 2026-09-23, piece C's gear removed `opener:allow-reveal-item-in-dir` and
+> added `dialog:allow-open`, a bare grant with nothing to scope: the plugin
+> only ever returns the folder the user picked in the OS's own dialog. The
+> library folder can move now (`app-settings`), and a permission fixed to
+> `$DOCUMENT/Screepub/**` cannot follow it there, so Show in Finder is the
+> engine's own `reveal` verb instead: the window hands over a path and the
+> engine does the showing. Still two commands.
 
 ### The updater archive is a release artifact, not a build artifact
 

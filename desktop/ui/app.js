@@ -64,6 +64,17 @@ export const argv = {
    *  index and writes into the user's Calibre, so it is only ever built in
    *  answer to a press of the button that says so (kfx.js). */
   kfxInstall: () => ['kfx-install', '--json'],
+
+  /** Read the app's own settings (the library folder, the format defaults)
+   *  with no `set`; write them when `set` is a JSON string, or the literal
+   *  string "null" to clear one field back to its default. */
+  appSettings: (set = null) =>
+    ['app-settings', '--json', set ? '--set' : null, set].filter((a) => a !== null),
+
+  /** Show `path` in the OS file manager, selected. The engine does the
+   *  revealing now (owner decision, 2026-09-23): the window hands over a
+   *  path it already has and nothing more. */
+  reveal: (path) => ['reveal', path, '--json'],
 };
 
 /** How much of an unparseable answer goes in the message a person reads.
@@ -123,9 +134,23 @@ let settleTimer = null;
  *  `kfx-status` is not either, for the same reason: kfx.js's probe() runs
  *  it when the Send tab opens and again every time the window gets focus
  *  back, read-only and never mid-job. `kfx-install` is the one that
- *  actually writes (into Calibre) and stays counted. */
+ *  actually writes (into Calibre) and stays counted.
+ *
+ *  `app-settings` without `--set` is the same shape again: the gear rereads
+ *  the settings file every time it is shown, read-only and never mid-job.
+ *  WITH `--set` it writes that file, so only the write counts, the same
+ *  split as kfx-status and kfx-install above.
+ *
+ *  `reveal` is not counted either, but for a different reason: it writes
+ *  nothing at all, and on some Linux desktops the xdg-open call behind it
+ *  can keep running until the file manager window it opened is closed.
+ *  Counting it could hold a restart off for as long as that window stayed
+ *  open, which is the controller's reason for leaving it out. */
 function countsTowardBusy(args) {
-  return args[0] !== argv.devices()[0] && args[0] !== argv.kfxStatus()[0];
+  if (args[0] === argv.devices()[0] || args[0] === argv.kfxStatus()[0]) return false;
+  if (args[0] === argv.appSettings()[0]) return args.includes('--set');
+  if (args[0] === 'reveal') return false;
+  return true;
 }
 
 /** Release every whenIdle() waiter if the engine has been quiet for
@@ -247,6 +272,31 @@ export async function pickScreenplay() {
   }
 }
 
+/** Ask the OS for a folder to save books into. Null when the reader
+ *  cancelled, and null, without opening anything, when a picker is already
+ *  up: it shares pickScreenplay's one-dialog-at-a-time guard and runs the
+ *  same onDialogClosed handlers in its finally, because the two pickers are
+ *  both modal and waiting on the same window. */
+export async function pickFolder({ defaultPath } = {}) {
+  if (dialogOpen) return null;
+  dialogOpen = true;
+  try {
+    const picked = await tauri().dialog.open({ directory: true, defaultPath });
+    // This plugin resolves a bare string for a single-folder pick on every
+    // platform this window ships for, but an array (the multi-select shape)
+    // or an object is normalised here rather than left for the caller to
+    // guess at.
+    if (Array.isArray(picked)) return picked[0] ?? null;
+    if (picked !== null && typeof picked === 'object') {
+      return typeof picked.path === 'string' ? picked.path : null;
+    }
+    return typeof picked === 'string' ? picked : null;
+  } finally {
+    dialogOpen = false;
+    for (const handler of dialogClosed) handler();
+  }
+}
+
 /** Every diagnostic line the engine writes, verbatim, as it writes it.
  *  Resolves to the function that stops listening. */
 export function onEngineLine(handler) {
@@ -288,25 +338,6 @@ export function onFileDrag({ over, drop }) {
 export async function openUrl(url) {
   try {
     await tauri().opener.openUrl(String(url));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Show a file where it lives, selected, in the OS file manager.
- *
- *  Scoped to the library in capabilities/default.json, so a path outside it
- *  is refused by Tauri rather than revealed. That scope uses `$DOCUMENT`,
- *  which means a library MOVED with $SCREEPUB_LIBRARY is outside it and this
- *  returns false. Honest and narrow beats broad and convenient: the day the
- *  settings gear can set the folder, the scope follows it there.
- *
- *  Resolves either way, like openUrl. A reveal that will not open is a
- *  disappointment, not a reason to throw inside a click handler. */
-export async function revealItem(path) {
-  try {
-    await tauri().opener.revealItemInDir(String(path));
     return true;
   } catch {
     return false;

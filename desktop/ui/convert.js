@@ -8,7 +8,7 @@
 // tests/desktop-ui.test.ts. Below the line is drawing: it holds no rule of
 // its own, so a live run is enough to check it.
 import {
-  runEngine, pickScreenplay, onProgress, argv, FORCE_FLAG, openUrl, revealItem,
+  runEngine, pickScreenplay, onProgress, argv, FORCE_FLAG, openUrl,
 } from './app.js';
 import { el, clear, text } from './dom.js';
 import { newIssueUrl, osLabel } from './feedback.js';
@@ -114,6 +114,17 @@ export function withoutCliRemedy(message, flag) {
   const sentences = whole.match(/[^.!?]+[.!?]*\s*/g) ?? [];
   const kept = sentences.filter((s) => !s.includes(needle)).join('').trim();
   return kept === '' ? whole : kept;
+}
+
+/** What Show in Finder says when the engine could not reveal the file.
+ *  Reuses failureFor, so a reveal refusal renders through the same rule as
+ *  every other one this surface shows: the engine's own sentence, and the
+ *  same fallback when it broke its contract and sent none. Success has
+ *  nothing to say here, the file manager showing the file already answers
+ *  the question. */
+export function revealFailureMessage(answer) {
+  if (answer === null || answer === undefined || answer.ok) return null;
+  return failureFor(answer.error).message;
 }
 
 /** What a failing answer means for the reader. The message is the engine's
@@ -436,6 +447,29 @@ function drawResult(path, answer) {
   ctx.state.script = scriptFrom(path, answer);
   const script = ctx.state.script;
 
+  // Show in Finder asks the ENGINE now (owner decision, 2026-09-23): the
+  // window's old reveal permission was fixed to the library's old path, and
+  // a library that can move needs a door that moves with it. Success says
+  // nothing, the file manager showing the file already answers the
+  // question; a refusal is shown the same way every other one on this
+  // screen is, through revealFailureMessage.
+  let revealNote = null;
+  async function showInFinder() {
+    let said;
+    try {
+      said = revealFailureMessage(await runEngine(argv.reveal(script.epubPath)));
+    } catch (err) {
+      said = err.message;
+    }
+    if (said === null) return;
+    if (revealNote === null) {
+      revealNote = el('p', { class: 'caption' }, said);
+      pane.append(revealNote);
+    } else {
+      text(revealNote, said);
+    }
+  }
+
   pane.append(
     el('div', { class: 'announce' },
       el('p', { class: 'book-title' }, script.title),
@@ -453,11 +487,11 @@ function drawResult(path, answer) {
           'Settings'),
         // Where the book actually is. The path is printed below, but a path
         // is something you read and then have to act on yourself; this is
-        // the acting. Scoped to the library, which is where epubPath points.
+        // the acting.
         el('button', {
           type: 'button',
           class: 'btn-quiet',
-          onclick: () => revealItem(script.epubPath),
+          onclick: showInFinder,
         }, revealLabel(navigator.userAgentData?.platform ?? navigator.platform)),
         el('button', { type: 'button', class: 'btn-quiet', onclick: reset },
           'Convert another'),

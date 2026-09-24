@@ -414,16 +414,21 @@ describe('the window is granted no more than it needs', () => {
     for (const permission of capability().permissions) {
       if (typeof permission === 'string') {
         // Only core:* may be a bare string: it is the window's own baseline,
-        // not a door onto the OS. TWO named exceptions. updater:default has
+        // not a door onto the OS. Three named exceptions. updater:default has
         // no allow-list to write, because the plugin can only ever reach
         // the endpoints in tauri.conf.json. That list is its scope, and the
         // updater tests at the end of this file pin it to one URL on this
         // repository. process:allow-restart has nothing to scope at all: it
         // restarts this app and nothing else (tauri-plugin-process 2.3.1,
-        // commands::restart is app.request_restart()).
+        // commands::restart is app.request_restart()). dialog:allow-open has
+        // no allow-list either, and for a related reason: the user chooses
+        // the folder themselves, in the OS's own picker, and the window only
+        // receives the path it comes back with and hands it to the engine
+        // (owner-approved 2026-09-23).
         const allowed = permission.startsWith('core:')
           || permission === 'updater:default'
-          || permission === 'process:allow-restart';
+          || permission === 'process:allow-restart'
+          || permission === 'dialog:allow-open';
         expect(`bare permission: ${permission}`).toBe(`bare permission: ${
           allowed ? permission : `${permission} MUST BE SCOPED`}`);
         continue;
@@ -433,24 +438,22 @@ describe('the window is granted no more than it needs', () => {
     }
   });
 
-  test('reveal is scoped to the library, not to the disk', () => {
-    // "Show in Finder" needs a path, and a path grant is the widest kind of
-    // door this window has. It is pinned to the library subtree so a bug that
-    // handed it any other path reveals nothing instead of revealing anything.
-    //
-    // $DOCUMENT resolves per-platform, which is the point: the same line is
-    // correct on all three. The consequence, accepted and recorded in
-    // app.js: a library MOVED with $SCREEPUB_LIBRARY falls outside this and
-    // reveal quietly fails there until the settings gear can move the scope
-    // with the folder.
-    const reveal = capability().permissions.find(
-      (p: unknown) => typeof p === 'object' && p !== null
-        && (p as { identifier: string }).identifier === 'opener:allow-reveal-item-in-dir',
-    );
-    expect(reveal).toBeDefined();
-    for (const entry of reveal.allow) {
-      expect(entry.path.startsWith('$DOCUMENT/Screepub/')).toBe(true);
-    }
+  test('the folder picker needs no allow-list: the OS dialog is the scope', () => {
+    // dialog:allow-open has nothing to narrow with an allow-list: the plugin
+    // hands back whatever folder the user navigated to and picked in the
+    // OS's own dialog, and the window only receives that path and gives it
+    // to the engine (pickFolder, app.js). Owner-approved 2026-09-23.
+    expect(capability().permissions).toContain('dialog:allow-open');
+  });
+
+  test('reveal is gone: the engine shows the file now, not the window', () => {
+    // Owner decision, 2026-09-23: the window's reveal permission was fixed
+    // to $DOCUMENT/Screepub, and once the library folder can move (piece
+    // C's app-settings), a fixed-path door cannot follow it there. The
+    // engine's own reveal verb does the showing now (ADR 2026-09-21's
+    // amendment), so the window needs no reveal door at all, scoped or not.
+    const raw = JSON.stringify(capability());
+    expect(raw).not.toContain('opener:allow-reveal-item-in-dir');
   });
 
   test('the opener may reach the issue tracker and the KFX download pages, and nothing else', async () => {

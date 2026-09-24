@@ -237,10 +237,14 @@ describe('the engine contract lives in exactly one file', () => {
       }),
       kfxStatus: argv.kfxStatus(),
       kfxInstall: argv.kfxInstall(),
+      appSettings: argv.appSettings(),
+      appSettingsSet: argv.appSettings('{"libraryPath":"/abs"}'),
+      reveal: argv.reveal('/s/script.epub'),
     };
     // Every builder the interface promises is exercised above.
     expect(Object.keys(argv).sort()).toEqual(
-      ['convert', 'devices', 'export', 'kfxInstall', 'kfxStatus', 'reconvert', 'send', 'settings', 'version'].sort(),
+      ['appSettings', 'convert', 'devices', 'export', 'kfxInstall', 'kfxStatus', 'reconvert',
+        'reveal', 'send', 'settings', 'version'].sort(),
     );
     for (const [name, args] of Object.entries(built)) {
       expect(`${name} has --json: ${args.includes('--json')}`).toBe(`${name} has --json: true`);
@@ -256,6 +260,15 @@ describe('the engine contract lives in exactly one file', () => {
     const { argv } = await import(join(UI, 'app.js'));
     expect(argv.kfxStatus()).toEqual(['kfx-status', '--json']);
     expect(argv.kfxInstall()).toEqual(['kfx-install', '--json']);
+  });
+
+  test('the gear’s two builders: a bare read, a write that carries --set, and a plain reveal', async () => {
+    const { argv } = await import(join(UI, 'app.js'));
+    expect(argv.appSettings()).toEqual(['app-settings', '--json']);
+    expect(argv.appSettings('{"libraryPath":"/abs"}')).toEqual(
+      ['app-settings', '--json', '--set', '{"libraryPath":"/abs"}'],
+    );
+    expect(argv.reveal('/s/script.epub')).toEqual(['reveal', '/s/script.epub', '--json']);
   });
 
   test('an optional flag brings its value and an absent one brings nothing', async () => {
@@ -498,6 +511,21 @@ describe('the Convert surface', () => {
     expect(main).toContain('convert.dragOver');
     expect(main).toContain('convert.dropPaths');
   });
+
+  test('Show in Finder goes through the engine, not a Tauri door the window no longer has', () => {
+    // Owner decision, 2026-09-23: the window's old reveal permission was
+    // fixed to the library's old path, and a library that can move needs a
+    // door that moves with it. The engine's own reveal verb does the
+    // showing now.
+    expect(convert).toContain('runEngine(argv.reveal(');
+    expect(convert).toContain('revealFailureMessage(');
+    // Gone from every file in this directory, not just renamed here.
+    for (const name of jsFiles()) {
+      expect(`${name} mentions revealItem: ${/revealItem/.test(read(name))}`).toBe(
+        `${name} mentions revealItem: false`,
+      );
+    }
+  });
 });
 
 describe('what the Convert surface decides', () => {
@@ -524,6 +552,7 @@ describe('what the Convert surface decides', () => {
     countLine: (answer: unknown) => string;
     scriptFrom: (path: string, answer: unknown) => Record<string, unknown>;
     droppedPath: (paths: unknown) => string | null;
+    revealFailureMessage: (answer: unknown) => string | null;
   };
   let convert: ConvertModule;
 
@@ -751,6 +780,18 @@ describe('what the Convert surface decides', () => {
     expect(convert.droppedPath([])).toBeNull();
     expect(convert.droppedPath(undefined as never)).toBeNull();
     expect(convert.droppedPath('/a/one.pdf' as never)).toBeNull();
+  });
+
+  test('Show in Finder says nothing on success and the engine’s own sentence on a refusal', () => {
+    expect(convert.revealFailureMessage({ ok: true, revealed: '/x/a.epub' })).toBeNull();
+    expect(convert.revealFailureMessage({
+      ok: false,
+      error: { code: 'reveal-failed', message: 'could not show /x/a.epub in the file manager' },
+    })).toBe('could not show /x/a.epub in the file manager');
+    // A contract-breaking refusal still says something a person can act on,
+    // the same fallback failureFor uses everywhere else on this screen.
+    expect(convert.revealFailureMessage({ ok: false, error: {} })).toBe(convert.NO_MESSAGE);
+    expect(convert.revealFailureMessage(undefined)).toBeNull();
   });
 
   test('the working line names the file, not its path', () => {
@@ -1161,6 +1202,69 @@ describe('one file dialog at a time', () => {
   });
 });
 
+describe('the folder picker door', () => {
+  // pickFolder shares pickScreenplay's guard rather than inventing a second
+  // one: they are both modal dialogs waiting on the same window, and a
+  // guard that only knew about one of them would let the other jump the
+  // queue.
+  type AppModule = {
+    pickFolder: (opts?: { defaultPath?: string }) => Promise<string | null>;
+    pickScreenplay: () => Promise<string | null>;
+    isDialogOpen: () => boolean;
+  };
+
+  function stubDialog(open: (options: unknown) => Promise<unknown>) {
+    (globalThis as unknown as { window: unknown }).window = {
+      __TAURI__: { dialog: { open } },
+    };
+  }
+
+  afterEach(() => { delete (globalThis as unknown as { window?: unknown }).window; });
+
+  test('resolves the chosen folder, and asks the plugin for a directory picker with the default path', async () => {
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    let seen: unknown;
+    stubDialog(async (options) => { seen = options; return '/Users/reader/Books'; });
+    expect(await app.pickFolder({ defaultPath: '/old/Books' })).toBe('/Users/reader/Books');
+    expect(seen).toEqual({ directory: true, defaultPath: '/old/Books' });
+  });
+
+  test('cancelling resolves null, and an array or object answer is normalised to a string', async () => {
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    stubDialog(async () => null);
+    expect(await app.pickFolder()).toBeNull();
+    // A future plugin version's multi-select shape: the first path wins,
+    // the same "one window converts one dropped script" rule droppedPath
+    // applies to a drag.
+    stubDialog(async () => ['/first', '/second']);
+    expect(await app.pickFolder()).toBe('/first');
+    stubDialog(async () => ({ path: '/from/object' }));
+    expect(await app.pickFolder()).toBe('/from/object');
+    stubDialog(async () => ({}));
+    expect(await app.pickFolder()).toBeNull();
+  });
+
+  test('a folder picker already open refuses a second one, the same guard pickScreenplay uses', async () => {
+    const app = (await import(join(UI, 'app.js'))) as AppModule;
+    let calls = 0;
+    let settle: ((v: string | null) => void) | null = null;
+    stubDialog(() => {
+      calls += 1;
+      return new Promise((resolve) => { settle = resolve; });
+    });
+    const first = app.pickFolder();
+    await Promise.resolve();
+    expect(app.isDialogOpen()).toBe(true);
+    // pickScreenplay would open a native picker of its own if the guard did
+    // not know about pickFolder too; it must answer null without asking.
+    expect(await app.pickScreenplay()).toBeNull();
+    expect(`dialogs opened: ${calls}`).toBe('dialogs opened: 1');
+    settle!('/picked');
+    expect(await first).toBe('/picked');
+    expect(app.isDialogOpen()).toBe(false);
+  });
+});
+
 describe('what runEngine does with the answer it is handed', () => {
   // Scope, stated plainly, because these used to claim more than they
   // covered: `invoke` is a stub here, so NOTHING below tests a transport.
@@ -1398,6 +1502,57 @@ describe('the window knows when the engine is working, and can restart', () => {
       expect(app.engineBusy()).toBe(true);
       expect(Bun.peek.status(app.whenIdle())).toBe('pending');
       await install;
+      expect(app.engineBusy()).toBe(false);
+    } finally {
+      delete win.window;
+    }
+  });
+
+  test('an app-settings read is never counted; a write, with --set, is', async () => {
+    // The gear rereads the settings file every time it is shown, read-only
+    // and never mid-job, the same shape as devices/kfx-status above. --set
+    // writes that file, so only the write counts, like kfx-install above.
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    win.window = {
+      __TAURI__: {
+        core: { invoke: () => new Promise((resolve) => setTimeout(() => resolve('{"ok":true}'), 10)) },
+      },
+    };
+    try {
+      const read = app.runEngine(app.argv.appSettings());
+      expect(app.engineBusy()).toBe(false);
+      expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
+      await read;
+
+      const write = app.runEngine(app.argv.appSettings('{"libraryPath":"/abs"}'));
+      expect(app.engineBusy()).toBe(true);
+      expect(Bun.peek.status(app.whenIdle())).toBe('pending');
+      await write;
+      expect(app.engineBusy()).toBe(false);
+    } finally {
+      delete win.window;
+    }
+  });
+
+  test('a reveal call is never counted either, though for a different reason than devices', async () => {
+    // reveal writes nothing at all: the file manager does the work, not the
+    // engine. It is still excluded, because on some Linux desktops the
+    // xdg-open call behind it can keep running until the file manager
+    // window it opened is closed, which could hold a restart off for as
+    // long as that window stayed open.
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    win.window = {
+      __TAURI__: {
+        core: { invoke: () => new Promise((resolve) => setTimeout(() => resolve('{"ok":true}'), 10)) },
+      },
+    };
+    try {
+      const call = app.runEngine(app.argv.reveal('/s/script.epub'));
+      expect(app.engineBusy()).toBe(false);
+      expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
+      await call;
       expect(app.engineBusy()).toBe(false);
     } finally {
       delete win.window;

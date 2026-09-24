@@ -1,13 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "This app's own two commands, plus scoped doors: the window may ask the OS to open the project's issue tracker and the three Calibre and Kindle Previewer download pages the KFX checklist links to, to reveal a file inside the Screepub library, and to ask the updater plugin to check, download and install. The updater grant has no allow-list to write; its scope is the one endpoint in tauri.conf.json. Two bare grants besides the doors: process:allow-restart, so the window can restart itself after an update once the engine is idle (the plugin's exit is not granted), and core:window:allow-start-dragging, so the strip along the top of the page, and the gaps in the tab bar, can move it. The shell and dialog plugins are still used only from Rust. See ADR 2026-09-21 — doors, not commands.",
+  "description": "This app's own two commands, plus scoped doors: the window may ask the OS to open the project's issue tracker and the three Calibre and Kindle Previewer download pages the KFX checklist links to, and to ask the updater plugin to check, download and install. The window may also show a native folder picker so the user can choose where books are saved; it only receives a path and hands it to the engine. The updater grant has no allow-list to write; its scope is the one endpoint in tauri.conf.json. Two bare grants besides the doors: process:allow-restart, so the window can restart itself after an update once the engine is idle (the plugin's exit is not granted), and core:window:allow-start-dragging, so the strip along the top of the page, and the gaps in the tab bar, can move it. The shell plugin is still used only from Rust; the dialog plugin's open is now used by the window too, for that one picker. See ADR 2026-09-21: doors, not commands. The engine reveals files now, not the window, per the ADR's amendment.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "updater:default",
     "process:allow-restart",
     "core:window:allow-start-dragging",
+    "dialog:allow-open",
     {
       "identifier": "opener:allow-open-url",
       "allow": [
@@ -16,10 +17,6 @@
         { "url": "https://calibre-ebook.com/download_windows" },
         { "url": "https://kdp.amazon.com/en_US/help/topic/G202131170" }
       ]
-    },
-    {
-      "identifier": "opener:allow-reveal-item-in-dir",
-      "allow": [{ "path": "$DOCUMENT/Screepub/**" }]
     }
   ]
 }
