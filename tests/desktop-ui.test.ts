@@ -760,10 +760,13 @@ describe('the Convert surface', () => {
       convert.indexOf('function buildLibrarySlot'),
       convert.indexOf('async function probeLibrary'),
     );
-    expect(slot).toContain("class: 'well-ask'");
+    // well-library is a name for the slot, with no rule of its own: the
+    // capture tool hides the slot by it (tools/capture/steps.js).
+    expect(slot).toContain("class: 'well-ask well-library'");
     expect(slot).not.toMatch(/class:\s*'library/);
-    const css = read('surfaces.css');
+    const css = cssFiles().map(read).join('\n');
     expect(css).not.toContain('.library');
+    expect(css).not.toContain('.well-library');
   });
 
   test('a hidden well-ask line takes no space: .well-ask is flex, which beats the UA [hidden] rule', () => {

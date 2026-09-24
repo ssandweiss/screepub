@@ -44,8 +44,31 @@ function hideStamp() {
   document.head.append(style);
 }
 
-async function dropped() {
+// The Convert page's library line says where books are saved, and in a
+// capture that is the tool's own scratch library, set by SCREEPUB_LIBRARY:
+// "Books are saved in /Users/Shared/Documents/Screepub, set by
+// SCREEPUB_LIBRARY." No reader ever sees that. The whole slot goes (the
+// line, its Change and Reset buttons, and the line under it), with
+// display: none rather than visibility, so the drop area sits where it
+// would with no slot at all. Hidden by a style that is in place before the
+// slot is drawn, so no frame ever shows it; the slot's absence, once the
+// drop well is up, fails the capture, for the same reason the stamp's does.
+function hideLibrarySlot() {
+  const style = document.createElement('style');
+  style.textContent = '.well-library { display: none !important; }';
+  document.head.append(style);
+}
+
+async function wellIdle() {
   await until(() => q('#surface-convert[data-state="idle"]'), 'the drop well');
+  if (!q('#surface-convert .well-library')) {
+    throw new Error('the drop well has no .well-library any more, so the capture\'s own ' +
+      'library folder would be in the pictures; update hideLibrarySlot in tools/capture/steps.js');
+  }
+}
+
+async function dropped() {
+  await wellIdle();
   // Exactly the event Tauri fires when a file lands on the window.
   fire('tauri://drag-drop', { paths: [cfg.demoPdf], position: { x: 400, y: 300 } });
   await until(() => {
@@ -63,7 +86,7 @@ async function dropped() {
 
 const SHOTS = {
   async drop() {
-    await until(() => q('#surface-convert[data-state="idle"]'), 'the drop well');
+    await wellIdle();
   },
   async result() {
     await dropped();
@@ -85,6 +108,7 @@ try {
   const run = SHOTS[cfg.shot];
   if (!run) throw new Error(`no capture steps for shot "${cfg.shot}"`);
   hideStamp();
+  hideLibrarySlot();
   await run();
   await document.fonts.ready;
   await settled(document);

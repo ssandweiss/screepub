@@ -40,6 +40,24 @@ describe('the engine gate', () => {
     expect(
       gateEngineCall(argv.reconvert(inLib('field-station.fountain'), inLib('field-station.epub'), '{}'), ctx),
     ).toEqual({ allow: true });
+    // The Convert page's library line reads the app settings every time the
+    // drop area draws. A read: it writes nothing, and the capture points it
+    // at a scratch settings folder anyway.
+    expect(gateEngineCall(argv.appSettings(), ctx)).toEqual({ allow: true });
+  });
+
+  test('it allows the app-settings READ only: any --set, or anything else on it, is refused', () => {
+    for (const args of [
+      argv.appSettings('{"libraryPath":"/Users/me/Books"}'),
+      argv.appSettings('{"keepScriptSettings":false}'),
+      argv.appSettings('{"formatDefaults":null}'),
+      [...argv.appSettings(), '--set', '{}'],
+      [...argv.appSettings(), '--debug'],
+      ['app-settings'],
+    ]) {
+      const a = gateEngineCall(args, ctx);
+      expect(`${args.join(' ')}: ${a.allow}`).toBe(`${args.join(' ')}: false`);
+    }
   });
 
   test('it refuses anything that reaches devices or writes outside the demo library, naming it', () => {
@@ -700,6 +718,20 @@ describe('the pieces that must agree with each other', () => {
     expect(block).not.toBeNull();
     const names = [...block![1]!.matchAll(/^ {2}async (\w+)\(\)/gm)].map((m) => m[1]).sort();
     expect(names).toEqual(SHOTS.filter((x) => x.kind === 'window').map((x) => x.name).sort());
+  });
+
+  test('the window still draws the library slot the step runner hides', () => {
+    // The Convert page's "Books are saved in ..." line names the capture's
+    // own scratch library, set by SCREEPUB_LIBRARY, which no reader ever
+    // has. steps.js hides the whole slot (the line, its buttons, and the
+    // line under it) by this class, and fails the capture if it is gone.
+    const convert = readFileSync(join(ROOT, 'desktop', 'ui', 'convert.js'), 'utf8');
+    const slot = convert.slice(
+      convert.indexOf('function buildLibrarySlot'), convert.indexOf('async function probeLibrary'));
+    expect([...slot.matchAll(/class: 'well-ask well-library'/g)].length).toBe(2);
+    const steps = readFileSync(join(ROOT, 'tools', 'capture', 'steps.js'), 'utf8');
+    expect(steps).toContain('.well-library');
+    expect(steps).toMatch(/\.well-library \{ display: none !important; \}/);
   });
 
   test('the window still draws the version stamp the step runner hides', () => {
