@@ -177,7 +177,16 @@ describe('the test-run guard: no test can reach the real settings file', () => {
     // a forgetful test made cannot land anywhere at all. Proves the
     // /dev/null claim in tests/isolate-app-settings.ts against the actual
     // guarded path this run is using, not just the literal by itself.
-    expect(() => writeAppSettings({}, appSettingsPath())).toThrow();
+    //
+    // The path is checked FIRST, and only then handed to writeAppSettings.
+    // Without that check, a run where the guard is missing (bun test from
+    // a subfolder that never reads bunfig.toml or .env.test; a developer
+    // who set SCREEPUB_CONFIG_DIR to somewhere real on purpose) would have
+    // this test itself write {} into whatever settings file appSettingsPath()
+    // actually resolves to on that run, which can be the real one.
+    const live = appSettingsPath();
+    expect(live).toBe(join(TEST_SETTINGS_GUARD, 'settings.json'));
+    expect(() => writeAppSettings({}, live)).toThrow();
   });
 
   test('a spawned CLI child inherits the same guarded path, and it is not the real one either', async () => {

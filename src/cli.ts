@@ -863,7 +863,7 @@ async function main() {
   let inputStem = join(dirname(input), basename(input, extname(input)));
   if (values.library) {
     try {
-      inputStem = libraryOutput(input, libRoot ?? libraryRoot());
+      inputStem = libraryOutput(input, libRoot);
       // Tuning the user already did beside the PDF follows the script in,
       // so the library does not start it over at the defaults.
       adoptSidecar(input, inputStem);
