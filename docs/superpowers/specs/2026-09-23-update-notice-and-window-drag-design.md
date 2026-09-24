@@ -130,7 +130,11 @@ people will never turn it on and never hear about an update.
   releases it on the line after it calls `runEngine()` for the save (which
   counts the call before its first await, so there is no moment with
   neither counted), or when it finds nothing left to save; a new script
-  (`scriptChanged()`) releases it with the rest of what was owed.
+  (`scriptChanged()`) releases it with the rest of what was owed. The same
+  hold covers an open native dialog: `withOneDialog()`, the one door every
+  dialog in `app.js` goes through, holds for as long as the dialog is up,
+  so a restart cannot land on the Save box between building a Kindle file
+  and writing it, or on the folder picker.
 - **Fallback:** if `restartReady()` is false, the label ends on today's
   `installedLine`: "Update installed. Quit and reopen Screepub to use 0.7.3."
   A refused `restart()` call (the realistic cause is a build missing

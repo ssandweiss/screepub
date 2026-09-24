@@ -2307,6 +2307,81 @@ describe('the window knows when the engine is working, and can restart', () => {
     expect(app.engineBusy()).toBe(false);
   });
 
+  test('an open native dialog holds a restart off, whichever door opened it, until it closes', async () => {
+    // Save a Kindle file builds the file, then opens the Save box with no
+    // engine call running; Change… opens the folder picker the same way. A
+    // restart waiting on whenIdle() used to be free to land on top of
+    // either. Every dialog goes through app.js's one guard, so the hold is
+    // taken there and no surface can forget it.
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+    const doors: [string, () => Promise<unknown>][] = [
+      ['pickScreenplay', () => app.pickScreenplay()],
+      ['pickFolder', () => app.pickFolder({ defaultPath: '/s' })],
+      ['saveDialog', () => app.saveDialog({ defaultPath: '/s/x.epub', filters: [] })],
+    ];
+    for (const [name, open] of doors) {
+      let close: (v: unknown) => void = () => {};
+      const pendingDialog = () => new Promise((resolve) => { close = resolve; });
+      win.window = {
+        __TAURI__: { core: { invoke: pendingDialog }, dialog: { open: pendingDialog, save: pendingDialog } },
+      };
+      try {
+        expect(`${name} before: ${app.engineBusy()}`).toBe(`${name} before: false`);
+        const asked = open();
+        expect(`${name} open: ${app.engineBusy()}`).toBe(`${name} open: true`);
+        let idle = false;
+        const waiting = app.whenIdle().then(() => { idle = true; });
+        await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+        expect(`${name} still open, idle: ${idle}`).toBe(`${name} still open, idle: false`);
+
+        close(null);
+        await asked;
+        expect(`${name} closed: ${app.engineBusy()}`).toBe(`${name} closed: false`);
+        await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+        await waiting;
+        expect(`${name} idle: ${idle}`).toBe(`${name} idle: true`);
+      } finally {
+        close(null);
+        await new Promise((r) => setTimeout(r, 0));
+        delete win.window;
+      }
+    }
+  });
+
+  test('a dialog that fails lets its hold go, and an ask refused by the guard takes none', async () => {
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    const settle = { resolve: (_v: unknown) => {}, reject: (_e: unknown) => {} };
+    win.window = {
+      __TAURI__: {
+        core: {
+          invoke: () => new Promise((resolve, reject) => {
+            settle.resolve = resolve;
+            settle.reject = reject;
+          }),
+        },
+      },
+    };
+    try {
+      const first = app.pickScreenplay();
+      expect(app.engineBusy()).toBe(true);
+      // Refused by the one-dialog guard: nothing opened, nothing held, and
+      // above all the FIRST dialog's hold is not released by it.
+      expect(await app.pickScreenplay()).toBeNull();
+      expect(app.engineBusy()).toBe(true);
+
+      settle.reject('no portal');
+      expect(await first.then(() => 'resolved', () => 'rejected')).toBe('rejected');
+      expect(app.engineBusy()).toBe(false);
+    } finally {
+      settle.resolve(null);
+      await new Promise((r) => setTimeout(r, 0));
+      delete win.window;
+    }
+  });
+
   test('restart is offered only when the process plugin is in this build', async () => {
     const app = await import(join(UI, 'app.js'));
     let relaunched = 0;

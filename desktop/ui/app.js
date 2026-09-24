@@ -109,11 +109,12 @@ export const argv = {
 const RAW_SHOWN = 300;
 
 // How many COUNTED engine calls are running right now (countsTowardBusy
-// leaves out the read-only ones). An update's restart waits for the engine
-// to have been quiet a while (update.js, installAndRestart), because every
-// counted call is somebody's work: a conversion, a copy to a Kindle, a
-// settings file half written. Counted HERE because this is the one door
-// every call goes through.
+// leaves out the read-only ones), plus every holdEngine() hold: a surface's
+// owed save still in its settle, or a native dialog that is still open. An
+// update's restart waits for the engine to have been quiet a while
+// (update.js, installAndRestart), because every counted call is somebody's
+// work: a conversion, a copy to a Kindle, a settings file half written.
+// Counted HERE because this is the one door every call goes through.
 let inFlight = 0;
 let idleWaiters = [];
 
@@ -327,15 +328,26 @@ export function isDialogOpen() {
  *  resolves whatever it resolves (or null, for a cancel), and always clears
  *  the guard and calls every onDialogClosed handler afterward, in a
  *  `finally`, so a rejection still cleans up and still reaches the caller
- *  (main.js needs the keyboard back either way). */
+ *  (main.js needs the keyboard back either way).
+ *
+ *  It also holds the engine (holdEngine) for as long as the dialog is up. A
+ *  dialog is the middle of someone's work with no engine call running:
+ *  Save a Kindle file builds the file, then asks where, then writes it
+ *  there, and Change… asks for a folder before it stores one. A restart
+ *  waiting on whenIdle() must not land on top of that. Taken here, the one
+ *  door every dialog passes, so no surface can forget it; taken only once
+ *  the guard has let this dialog through, so an ask it refuses holds
+ *  nothing and cannot release the open dialog's hold either. */
 async function withOneDialog(open) {
   if (dialogOpen) return null;
   dialogOpen = true;
+  const release = holdEngine();
   try {
     const result = await open();
     return result ?? null;
   } finally {
     dialogOpen = false;
+    release();
     for (const handler of dialogClosed) handler();
   }
 }
