@@ -272,7 +272,7 @@ describe('screepub settings (through the CLI)', () => {
     expect(answer.error.code).toBe('unsupported-type');
   });
 
-  test('devices rejects --set: it belongs to settings, not every verb', () => {
+  test('devices rejects --set: it belongs to settings and app-settings, not every verb', () => {
     // The brief wires this rejection into cli.ts alongside `devices`
     // rejecting `--device`; without a test, a future edit could delete the
     // check and devices would silently ignore --set instead of failing loud.

@@ -67,70 +67,65 @@ function xdgDocuments(home: string, env: Env): string | null {
   return line === undefined ? null : asDocuments(line.slice(line.indexOf('=') + 1));
 }
 
-/** Where the library lives, per platform.
- *
- * Under Documents, NOT under the platform's application-state directory. A
- * converted .epub and .fountain are the user's documents — things they open,
- * copy to a reader, email and back up — not our state, and ~/.local/share is
- * for what a user is not expected to browse. It also matches the SwiftUI app
- * this window replaces (~/Documents/Screepub), so a Mac user running both
- * does not silently accumulate two libraries in two places.
- *
- * SCREEPUB_LIBRARY wins everywhere. It is the seam the tests use — no test
- * may write into a real home directory, and without an override there is no
- * way to exercise this at all — and it is the escape hatch for anyone who
- * keeps their scripts somewhere else.
- *
- * Next in line is the folder the user chose in the app (piece C), read from
- * the app settings file's `libraryPath`. It loses to SCREEPUB_LIBRARY on
- * purpose: the env var is the one override a test or a script author can
- * always reach, and it would be a strange escape hatch if a saved app
- * setting could override it back. `settingsPath` lets a test point that
- * read at a scratch file instead of the real one; production leaves it
- * unset, and the default read is `appSettingsPath(platform, env)`, so a
- * SCREEPUB_CONFIG_DIR in the caller's own env is honoured there too. */
-/** The stored `libraryPath`, resolved, but ONLY when it is one `libraryRoot`
- * itself would honour: an absolute path for the given platform. Anything
- * else (relative, not a string, missing file) reads as `null`, so a caller
- * such as `app-settings` can report "the chosen folder" without ever naming
- * one the engine would actually ignore.
- *
- * Split out of `libraryRoot` rather than re-read by its callers, so the two
- * can never disagree on what counts as a usable choice: the same reasoning
- * `src/parser/cue.ts`'s shared discriminator exists for. */
+/** The user's home folder as this engine sees it: HOME first (set on POSIX,
+ * and by some Windows shells), then USERPROFILE (Windows' own name for it),
+ * then the OS's own answer. Shared by `platformLibraryDefault` and by
+ * `app-settings`'s `home` answer, so the two can never name a different
+ * folder `~` for the same environment. (`src/settings/app.ts` keeps its own
+ * copy of this rule for `appSettingsPath`, on purpose: it is shared with the
+ * parallel piece B branch and is not touched here.) */
+export function homeFolder(env: Env): string {
+  return env.HOME || env.USERPROFILE || homedir();
+}
+
+/** SCREEPUB_LIBRARY, trimmed, or `null` when it is unset or blank. The one
+ * rule for whether the env override counts as "set", shared by
+ * `libraryRoot` (which honours it) and by `app-settings` (which reports it
+ * as `fromEnv`), so the two can never disagree over a value that is really
+ * just whitespace. */
+export function envLibraryOverride(env: Env): string | null {
+  const trimmed = (env.SCREEPUB_LIBRARY ?? '').trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+/** `value`, resolved, when it is absolute for `platform`; `null` otherwise.
+ * The PLATFORM's own rule, not the host's: `isAbsolute` on a POSIX build
+ * says "C:\\Users\\Ada" is relative, so a host-flavoured check would throw
+ * away a perfectly good path. The one place that decides what an absolute
+ * library path even means, so a stored choice and a caller validating a new
+ * one (`app-settings --set`) can never disagree about which paths
+ * `libraryRoot` would honour. */
+export function resolvedIfAbsolute(platform: NodeJS.Platform, value: string): string | null {
+  const path = platform === 'win32' ? win32 : posix;
+  return path.isAbsolute(value) ? path.resolve(value) : null;
+}
+
+/** The stored `libraryPath`, but ONLY when `resolvedIfAbsolute` would accept
+ * it: a relative path, an empty or whitespace-only string, or a value that
+ * is not a string at all (readAppSettings already turns a missing,
+ * unreadable or corrupt settings file into `{}`, so `chosen` is simply
+ * `undefined` in all of those cases) all read as `null` rather than being
+ * honoured halfway, so a caller such as `app-settings` can report "the
+ * chosen folder" without ever naming one the engine would ignore. */
 export function chosenLibraryPath(
   platform: NodeJS.Platform = process.platform,
   env: Env = process.env,
   settingsPath?: string,
 ): string | null {
-  // The PLATFORM's own path rules, not the host's: `isAbsolute` on a POSIX
-  // build says "C:\\Users\\Ada" is relative, so a host-flavoured check would
-  // throw away a perfectly good path — and would do it only when the answer
-  // is computed for a platform other than the one asking, which is exactly
-  // the case a test can reach and a user cannot.
-  const path = platform === 'win32' ? win32 : posix;
-
-  // A relative path, an empty or whitespace-only string, or a value that is
-  // not a string at all (readAppSettings already turns a missing file,
-  // unreadable file or corrupt JSON into `{}`, so `chosen` is simply
-  // `undefined` in all of those cases) all fall through rather than being
-  // honoured halfway. Absolute is judged by the PLATFORM's own rule, same
-  // reasoning as `path` above: a stored `C:\Books` is a real folder on
-  // win32 and gibberish on posix.
   const chosen = readAppSettings(settingsPath ?? appSettingsPath(platform, env)).libraryPath;
-  return typeof chosen === 'string' && path.isAbsolute(chosen) ? path.resolve(chosen) : null;
+  return typeof chosen === 'string' ? resolvedIfAbsolute(platform, chosen) : null;
 }
 
 /** The library's location with no chosen folder and no `SCREEPUB_LIBRARY`
  * override: the platform default alone. Exported so `app-settings` can
- * report it (the window's Reset target) through this one function rather
+ * report it (the window's Reset target) through this one function, rather
  * than a second copy of the rules below, which is how the two would drift. */
 export function platformLibraryDefault(
   platform: NodeJS.Platform = process.platform,
   env: Env = process.env,
 ): string {
   const path = platform === 'win32' ? win32 : posix;
-  const home = env.HOME || env.USERPROFILE || homedir();
+  const home = homeFolder(env);
   // macOS and Windows both keep Documents at a fixed path under the home
   // directory. macOS localizes only the DISPLAY name, so ~/Documents is
   // right in every language. Windows lets the folder be relocated (OneDrive
@@ -143,13 +138,35 @@ export function platformLibraryDefault(
   return path.join(documents, 'Screepub');
 }
 
+/** Where the library lives, per platform.
+ *
+ * Under Documents, NOT under the platform's application-state directory. A
+ * converted .epub and .fountain are the user's documents (things they open,
+ * copy to a reader, email and back up), not our state, and ~/.local/share
+ * is for what a user is not expected to browse. It also matches the SwiftUI
+ * app this window replaces (~/Documents/Screepub), so a Mac user running
+ * both does not silently accumulate two libraries in two places.
+ *
+ * SCREEPUB_LIBRARY wins everywhere. It is the seam the tests use: no test
+ * may write into a real home directory, and without an override there is no
+ * way to exercise this at all. It is also the escape hatch for anyone who
+ * keeps their scripts somewhere else.
+ *
+ * Next in line is the folder the user chose in the app (piece C), read from
+ * the app settings file's `libraryPath`. It loses to SCREEPUB_LIBRARY on
+ * purpose: the env var is the one override a test or a script author can
+ * always reach, and it would be a strange escape hatch if a saved app
+ * setting could override it back. `settingsPath` lets a test point that
+ * read at a scratch file instead of the real one; production leaves it
+ * unset, and the default read is `appSettingsPath(platform, env)`, so a
+ * SCREEPUB_CONFIG_DIR in the caller's own env is honoured there too. */
 export function libraryRoot(
   platform: NodeJS.Platform = process.platform,
   env: Env = process.env,
   settingsPath?: string,
 ): string {
-  const override = (env.SCREEPUB_LIBRARY ?? '').trim();
-  if (override !== '') return resolve(override);
+  const override = envLibraryOverride(env);
+  if (override !== null) return resolve(override);
 
   // The chosen folder wins over the platform default, but only when it is
   // usable: chosenLibraryPath is the one place that decides "usable".

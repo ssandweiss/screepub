@@ -4,10 +4,11 @@
 // not writable from here. Like the other verb handlers, this RETURNS a
 // result and never prints; cli.ts owns stdout.
 import { accessSync, constants, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { posix, win32 } from 'node:path';
 import { CliError, errorMessage } from './cli-errors';
-import { chosenLibraryPath, libraryRoot, platformLibraryDefault } from './library';
+import {
+  chosenLibraryPath, envLibraryOverride, homeFolder, libraryRoot, platformLibraryDefault,
+  resolvedIfAbsolute,
+} from './library';
 import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from './options';
 import { appSettingsPath, writeAppSettings, type AppSettings } from './settings/app';
 import { appDefaultOptions, appDefaultsCustomized } from './settings/app-defaults';
@@ -67,30 +68,39 @@ function plainReason(err: unknown): string {
   const code = (err as NodeJS.ErrnoException)?.code;
   if (code === 'EACCES' || code === 'EPERM') return 'permission denied';
   if (code === 'ENOTDIR') return 'part of that path is not a folder';
+  // mkdirSync(recursive) on a path that ALREADY EXISTS AS A FILE (the exact
+  // target, not a parent segment: that case is ENOTDIR above) fails EEXIST.
+  if (code === 'EEXIST') return 'that is a file, not a folder';
   if (code === 'EROFS') return 'that location is read-only';
   if (code === 'ENOSPC') return 'no space left on the disk';
   if (code === 'ENAMETOOLONG') return 'that path is too long';
   return errorMessage(err);
 }
 
-/** `libraryPath` from a validated `--set` patch: `undefined` to remove the
- * key (writeAppSettings' own convention for a reset), or the resolved,
- * created, checked-writable folder. Throws `bad-settings` for anything else,
- * BEFORE any settings file write: the folder made here is the check, not a
- * side effect to undo on failure. */
-function validatedLibraryPath(value: unknown, platform: NodeJS.Platform): string | undefined {
+/** Pure check for `libraryPath`: no filesystem access at all. `null` reads
+ * as Reset and returns `undefined`; a good absolute string comes back
+ * resolved, ready for `createdWritableFolder` to create and probe LATER,
+ * only once every other key in the same patch has passed its own pure check
+ * too. Throws `bad-settings` for anything else. */
+function checkedLibraryPath(value: unknown, platform: NodeJS.Platform): string | undefined {
   if (value === null) return undefined;
   if (typeof value !== 'string') {
     throw new CliError('bad-settings', 'libraryPath must be a full path or null');
   }
-  // The PLATFORM's own rule, same reasoning as libraryRoot and
-  // chosenLibraryPath: a relative-looking path must be refused even when it
-  // happens to look absolute on the machine running this process.
-  const path = platform === 'win32' ? win32 : posix;
-  if (!path.isAbsolute(value)) {
+  const resolved = resolvedIfAbsolute(platform, value);
+  if (resolved === null) {
     throw new CliError('bad-settings', 'the library folder must be a full path');
   }
-  const resolved = path.resolve(value);
+  return resolved;
+}
+
+/** The one side effect this handler makes for `libraryPath`: creates
+ * `resolved` (recursive) and checks it is writable. Called LAST, after
+ * every pure check on the WHOLE patch has already passed, so a call refused
+ * for some other reason (a bad formatDefaults alongside a perfectly good,
+ * brand new libraryPath) never leaves a folder behind that it did not, in
+ * the end, actually choose to store. */
+function createdWritableFolder(resolved: string): string {
   try {
     mkdirSync(resolved, { recursive: true });
     accessSync(resolved, constants.W_OK);
@@ -102,7 +112,8 @@ function validatedLibraryPath(value: unknown, platform: NodeJS.Platform): string
 
 /** `formatDefaults` from a validated `--set` patch: `undefined` to remove
  * the key, or the FULL resolved object (every knob present and clamped),
- * never the partial the caller sent. */
+ * never the partial the caller sent. Pure: resolveFormatOptions touches
+ * nothing on disk. */
 function validatedFormatDefaults(value: unknown): FormatOptions | undefined {
   if (value === null) return undefined;
   if (typeof value !== 'object' || Array.isArray(value)) {
@@ -112,16 +123,15 @@ function validatedFormatDefaults(value: unknown): FormatOptions | undefined {
 }
 
 function buildAnswer(file: string, platform: NodeJS.Platform, env: Env): AppSettingsResult {
-  const home = env.HOME || env.USERPROFILE || homedir();
   return {
     file,
     library: {
       path: libraryRoot(platform, env, file),
       chosen: chosenLibraryPath(platform, env, file),
       platformDefault: platformLibraryDefault(platform, env),
-      fromEnv: (env.SCREEPUB_LIBRARY ?? '').trim() !== '',
+      fromEnv: envLibraryOverride(env) !== null,
     },
-    home,
+    home: homeFolder(env),
     formatDefaults: appDefaultOptions(file),
     shippedDefaults: DEFAULT_FORMAT_OPTIONS,
     customized: appDefaultsCustomized(file),
@@ -160,14 +170,42 @@ export function appSettingsCommand(
       }
     }
 
-    // Both knobs are validated in full BEFORE writeAppSettings is called
-    // once: a good formatDefaults alongside a bad libraryPath must store
-    // neither, not the one that happened to validate first.
-    const write: Partial<AppSettings> = {};
-    if ('libraryPath' in patch) write.libraryPath = validatedLibraryPath(patch.libraryPath, platform);
-    if ('formatDefaults' in patch) write.formatDefaults = validatedFormatDefaults(patch.formatDefaults);
+    const hasLibraryPath = 'libraryPath' in patch;
+    const hasFormatDefaults = 'formatDefaults' in patch;
 
-    writeAppSettings(write, file);
+    // An empty object changes nothing: it answers like a plain read rather
+    // than writing (and potentially overwriting an existing, even corrupt,
+    // file with) `{}`.
+    if (!hasLibraryPath && !hasFormatDefaults) {
+      return buildAnswer(file, platform, env);
+    }
+
+    // Phase 1: every PURE check runs first, for BOTH keys, before either one
+    // touches disk. A bad formatDefaults must refuse before a good, brand
+    // new libraryPath's folder is ever created, and a bad libraryPath must
+    // refuse before formatDefaults is stored: neither check below has a
+    // side effect, so which one the caller's JSON happened to name first
+    // cannot change that.
+    const write: Partial<AppSettings> = {};
+    const libraryFolder = hasLibraryPath ? checkedLibraryPath(patch.libraryPath, platform) : undefined;
+    if (hasFormatDefaults) write.formatDefaults = validatedFormatDefaults(patch.formatDefaults);
+
+    // Phase 2: the one side effect (creating and probing the chosen
+    // folder), run LAST, only once every pure check above has already
+    // passed.
+    if (hasLibraryPath) {
+      write.libraryPath = libraryFolder === undefined ? undefined : createdWritableFolder(libraryFolder);
+    }
+
+    try {
+      writeAppSettings(write, file);
+    } catch (err) {
+      // The settings file's own folder can be unwritable too (a locked
+      // config directory), which is not the library-folder check above at
+      // all. Wrapped the same way, so a raw fs error never reaches the
+      // caller as an uncaught 'internal' failure.
+      throw new CliError('bad-settings', `cannot save the settings file: ${plainReason(err)}`);
+    }
   }
 
   return buildAnswer(file, platform, env);

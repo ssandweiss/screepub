@@ -174,6 +174,10 @@ with either or both of:
   libraryPath     a full path, or null to go back to the default folder
   formatDefaults  a FormatOptions object, or null to go back to Screepub's own
 
+formatDefaults REPLACES the stored defaults: any knob it leaves out goes
+back to Screepub's own, unlike screepub settings --set, which moves only
+the knobs it names and leaves the rest of a script's own tuning alone.
+
 When SCREEPUB_LIBRARY is set, it wins over the chosen folder: books land
 there no matter what libraryPath says.
 

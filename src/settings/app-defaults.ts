@@ -5,8 +5,8 @@
 // explicit flags > the script's sidecar > these > DEFAULT_FORMAT_OPTIONS,
 // through the one merge resolveFormatOptions already is.
 //
-// Task 3 (not this one) adds the verb that WRITES `formatDefaults` into the
-// app settings file. This module only reads it.
+// `screepub app-settings` (src/cli-app-settings.ts) is the verb that WRITES
+// `formatDefaults` into the app settings file. This module only reads it.
 import { appSettingsPath, readAppSettings } from './app';
 import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from '../options';
 

@@ -7,7 +7,7 @@
 // way tests/cli-app-defaults.test.ts does.
 import { afterAll, describe, expect, test } from 'bun:test';
 import {
-  chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync,
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -222,6 +222,24 @@ describe('appSettingsCommand: refusals before anything is written', () => {
     expect(existsSync(file)).toBe(false);
   });
 
+  test('a regular file already sitting at the exact libraryPath is refused in plain words', () => {
+    // mkdirSync(recursive) on a path that already exists AS A FILE (not a
+    // parent segment, the exact target) fails EEXIST, not ENOTDIR. Node's
+    // own text for it ("EEXIST: file already exists, mkdir '...'") must not
+    // reach the caller raw.
+    const already = join(scratch('eexist'), 'already-a-file');
+    writeFileSync(already, 'x');
+    const file = settingsFile();
+    let err: unknown;
+    try {
+      appSettingsCommand({ set: JSON.stringify({ libraryPath: already }) }, { settingsPath: file, platform: 'linux', env: env() });
+    } catch (e) { err = e; }
+    expect(codeOf(err)).toBe('bad-settings');
+    expect((err as Error).message).toContain('that is a file, not a folder');
+    expect((err as Error).message).not.toContain('EEXIST');
+    expect(existsSync(file)).toBe(false);
+  });
+
   // Root bypasses ordinary permission bits, and Windows has no chmod-style
   // read-only-directory story that mkdirSync/accessSync would trip on here.
   test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
@@ -237,6 +255,33 @@ describe('appSettingsCommand: refusals before anything is written', () => {
       } catch (e) { err = e; }
       expect(codeOf(err)).toBe('bad-settings');
       expect((err as Error).message).toContain('permission denied');
+      // The mapped phrase, not the raw code: today's message would pass a
+      // bare toContain('permission denied') even with the EACCES mapping
+      // deleted, because Node's own "EACCES: permission denied, mkdir ..."
+      // happens to contain that same substring. This is the assertion that
+      // actually proves the mapping ran.
+      expect((err as Error).message).not.toContain('EACCES');
+      expect(existsSync(file)).toBe(false);
+    },
+  );
+
+  // The test above targets a CHILD of the locked folder, so mkdirSync fails
+  // on the parent and accessSync's own W_OK check is never reached. This
+  // one targets the locked folder ITSELF, which already exists: mkdirSync
+  // is then a no-op, and accessSync is what actually refuses it.
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'the write-permission check itself refuses an existing, unwritable folder',
+    () => {
+      const locked = scratch('locked-existing');
+      chmodSync(locked, 0o500);
+      const file = settingsFile();
+      let err: unknown;
+      try {
+        appSettingsCommand({ set: JSON.stringify({ libraryPath: locked }) }, { settingsPath: file, platform: 'linux', env: env() });
+      } catch (e) { err = e; }
+      expect(codeOf(err)).toBe('bad-settings');
+      expect((err as Error).message).toContain('permission denied');
+      expect((err as Error).message).not.toContain('EACCES');
       expect(existsSync(file)).toBe(false);
     },
   );
@@ -253,6 +298,61 @@ describe('appSettingsCommand: refusals before anything is written', () => {
     expect(codeOf(err)).toBe('bad-settings');
     expect(existsSync(file)).toBe(false);
   });
+
+  test('a good NEW libraryPath alongside a bad formatDefaults creates no folder, stores neither', () => {
+    // The order the brief's own bug lived in: libraryPath validated (and,
+    // before this fix, CREATED) before formatDefaults' type was even
+    // checked. Every pure check must run for BOTH keys before either one
+    // touches disk, so this folder must never come into existence.
+    const file = settingsFile();
+    const newFolder = join(scratch('would-be-lib'), 'not-yet-made');
+    let err: unknown;
+    try {
+      appSettingsCommand(
+        { set: JSON.stringify({ libraryPath: newFolder, formatDefaults: 'nope' }) },
+        { settingsPath: file, platform: 'linux', env: env() },
+      );
+    } catch (e) { err = e; }
+    expect(codeOf(err)).toBe('bad-settings');
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(newFolder)).toBe(false);
+  });
+
+  test('--set with an empty object changes nothing: it answers like a plain read and writes nothing', () => {
+    const file = settingsFile();
+    const result = appSettingsCommand({ set: '{}' }, { settingsPath: file, platform: 'linux', env: env() });
+    expect(result.library.chosen).toBeNull();
+    expect(result.customized).toBe(false);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  test('--set with an empty object does not touch an existing file, even a corrupt one', () => {
+    const file = settingsFile();
+    writeFileSync(file, 'not json at all');
+    appSettingsCommand({ set: '{}' }, { settingsPath: file, platform: 'linux', env: env() });
+    expect(readFileSync(file, 'utf8')).toBe('not json at all');
+  });
+
+  // Root bypasses ordinary permission bits, and Windows has no chmod-style
+  // read-only-directory story that would make the settings file itself
+  // unwritable here.
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'a settings file that cannot be saved is bad-settings, not a raw crash',
+    () => {
+      const locked = scratch('locked-config');
+      chmodSync(locked, 0o500);
+      const file = join(locked, 'settings.json');
+      let err: unknown;
+      try {
+        // libraryPath: null is a pure reset, so the ONLY thing that can fail
+        // here is writeAppSettings' own write, not the library-folder check.
+        appSettingsCommand({ set: JSON.stringify({ libraryPath: null }) }, { settingsPath: file, platform: 'linux', env: env() });
+      } catch (e) { err = e; }
+      expect(codeOf(err)).toBe('bad-settings');
+      expect((err as Error).message).toContain('permission denied');
+      expect((err as Error).message).not.toContain('EACCES');
+    },
+  );
 });
 
 describe('appSettingsCommand: one write covers both keys', () => {
@@ -273,7 +373,10 @@ describe('appSettingsCommand: one write covers both keys', () => {
     expect((onDisk.formatDefaults as Record<string, unknown>).justifyText).toBe(true);
     // lastRoute (piece B's key) survived a write this verb made.
     expect(onDisk.lastRoute).toBe('kindle');
-    // One write, one file: no leftover temp artifact from a second pass.
+    // Both keys landed together, asserted above from the ONE result and the
+    // ONE file read back. This only confirms no stray temp file was left
+    // beside settings.json; it does not by itself prove writeAppSettings
+    // was called exactly once (nothing here spies on the writer).
     expect(readdirSync(dirname(file))).toEqual(['settings.json']);
   });
 });
@@ -403,13 +506,48 @@ describe('screepub app-settings (through the CLI)', () => {
     expect(stdout.trim().split('\n')[1]).toBe('new scripts start from: your own defaults');
   });
 
-  test('refuses a foreign flag as a usage error', async () => {
+  test('human output says "the folder you chose" once one is stored', async () => {
     const configDir = scratch('config');
-    const { stdout, exitCode } = await runCli(['app-settings', '--device', 'x', '--json'], { SCREEPUB_CONFIG_DIR: configDir });
-    expect(exitCode).toBe(1);
-    const answer = JSON.parse(stdout);
-    expect(answer.error.code).toBe('usage');
-    expect(answer.error.message).toContain('--device');
+    const chosen = scratch('chosen-human');
+    await runCli(
+      ['app-settings', '--set', JSON.stringify({ libraryPath: chosen }), '--json'],
+      { SCREEPUB_CONFIG_DIR: configDir },
+    );
+    const { stdout, exitCode } = await runCli(['app-settings'], { SCREEPUB_CONFIG_DIR: configDir });
+    expect(exitCode).toBe(0);
+    const line = stdout.trim().split('\n')[0];
+    expect(line).toContain('books are saved in');
+    expect(line).toContain('the folder you chose');
+  });
+
+  test('human output says "set by SCREEPUB_LIBRARY" when the env override wins', async () => {
+    const configDir = scratch('config');
+    const envLib = scratch('env-lib-human');
+    const { stdout, exitCode } = await runCli(['app-settings'], { SCREEPUB_CONFIG_DIR: configDir, SCREEPUB_LIBRARY: envLib });
+    expect(exitCode).toBe(0);
+    const line = stdout.trim().split('\n')[0];
+    expect(line).toContain('books are saved in');
+    expect(line).toContain('set by SCREEPUB_LIBRARY');
+  });
+
+  // Table-driven, the same shape tests/cli-kfx.test.ts uses for its FOREIGN
+  // list: app-settings must refuse every flag that belongs to another verb.
+  // --set is deliberately absent here: app-settings shares it with settings.
+  const FOREIGN: [string[], string][] = [
+    [['--device', 'x'], '--device'],
+    [['--for', 'kindle'], '--for'],
+    [['--fountain', '/x.fountain'], '--fountain'],
+    [['--options-json', '{}'], '--options-json'],
+  ];
+
+  test('refuses every other verb\'s flags as usage errors', async () => {
+    const configDir = scratch('config');
+    for (const [flags, name] of FOREIGN) {
+      const { stdout, exitCode } = await runCli(['app-settings', ...flags, '--json'], { SCREEPUB_CONFIG_DIR: configDir });
+      const answer = JSON.parse(stdout);
+      expect(`${name}: ${exitCode} ${answer.ok} ${answer.error?.code}`).toBe(`${name}: 1 false usage`);
+      expect(answer.error.message).toContain(name);
+    }
   });
 
   test('refuses a stray positional', async () => {
@@ -428,5 +566,31 @@ describe('screepub app-settings (through the CLI)', () => {
     expect(stdout).toContain('libraryPath');
     expect(stdout).toContain('formatDefaults');
     expect(stdout).toContain('SCREEPUB_LIBRARY');
+  });
+
+  test('--help says formatDefaults REPLACES the stored defaults, unlike settings --set', async () => {
+    const { stdout } = await runCli(['app-settings', '--help']);
+    expect(stdout).toContain('REPLACES');
+    expect(stdout).toContain('settings --set');
+  });
+
+  test('the top-level --help usage lists app-settings', async () => {
+    const { stdout, exitCode } = await runCli(['--help']);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('screepub app-settings [--set <json>] [--json]');
+    expect(stdout).toContain('where books land, and what new scripts start from');
+  });
+
+  test('devices and send both refuse --set, naming settings AND app-settings as its owners', async () => {
+    // send refuses --set before it ever looks at the positional, so a file
+    // that does not exist is fine here: this is a usage refusal, not a
+    // send attempt.
+    const devices = await runCli(['devices', '--set', '{}', '--json']);
+    expect(JSON.parse(devices.stdout).error.message)
+      .toBe('devices takes no --set (--set belongs to settings and app-settings)');
+
+    const send = await runCli(['send', 'x.epub', '--set', '{}', '--json']);
+    expect(JSON.parse(send.stdout).error.message)
+      .toBe('send takes no --set (--set belongs to settings and app-settings)');
   });
 });
