@@ -4755,30 +4755,40 @@ describe('the Send surface', () => {
     expect(send).toContain('state.script.settings');
   });
 
-  test('every call on the library EPUB takes its turn with the Settings page’s saves', () => {
+  test('every call on the library EPUB takes its turn with the Settings page’s saves, and nothing else does', async () => {
     // A moved knob's save rebuilds the library EPUB in place, and an export
-    // can rebuild it too (the MOBI rung); a send, a save or an opened route
-    // reads it. tune.js's withBook() is the one queue for all of them, and
-    // the Tune test "the book waits its turn" drives it. What is pinned here
-    // is that send.js hands it every such call: one door, onBook(), and no
-    // export, send or route that reaches runEngine() around it.
+    // can rebuild it too (the MOBI rung); a send or a save copies it.
+    // tune.js's withBook() is the one queue for all of them, and the Tune
+    // test "the book waits its turn" drives it. What is pinned here is that
+    // send.js hands it every such call, through one door, onBook(), and
+    // nothing that only opens another program: that would hold the Settings
+    // page's saves for as long as the program took to answer (on Linux, the
+    // Send to Kindle route's folder can stay open until the reader closes
+    // it). send-routes-ui.test.ts drives both halves on the page.
+    const sendUi = await import(join(UI, 'send.js'));
+    expect(['device', 'save-epub', 'save-kindle', 'open', 'setup', null].map(sendUi.readsTheBook))
+      .toEqual([true, true, true, false, false, false]);
+
     const code = send.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/.*$/gm, ' ');
     const imported = /import \{[^}]*\bwithBook\b[^}]*\} from '\.\/tune\.js'/.test(code);
     expect(`send.js imports tune.js's withBook: ${imported}`).toBe('send.js imports tune.js\'s withBook: true');
     const door = code.slice(code.indexOf('function onBook('));
     expect(door.slice(0, door.indexOf('\n}'))).toMatch(/return withBook\(\(\) => runEngine\(args\)\)/);
-    const onTheBook = [...code.matchAll(/argv\.(export|send|route)\(/g)];
-    // Both exports (a device send, Save a Kindle file), the send, the route.
-    expect(onTheBook.map((m) => m[1]).sort()).toEqual(['export', 'export', 'route', 'send']);
-    for (const call of onTheBook) {
+    // Both exports (a device send, Save a Kindle file) and the send.
+    const building = [...code.matchAll(/argv\.(export|send)\(/g)];
+    expect(building.map((m) => m[1]).sort()).toEqual(['export', 'export', 'send']);
+    for (const call of building) {
       const before = code.slice(0, call.index);
       expect(`${call[0]} is handed to ${before.slice(-12).trim()}`).toMatch(/is handed to .*onBook\($/);
     }
-    // What still goes straight to runEngine reads nothing of the book's
-    // content: the route list, the settings read, Amazon's setup page. And
+    // The route: through the door only when the flow reads the book.
+    expect(code.match(/argv\.route\(/g)?.length).toBe(1);
+    expect(code).toMatch(/readsTheBook\(how\) \? onBook\(call\) : runEngine\(call\)/);
+    // What else goes straight to runEngine reads nothing of the book's
+    // content: the route list, the settings read, and `call` above. And
     // `args`, which is onBook()'s own call, pinned above.
     const direct = [...code.matchAll(/\brunEngine\(\s*(argv\.\w+|\w+)/g)].map((m) => m[1]).sort();
-    expect(direct).toEqual(['args', 'argv.emailSetup', 'argv.routes', 'argv.settings']);
+    expect(direct).toEqual(['args', 'argv.routes', 'argv.settings', 'call']);
   });
 
   test('nothing connected is an answer, not an error', async () => {

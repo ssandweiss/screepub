@@ -478,6 +478,19 @@ export function performerFor(route) {
   return 'open';
 }
 
+/** Whether a flow's engine call reads or writes this script's library EPUB,
+ *  and so has to take the book's turn (onBook(), below). A device send and a
+ *  save do: they export or copy the book itself. A route that opens another
+ *  program (Books, Mail, Amazon's app or page) does not: the engine hands
+ *  that program the book's path and returns, reading nothing of it. It also
+ *  must not hold the book, because the Settings page's saves wait for
+ *  whatever does, and on Linux the Send to Kindle route waits on xdg-open
+ *  for the book's folder, which can last until the reader closes the file
+ *  manager. Amazon's setup page needs no book at all. */
+export function readsTheBook(how) {
+  return how === 'device' || how === 'save-epub' || how === 'save-kindle';
+}
+
 /** What is plugged in, read off the route list: the device of every row
  *  that carries one (routesFrom() lets a device ride only on an available
  *  device row), in the engine's order, as copies. This is what
@@ -888,10 +901,10 @@ async function ensureSettings() {
 }
 
 /** An engine call that reads or writes this script's library EPUB: an
- *  export (whose MOBI rung rebuilds it), a send, a save, an opened route.
- *  Every one goes through here, into the queue the Settings page's saves
- *  take their turn in, because a save rebuilds that same file in place;
- *  tune.js's withBook() says what the queue promises. */
+ *  export (whose MOBI rung rebuilds it), a send, a save (readsTheBook()
+ *  says which flows). Every one goes through here, into the queue the
+ *  Settings page's saves take their turn in, because a save rebuilds that
+ *  same file in place; tune.js's withBook() says what the queue promises. */
 function onBook(args) {
   return withBook(() => runEngine(args));
 }
@@ -1022,10 +1035,8 @@ async function perform(route) {
     } else {
       say(statusFor('opening', { route }));
     }
-    // Amazon's setup page is the one route that never touches the book.
-    const answer = await (how === 'setup'
-      ? runEngine(argv.emailSetup())
-      : onBook(argv.route(route.key, script.epubPath, options)));
+    const call = how === 'setup' ? argv.emailSetup() : argv.route(route.key, script.epubPath, options);
+    const answer = await (readsTheBook(how) ? onBook(call) : runEngine(call));
     if (stale()) return;
     const [phase, detail] = routeNoteFrom(answer);
     say(statusFor(phase, detail));

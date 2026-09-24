@@ -1349,6 +1349,37 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     expect(w.button('Copy to Kindle').className).toBe('btn btn-outline');
   });
 
+  test('only a save waits for the book: a route that opens another program asks at once', async () => {
+    // Apple Books, Send to Kindle and Mail hand the book's path to another
+    // program and return; the engine reads nothing of the book. On Linux the
+    // Send to Kindle route waits on xdg-open for the book's folder, which
+    // can last until the reader closes the file manager, so queueing it would
+    // hold every Settings save that long. A save copies the book itself, so
+    // it waits for whatever holds the book (here, a turn already running).
+    const w = await world();
+    await w.answer('routes', listed([]));
+    const { withBook } = await import(join(UI, 'tune.js'));
+    let free: () => void = () => {};
+    const holding = withBook(() => new Promise<void>((resolve) => { free = resolve; }));
+    try {
+      w.button('Add to Apple Books').click();
+      expect(w.asked()).toEqual(['route']);
+      await w.answer('route', { ok: true, note: 'Added to Apple Books.' });
+      await w.answer('routes', listed([], 'apple-books'));
+
+      w.button('Save the EPUB…').click();
+      await w.choose('/Users/me/Desktop/Field Station.epub');
+      expect(w.asked()).toEqual([]);
+    } finally {
+      free();
+      await holding;
+    }
+    await settle();
+    expect(w.asked()).toEqual(['route']);
+    await w.answer('route', { ok: true, note: 'Saved.' });
+    await w.answer('routes', listed([], 'save-epub'));
+  });
+
   test('a refused route says the engine’s sentence as an alarm, and asks for nothing more', async () => {
     const w = await world();
     await w.answer('routes', listed([]));
