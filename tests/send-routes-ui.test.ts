@@ -1358,9 +1358,9 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     // it waits for whatever holds the book (here, a turn already running).
     const w = await world();
     await w.answer('routes', listed([]));
-    const { withBook } = await import(join(UI, 'tune.js'));
+    const { inTurn } = await import(join(UI, 'book-queue.js'));
     let free: () => void = () => {};
-    const holding = withBook(() => new Promise<void>((resolve) => { free = resolve; }));
+    const holding = inTurn(EPUB, 'save', () => new Promise<void>((resolve) => { free = resolve; }));
     try {
       w.button('Add to Apple Books').click();
       expect(w.asked()).toEqual(['route']);

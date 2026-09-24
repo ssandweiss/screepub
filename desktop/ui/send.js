@@ -18,7 +18,8 @@
 // tests/desktop-ui.test.ts. Below the line is drawing, which holds no rule
 // of its own and rides on the live run.
 import { runEngine, argv, saveDialog } from './app.js';
-import { settingsFrom, withBook } from './tune.js';
+import { settingsFrom } from './tune.js';
+import { inTurn } from './book-queue.js';
 import { el, clear, text } from './dom.js';
 import { canFocus } from './focus.js';
 import {
@@ -900,13 +901,14 @@ async function ensureSettings() {
   }
 }
 
-/** An engine call that reads or writes this script's library EPUB: an
- *  export (whose MOBI rung rebuilds it), a send, a save (readsTheBook()
- *  says which flows). Every one goes through here, into the queue the
- *  Settings page's saves take their turn in, because a save rebuilds that
- *  same file in place; tune.js's withBook() says what the queue promises. */
-function onBook(args) {
-  return withBook(() => runEngine(args));
+/** An engine call that reads or writes `book`, this script's library EPUB:
+ *  an export (whose MOBI rung rebuilds it), a send, a save (readsTheBook()
+ *  says which flows). Every one goes through here, to take its turn on the
+ *  book with the Settings page's saves, which rebuild that same file in
+ *  place; book-queue.js says what a turn promises. `label` is what the
+ *  Settings page says it is waiting for. */
+function onBook(book, label, args) {
+  return inTurn(book, label, () => runEngine(args));
 }
 
 async function sendTo(device) {
@@ -930,7 +932,7 @@ async function sendTo(device) {
     // The library artifact is what Read previewed and what Tune rebuilds, so
     // it is the only file handed to a transfer. What the Kindle rung makes
     // of it is the engine's ladder, not this window's.
-    const built = await onBook(argv.export(script.epubPath, {
+    const built = await onBook(script.epubPath, 'send', argv.export(script.epubPath, {
       forFormat: forFormat(device),
       fountain: script.fountainPath,
       optionsJson: optionsJsonFor(script),
@@ -946,7 +948,7 @@ async function sendTo(device) {
     }
 
     say(statusFor('copying', { device }));
-    const sent = await onBook(argv.send(built.path, device.id));
+    const sent = await onBook(script.epubPath, 'send', argv.send(built.path, device.id));
     if (stale()) return;
 
     const [phase, detail] = outcomeFor(built, sent, device);
@@ -1012,7 +1014,8 @@ async function perform(route) {
       if (stale()) return;
       const settings = { fountain: script.fountainPath, optionsJson: optionsJsonFor(script) };
       say(statusFor('building-kindle'));
-      const built = await onBook(argv.export(script.epubPath, { forFormat: 'kindle', ...settings }));
+      const built = await onBook(script.epubPath, 'copy',
+        argv.export(script.epubPath, { forFormat: 'kindle', ...settings }));
       if (stale()) return;
       const [phase, file] = kindleFileFrom(built);
       if (phase === 'failed') {
@@ -1036,7 +1039,7 @@ async function perform(route) {
       say(statusFor('opening', { route }));
     }
     const call = how === 'setup' ? argv.emailSetup() : argv.route(route.key, script.epubPath, options);
-    const answer = await (readsTheBook(how) ? onBook(call) : runEngine(call));
+    const answer = await (readsTheBook(how) ? onBook(script.epubPath, 'copy', call) : runEngine(call));
     if (stale()) return;
     const [phase, detail] = routeNoteFrom(answer);
     say(statusFor(phase, detail));

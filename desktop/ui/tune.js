@@ -12,6 +12,7 @@
 // tests/desktop-ui.test.ts. Below the line is drawing, which holds no rule of
 // its own and rides on the live run.
 import { runEngine, argv, holdEngine } from './app.js';
+import { inTurn, holder, beforeEveryTurn } from './book-queue.js';
 import { el, clear, text } from './dom.js';
 import { render as renderReader, splitPreview, dressFrame } from './read.js';
 
@@ -352,13 +353,26 @@ export const STATUS = {
   saved: 'Saved. The book on disk matches what you see.',
 };
 
+/** What a save waiting its turn on the book says, by what holds the book
+ *  (book-queue.js's labels). "In a moment" would not be true while a
+ *  minute-long KFX export has the book. */
+export const WAITING = {
+  send: 'Waiting for the send to finish…',
+  copy: 'Waiting for the copy to finish…',
+  convert: 'Waiting for the conversion to finish…',
+};
+
 export const NO_MESSAGE = 'The engine refused the change without saying why.';
 
+/** The status line for a phase. `message` is the engine's sentence for
+ *  'failed', and what holds the book for 'waiting' (this page's own
+ *  earlier save waiting is still "in a moment"). */
 export function statusFor(phase, message) {
   if (phase === 'failed') {
     const said = typeof message === 'string' ? message.trim() : '';
     return { line: said === '' ? NO_MESSAGE : said, bad: true };
   }
+  if (phase === 'waiting') return { line: WAITING[message] ?? STATUS.pending, bad: false };
   return { line: STATUS[phase] ?? '', bad: false };
 }
 
@@ -601,10 +615,6 @@ let timer = null;
  *  Part 3, closed 2026-09-24). One hold covers however many knobs move
  *  inside one settle; releaseHold() is the only thing that lets it go. */
 let hold = null;
-/** The queue withBook() describes: the last turn in it, and how many turns
- *  are waiting or running, this surface's own saves included. */
-let running = Promise.resolve();
-let turns = 0;
 let pending = {};
 let statusLine = null;
 let controls = new Map();
@@ -1138,56 +1148,35 @@ function schedule() {
   timer = setTimeout(settle, SETTLE_MS);
 }
 
-/** The settle is over: what the moved knobs owe joins the queue. */
+/** The settle is over: what the moved knobs owe takes its turn on the
+ *  script's book (book-queue.js). Serialised behind whatever already has
+ *  the book: two conversions writing the same EPUB is a race, and a slow
+ *  early one finishing last would leave the file disagreeing with the
+ *  screen. When something else has it (a send, a copy, a conversion), the
+ *  status line says so until the save starts and says "Saving". */
 function settle() {
   timer = null;
-  enqueue(flush);
+  const book = bookOf(ctx.state.script);
+  const ahead = holder(book);
+  if (ahead !== null) say(statusFor('waiting', ahead));
+  inTurn(book, 'save', flush);
 }
 
-/** Start `job` once every turn already queued has finished, however it
- *  finished, and hand back its own promise. With nothing queued it starts at
- *  once, in the caller's own tick, as it would with no queue at all: a send
- *  with nothing owed ahead of it asks the engine the moment it is pressed.
- *  A job must not queue another from inside itself. */
-function enqueue(job) {
-  const idle = turns === 0;
-  turns += 1;
-  if (idle) {
-    try {
-      running = Promise.resolve(job());
-    } catch (err) {
-      running = Promise.reject(err);
-    }
-  } else {
-    // Serialised behind whatever is already in flight: two conversions
-    // writing the same EPUB is a race, and a slow early one finishing last
-    // would leave the file disagreeing with the screen.
-    running = running.catch(() => {}).then(job);
-  }
-  const done = () => { turns -= 1; };
-  running.then(done, done);
-  return running;
+/** Which book a save takes its turn on: the script's library EPUB, which
+ *  its rebuild writes. A script with no EPUB still has settings to store,
+ *  so its .fountain stands in and its saves still come one at a time. */
+function bookOf(script) {
+  return script?.epubPath ?? script?.fountainPath ?? '';
 }
 
-/** Run `work` in turn with this surface's saves: the one queue for every
- *  engine call that reads or writes the script's library EPUB. A save
- *  rebuilds that file in place (flush()'s reconvert), and so can the Send
- *  page's export, on its MOBI rung; nothing else ordered the two, so a send
- *  could start before a moved knob's rebuild landed and ship the book
- *  without it, or a rebuild could replace the file under a send reading it.
- *
- *  A settle still counting down is cut short, not waited out: its save
- *  takes its turn now, ahead of `work`, so what is sent is what the reader
- *  last set. A knob moved while `work` runs saves once `work` is done. The
- *  queue never stops on a failure; `work`'s own result or failure is handed
- *  back to its caller as it was. */
-export function withBook(work) {
-  if (timer !== null) {
-    clearTimeout(timer);
-    settle();
-  }
-  return enqueue(work);
-}
+/** A settle still counting down is cut short, not waited out, whenever any
+ *  page asks for a turn on a book: its save takes its turn first, so a send
+ *  started 100 ms after a knob moved sends what the reader last set. */
+beforeEveryTurn(() => {
+  if (timer === null) return;
+  clearTimeout(timer);
+  settle();
+});
 
 /** Let the settle's hold go, if one is held. Safe to call any number of
  *  times: app.js's release is idempotent, and this forgets it after the

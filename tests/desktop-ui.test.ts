@@ -3403,6 +3403,20 @@ describe('the Tune surface', () => {
     expect(tune.presetsFrom({ presets: 'kindle' })).toEqual([]);
   });
 
+  test('a save waiting for the book says what it waits for, and nothing it is not', () => {
+    // book-queue.js's labels for what holds a book. This page's own earlier
+    // save, or a label it has no words for, is still "in a moment".
+    expect(tune.statusFor('waiting', 'send')).toEqual({ line: 'Waiting for the send to finish…', bad: false });
+    expect(tune.statusFor('waiting', 'copy').line).toBe('Waiting for the copy to finish…');
+    expect(tune.statusFor('waiting', 'convert').line).toBe('Waiting for the conversion to finish…');
+    expect(tune.statusFor('waiting', 'save').line).toBe(tune.STATUS.pending);
+    expect(tune.statusFor('waiting', 'anything else').line).toBe(tune.STATUS.pending);
+    for (const line of Object.values(tune.WAITING) as string[]) {
+      expect(line).not.toContain('\u2014');
+      expect(line).not.toContain('Saved');
+    }
+  });
+
   test('the surface never says "saved" about something that was not', () => {
     expect(tune.statusFor('saved').line).toContain('Saved');
     expect(tune.statusFor('saved').bad).toBe(false);
@@ -3464,7 +3478,10 @@ describe('the Tune surface', () => {
     // screen.
     expect(source).toContain('setTimeout');
     expect(source).toContain('clearTimeout');
-    expect(source).toMatch(/running\s*=\s*running/);
+    // Serialised as a turn on the book (book-queue.js), one at a time with
+    // every other page's calls on that book.
+    const settle = source.slice(source.indexOf('function settle('));
+    expect(settle.slice(0, settle.indexOf('\n}'))).toMatch(/inTurn\(book, 'save', flush\)/);
   });
 
   test('a knob held in the settle is held against a restart too, and let go once its save has started', () => {
@@ -4186,15 +4203,17 @@ describe('the Tune surface: app defaults for new scripts', () => {
   // queue is one module's for the whole file, as app.js's count is.
   test('the book waits its turn: a moved knob’s save goes first, at once, and a knob moved meanwhile waits', async () => {
     const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const { inTurn } = await import(join(UI, 'book-queue.js'));
     const { pane, script } = await mountReady(engine);
     (script as { epubPath: string | null }).epubPath = '/scripts/demo.epub';
     const refused = { ok: false, error: { message: 'not what this test is about' } };
+    const status = () => pane.find('tune-status')?.textContent ?? '';
 
     moveKnob(pane, 'dialogueSideMarginPct', '27');
     expect(engine.calls.length).toBe(1);
     let ran = false;
     let finish: (value: string) => void = () => {};
-    const turn = tune.withBook(() => {
+    const turn = inTurn('/scripts/demo.epub', 'send', () => {
       ran = true;
       return new Promise<string>((resolve) => { finish = resolve; });
     });
@@ -4214,28 +4233,50 @@ describe('the Tune surface: app defaults for new scripts', () => {
     await tick();
     expect(ran).toBe(true);
 
-    // The other way round: a knob moved while the turn holds the book is
-    // saved (and the book rebuilt) only once the turn is over.
+    // The other way round: a knob moved while the send holds the book is
+    // saved (and the book rebuilt) only once the send is over, and the
+    // page says what it is waiting for rather than "in a moment".
     moveKnob(pane, 'dialogueSideMarginPct', '28');
+    expect(status()).toBe(tune.STATUS.pending);
     await new Promise((resolve) => setTimeout(resolve, 320));
     expect(engine.calls.length).toBe(3);
+    expect(status()).toBe('Waiting for the send to finish…');
     finish('sent');
     expect(await turn).toBe('sent');
     await tick();
     expect(engine.calls.length).toBe(4);
     expect(engine.calls[3].args[0]).toBe('settings');
     expect(engine.calls[3].args.join(' ')).toContain('"dialogueSideMarginPct":28');
+    expect(status()).toBe(tune.STATUS.saving);
     engine.resolve(3, settingsAnswer({ settings: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 28 } }));
     await tick();
     expect(engine.calls[4].args.slice(3, 5)).toEqual(['-o', '/scripts/demo.epub']);
     engine.resolve(4, refused);
     await tick();
+  });
 
-    // A turn that fails hands its failure to its caller and does not stop
-    // the queue: the next turn still runs.
-    await expect(tune.withBook(() => Promise.reject(new Error('the copy failed')))).rejects.toThrow('the copy failed');
-    expect(await tune.withBook(() => 'next')).toBe('next');
-    expect(engine.calls.length).toBe(5);
+  test('another book’s turn does not hold this script’s save', async () => {
+    // One queue per book: the old script's minute-long KFX export must not
+    // hold the new script's saves, and an engine call that never answers
+    // holds up its own book and nothing else.
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const { inTurn } = await import(join(UI, 'book-queue.js'));
+    const { pane, script } = await mountReady(engine);
+    (script as { epubPath: string | null }).epubPath = '/scripts/demo.epub';
+    let finish: (value: string) => void = () => {};
+    const other = inTurn('/scripts/an-older-script.epub', 'send',
+      () => new Promise<string>((resolve) => { finish = resolve; }));
+    moveKnob(pane, 'dialogueSideMarginPct', '27');
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    expect(engine.calls.length).toBe(2);
+    expect(engine.calls[1].args[0]).toBe('settings');
+    engine.resolve(1, settingsAnswer({ settings: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 27 } }));
+    await tick();
+    expect(engine.calls[2].args.slice(3, 5)).toEqual(['-o', '/scripts/demo.epub']);
+    engine.resolve(2, { ok: false, error: { message: 'not what this test is about' } });
+    await tick();
+    finish('sent');
+    expect(await other).toBe('sent');
   });
 
   test('"Use these for new scripts" sends this script’s CURRENT settings, moved after the foot was drawn, not the shipped or app defaults', async () => {
@@ -4698,6 +4739,79 @@ describe('the Tune surface: app defaults for new scripts', () => {
   });
 });
 
+describe('turns on a book: book-queue.js', () => {
+  // One queue per library EPUB. A module of its own per test: the queues
+  // and the registered hooks live as long as the module does.
+  type Queue = {
+    inTurn: <T>(book: string, label: string, work: () => T | Promise<T>) => Promise<T>;
+    holder: (book: string) => string | null;
+    beforeEveryTurn: (hook: () => void) => void;
+  };
+  let fresh = 0;
+  const load = async () => (await import(`${join(UI, 'book-queue.js')}?turns-${++fresh}`)) as Queue;
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const held = () => {
+    let release: (value: string) => void = () => {};
+    const promise = new Promise<string>((resolve) => { release = resolve; });
+    return { promise, release };
+  };
+
+  test('with nothing queued, a turn starts in the caller’s own tick', async () => {
+    const q = await load();
+    let ran = false;
+    const turn = q.inTurn('/lib/a.epub', 'send', () => { ran = true; return 'sent'; });
+    expect(ran).toBe(true);
+    expect(await turn).toBe('sent');
+  });
+
+  test('on one book, a turn waits for the one before it, and a failure does not stop the next', async () => {
+    const q = await load();
+    const first = held();
+    const order: string[] = [];
+    const a = q.inTurn('/lib/a.epub', 'send', () => { order.push('send'); return first.promise; });
+    const b = q.inTurn('/lib/a.epub', 'save', () => { order.push('save'); throw new Error('refused'); });
+    const c = q.inTurn('/lib/a.epub', 'copy', () => { order.push('copy'); return 'copied'; });
+    await tick();
+    expect(order).toEqual(['send']);
+    expect(q.holder('/lib/a.epub')).toBe('send');
+    first.release('sent');
+    expect(await a).toBe('sent');
+    await expect(b).rejects.toThrow('refused');
+    expect(await c).toBe('copied');
+    expect(order).toEqual(['send', 'save', 'copy']);
+    await tick();
+    expect(q.holder('/lib/a.epub')).toBe(null);
+  });
+
+  test('another book does not wait: a hung call holds up its own book and nothing else', async () => {
+    const q = await load();
+    const hung = held();
+    q.inTurn('/lib/old.epub', 'send', () => hung.promise);
+    let ran = false;
+    const other = q.inTurn('/lib/new.epub', 'save', () => { ran = true; return 'saved'; });
+    expect(ran).toBe(true);
+    expect(await other).toBe('saved');
+    expect(q.holder('/lib/old.epub')).toBe('send');
+    expect(q.holder('/lib/new.epub')).toBe(null);
+    hung.release('late');
+  });
+
+  test('what a page owes goes first: a hook runs before every turn joins its queue', async () => {
+    const q = await load();
+    const order: string[] = [];
+    let owing = true;
+    const settle = () => {
+      if (!owing) return;
+      owing = false;
+      q.inTurn('/lib/a.epub', 'save', () => { order.push('save'); });
+    };
+    q.beforeEveryTurn(settle);
+    q.beforeEveryTurn(settle);
+    await q.inTurn('/lib/a.epub', 'send', () => { order.push('send'); });
+    expect(order).toEqual(['save', 'send']);
+  });
+});
+
 describe('the Send surface', () => {
   const send = read('send.js');
 
@@ -4757,33 +4871,33 @@ describe('the Send surface', () => {
 
   test('every call on the library EPUB takes its turn with the Settings page’s saves, and nothing else does', async () => {
     // A moved knob's save rebuilds the library EPUB in place, and an export
-    // can rebuild it too (the MOBI rung); a send or a save copies it.
-    // tune.js's withBook() is the one queue for all of them, and the Tune
-    // test "the book waits its turn" drives it. What is pinned here is that
-    // send.js hands it every such call, through one door, onBook(), and
-    // nothing that only opens another program: that would hold the Settings
-    // page's saves for as long as the program took to answer (on Linux, the
-    // Send to Kindle route's folder can stay open until the reader closes
-    // it). send-routes-ui.test.ts drives both halves on the page.
+    // can rebuild it too (the MOBI rung); a send or a save copies it. Each
+    // takes its turn on that book (book-queue.js, driven directly in "turns
+    // on a book", and with the Settings page in "the book waits its turn").
+    // What is pinned here is that send.js hands it every such call, through
+    // one door, onBook(), keyed by the script's own EPUB, and nothing that
+    // only opens another program: that would hold the Settings page's saves
+    // for as long as the program took to answer (on Linux, the Send to
+    // Kindle route's folder can stay open until the reader closes it).
+    // send-routes-ui.test.ts drives both halves on the page.
     const sendUi = await import(join(UI, 'send.js'));
     expect(['device', 'save-epub', 'save-kindle', 'open', 'setup', null].map(sendUi.readsTheBook))
       .toEqual([true, true, true, false, false, false]);
 
     const code = send.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/.*$/gm, ' ');
-    const imported = /import \{[^}]*\bwithBook\b[^}]*\} from '\.\/tune\.js'/.test(code);
-    expect(`send.js imports tune.js's withBook: ${imported}`).toBe('send.js imports tune.js\'s withBook: true');
+    const imported = /import \{[^}]*\binTurn\b[^}]*\} from '\.\/book-queue\.js'/.test(code);
+    expect(`send.js imports book-queue.js's inTurn: ${imported}`).toBe('send.js imports book-queue.js\'s inTurn: true');
     const door = code.slice(code.indexOf('function onBook('));
-    expect(door.slice(0, door.indexOf('\n}'))).toMatch(/return withBook\(\(\) => runEngine\(args\)\)/);
-    // Both exports (a device send, Save a Kindle file) and the send.
-    const building = [...code.matchAll(/argv\.(export|send)\(/g)];
-    expect(building.map((m) => m[1]).sort()).toEqual(['export', 'export', 'send']);
-    for (const call of building) {
-      const before = code.slice(0, call.index);
-      expect(`${call[0]} is handed to ${before.slice(-12).trim()}`).toMatch(/is handed to .*onBook\($/);
-    }
+    expect(door.slice(0, door.indexOf('\n}'))).toMatch(/return inTurn\(book, label, \(\) => runEngine\(args\)\)/);
+    // Both exports (a device send, Save a Kindle file) and the send, each on
+    // this script's book and named for what the Settings page waits on.
+    const building = [...code.matchAll(/onBook\(script\.epubPath, '(\w+)',\s*argv\.(export|send)\(/g)]
+      .map((m) => `${m[2]}:${m[1]}`).sort();
+    expect(building).toEqual(['export:copy', 'export:send', 'send:send']);
+    expect(code.match(/argv\.(export|send)\(/g)?.length).toBe(3);
     // The route: through the door only when the flow reads the book.
     expect(code.match(/argv\.route\(/g)?.length).toBe(1);
-    expect(code).toMatch(/readsTheBook\(how\) \? onBook\(call\) : runEngine\(call\)/);
+    expect(code).toMatch(/readsTheBook\(how\) \? onBook\(script\.epubPath, 'copy', call\) : runEngine\(call\)/);
     // What else goes straight to runEngine reads nothing of the book's
     // content: the route list, the settings read, and `call` above. And
     // `args`, which is onBook()'s own call, pinned above.
