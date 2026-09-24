@@ -52,9 +52,9 @@
       "breaks": "Two live paths inside app/Packages/KFXKit (PROVENANCE.md and LICENSE) plus the Screepub.app resource path. This is a LICENSE document: a dangling path in it is a compliance defect, not a typo. F3 acceptance criterion 13."
     },
     "brand/README.md": {
-      "refs": 3,
+      "refs": 5,
       "category": "doc",
-      "breaks": "Declares app/Sources/ScreepubApp/Theme.swift the source of the shared brand tokens. Reversed by F3 criterion 12."
+      "breaks": "Describes the frozen Swift copy of the brand tokens: tokens.json became the source on 2026-09-23 (F3 criterion 12), and the drift check skips once app/ is gone. At F3, drop the sentences about the Swift copy."
     },
     "brand/tokens.css": {
       "refs": 2,
@@ -62,9 +62,9 @@
       "breaks": "Comments saying which values mirror Theme.swift."
     },
     "brand/tokens.json": {
-      "refs": 11,
+      "refs": 12,
       "category": "test",
-      "breaks": "`\"from\": \"Theme.swift\"` on eight tokens, plus a $comment naming the Swift path. This is the machine-readable half of the pin that tests/brand-tokens.test.ts enforces; promoting this file to source of truth is F3 criterion 12."
+      "breaks": "`\"from\": \"Theme.swift\"` on seven tokens is now provenance, not a pin: this file is the source of truth and tests/brand-tokens.test.ts checks the frozen Swift copy against it, skipping once app/Sources/ScreepubApp/Theme.swift is gone. F3 criterion 12 is already satisfied and needs no further change here."
     },
     "desktop/README.md": {
       "refs": 1,
@@ -172,9 +172,9 @@
       "breaks": "A comment crediting Theme.swift/ContentView.swift as where the components existed first."
     },
     "tests/brand-tokens.test.ts": {
-      "refs": 9,
+      "refs": 10,
       "category": "test",
-      "breaks": "FAILS OUTRIGHT once Theme.swift is gone: it filters brand/tokens.json for from:\"Theme.swift\" and compares each value against the parsed Swift. F3 criterion 12 reverses its direction."
+      "breaks": "Guarded, not broken: the Theme.swift comparison runs inside test.skipIf(!themeSwiftExists) and every other test in the file reads only tokens.json, tokens.css and the component previews. Once app/Sources/ScreepubApp/Theme.swift is gone the one guarded test skips instead of failing; F3 criterion 12 is already satisfied."
     },
     "tests/build-app-bundle.test.ts": {
       "refs": 3,
