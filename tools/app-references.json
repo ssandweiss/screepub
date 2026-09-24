@@ -306,6 +306,11 @@
       "category": "artifact",
       "breaks": "Verifies the published cask still serves Screepub-macOS.dmg. TAP MACHINERY, gate 3. It is run weekly by .github/workflows/tap-freshness.yml, which carries no textual reference of its own and is therefore INVISIBLE to this sweep — the second-order reference this row exists to record."
     },
+    "tools/dmg.ts": {
+      "refs": 1,
+      "category": "artifact",
+      "breaks": "A comment saying the handover renames \"Screepub Desktop.app\" to \"Screepub.app\". Moved here from smoke-bundle.ts when the two DMG tools began sharing this module."
+    },
     "tools/frozen-app-manifest.json": {
       "refs": 67,
       "category": "freeze",
@@ -321,13 +326,8 @@
       "category": "note",
       "breaks": "A comment saying the signed macOS CLI is notarized from app/release.sh."
     },
-    "tools/smoke-bundle.ts": {
-      "refs": 1,
-      "category": "artifact",
-      "breaks": "A comment saying piece F renames \"Screepub Desktop.app\" to \"Screepub.app\"."
-    },
     "tools/verify-signing.ts": {
-      "refs": 7,
+      "refs": 6,
       "category": "test",
       "breaks": "Carries UpdateInstaller's teamID, bundleID and both designated requirements, because the whole point is to check a published DMG against what the FROZEN app will actually demand of it. Its source of truth is a Swift file in app/. The notarization section added 2026-09-21 also cites app/release.sh and Screepub-macOS.dmg, as the reference behaviour and the comparison artifact: both become historical notes at F3 rather than breakage, since the checks themselves are about the Tauri DMG. Goes with tests/verify-signing.test.ts."
     }

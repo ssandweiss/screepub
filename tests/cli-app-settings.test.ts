@@ -768,10 +768,9 @@ describe('screepub app-settings (through the CLI)', () => {
   test('every verb that refuses --set names BOTH settings and app-settings as its owners', async () => {
     // send refuses --set before it ever looks at the positional, so a file
     // that does not exist is fine here: this is a usage refusal, not a
-    // send attempt. update-decision and kfx-status each come from a
-    // SEPARATE shared `foreign` list in cli.ts (one per branch), so pinning
-    // one of each is what actually proves both lists were updated, not just
-    // the two standalone fail() calls devices and send use.
+    // send attempt. Every refusal is read off cli.ts's one VERB_FLAGS
+    // table, which also supplies the owners it names: pinning four verbs
+    // proves that table names both owners of --set.
     const devices = await runCli(['devices', '--set', '{}', '--json']);
     expect(JSON.parse(devices.stdout).error.message)
       .toBe('devices takes no --set (--set belongs to settings and app-settings)');

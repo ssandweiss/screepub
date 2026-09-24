@@ -104,10 +104,6 @@ export function sidecarTargetFor(bunTarget: string): SidecarTarget {
   return found;
 }
 
-export function rustTripleFor(bunTarget: string): string {
-  return sidecarTargetFor(bunTarget).rustTriple;
-}
-
 export function sidecarFileName(target: SidecarTarget): string {
   return `${SIDECAR_BASENAME}-${target.rustTriple}${target.exeSuffix}`;
 }

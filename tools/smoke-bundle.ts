@@ -42,6 +42,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { bundleEntries, findEntry } from './bundle-archive';
+import { mountDmgApp } from './dmg';
 import {
   bundleDirFor,
   discoverArtifact,
@@ -53,19 +54,11 @@ import {
 import {
   checkConvertResult,
   checkEpubBytes,
+  realRun,
   soleJson,
   type RunResult,
   type Runner,
 } from './smoke-cli';
-
-const realRun: Runner = (argv) => {
-  const proc = Bun.spawnSync(argv, { stdout: 'pipe', stderr: 'pipe' });
-  return {
-    exitCode: proc.exitCode ?? 1,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-  };
-};
 
 /** The engine's own `--version --json`, checked against the version the
  *  bundle claims to be. soleJson enforces the one-object contract, so a
@@ -144,53 +137,15 @@ export function extractArchiveEngine(bundlePath: string, workDir: string): strin
   return dest;
 }
 
-/** A .dmg, via hdiutil. macOS only; nothing else has hdiutil. Returns a
- *  `detach` the caller must run in a finally -- an attached image on a
- *  runner outlives the job and the next one inherits a busy mount point. */
+/** A .dmg, via hdiutil (tools/dmg.ts). macOS only; nothing else has
+ *  hdiutil. Returns a `detach` the caller must run in a finally. */
 export function extractDmgEngine(
   bundlePath: string,
   workDir: string,
   run: Runner = realRun,
 ): { enginePath: string; detach: () => void } {
-  const mount = join(workDir, 'mnt');
-  mkdirSync(mount, { recursive: true });
-  // -readonly so verifying an artifact cannot modify it; -nobrowse so no
-  // volume appears on a desktop the next job inherits.
-  const attach = run([
-    'hdiutil',
-    'attach',
-    bundlePath,
-    '-readonly',
-    '-nobrowse',
-    '-mountpoint',
-    mount,
-  ]);
-  if (attach.exitCode !== 0) {
-    throw new Error(
-      `smoke-bundle: hdiutil attach failed on ${bundlePath}: ${attach.stderr.trim().slice(0, 500)}`,
-    );
-  }
-  const detach = (): void => {
-    run(['hdiutil', 'detach', mount, '-force']);
-  };
-  try {
-    // Found by suffix, not by name: the transition overlay ships "Screepub
-    // Desktop.app" and piece F renames it to "Screepub.app".
-    // Sorted so a two-.app error names them in a stable order.
-    const apps = readdirSync(mount)
-      .filter((n) => n.endsWith('.app'))
-      .sort();
-    if (apps.length !== 1) {
-      throw new Error(
-        `smoke-bundle: expected exactly one .app on the mounted image, found ` +
-          `${apps.length}${apps.length ? ` (${apps.join(', ')})` : ''}`,
-      );
-    }
-    return { enginePath: join(mount, apps[0]!, ENGINE_IN_APP), detach };
-  } catch (err) {
-    detach();
-    throw err;
-  }
+  const { appPath, detach } = mountDmgApp(bundlePath, workDir, run, 'smoke-bundle');
+  return { enginePath: join(appPath, ENGINE_IN_APP), detach };
 }
 
 /** An NSIS installer, via 7z, which is present on GitHub's Windows image.

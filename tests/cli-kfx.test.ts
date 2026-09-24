@@ -413,20 +413,17 @@ describe('kfx-install refuses before it installs', () => {
     }
   });
 
-  test("in the source, the branch's foreign list names every other verb's own flag", async () => {
-    // Counting fail() call sites cannot see a deleted ROW: the loop's one
-    // fail() stays, and the flag that row named is quietly accepted.
-    // --offered, --current, --last-checked and --opted-in are refused for
-    // every verb but their own, above this branch, in one shared block.
-    const branch = kfxBranch(await Bun.file(`${ROOT}src/cli.ts`).text());
-    expect(branch, 'the kfx branch moved').not.toBe(null);
-    const from = branch!.indexOf('const foreign');
-    expect(from, 'the kfx branch has no foreign list').toBeGreaterThan(-1);
-    const foreign = branch!.slice(from, branch!.indexOf('];', from));
-    for (const flag of ['--device', '--set', '--for', '--fountain', '--options-json']) {
-      expect(foreign, `the kfx branch no longer refuses ${flag}`).toContain(`'${flag}'`);
-    }
-    expect(branch).toContain('for (const [value, flag, owner] of foreign)');
+  test("in the source, the flag table gives both kfx verbs no flag of their own", async () => {
+    // Counting fail() call sites cannot see a flag granted in cli.ts's
+    // VERB_FLAGS table: the one refusal stays, and the flag that row names
+    // is quietly accepted. Every foreign-flag refusal, for every verb, is
+    // read off that table, so both kfx rows must be empty.
+    const source = await Bun.file(`${ROOT}src/cli.ts`).text();
+    const from = source.indexOf('const VERB_FLAGS');
+    expect(from, 'cli.ts has no VERB_FLAGS table').toBeGreaterThan(-1);
+    const table = source.slice(from, source.indexOf('};', from));
+    expect(table).toContain("'kfx-status': [],");
+    expect(table).toContain("'kfx-install': [],");
   });
 
   test('in the source, the installing line is said only where an install can run', async () => {
@@ -457,9 +454,17 @@ describe('kfx-install refuses before it installs', () => {
     // Neither handler call has a refusal written after it.
     expect(check.refusalsAfterInstalled).toBe(0);
     expect(check.refusalsAfterStatus).toBe(0);
-    // Both refusals (the foreign-flag loop, the positional check) sit
-    // before each handler call.
-    expect(check.refusalsBeforeInstalled).toBe(2);
-    expect(check.refusalsBeforeStatus).toBe(2);
+    // The branch's own refusal (the positional check) sits before each
+    // handler call.
+    expect(check.refusalsBeforeInstalled).toBe(1);
+    expect(check.refusalsBeforeStatus).toBe(1);
+    // And the foreign-flag refusal, every verb's, is made once in runVerb
+    // above the branch, so it too comes before either handler.
+    const runVerb = source.indexOf('async function runVerb(');
+    const flagCheck = source.indexOf('foreignFlagRefusal(verb, values)');
+    expect(flagCheck, 'the foreign-flag check moved out of runVerb').toBeGreaterThan(runVerb);
+    expect(flagCheck, 'the foreign-flag check moved below the kfx branch')
+      .toBeLessThan(source.indexOf(KFX_BRANCH_START));
+    expect(source.split('foreignFlagRefusal(').length - 1, 'defined once, called once').toBe(2);
   });
 });

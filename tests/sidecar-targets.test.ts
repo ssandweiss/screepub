@@ -2,7 +2,6 @@ import { describe, test, expect } from 'bun:test';
 import {
   SIDECAR_TARGETS,
   SIDECAR_BASENAME,
-  rustTripleFor,
   sidecarFileName,
   sidecarTargetFor,
   hostBunTarget,
@@ -65,10 +64,10 @@ describe('the triple map', () => {
   });
 });
 
-describe('rustTripleFor', () => {
+describe('sidecarTargetFor', () => {
   test('answers for every known target', () => {
     for (const t of SIDECAR_TARGETS) {
-      expect(rustTripleFor(t.bunTarget)).toBe(t.rustTriple);
+      expect(sidecarTargetFor(t.bunTarget).rustTriple).toBe(t.rustTriple);
     }
   });
 
@@ -77,13 +76,13 @@ describe('rustTripleFor', () => {
     // host's binary, name it for a machine it cannot run on, and the
     // mistake would only surface on someone else's computer.
     for (const bad of ['bun-linux-riscv64', 'bun-darwin-arm', 'linux-x64', '', 'bun-windows-arm64']) {
-      expect(() => rustTripleFor(bad)).toThrow(/unknown bun target/i);
+      expect(() => sidecarTargetFor(bad)).toThrow(/unknown bun target/i);
     }
   });
 
   test('the error names the target it was given and the ones it knows', () => {
-    expect(() => rustTripleFor('bun-linux-riscv64')).toThrow(/bun-linux-riscv64/);
-    expect(() => rustTripleFor('bun-linux-riscv64')).toThrow(/bun-linux-x64/);
+    expect(() => sidecarTargetFor('bun-linux-riscv64')).toThrow(/bun-linux-riscv64/);
+    expect(() => sidecarTargetFor('bun-linux-riscv64')).toThrow(/bun-linux-x64/);
   });
 });
 

@@ -32,11 +32,12 @@
 // directly: at v0.6.0 the answer must be NO and at v0.6.1 it must be YES.
 // Finding out on a Mac with a working app on it is the expensive way.
 
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import type { RunResult, Runner } from './smoke-cli';
+import { mountDmgApp } from './dmg';
+import { realRun, type RunResult, type Runner } from './smoke-cli';
 
 /** UpdateInstaller.teamID. */
 export const TEAM_ID = 'XSRB3D643J';
@@ -274,50 +275,6 @@ export function describeVerdict(
   return { ok, lines };
 }
 
-const realRun: Runner = (argv) => {
-  const proc = Bun.spawnSync(argv, { stdout: 'pipe', stderr: 'pipe' });
-  return {
-    exitCode: proc.exitCode ?? 1,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-  };
-};
-
-/** Mount read-only and nobrowse, and find the one .app by SUFFIX: the
- *  transition overlay ships "Screepub Desktop.app" and the handover
- *  renames it to "Screepub.app". Same rule, same reason, as
- *  smoke-bundle.ts's extractDmgEngine. */
-export function mountDmg(
-  dmgPath: string,
-  workDir: string,
-  run: Runner = realRun,
-): { appPath: string; detach: () => void } {
-  const mount = join(workDir, 'mnt');
-  mkdirSync(mount, { recursive: true });
-  const attach = run(['hdiutil', 'attach', dmgPath, '-readonly', '-nobrowse', '-mountpoint', mount]);
-  if (attach.exitCode !== 0) {
-    throw new Error(`verify-signing: hdiutil attach failed on ${dmgPath}: ${attach.stderr.trim().slice(0, 500)}`);
-  }
-  const detach = (): void => {
-    run(['hdiutil', 'detach', mount, '-force']);
-  };
-  try {
-    const apps = readdirSync(mount)
-      .filter((n) => n.endsWith('.app'))
-      .sort();
-    if (apps.length !== 1) {
-      throw new Error(
-        `verify-signing: expected exactly one .app on the mounted image, found ` +
-          `${apps.length}${apps.length ? ` (${apps.join(', ')})` : ''}`,
-      );
-    }
-    return { appPath: join(mount, apps[0]!), detach };
-  } catch (err) {
-    detach();
-    throw err;
-  }
-}
-
 if (import.meta.main) {
   const { values } = parseArgs({
     args: Bun.argv.slice(2),
@@ -347,7 +304,7 @@ if (import.meta.main) {
   // folder behind with the DMG still mounted inside it.
   try {
     let appPath: string;
-    ({ appPath, detach } = mountDmg(dmg, work));
+    ({ appPath, detach } = mountDmgApp(dmg, work, realRun, 'verify-signing'));
     const verdict = judgeSigning(dmg, appPath, realRun);
     const { ok, lines } = describeVerdict(verdict, expectation);
     console.log(`verify-signing: ${dmg} (--expect ${expectation})`);

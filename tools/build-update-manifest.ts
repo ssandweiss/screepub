@@ -25,6 +25,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { SIGNATURE_EXT, UPDATER_KINDS, type PlatformKey } from './build-app-bundle';
+import { VERSION_RE } from './build-cli';
 import { parseSignatureBox } from './update-signature';
 
 export const RELEASE_REPO = 'ssandweiss/screepub';
@@ -107,8 +108,6 @@ export function collectSignedArtifacts(dir: string): SignedArtifact[] {
   }
   return out;
 }
-
-const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
 
 /** The manifest for `version` over what arrived.
  *

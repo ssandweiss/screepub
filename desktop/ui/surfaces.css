@@ -520,7 +520,6 @@
   opacity: 1;
 }
 .btn-small { font-size: var(--text-label); padding: 6px 18px; letter-spacing: 0.07em; }
-.btn-small { font-size: var(--text-label); padding: 6px 18px; letter-spacing: 0.07em; }
 
 /* Knobs on the left, the script on the right. The preview is the argument
  * for the whole surface: most of these eighteen change what the page looks

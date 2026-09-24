@@ -35,7 +35,7 @@ import {
 } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { REPO_DIR, writeChecksums, type Spawn } from './build-cli';
+import { REPO_DIR, VERSION_RE, writeChecksums, type Spawn } from './build-cli';
 import { parseSignatureBox } from './update-signature';
 
 export type BundleOs = 'linux' | 'macos' | 'windows';
@@ -324,8 +324,6 @@ export function verifyBundleFile(path: string, kind: ArtifactShape): void {
     );
   }
 }
-
-const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
 
 /** The crate's own version: the `version` key of the `[package]` TABLE and
  *  nothing else. A naive "first version after [package]" scan runs straight

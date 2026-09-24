@@ -28,9 +28,9 @@
 name: desktop
 on:
   push:
-    paths: ['desktop/**', 'tools/build-sidecar.ts', 'tools/build-cli.ts', 'tools/sidecar-targets.ts', 'tools/bundle-archive.ts', 'tools/build-app-bundle.ts', 'tools/smoke-bundle.ts', 'package.json', 'brand/tokens.json', '.github/workflows/desktop.yml']
+    paths: ['desktop/**', 'tools/build-sidecar.ts', 'tools/build-cli.ts', 'tools/sidecar-targets.ts', 'tools/bundle-archive.ts', 'tools/build-app-bundle.ts', 'tools/smoke-bundle.ts', 'tools/dmg.ts', 'tools/smoke-cli.ts', 'package.json', 'brand/tokens.json', '.github/workflows/desktop.yml']
   pull_request:
-    paths: ['desktop/**', 'tools/build-sidecar.ts', 'tools/build-cli.ts', 'tools/sidecar-targets.ts', 'tools/bundle-archive.ts', 'tools/build-app-bundle.ts', 'tools/smoke-bundle.ts', 'package.json', 'brand/tokens.json', '.github/workflows/desktop.yml']
+    paths: ['desktop/**', 'tools/build-sidecar.ts', 'tools/build-cli.ts', 'tools/sidecar-targets.ts', 'tools/bundle-archive.ts', 'tools/build-app-bundle.ts', 'tools/smoke-bundle.ts', 'tools/dmg.ts', 'tools/smoke-cli.ts', 'package.json', 'brand/tokens.json', '.github/workflows/desktop.yml']
 permissions:
   contents: read
 jobs:

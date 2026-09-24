@@ -517,6 +517,61 @@ function parseVerbArgs(args: string[]) {
   });
 }
 
+type VerbValues = ReturnType<typeof parseVerbArgs>['values'];
+/** Every flag in parseVerbArgs' schema but --json and --help, which every
+ *  verb takes. */
+type VerbFlag = `--${Exclude<Extract<keyof VerbValues, string>, 'json' | 'help'>}`;
+
+/** The flags each verb acts on: the ONE place that says so.
+ *
+ * The verbs share ONE parser, so every flag any verb takes parses for all of
+ * them, and each verb must refuse the ones it cannot act on: a flag that
+ * silently does nothing teaches the caller it did something. That used to be
+ * written verb by verb, and two verbs missed flags (settings took --device,
+ * export took --set). Now a refusal is read off this table, and so is the
+ * owner a refusal names, so the two cannot disagree. A new verb fails to
+ * type-check until it has a row; tests/cli-verb-flags.test.ts runs every verb
+ * against every flag. */
+const VERB_FLAGS: Record<Verb, readonly VerbFlag[]> = {
+  devices: [],
+  send: ['--device'],
+  settings: ['--set'],
+  export: ['--for', '--fountain', '--options-json', '--out'],
+  'update-decision': ['--offered', '--current'],
+  'update-should-check': ['--opted-in', '--last-checked'],
+  'kfx-status': [],
+  'kfx-install': [],
+  'app-settings': ['--set'],
+  reveal: [],
+  routes: [],
+  // For some keys only: routeCommand refuses each for every key that cannot
+  // act on it.
+  route: ['--out', '--fountain', '--options-json'],
+};
+
+/** The order a call carrying SEVERAL foreign flags hears about them in, kept
+ * exactly as it was when each verb refused its own: the update verbs' flags
+ * first, except on those two verbs, which name the other one's flags last. */
+const UPDATE_FLAGS: readonly VerbFlag[] = ['--offered', '--current', '--last-checked', '--opted-in'];
+const OTHER_FLAGS: readonly VerbFlag[] = ['--out', '--device', '--set', '--for', '--fountain', '--options-json'];
+
+/** The refusal for the first flag given that `verb` does not act on, naming
+ *  the verbs that do, in VERBS order; null when every flag given is the
+ *  verb's own. */
+function foreignFlagRefusal(verb: Verb, values: VerbValues): string | null {
+  const isUpdate = verb === 'update-decision' || verb === 'update-should-check';
+  const order = isUpdate ? [...OTHER_FLAGS, ...UPDATE_FLAGS] : [...UPDATE_FLAGS, ...OTHER_FLAGS];
+  for (const flag of order) {
+    const value = values[flag.slice(2) as keyof VerbValues];
+    // --opted-in is a boolean that defaults to false: false is "not given".
+    if (value === undefined || value === false || VERB_FLAGS[verb].includes(flag)) continue;
+    const owners = VERBS.filter((v) => VERB_FLAGS[v].includes(flag)).join(' and ');
+    const aside = verb === 'devices' && flag === '--device' ? ' — it lists every reader' : '';
+    return `${verb} takes no ${flag}${aside} (${flag} belongs to ${owners})`;
+  }
+  return null;
+}
+
 async function runVerb(verb: Verb, args: string[]): Promise<void> {
   let parsed: ReturnType<typeof parseVerbArgs>;
   try {
@@ -532,53 +587,18 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
   }
 
   try {
-    // The update verbs' flags live in the schema every verb shares, so
-    // every OTHER verb has to refuse them. Without this,
-    // `screepub devices --offered 1.0` quietly succeeds, which is the
-    // failure the per-verb rejections below exist to prevent, arriving
-    // through a flag they were written before.
-    if (verb !== 'update-decision' && verb !== 'update-should-check') {
-      const updateFlags: [unknown, string, string][] = [
-        [values.offered, '--offered', 'update-decision'],
-        [values.current, '--current', 'update-decision'],
-        [values['last-checked'], '--last-checked', 'update-should-check'],
-        [values['opted-in'] ? true : undefined, '--opted-in', 'update-should-check'],
-      ];
-      for (const [value, flag, owner] of updateFlags) {
-        if (value !== undefined) {
-          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
-        }
-      }
-    }
-
-    // --out belongs to export and route: the window's save dialog hands the
-    // engine a chosen path, and every verb that cannot write a file there
-    // must refuse it loud, the same way --for is refused everywhere but
-    // export. (route takes it for its two saves only, and refuses it for
-    // every other key itself.)
-    if (verb !== 'export' && verb !== 'route' && values.out !== undefined) {
-      fail({ code: 'usage', message: `${verb} takes no --out (--out belongs to export and route)` });
-    }
+    // Every flag refusal, for every verb, before any positional check and
+    // before any handler runs: for kfx-install that order is what keeps a
+    // mistyped command off the network and out of the user's Calibre, and
+    // for settings it is what keeps a --set beside a foreign flag from
+    // writing. tests/cli-kfx.test.ts and tests/cli-routes.test.ts pin it.
+    const refusal = foreignFlagRefusal(verb, values);
+    if (refusal !== null) fail({ code: 'usage', message: refusal });
 
     if (verb === 'devices') {
-      // Rejected rather than ignored, for the same reason `devices extra` is:
-      // silently accepting a flag the command cannot act on teaches the user
-      // it did something. --device belongs to send.
-      if (values.device !== undefined) {
-        fail({ code: 'usage', message: 'devices takes no --device — it lists every reader (--device belongs to send)' });
-      }
-      if (values.set !== undefined) {
-        fail({ code: 'usage', message: 'devices takes no --set (--set belongs to settings and app-settings)' });
-      }
-      if (values.for !== undefined) {
-        fail({ code: 'usage', message: 'devices takes no --for (--for belongs to export)' });
-      }
-      if (values.fountain !== undefined) {
-        fail({ code: 'usage', message: 'devices takes no --fountain (--fountain belongs to export and route)' });
-      }
-      if (values['options-json'] !== undefined) {
-        fail({ code: 'usage', message: 'devices takes no --options-json (--options-json belongs to export and route)' });
-      }
+      // Rejected rather than ignored, for the same reason a foreign flag is:
+      // silently accepting an argument the command cannot act on teaches the
+      // user it did something.
       if (positionals.length > 0) {
         fail({ code: 'usage', message: `devices takes no arguments (got "${positionals[0]}")` });
       }
@@ -596,27 +616,6 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
     }
 
     if (verb === 'update-decision' || verb === 'update-should-check') {
-      // Rejected rather than ignored, the same rule `devices` follows: a
-      // flag this verb cannot act on must not look like it did something.
-      const foreign: [unknown, string, string][] = [
-        [values.device, '--device', 'send'],
-        [values.set, '--set', 'settings and app-settings'],
-        [values.for, '--for', 'export'],
-        [values.fountain, '--fountain', 'export and route'],
-        [values['options-json'], '--options-json', 'export and route'],
-      ];
-      if (verb === 'update-decision') {
-        foreign.push([values['last-checked'], '--last-checked', 'update-should-check']);
-        if (values['opted-in']) foreign.push([true, '--opted-in', 'update-should-check']);
-      } else {
-        foreign.push([values.offered, '--offered', 'update-decision']);
-        foreign.push([values.current, '--current', 'update-decision']);
-      }
-      for (const [value, flag, owner] of foreign) {
-        if (value !== undefined) {
-          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
-        }
-      }
       if (positionals.length > 0) {
         fail({ code: 'usage', message: `${verb} takes no arguments (got "${positionals[0]}")` });
       }
@@ -659,18 +658,6 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       // Every refusal comes BEFORE anything runs. For kfx-install that order
       // is the point: a mistyped command must not reach the network or the
       // user's Calibre. tests/cli-kfx.test.ts pins the order in this source.
-      const foreign: [unknown, string, string][] = [
-        [values.device, '--device', 'send'],
-        [values.set, '--set', 'settings and app-settings'],
-        [values.for, '--for', 'export'],
-        [values.fountain, '--fountain', 'export and route'],
-        [values['options-json'], '--options-json', 'export and route'],
-      ];
-      for (const [value, flag, owner] of foreign) {
-        if (value !== undefined) {
-          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
-        }
-      }
       if (positionals.length > 0) {
         fail({ code: 'usage', message: `${verb} takes no arguments (got "${positionals[0]}")` });
       }
@@ -702,22 +689,6 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
     }
 
     if (verb === 'settings') {
-      // Rejected rather than ignored, the same rule every verb follows. The
-      // update flags and --out are refused above, in the shared blocks;
-      // --set is settings' own. Before the positional check and before
-      // settingsCommand touches the script, so a mistyped call with a --set
-      // beside it writes nothing.
-      const foreign: [unknown, string, string][] = [
-        [values.device, '--device', 'send'],
-        [values.for, '--for', 'export'],
-        [values.fountain, '--fountain', 'export and route'],
-        [values['options-json'], '--options-json', 'export and route'],
-      ];
-      for (const [value, flag, owner] of foreign) {
-        if (value !== undefined) {
-          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
-        }
-      }
       if (positionals.length !== 1) {
         fail({ code: 'usage', message: 'expected exactly one .fountain (see --help)' });
       }
@@ -734,18 +705,6 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
     }
 
     if (verb === 'export') {
-      // Rejected rather than ignored, the same rule every verb follows. The
-      // update flags are refused above in the shared block; --for,
-      // --fountain, --options-json and --out are export's own.
-      const foreign: [unknown, string, string][] = [
-        [values.device, '--device', 'send'],
-        [values.set, '--set', 'settings and app-settings'],
-      ];
-      for (const [value, flag, owner] of foreign) {
-        if (value !== undefined) {
-          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
-        }
-      }
       if (positionals.length !== 1) {
         fail({ code: 'usage', message: 'expected exactly one .epub to export (see --help)' });
       }
@@ -766,21 +725,6 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
     }
 
     if (verb === 'app-settings') {
-      // Same discipline as `devices`: a flag this verb cannot act on is
-      // refused, not silently ignored. --set is the one flag it shares with
-      // `settings`, so it is not refused here.
-      if (values.device !== undefined) {
-        fail({ code: 'usage', message: 'app-settings takes no --device (--device belongs to send)' });
-      }
-      if (values.for !== undefined) {
-        fail({ code: 'usage', message: 'app-settings takes no --for (--for belongs to export)' });
-      }
-      if (values.fountain !== undefined) {
-        fail({ code: 'usage', message: 'app-settings takes no --fountain (--fountain belongs to export and route)' });
-      }
-      if (values['options-json'] !== undefined) {
-        fail({ code: 'usage', message: 'app-settings takes no --options-json (--options-json belongs to export and route)' });
-      }
       if (positionals.length > 0) {
         fail({ code: 'usage', message: `app-settings takes no arguments (got "${positionals[0]}")` });
       }
@@ -810,23 +754,6 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
     }
 
     if (verb === 'reveal') {
-      // Same discipline as `devices` and `app-settings`: every flag this
-      // verb cannot act on is refused, not silently ignored.
-      if (values.device !== undefined) {
-        fail({ code: 'usage', message: 'reveal takes no --device (--device belongs to send)' });
-      }
-      if (values.set !== undefined) {
-        fail({ code: 'usage', message: 'reveal takes no --set (--set belongs to settings and app-settings)' });
-      }
-      if (values.for !== undefined) {
-        fail({ code: 'usage', message: 'reveal takes no --for (--for belongs to export)' });
-      }
-      if (values.fountain !== undefined) {
-        fail({ code: 'usage', message: 'reveal takes no --fountain (--fountain belongs to export and route)' });
-      }
-      if (values['options-json'] !== undefined) {
-        fail({ code: 'usage', message: 'reveal takes no --options-json (--options-json belongs to export and route)' });
-      }
       if (positionals.length !== 1) {
         fail({ code: 'usage', message: 'expected exactly one file to reveal (see --help)' });
       }
@@ -840,20 +767,6 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
     }
 
     if (verb === 'routes') {
-      // Rejected rather than ignored, the same rule every verb follows.
-      // --out is refused above, with the update flags, in the shared blocks.
-      const foreign: [unknown, string, string][] = [
-        [values.device, '--device', 'send'],
-        [values.set, '--set', 'settings and app-settings'],
-        [values.for, '--for', 'export'],
-        [values.fountain, '--fountain', 'export and route'],
-        [values['options-json'], '--options-json', 'export and route'],
-      ];
-      for (const [value, flag, owner] of foreign) {
-        if (value !== undefined) {
-          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
-        }
-      }
       if (positionals.length !== 1) {
         fail({ code: 'usage', message: 'expected exactly one .epub (see --help)' });
       }
@@ -869,21 +782,9 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
     }
 
     if (verb === 'route') {
-      // Rejected rather than ignored, the same rule every verb follows. The
-      // update flags are refused above in the shared block; --out,
-      // --fountain and --options-json are route's own, and routeCommand
-      // refuses each for every key that cannot act on it, before it probes
-      // or opens anything.
-      const foreign: [unknown, string, string][] = [
-        [values.device, '--device', 'send'],
-        [values.set, '--set', 'settings and app-settings'],
-        [values.for, '--for', 'export'],
-      ];
-      for (const [value, flag, owner] of foreign) {
-        if (value !== undefined) {
-          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
-        }
-      }
+      // --out, --fountain and --options-json are route's own, and
+      // routeCommand refuses each for every key that cannot act on it,
+      // before it probes or opens anything.
       if (positionals.length < 1 || positionals.length > 2) {
         fail({ code: 'usage', message: 'expected a route key and one .epub (see --help)' });
       }
@@ -903,18 +804,6 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
     }
 
     // verb === 'send'
-    if (values.set !== undefined) {
-      fail({ code: 'usage', message: 'send takes no --set (--set belongs to settings and app-settings)' });
-    }
-    if (values.for !== undefined) {
-      fail({ code: 'usage', message: 'send takes no --for (--for belongs to export)' });
-    }
-    if (values.fountain !== undefined) {
-      fail({ code: 'usage', message: 'send takes no --fountain (--fountain belongs to export and route)' });
-    }
-    if (values['options-json'] !== undefined) {
-      fail({ code: 'usage', message: 'send takes no --options-json (--options-json belongs to export and route)' });
-    }
     if (positionals.length !== 1) {
       fail({ code: 'usage', message: 'expected exactly one file to send (see --help)' });
     }

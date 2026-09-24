@@ -1082,9 +1082,16 @@ describe("cli.ts's route branch, in the source", () => {
     const called = text.indexOf('routeCommand(');
     expect(called).toBeGreaterThan(-1);
     const count = (s: string) => s.split(REFUSAL).length - 1;
-    // The foreign-flag loop and the positional check.
-    expect(count(text.slice(0, called))).toBe(2);
+    // The positional check. The foreign-flag refusal, every verb's, is made
+    // once in runVerb above every branch.
+    expect(count(text.slice(0, called))).toBe(1);
     expect(count(text.slice(called))).toBe(0);
+    const source = await Bun.file(`${ROOT}src/cli.ts`).text();
+    const flagCheck = source.indexOf('foreignFlagRefusal(verb, values)');
+    expect(flagCheck, 'the foreign-flag check moved out of runVerb')
+      .toBeGreaterThan(source.indexOf('async function runVerb('));
+    expect(flagCheck, 'the foreign-flag check moved below the route branch')
+      .toBeLessThan(source.indexOf(START));
   });
 });
 

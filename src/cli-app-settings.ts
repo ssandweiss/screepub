@@ -7,11 +7,11 @@
 import { accessSync, constants, mkdirSync } from 'node:fs';
 import { CliError, errorMessage } from './cli-errors';
 import {
-  chosenLibraryPath, envLibraryOverride, homeFolder, libraryRoot, platformLibraryDefault,
+  chosenLibraryPath, envLibraryOverride, libraryRoot, platformLibraryDefault,
   resolvedIfAbsolute,
 } from './library';
 import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from './options';
-import { appSettingsPath, writeAppSettings, type AppSettings } from './settings/app';
+import { appSettingsPath, homeFolder, writeAppSettings, type AppSettings } from './settings/app';
 import { appDefaultOptions, appDefaultsCustomized, keepsScriptSettings } from './settings/app-defaults';
 
 type Env = Record<string, string | undefined>;
