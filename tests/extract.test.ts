@@ -1,11 +1,13 @@
 import '../src/parser/pdfjs-shims';
 import { describe, test, expect } from 'bun:test';
+import { existsSync } from 'node:fs';
 import {
   collectUnderlineMarks,
   extractDocument,
   familyBucket,
   groupItemsIntoLines,
   markUnderlinesItem,
+  repairPhantomSpaces,
   stampLineFmt,
 } from '../src/parser/extract';
 import type { FontRun, RawLine } from '../src/parser/types';
@@ -110,6 +112,48 @@ describe('groupItemsIntoLines', () => {
     expect(lines[1].indent).toBe(30); // dialogue zone
     expect(lines[2].indent).toBe(40);
     expect(lines[4].indent).toBe(30);
+  });
+
+  test('a ONE-LETTER character name still anchors a dual region', () => {
+    // Found in the wild 2026-09-16: a Final Draft script whose lead is named
+    // "Q". isCueShaped required two characters AND two letters, so a
+    // "ALANI  Q" cue row failed the dual test, the region was never entered,
+    // and the two columns were Y-joined into one line each. The visible
+    // damage was not a missing cue: it was every following speech fusing
+    // with the other speaker's, and the rest of the scene reading as action,
+    // because the interleaved lines carry no cue to attach to.
+    //
+    // The geometry is the real guard here — left of 42%, right of 48%, a
+    // clear gap — so admitting a single letter costs no safety. A page
+    // number cannot reach this: it has no letters at all.
+    const lines = groupItemsIntoLines(
+      [
+        item('ALANI', 194, 700), item('Q', 432, 700),
+        item('Hang on--', 150, 688), item('We talked about this.', 400, 688),
+        item('She turns away.', 108, 640),
+      ],
+      612,
+      1,
+    );
+    expect(lines.map((l) => l.text)).toEqual([
+      'ALANI',
+      'Hang on--',
+      'Q',
+      'We talked about this.',
+      'She turns away.',
+    ]);
+  });
+
+  test('a lone letter does NOT make any two-cluster row a dual cue', () => {
+    // The pair of digits a shooting script prints in both margins, and a
+    // scene number row, must not be read as two cues now that one letter is
+    // allowed. Neither has a letter in it.
+    const lines = groupItemsIntoLines(
+      [item('2', 100, 700), item('2', 500, 700)],
+      612,
+      1,
+    );
+    expect(lines.map((l) => l.text)).toEqual(['2']);
   });
 
   test('dual body lines with narrow gaps still split at the cue-anchored boundary', () => {
@@ -703,5 +747,190 @@ describe('dual dialogue body lines', () => {
     const lines = dual();
     expect(lines.find((l) => l.text === 'SYD')?.dualRight).toBe(true);
     expect(lines.find((l) => l.text === 'LOU')?.dualRight).toBeUndefined();
+  });
+});
+
+// ── phantom spaces invented by pdf.js ────────────────────────────────
+//
+// Found 2026-09-16 in a Final Draft script that had been re-saved through
+// Quartz. The re-encode left one anomalous kerning adjustment roughly once
+// a page: every glyph pair on a line carries +17, and one carries about
+// -110, which widens that single gap by ~1.5pt. pdf.js reads a gap that
+// size as a word space and puts one in the string it hands us, so "these"
+// arrives as "thes e". The PDF contains no space there at all.
+//
+// The repair reads the glyph run, where a REAL space is a glyph of its own
+// and an invented one is not present at all. That is what makes this safe
+// against a writer who spaced a word out deliberately: their spaces are
+// characters and survive untouched.
+describe('repairPhantomSpaces', () => {
+  const SHOW_TEXT = 44; // OPS.showText
+  const g = (s: string) => [...s].map((c) => ({ unicode: c, width: 600 }));
+  const opsFor = (...runs: string[]) => ({
+    fnArray: runs.map(() => SHOW_TEXT),
+    argsArray: runs.map((r) => [g(r)]),
+  });
+  // 7.0 per cell, the tracked Courier this bug appears in.
+  const it = (str: string, cells: number) => ({
+    str,
+    transform: [1, 0, 0, 1, 100, 700],
+    width: cells * 7,
+  });
+
+  test('a space with no glyph behind it is removed', () => {
+    // "these men." is 10 glyphs of ink but 11 characters of string.
+    // Three clean lines alongside, because the cell width is a median over
+    // the page and a page with almost nothing on it should not produce one.
+    const items = [
+      it('sit well with thes e men.', 24),
+      it('a normal line of dialogue here', 30),
+      it('another perfectly ordinary line', 31),
+      it('and a third one for the median', 30),
+    ];
+    const fixed = repairPhantomSpaces(
+      items,
+      opsFor(
+        'sit well with these men.',
+        'a normal line of dialogue here',
+        'another perfectly ordinary line',
+        'and a third one for the median',
+      ),
+    );
+    expect(fixed).toBe(1);
+    expect(items[0].str).toBe('sit well with these men.');
+    expect(items[1].str).toBe('a normal line of dialogue here');
+  });
+
+  test('a glyph run with a trailing space still repairs the item', () => {
+    // The defect in the first cut of this, found on the real script: the
+    // glyph run for a line usually ends with a trailing space, so it is the
+    // SAME LENGTH as the damaged item even though it has one less space in
+    // the middle. A raw length comparison then reads "no improvement" and
+    // skips the repair. Three of the four known cases were skipped this way
+    // and only the one run without a trailing space was fixed.
+    const items = [
+      it('as we sl owly PAN AWAY.', 22),
+      it('a normal line of dialogue here', 30),
+      it('another perfectly ordinary line', 31),
+      it('and a third one for the median', 30),
+    ];
+    const fixed = repairPhantomSpaces(
+      items,
+      opsFor(
+        'as we slowly PAN AWAY. ',
+        'a normal line of dialogue here',
+        'another perfectly ordinary line',
+        'and a third one for the median',
+      ),
+    );
+    expect(fixed).toBe(1);
+    expect(items[0].str).toBe('as we slowly PAN AWAY.');
+  });
+
+  test('a deliberately spaced-out word is left alone', () => {
+    // The writer typed "s l o w l y". Every space is a real glyph, so the
+    // ink matches the string and nothing is flagged. This is the assurance
+    // that the repair cannot second-guess an author.
+    const items = [
+      it('we go s l o w l y now', 21),
+      it('a normal line of dialogue here', 30),
+      it('another perfectly ordinary line', 31),
+      it('and a third one for the median', 30),
+    ];
+    const fixed = repairPhantomSpaces(
+      items,
+      opsFor(
+        'we go s l o w l y now',
+        'a normal line of dialogue here',
+        'another perfectly ordinary line',
+        'and a third one for the median',
+      ),
+    );
+    expect(fixed).toBe(0);
+    expect(items[0].str).toBe('we go s l o w l y now');
+  });
+
+  test('an ambiguous match is refused rather than guessed', () => {
+    // Two runs on the page collapse to the same key. Picking one would be
+    // a coin flip, so neither is applied.
+    const items = [
+      it('thes e men.', 10),
+      it('a normal line of dialogue here', 30),
+      it('another perfectly ordinary line', 31),
+      it('and a third one for the median', 30),
+    ];
+    const fixed = repairPhantomSpaces(
+      items,
+      opsFor(
+        'these men.',
+        'these men.',
+        'a normal line of dialogue here',
+        'another perfectly ordinary line',
+        'and a third one for the median',
+      ),
+    );
+    expect(fixed).toBe(0);
+    expect(items[0].str).toBe('thes e men.');
+  });
+
+  test('an item whose ink matches its string is never touched', () => {
+    const items = [
+      it('these men.', 10),
+      it('a normal line of dialogue here', 30),
+      it('another perfectly ordinary line', 31),
+      it('and a third one for the median', 30),
+    ];
+    expect(
+      repairPhantomSpaces(
+        items,
+        opsFor(
+          'these men.',
+          'a normal line of dialogue here',
+          'another perfectly ordinary line',
+          'and a third one for the median',
+        ),
+      ),
+    ).toBe(0);
+  });
+
+  test('no operator list means no repair, not a crash', () => {
+    const items = [it('thes e men.', 10)];
+    expect(repairPhantomSpaces(items, null)).toBe(0);
+    expect(items[0].str).toBe('thes e men.');
+  });
+});
+
+// ── the repair is counted, never silent ──────────────────────────────
+//
+// repairPhantomSpaces changes an author's text. The owner's first instinct
+// was to make it opt-in, and the concern behind that is right: we should
+// not quietly rewrite someone's script. But a toggle answers it badly,
+// because it defaults to something — off, and people see broken words and
+// never find the setting; on, and the switch exists for a case nobody can
+// name — and because this is a correctness repair, not a preference: the
+// PDF says "these", we were writing "thes e".
+//
+// So it reports instead of asking. The count rides out with the result, the
+// app can say "repaired 94 spacing artifacts", and a number that suddenly
+// jumps is how anyone would notice it misfiring on a script.
+describe('extractDocument reports what it repaired', () => {
+  test('the count is part of the extraction result', async () => {
+    const pdf = new Uint8Array(await Bun.file('tests/fixtures/screenplay.pdf').arrayBuffer());
+    const out = await extractDocument(pdf);
+    // The committed fixture is clean, so the honest answer here is zero —
+    // and zero has to be REPORTED rather than absent, or a caller cannot
+    // tell "nothing to repair" from "this engine does not count".
+    expect(out.spacingRepairs).toBe(0);
+    expect(out.pageCount).toBeGreaterThan(0);
+  });
+
+  test('a PDF that needs repairs reports a non-zero count', async () => {
+    // The committed fixtures are all clean, so the only honest source for
+    // this is a real file. Skips rather than lies when the corpus is absent
+    // (it is gitignored and does not exist in CI).
+    const real = `${process.env.HOME}/Downloads/One Day This Could All Be Yours by Perry Janes.pdf`;
+    if (!existsSync(real)) return;
+    const out = await extractDocument(new Uint8Array(await Bun.file(real).arrayBuffer()));
+    expect(out.spacingRepairs).toBeGreaterThan(50);
   });
 });

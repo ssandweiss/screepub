@@ -100,19 +100,21 @@ proprietary, installed by you) to perform the actual KFX conversion. The
 Copyright (c) 2015 Alan Dague-Greene, Quote-Unquote Apps.
 <https://quoteunquoteapps.com/courierprime/>
 
-Bundled as WOFF2 subsets in `site/fonts/`, self-hosted so the website makes
-no third-party request. Not shipped inside the app or inside any converted
-book: the EPUB and MOBI ask the device for Courier Prime by name and fall
-back to whatever typewriter face it carries. Embedding the font in the book
-itself is on the roadmap, and the OFL permits it.
+Bundled as WOFF2 subsets in `site/fonts/` and in `desktop/ui/fonts/`,
+self-hosted so neither the website nor the desktop app makes a third-party
+request. Not shipped inside the app or inside any converted book: the EPUB
+and MOBI ask the device for Courier Prime by name and fall back to whatever
+typewriter face it carries. Embedding the font in the book itself is on the
+roadmap, and the OFL permits it.
 
 ## Literata 3.103 — SIL Open Font License 1.1
 
 Copyright (c) 2017 Type Together, commissioned by Google.
 <https://github.com/googlefonts/literata>
 
-Bundled as WOFF2 subsets in `site/fonts/`. Website only; the app has no
-running prose and never uses it.
+Bundled as WOFF2 subsets in `site/fonts/` and in `desktop/ui/fonts/`. The
+SwiftUI app has no running prose and never used it; the desktop window does,
+so the desktop app ships it.
 
 The OFL requires that the fonts be redistributed under the same licence, that
 this notice travel with them, and that they not be sold on their own. It also

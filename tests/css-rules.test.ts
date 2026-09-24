@@ -108,12 +108,19 @@ describe('ruleFor', () => {
   test('against the real stylesheet: the historical incident stays fixed', () => {
     // Regression check tied to commit 3abeba3: table.dual-dialogue is
     // requested bare and must resolve to the real rule, not the shadow
-    // rule that sits earlier in SCREENPLAY_CSS.
+    // rule that re-spells it for multicol engines.
+    //
+    // Since 2026-09-14 the two share a selector outright: the shadow list
+    // lost its other member when the cue keep stopped being a wrapper. So
+    // the shadow is emitted AFTER the rule it shadows, which is what keeps
+    // ruleFor's first-match answer the real one. Reversing that order
+    // reopens exactly the incident this test is named for.
     const rule = ruleFor(SCREENPLAY_CSS, 'table.dual-dialogue');
     expect(rule).toContain('width: 100%');
     expect(rule).not.toContain('-webkit-column-break-inside');
 
-    const shadow = ruleFor(SCREENPLAY_CSS, '.keep-together, table.dual-dialogue');
-    expect(shadow).toContain('-webkit-column-break-inside: avoid');
+    const both = eachRule(SCREENPLAY_CSS).filter((r) => r.selector === 'table.dual-dialogue');
+    expect(both).toHaveLength(2);
+    expect(both[1]!.body).toContain('-webkit-column-break-inside: avoid');
   });
 });

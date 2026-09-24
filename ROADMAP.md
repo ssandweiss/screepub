@@ -42,6 +42,13 @@ annoys you is more useful than anything on this page.
 
 ## Later
 
+**A library — seeing the books you have made.** The app writes every
+conversion into `~/Documents/Screepub` and then offers no way to look at what
+is in there: the surfaces are Convert, Read, Tune, Send and Notes. You find
+your books in Finder. A library view would list them, reopen one without
+reconverting its PDF, and be the obvious home for per-script tuning that
+today you can only reach by converting the script again.
+
 **Sides — reading one character's script.** Extract only the scenes a given
 character appears in, or emphasise their lines throughout. Screepub already
 identifies every scene and every character cue while converting; this puts
@@ -92,12 +99,11 @@ already be looped; the app can't.
 **Right-click a PDF in Finder** and send it to your e-reader, without
 opening Screepub at all.
 
-**A graphical Screepub off the Mac.** The app is macOS-only and a second
-native app isn't realistic for one maintainer. The likely answer is a local
-web interface — served from your own machine, nothing uploaded — giving
-Windows and Linux a real window instead of a terminal. This is waiting on
-demand rather than on effort: **if you want it, say so in an issue.** That's
-the signal that moves it.
+**A graphical Screepub off the Mac.** Done, in 0.6.0: there is a window for
+Linux and Windows now, built on Tauri around the same engine, with packages
+on the release page. Nobody has installed one yet and the window has only
+been opened on Linux, so **what it needs now is people running it** — say
+what broke in an issue. That's the signal that moves it.
 
 ## Influencing this list
 

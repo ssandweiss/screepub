@@ -102,6 +102,114 @@ brew install --cask ssandweiss/tap/screepub
 [Calibre](https://calibre-ebook.com) is optional and only needed for the AZW3
 Kindle-sideload format.
 
+### Linux and Windows (command line)
+
+There is no window to open yet on Linux or Windows: what ships is the
+converter itself, run from a terminal. From version 0.6.0 onward, download the
+file for your machine from the
+[latest release](https://github.com/ssandweiss/screepub/releases/latest),
+unpack it, and run it. Earlier releases carry the macOS downloads only.
+
+| Machine | File |
+| --- | --- |
+| Linux, Intel or AMD | `screepub-cli-linux-x64.tar.gz` |
+| Linux, ARM (Asahi, Raspberry Pi, ARM servers) | `screepub-cli-linux-arm64.tar.gz` |
+| Windows, 64-bit | `screepub-cli-windows-x64.zip` |
+
+```bash
+tar -xzf screepub-cli-linux-x64.tar.gz
+./screepub script.pdf
+```
+
+`SHA256SUMS` on the release page covers these three files, for anyone who
+wants to check what they downloaded.
+
+**Windows will warn you.** The Windows build is unsigned: it carries no
+code-signing certificate, so SmartScreen shows a "publisher unknown" screen the
+first time you run it. Choose **More info**, then **Run anyway**. Certificates
+cost money this project does not spend yet; this note exists so the warning is
+expected rather than alarming.
+
+**Device support off macOS is unproven.** `screepub devices` and
+`screepub send` are built for all three platforms and code-tested on all
+three, but the only device transfer anyone has ever run on real hardware was a
+Kindle, on a Mac. Windows drive enumeration has never run against a real
+reader, and a tolino cannot be detected on Windows at all: it is identified by
+the name of its volume, and a Windows drive root carries none. Converting is
+the part that is well tested everywhere; sending is not.
+
+### Desktop app
+
+From 0.6.0 there is a window as well as a command line, built on Tauri in
+`desktop/` around this same engine: the app spawns the engine binary and
+renders its `--json` answer, so there is exactly one implementation of
+everything that thinks. It has five surfaces — convert a script, read it,
+tune its formatting, send it to a reader, and the release notes.
+
+| Machine | File |
+| --- | --- |
+| Linux, Debian or Ubuntu, Intel or AMD | `Screepub-linux-amd64.deb` |
+| Linux, Fedora or openSUSE, Intel or AMD | `Screepub-linux-x86_64.rpm` |
+| macOS, Apple Silicon or Intel | `Screepub-Desktop-macOS-universal.dmg` |
+| Windows, 64-bit | `Screepub-windows-x64-setup.exe` |
+
+These names carry no version from 0.7.2 on, so they are the same at every
+release. Releases up to 0.7.1 put the version in the Linux and Windows
+names.
+
+```bash
+sudo apt install ./Screepub-linux-amd64.deb      # Debian, Ubuntu
+sudo dnf install ./Screepub-linux-x86_64.rpm     # Fedora
+sudo zypper install ./Screepub-linux-x86_64.rpm  # openSUSE
+```
+
+`SHA256SUMS-app` on the release page covers these four files. (`SHA256SUMS`,
+beside it, covers the three command-line downloads.) There is no Linux ARM
+package: no ARM runner builds one, and shipping a filename nothing produces
+is worse than shipping nothing. `tools/build-app-bundle.ts` makes one by
+hand on an ARM machine if you want it.
+
+**On a Mac, `Screepub-macOS.dmg` is still the supported download.** It
+installs `Screepub.app` and it is the one this project has been shipping.
+`Screepub-Desktop-macOS-universal.dmg` is the new cross-platform app, one
+download that runs on Apple Silicon and Intel alike; it installs
+`Screepub Desktop.app`, a different name and a different bundle identifier
+from the Mac app's, so installing it is not installing over the other. Both write into `~/Documents/Screepub/` by default, in different
+shapes — see [the library](#the-library) below. When the new app replaces the
+old one, that name goes back to `Screepub.app`.
+
+**Windows will warn you, the same way the command-line download does.** The
+installer is unsigned too: it carries no code-signing certificate, so
+SmartScreen shows a "publisher unknown" screen the first time you run it.
+Choose **More info**, then **Run anyway**. It is the same warning, for the
+same reason, from the same missing certificate — not a second problem.
+
+**The Windows installer may need the network once.** It installs Microsoft's
+WebView2 runtime if the machine has none — Windows 11 ships it, Windows 10
+may not — and fetches it from Microsoft at install time. Converting itself
+never touches the network, on any platform, and never has.
+
+**What has been installed, and by whom.** On a Mac, one person has mounted
+the universal `.dmg`, dragged the app to `/Applications`, launched it past
+Gatekeeper and converted two real feature scripts with it. That is one
+person on one machine, and it is the most anyone has done with any of these.
+The `.deb`, the `.rpm` and the Windows installer have never been installed
+on a real machine by anyone. The release path opens all four bundles and
+runs the engine out of each before anything is published: that catches a
+broken payload, and catches nothing a person would notice about the window.
+It has not run yet either, because 0.6.0 is the first release that will
+exercise it. The window itself has been opened on Linux and on macOS, never
+on Windows: no build runner has a display, so nobody has started, clicked or
+looked at it there. And half of the Mac download is unexercised. It is a
+universal build, and only its Apple Silicon slice has ever been run: the
+Intel slice ships built, signed, and executed nowhere. Treat 0.6.0's app
+downloads as a first release that wants your bug reports.
+
+Build instructions, and a ledger of exactly who has verified what:
+[`desktop/README.md`](desktop/README.md).
+
+The macOS app in `app/` remains the supported Mac app.
+
 ## Your script stays on your machine
 
 Scripts are confidential. Screepub is built accordingly.
@@ -114,9 +222,12 @@ Scripts are confidential. Screepub is built accordingly.
   any kind. Your PDF is read from disk and the e-book is written back to disk.
 - **No training data, ever.** There is no server to send scripts to.
 - **No accounts, no telemetry, no analytics.** Screepub does not track usage,
-  report crashes, or phone home. It works fully offline.
+  report crashes, or phone home. Converting works fully offline, on every
+  platform. The one exception is not the converter but the Windows
+  *installer*, which fetches Microsoft's WebView2 runtime once if the machine
+  has none; see [Desktop app](#desktop-app) above.
 
-The app touches the network in five places, each needing your click: uploading
+The Mac app touches the network in five places, each needing your click: uploading
 to a **docked reMarkable** over USB (your own hardware, not the internet),
 opening **Amazon's Send-to-Kindle page**, opening **GitHub** to report a bug,
 **only if you opt in** asking GitHub whether a newer release exists, and
@@ -128,6 +239,35 @@ unauthenticated request to `api.github.com`, at most once a day, carrying the
 app name and version and nothing else. **Install and Relaunch** verifies the
 DMG's Apple signature against this project's Developer ID *and* checks it is the
 exact version offered before swapping anything.
+
+The cross-platform window touches the network in seven places, each needing
+your click: the upload to a docked reMarkable over USB, GitHub when you choose
+**Report a bug**, which opens a pre-filled issue in your browser, Amazon's
+Send to Kindle web page when you choose **Send to Kindle web** on the Send
+page (it opens in your browser beside the book's folder, and you drag the
+book in yourself), Amazon's settings page when you choose **Open Amazon's
+page** on the Send page's email row, where your Kindle's email address and
+approved senders are, Calibre's or Amazon's download page when you choose
+**Get Calibre** or **Get Kindle Previewer** on the Send page's KFX checklist,
+that same checklist's own **Install** button, which fetches the KFX plugin
+from Calibre's own plugin index, and this project's `latest.json` on GitHub.
+That last one is asked once a day only if you say yes when the window first
+asks (one line under the drop area, which stays until you answer; the switch
+in the release notes changes your answer later), and once whenever you press
+**Check for updates** in the release notes. The download follows only when
+you choose **Update to** beside the version number, or **Install** in the
+release notes. Its signature is checked against a key built into the app
+before anything is swapped, and the app then restarts itself, waiting first
+for any conversion, send, export or settings change that is still running,
+and for any file dialog that is still open.
+
+Three more Send page buttons, on a Mac, hand the book to another app on your
+computer and stop there: **Send to Kindle app** opens Amazon's own app with
+the book, and that app uploads it to Amazon when you send it; **Add to Apple
+Books** adds it to Books, which syncs it through iCloud if Books is set to;
+and **Send to Kindle email** opens a Mail message with the book attached,
+which goes nowhere until you send it. Saving a copy, and showing a book in
+your file manager, are local and reach nothing.
 
 The one thing worth being clear about: **you** can choose to send a script
 somewhere. If you email it to your `@kindle.com` address, Amazon receives it and
@@ -154,6 +294,7 @@ bun src/cli.ts <input.pdf | input.fountain> [options]
 | Option | Effect |
 | --- | --- |
 | `-o, --output <file>` | EPUB path (default `<input>.epub`; companions follow it) |
+| `--library` | write into the library instead of beside the input (see below) |
 | `--mobi` | also write a MOBI 6 (dependency-free USB sideload) |
 | `--preview-html <file>` | also write the script as one self-contained HTML file |
 | `--fountain <file>` / `--no-fountain` | intermediate `.fountain` control |
@@ -163,6 +304,139 @@ bun src/cli.ts <input.pdf | input.fountain> [options]
 | `--json` | machine-readable result (the app↔engine contract) |
 | `--progress` | NDJSON progress on **stderr** while converting |
 | `--debug` | dump classified elements JSON |
+
+#### The library
+
+Without `--library` the CLI writes beside its input, which is what a
+command-line tool is expected to do. `--library` — what the desktop window
+passes, so a converted script never litters the folder the PDF was dragged
+from — puts the book, its `.fountain` and its settings sidecar together in
+one folder per script:
+
+| Platform | Library |
+| --- | --- |
+| macOS | `~/Documents/Screepub` |
+| Windows | `%USERPROFILE%\Documents\Screepub` |
+| Linux / other | `<Documents>/Screepub`, where `<Documents>` is `XDG_DOCUMENTS_DIR` — from the environment, else from `~/.config/user-dirs.dirs` — and `~/Documents` when neither says otherwise |
+
+Under **Documents**, not under application state: a converted `.epub` is a
+document the reader opens, copies to a device and backs up, not something the
+program keeps for itself. It is also the SwiftUI app's DEFAULT
+output folder, so on a Mac the two usually write into the same place — but
+only usually, and never into the same shape. The app's folder is settable, so
+a Mac user who moved it does end up with two libraries; and the app writes
+flat (`<folder>/<stem>.epub`) where the window writes one folder per script
+(`<folder>/<stem>/<stem>.epub`). The window does not list, reuse, or inherit
+tuning from books the app left flat in that folder.
+
+`SCREEPUB_LIBRARY` overrides all three. Two different scripts with the same
+filename do not share a folder: the second gets `<stem>-<hash>`, keyed on its
+own path, so neither book can overwrite the other. A `<stem>.screepub.json`
+sitting beside the PDF from an earlier conversion is copied in the first time
+that script reaches the library, so tuning is not silently lost. The
+`source.json` in each script folder records which PDF it came from; it is the
+one file a library listing should skip.
+
+The default folder above is not fixed. `screepub app-settings --set '{"libraryPath": "/some/folder"}'` chooses a different one (it must be a
+full path), and `'{"libraryPath": null}'` goes back to the default.
+Precedence is `SCREEPUB_LIBRARY` > the chosen folder > the platform default.
+Choosing a new folder moves nothing: books already converted stay where they
+are, and conversions from then on land in the new one. A script converted
+again after the change starts a fresh folder there, without the tuning
+saved in its old one. The desktop window offers the same choice from the
+Convert page: a Change… button next to the library line opens a folder
+picker, and Reset goes back to the default.
+
+The same command sets the app's format defaults too: what a new script
+starts from. Precedence there is explicit flags > the script's saved
+settings (`screepub settings`) > these app defaults > Screepub's own.
+`screepub app-settings [--set <json>] [--json]` reads or writes both
+`libraryPath` and `formatDefaults` in one call (`formatDefaults` replaces
+the whole set; see `--help`). The per-script Settings page's foot has the
+window's equivalent, "Use these for new scripts", which sends that
+script's current settings as the new app defaults.
+
+The first `--library` conversion of a PDF that has no settings sidecar of
+its own saves the settings it started from as that script's own, so a
+later change to the app defaults reaches only scripts converted
+afterwards. Scripts already in the library from before this release saved
+nothing, so they keep following the app defaults until a knob is moved
+once on their own Settings page.
+
+That save is a choice. The Settings page's "When a PDF is converted" offers
+"Keep its settings" (the default) and "Follow the defaults";
+`screepub app-settings --set '{"keepScriptSettings": false}'` is the same
+switch (`true` or `null` turns it back on). With it off, a converted PDF
+saves nothing of its own, so it follows the app defaults until you tune
+it. Switching changes only what happens to PDFs converted from then on:
+a script that already has saved settings keeps them either way.
+
+`screepub reveal <file> [--json]` shows a converted file (given as a full
+path) in the system's file manager: Finder with the file selected on
+macOS, the containing folder on Windows and Linux.
+
+All three settings live in one small file outside the library:
+`~/Library/Application Support/Screepub/settings.json` on macOS,
+`%APPDATA%\Screepub\settings.json` on Windows, and
+`$XDG_CONFIG_HOME/screepub/settings.json` on Linux
+(`~/.config/screepub/settings.json` by default). `SCREEPUB_CONFIG_DIR`
+overrides that folder everywhere.
+
+#### Device commands
+
+```bash
+bun src/cli.ts devices [--json]                          # list connected e-readers
+bun src/cli.ts send <file> [--device <id>] [--json]      # send an existing file to one
+bun src/cli.ts routes <file.epub> [--json]               # every way this book can leave, best first
+bun src/cli.ts route <key> <file.epub> [--out <path>]    # send it to Apple Books, Amazon or Mail, or save a copy
+bun src/cli.ts kfx-status [--json]                       # can this computer make KFX for a Kindle?
+bun src/cli.ts kfx-install [--json]                      # install the KFX plugin into Calibre (online)
+```
+
+`devices` lists every reader it can reach: USB-mounted Kindle, Kobo and
+tolino volumes, plus a reMarkable if its USB web interface is answering.
+`send` delivers an existing file — it does **not** convert, so run a
+conversion first. For a mounted volume that means copying the file where that
+vendor actually indexes it; for a reMarkable it means uploading over HTTP to
+the docked tablet, which accepts **only PDF and EPUB** (anything else is
+refused before a byte moves). With one reader connected `--device` is
+optional; with several it is required, and `devices` prints the ids it
+accepts.
+
+`routes` lists every other way the book can leave too: Apple Books, Amazon's
+Send to Kindle, email, and saving a copy, in a fixed order, with the one you
+chose last time marked as the choice, even when it can't fire right now.
+`route <key>` performs one of them (`apple-books`, `send-to-kindle`,
+`email-to-kindle`, `save-epub`, `save-kindle`) and remembers it for next time;
+`route kindle-email-setup` takes no file and opens Amazon's Personal Document
+Settings page, where a Kindle's email address and the approved senders live.
+The two saves need an absolute `--out` path; Apple Books and email are
+Mac only, and email needs Apple Mail set as the default mail app. The
+remembered choice lives in an app settings file, not the library: macOS
+`~/Library/Application Support/Screepub/settings.json`, Windows
+`%APPDATA%\Screepub\settings.json`, elsewhere `$XDG_CONFIG_HOME/screepub`
+(or `~/.config/screepub`); `SCREEPUB_CONFIG_DIR` overrides it on every
+platform.
+
+A Kindle gets its best rendering from KFX, which needs three free tools:
+Calibre, Amazon's Kindle Previewer, and the KFX Output plugin inside
+Calibre. `kfx-status` says which are installed and where to get the rest;
+`kfx-install` installs the plugin from Calibre's own plugin index. Amazon
+makes no Kindle Previewer for Linux, so `kfx-install` does not work there.
+Until all three are there, a Kindle gets AZW3 (with Calibre) or the
+engine's MOBI. The desktop app shows the same checklist on its Send page.
+
+The same hardware caveat as everywhere else applies here: only the Kindle
+route has been run on a real device. Kobo, tolino and reMarkable are built and
+code-tested against injected mounts and a stub tablet — see the table in
+[Which readers?](#which-readers) above.
+
+On Linux and Windows this caveat is stronger still: no device of any kind has
+been connected to Screepub on either operating system. See
+[Linux and Windows](#linux-and-windows-command-line) above.
+
+A verb is only a verb when no file of that name exists, so a script saved as
+`devices` still converts and `./devices` always means the file.
 
 `.fountain` input is partially supported: 16 of the 18 formatting options
 apply, and one piece of syntax renders differently than another tool would

@@ -1,9 +1,9 @@
 import { describe, test, expect } from 'bun:test';
 import { Fountain } from 'fountain-js';
 import JSZip from 'jszip';
-import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions } from '../src/options';
+import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from '../src/options';
 import { screenplayCss } from '../src/epub/css';
-import { ruleFor } from './css-rules';
+import { ruleFor, eachRule } from './css-rules';
 import { tokensToBody } from '../src/epub/html';
 import { buildEpub } from '../src/epub/build';
 import { toFountain } from '../src/fountain/serialize';
@@ -84,6 +84,46 @@ describe('resolveFormatOptions', () => {
       resolveFormatOptions({ preserveFontShifts: 0 } as Record<string, unknown>).preserveFontShifts,
     ).toBe(true);
   });
+
+  test('resolveFormatOptions merges over a supplied base, not just the defaults', () => {
+    const base: FormatOptions = { ...DEFAULT_FORMAT_OPTIONS, keepSpeechesWhole: true, justifyText: true };
+    const merged = resolveFormatOptions({ dialogueSideMarginPct: 9 }, base);
+    expect(merged.dialogueSideMarginPct).toBe(9);
+    // fields absent from the partial come from the BASE, not from the defaults
+    expect(merged.keepSpeechesWhole).toBe(true);
+    expect(merged.justifyText).toBe(true);
+  });
+
+  test('resolveFormatOptions still defaults its base to DEFAULT_FORMAT_OPTIONS', () => {
+    expect(resolveFormatOptions({})).toEqual(DEFAULT_FORMAT_OPTIONS);
+  });
+
+  test('an out-of-range value clamps against the base rather than being taken raw', () => {
+    const base: FormatOptions = { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 12 };
+    expect(resolveFormatOptions({ dialogueSideMarginPct: 999 }, base).dialogueSideMarginPct).toBe(30);
+    expect(resolveFormatOptions({ dialogueSideMarginPct: 'nope' }, base).dialogueSideMarginPct).toBe(12);
+  });
+
+  // dualDialogue used to be merged as `p.dualDialogue === 'sequential' ?
+  // 'sequential' : d.dualDialogue`, which reads an explicit 'sideBySide' the
+  // same as an absent or invalid value: it always fell through to the base.
+  // A base of 'sequential' (a user's own app defaults, the Phone preset
+  // saved as their starting point) then could never be moved back to
+  // 'sideBySide' by anything downstream, no matter how explicitly asked.
+  test('an explicit sideBySide overrides a sequential base', () => {
+    const base: FormatOptions = { ...DEFAULT_FORMAT_OPTIONS, dualDialogue: 'sequential' };
+    expect(resolveFormatOptions({ dualDialogue: 'sideBySide' }, base).dualDialogue).toBe('sideBySide');
+  });
+
+  test('an explicit sequential still overrides a sideBySide base', () => {
+    const base: FormatOptions = { ...DEFAULT_FORMAT_OPTIONS, dualDialogue: 'sideBySide' };
+    expect(resolveFormatOptions({ dualDialogue: 'sequential' }, base).dualDialogue).toBe('sequential');
+  });
+
+  test('an invalid dualDialogue value falls back to the base, same as the other enums', () => {
+    const base: FormatOptions = { ...DEFAULT_FORMAT_OPTIONS, dualDialogue: 'sequential' };
+    expect(resolveFormatOptions({ dualDialogue: 'nonsense' }, base).dualDialogue).toBe('sequential');
+  });
 });
 
 // ── screenplayCss(options) ───────────────────────────────
@@ -155,14 +195,14 @@ describe('screenplayCss with options', () => {
 
   test('wrapper keeps carry the column spelling in a separate rule', () => {
     const css = screenplayCss(DEFAULT_FORMAT_OPTIONS);
-    // Grouped rule on purpose: this test targets the comma-joined shadow
-    // selector itself (the old column-break spelling), not the bare
-    // .keep-together or table.dual-dialogue rules.
-    const rule = ruleFor(css, '.keep-together, table.dual-dialogue');
-    expect(rule).toContain('-webkit-column-break-inside: avoid');
+    // The shadow shares its selector with the rule it shadows and is
+    // emitted second, so address it by position rather than by name.
+    const both = eachRule(css).filter((r) => r.selector === 'table.dual-dialogue');
+    expect(both).toHaveLength(2);
+    expect(both[1]!.body).toContain('-webkit-column-break-inside: avoid');
     // iBooks bug: the column spelling must not share a declaration block
     // with page-break-inside, or Books ignores BOTH.
-    expect(rule).not.toContain('page-break-inside');
+    expect(both[1]!.body).not.toContain('page-break-inside');
   });
 
   test('the column spelling tracks the keep set: keepSpeechesWhole joins it', () => {
@@ -170,12 +210,11 @@ describe('screenplayCss with options', () => {
     // from this rule is inert there. The selector list is derived from the
     // same gating that emits the keeps, not hand-maintained beside it.
     const off = screenplayCss(resolveFormatOptions({}));
-    expect(ruleFor(off, '.keep-together, table.dual-dialogue'))
-      .toContain('-webkit-column-break-inside: avoid');
+    expect(off).toContain('table.dual-dialogue { -webkit-column-break-inside: avoid; }');
     expect(off).not.toContain('.dialogue-block { -webkit-column-break-inside');
 
     const on = screenplayCss(resolveFormatOptions({ keepSpeechesWhole: true }));
-    const rule = ruleFor(on, '.keep-together, table.dual-dialogue, .dialogue-block');
+    const rule = ruleFor(on, 'table.dual-dialogue, .dialogue-block');
     expect(rule).toContain('-webkit-column-break-inside: avoid');
     // Still its own declaration block, per the iBooks bug above.
     expect(rule).not.toContain('page-break-inside');
@@ -363,8 +402,23 @@ describe('showPageMarkers', () => {
     el3({ text: 'Even more.', type: 'action', pageNum: 3 }),
   ];
 
-  test('off by default — no markers', () => {
-    expect(toFountain(sp3(ELS))).not.toContain('= pg');
+  test('on by default — a note about page 42 can still be found', () => {
+    // Flipped 2026-09-21. Page numbers are navigation: a script gets notes
+    // against printed page numbers, and a book that dropped them made every
+    // one of those notes unfindable. Nothing else in the book carries the
+    // printed pagination, so this was the only way back to it.
+    //
+    // showSceneNumbers was deliberately NOT flipped with it. A scene number
+    // is an intentional property of a draft, present or absent because a
+    // writer decided, and the app has no business inventing one.
+    const out = toFountain(sp3(ELS));
+    expect(out).toContain('= pg 1\n\nMore work.');
+    expect(out).toContain('= pg 2\n\nEven more.');
+  });
+
+  test('and can still be turned off', () => {
+    const out = toFountain(sp3(ELS), undefined, resolveFormatOptions({ showPageMarkers: false }));
+    expect(out).not.toContain('= pg');
   });
 
   test('on: markers carry the PDF-printed numbering, not the sheet index', () => {

@@ -1,0 +1,114 @@
+// The app-wide settings file: one small JSON file for knobs that belong to
+// the app itself, not to any one script. Shared by two pieces built in
+// parallel: piece B stores the last-chosen send route (`lastRoute`) here,
+// and piece C stores the library folder and app-wide format defaults here.
+// Neither owns the file, so a write from one must keep the other's keys.
+//
+// It lives OUTSIDE the library on purpose. Piece C makes the library
+// movable (a user can point SCREEPUB_LIBRARY, or later a setting, somewhere
+// else), and a file that recorded where to find the library could not
+// itself live inside the thing it locates.
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
+
+type Env = Record<string, string | undefined>;
+
+export interface AppSettings {
+  lastRoute?: string;
+  [other: string]: unknown;
+}
+
+/** Folder + 'settings.json'. SCREEPUB_CONFIG_DIR wins everywhere.
+ *
+ * Platform and env are parameters, not read from the host, for the same
+ * reason `src/library.ts`'s `libraryRoot` takes them: it is the only way a
+ * single test run can check all three operating systems' answers, and the
+ * only way a real run stays out of the tester's actual home directory. */
+export function appSettingsPath(
+  platform: NodeJS.Platform = process.platform,
+  env: Env = process.env,
+): string {
+  const override = (env.SCREEPUB_CONFIG_DIR ?? '').trim();
+  if (override !== '') return join(resolve(override), 'settings.json');
+
+  // The PLATFORM's own path rules, not the host's, same as libraryRoot: a
+  // path computed for win32 while running on posix (or back) has to use
+  // win32's own join, not the host's.
+  const path = platform === 'win32' ? win32 : posix;
+  const home = env.HOME || env.USERPROFILE || homedir();
+
+  if (platform === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', 'Screepub', 'settings.json');
+  }
+
+  if (platform === 'win32') {
+    const appData = (env.APPDATA ?? '').trim();
+    const base = appData !== '' ? appData : path.join(home, 'AppData', 'Roaming');
+    return path.join(base, 'Screepub', 'settings.json');
+  }
+
+  // Everywhere else: XDG's config-home convention, lower-cased, the way
+  // every other well-behaved tool on these systems names its folder.
+  const xdgConfigHome = (env.XDG_CONFIG_HOME ?? '').trim();
+  const configHome = path.isAbsolute(xdgConfigHome) ? xdgConfigHome : path.join(home, '.config');
+  return path.join(configHome, 'screepub', 'settings.json');
+}
+
+/** Never throws: missing, unreadable, not JSON, or not an object all read
+ * back as `{}` rather than stopping whatever asked. */
+export function readAppSettings(path: string = appSettingsPath()): AppSettings {
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return {};
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+  return parsed as AppSettings;
+}
+
+/** Reads, shallow-merges `patch` over what is there (unknown keys kept, so a
+ * write from one piece can never drop a key that belongs to the other),
+ * writes atomically (temp file in the same folder, then rename, the same
+ * discipline `src/settings/sidecar.ts` uses), and creates the folder.
+ *
+ * A key set to `undefined` in `patch` is removed rather than written as
+ * `null`, so callers can delete a key without knowing the rest of the file.
+ *
+ * The read and the write are not one atomic operation, so two engine calls
+ * landing at the same moment (a route saving `lastRoute` while an
+ * `app-settings --set` runs) can still interleave: both read the same
+ * starting file, and whichever renames its temp file second wins, silently
+ * dropping the other's key. Accepted rather than fixed with a lock: the
+ * window is a single JSON read-modify-write, not a long-running job, and
+ * both writers are a person doing one thing at a time (choosing a route,
+ * opening the settings gear), not a background process that could pile up
+ * concurrent calls. */
+export function writeAppSettings(
+  patch: Partial<AppSettings>,
+  path: string = appSettingsPath(),
+): AppSettings {
+  const merged: AppSettings = { ...readAppSettings(path) };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) {
+      delete merged[key];
+    } else {
+      merged[key] = value;
+    }
+  }
+
+  const folder = dirname(path);
+  if (!existsSync(folder)) mkdirSync(folder, { recursive: true });
+  const tmp = join(folder, `.${basename(path)}.${process.pid}.tmp`);
+  writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`);
+  renameSync(tmp, path);
+
+  return merged;
+}

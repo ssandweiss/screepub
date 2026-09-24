@@ -15,6 +15,7 @@ bun src/cli.ts <pdf>        # convert (see --help; --json is the app contract)
 app/build-app.sh            # engine sidecar + SwiftUI app → app/dist/Screepub.app
 (cd app && swift run -c release kit-check)   # Swift-side behavior checks
 epubcheck <out.epub>        # validate output (brew-installed)
+bun tools/capture-screens.ts   # retake README + site pictures (needs Chrome; macOS)
 ```
 
 ## Architecture
@@ -23,6 +24,15 @@ epubcheck <out.epub>        # validate output (brew-installed)
   table-read parser by the same author and heavily extended here; this is
   now the only copy, so no cross-repo mirroring. Parser stays
   FORMAT-OPTION-FREE.
+- `src/parser/cue.ts` — the ONE definition of what a character cue looks
+  like as TEXT, imported by classify.ts and by extract.ts's dual-dialogue
+  detector. Third module of the shared-discriminator kind, and the one that
+  proved why the pattern exists: there used to be two definitions and they
+  disagreed, so a script whose lead was named "Q" rendered ordinary cues
+  fine and collapsed a whole dual-dialogue scene into interleaved action.
+  **Geometry stays with the caller** — classify owns the indent band,
+  clusterSplit owns the column test — because forcing the dual path to
+  invent an indent is how the second copy got written.
 - `src/fountain/serialize.ts` — elements → Fountain. The `.fountain` is a
   durable artifact and the app's cache boundary. Beside it,
   `src/fountain/slug.ts` owns the stage-2 `PRIMARY_SLUG`/`isMiniSlug`
@@ -51,10 +61,13 @@ epubcheck <out.epub>        # validate output (brew-installed)
   line-height.** Kindle strips max-width and owns line-height. Two more
   hard NOs: **never `background-color` on html or body** — it makes the KFX
   converter synthesize its own wrapper block and every keep in the book
-  then dies silently (MobileRead t=330798). Our own nesting is fine:
-  `section.scene` > `.dialogue-block` > `.keep-together` is device-
-  confirmed to hold (registry #8b), so this is a ban on the root
-  background, NOT a reason to flatten the DOM. And **CSS value SYNTAX
+  then dies silently (MobileRead t=330798). This is a ban on the ROOT
+  background, not a general fear of nesting: `section.scene` >
+  `.dialogue-block` is device-confirmed to hold. But **a keep must sit on
+  an element that carries TEXT, never on a structural wrapper** — that
+  converter honors `break-after: avoid` on a `<p>` or `<h2>` and ignores it
+  on a `<div>`, which stranded every cue in the book once (registry #8b,
+  2026-09-14). Keeps are chains on paragraphs here, not wrappers. And **CSS value SYNTAX
   stays CSS-2.1-vintage** — no `min()`/`clamp()`/`var()`, because Adobe
   RMSDK (Kobo's EPUB path, tolino) violates CSS error handling and can
   blank a whole book on a value function it cannot parse; CSS3 PROPERTIES
@@ -88,9 +101,17 @@ epubcheck <out.epub>        # validate output (brew-installed)
   **`torture.pdf`** — 14 sheets exercising every content-driven registry
   behavior, whose coverage is tracked row-by-row in
   `tools/torture-manifest.json`. `bun tools/device-checklist.ts` prints the
-  device-side half of that manifest for a hardware pass. All four regenerate
-  from `make-fixture.py`, and `tests/fixture-stability.test.ts` fails if the
-  first three stop reproducing byte-for-byte.
+  device-side half of that manifest for a hardware pass. And
+  **`field-station.pdf`**, the invented 18-page feature every README and site
+  picture shows; the site's own scene sits on its pages 14 to 18, and
+  `tests/field-station.test.ts` checks that. All five regenerate from
+  `make-fixture.py`, and `tests/fixture-stability.test.ts` fails if any but
+  `torture.pdf` stops reproducing byte-for-byte.
+- No test may read or write the real app settings file: `bunfig.toml`
+  preloads `tests/isolate-app-settings.ts` and root `.env.test` sets the
+  same guard (SCREEPUB_CONFIG_DIR under `/dev/null/`). Run `bun test` from
+  the repo root, not a subfolder, and give any test that needs settings its
+  own scratch path.
 - Fixture sweep + epubcheck after any stage-1/CSS change. Test
   end-to-end with real PDFs too; outputs land in the app library folder.
 - **The corpus diff is the tool for "does this actually matter?"** Convert
