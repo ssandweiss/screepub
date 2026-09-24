@@ -347,12 +347,13 @@ optional; with several it is required, and `devices` prints the ids it
 accepts.
 
 `routes` lists every other way the book can leave too: Apple Books, Amazon's
-Send to Kindle, email, and saving a copy, ranked with whichever one you chose
-last time marked first, even when it can't fire right now. `route <key>`
-performs one of those (`apple-books`, `send-to-kindle`, `email-to-kindle`,
-`save-epub`, `save-kindle`, and `kindle-email-setup`, which takes no file and
-opens Amazon's Personal Document Settings page) and remembers it for next
-time. The two saves need an absolute `--out` path; Apple Books and email are
+Send to Kindle, email, and saving a copy, in a fixed order, with the one you
+chose last time marked as the choice, even when it can't fire right now.
+`route <key>` performs one of them (`apple-books`, `send-to-kindle`,
+`email-to-kindle`, `save-epub`, `save-kindle`) and remembers it for next time;
+`route kindle-email-setup` takes no file and opens Amazon's Personal Document
+Settings page, where a Kindle's email address and the approved senders live.
+The two saves need an absolute `--out` path; Apple Books and email are
 Mac only, and email needs Apple Mail set as the default mail app. The
 remembered choice lives in an app settings file, not the library: macOS
 `~/Library/Application Support/Screepub/settings.json`, Windows
