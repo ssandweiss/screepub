@@ -1000,7 +1000,10 @@ async function perform(route) {
       say(statusFor('idle'));
       const out = await saveDialog({
         defaultPath: saveNameFor(script.epubPath, file.extension),
-        filters: saveFiltersFor(file.extension, file.label),
+        // Named by purpose and type, short enough for a dialog's format menu.
+        // The engine's label ("AZW3, for USB sideload to Kindle") is a
+        // sentence for the page, not a menu item.
+        filters: saveFiltersFor(file.extension, `Kindle file (${file.extension.toUpperCase()})`),
       });
       if (stale() || out === null) return;
       options = { out, ...settings };

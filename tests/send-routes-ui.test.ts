@@ -1379,7 +1379,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     expect(w.status().textContent).toBe('');
     const dialog = await w.choose('/Users/me/Desktop/Field Station.azw3');
     expect(dialog).toEqual({
-      defaultPath: 'Field Station.azw3', filters: [{ name: 'AZW3 for USB sideload', extensions: ['azw3'] }],
+      defaultPath: 'Field Station.azw3', filters: [{ name: 'Kindle file (AZW3)', extensions: ['azw3'] }],
     });
     const args = await w.answer('route', { ok: true, key: 'save-kindle', note: 'Saved the AZW3.' });
     expect(args).toEqual([
