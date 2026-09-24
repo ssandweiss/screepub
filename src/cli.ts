@@ -702,6 +702,22 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
     }
 
     if (verb === 'settings') {
+      // Rejected rather than ignored, the same rule every verb follows. The
+      // update flags and --out are refused above, in the shared blocks;
+      // --set is settings' own. Before the positional check and before
+      // settingsCommand touches the script, so a mistyped call with a --set
+      // beside it writes nothing.
+      const foreign: [unknown, string, string][] = [
+        [values.device, '--device', 'send'],
+        [values.for, '--for', 'export'],
+        [values.fountain, '--fountain', 'export and route'],
+        [values['options-json'], '--options-json', 'export and route'],
+      ];
+      for (const [value, flag, owner] of foreign) {
+        if (value !== undefined) {
+          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
+        }
+      }
       if (positionals.length !== 1) {
         fail({ code: 'usage', message: 'expected exactly one .fountain (see --help)' });
       }
@@ -718,6 +734,18 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
     }
 
     if (verb === 'export') {
+      // Rejected rather than ignored, the same rule every verb follows. The
+      // update flags are refused above in the shared block; --for,
+      // --fountain, --options-json and --out are export's own.
+      const foreign: [unknown, string, string][] = [
+        [values.device, '--device', 'send'],
+        [values.set, '--set', 'settings and app-settings'],
+      ];
+      for (const [value, flag, owner] of foreign) {
+        if (value !== undefined) {
+          fail({ code: 'usage', message: `${verb} takes no ${flag} (${flag} belongs to ${owner})` });
+        }
+      }
       if (positionals.length !== 1) {
         fail({ code: 'usage', message: 'expected exactly one .epub to export (see --help)' });
       }
@@ -969,6 +997,25 @@ async function main() {
 
   const input = positionals[0];
   const ext = extname(input).toLowerCase();
+  // --fountain names where a PDF's .fountain is written. Beside
+  // --no-fountain, one of the two would silently lose; on a .fountain or
+  // .txt input, no .fountain is written at all (only a PDF produces one), so
+  // the path it names would never appear. Both are refused before anything
+  // is read, the same rule as --library with -o below. Any other extension
+  // is left to the unsupported-type refusal further down, which says the
+  // more useful thing.
+  if (values.fountain !== undefined && values['no-fountain']) {
+    fail({
+      code: 'usage',
+      message: 'pass --fountain or --no-fountain, not both (--no-fountain writes no .fountain for --fountain to name)',
+    });
+  }
+  if (values.fountain !== undefined && (ext === '.fountain' || ext === '.txt')) {
+    fail({
+      code: 'usage',
+      message: `a ${ext} input takes no --fountain (only a PDF conversion writes a .fountain)`,
+    });
+  }
   // -o already says where the output goes, so --library beside it says
   // nothing this run can act on. Rejected rather than ignored, the same way
   // --options with --options-json is: a flag that silently did nothing
