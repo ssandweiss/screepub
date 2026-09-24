@@ -24,7 +24,8 @@ export const SEND_TO_KINDLE_URL = 'https://www.amazon.com/sendtokindle';
 
 /** Amazon's Personal Document Settings: where a Kindle's email address is
  *  listed and where the approved senders list is edited. One page for both
- *  steps of the email setup (SendToKindle.swift's personalDocumentSettings). */
+ *  steps of the email setup (the Swift app's Personal Document Settings
+ *  link; the send-routes plan names the original). */
 export const KINDLE_EMAIL_SETTINGS_URL = 'https://www.amazon.com/hz/mycd/myx#/home/settings/pdoc';
 
 /** The real thing: spawns argv[0] with the rest, waits, and returns its exit

@@ -138,7 +138,7 @@ describe('routesFrom: the engine’s route list, taken whole or not at all', () 
         checked += 1;
       }
     }
-    // The matrix really ran: 3 platforms x 8 app/mail combinations x 4
+    // The matrix really ran: 3 platforms x 8 app and mail combinations x 4
     // device sets x docked or not is 192 fact sets, each with several
     // remembered choices.
     expect(checked).toBeGreaterThan(192 * 3);
