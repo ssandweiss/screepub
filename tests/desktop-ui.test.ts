@@ -604,6 +604,19 @@ describe('the Convert surface', () => {
     expect(probe).toContain('gen !== libraryGeneration');
   });
 
+  test('P1: the probe only ever reads the library, never writes it', () => {
+    // A probe that sent a --set (even a bare "reset to default") would
+    // silently move whatever folder the reader chose, every time the well
+    // is redrawn: mount, "Convert another", every "Back to one".
+    const probe = convert.slice(
+      convert.indexOf('async function probeLibrary'),
+      convert.indexOf('function drawWell'),
+    );
+    const calls = [...probe.matchAll(/argv\.appSettings\(([^)]*)\)/g)];
+    expect(calls.length).toBe(1);
+    expect(calls[0][1].trim()).toBe('');
+  });
+
   test('P5/P6: a failed or malformed probe leaves the slot exactly as drawWell built it', () => {
     const probe = convert.slice(
       convert.indexOf('async function probeLibrary'),
@@ -620,6 +633,22 @@ describe('the Convert surface', () => {
     expect(catchIdx).toBeGreaterThan(-1);
     expect(nullCheckIdx).toBeGreaterThan(catchIdx);
     expect(showIdx).toBeGreaterThan(nullCheckIdx);
+  });
+
+  test('B1: setBusy actually disables (and re-enables) every button it knows about', () => {
+    // Proving where setBusy(true)/setBusy(false) are CALLED (below) says
+    // nothing about what the function itself does; a setBusy that had been
+    // hollowed out to a no-op would still pass that half.
+    const slot = convert.slice(
+      convert.indexOf('function buildLibrarySlot'),
+      convert.indexOf('async function probeLibrary'),
+    );
+    const setBusyFn = slot.slice(
+      slot.indexOf('function setBusy('),
+      slot.indexOf('async function run('),
+    );
+    expect(setBusyFn).toContain('for (const button of buttons)');
+    expect(setBusyFn).toContain('button.disabled = on');
   });
 
   test('B1/C2/C4/6: the picker opens with both buttons already quiet, at the current folder, and a cancel or a no-op pick sends nothing', () => {
@@ -699,6 +728,15 @@ describe('the Convert surface', () => {
     const css = read('surfaces.css');
     expect(css).not.toContain('.library');
   });
+
+  test('a hidden well-ask line takes no space: .well-ask is flex, which beats the UA [hidden] rule', () => {
+    // .well-ask { display: flex } outranks the browser's own
+    // [hidden] { display: none }, and style.css/surfaces.css have no
+    // general [hidden] rule to fall back on, so a pending or a failed
+    // probe used to leave a blank ~52px gap where the line would go.
+    const css = read('surfaces.css');
+    expect(css).toMatch(/\.well-ask\[hidden\]\s*\{\s*display:\s*none;?\s*\}/);
+  });
 });
 
 describe('what the Convert surface decides', () => {
@@ -739,6 +777,9 @@ describe('what the Convert surface decides', () => {
     libraryChangeArgs: (path: string | null) => string;
     libraryAfter: (answer: unknown) =>
       { ok: true; library: Record<string, unknown> } | { ok: false; message: string };
+    showsMovedLine: (
+      action: string, previousPath: string, library: { path: string },
+    ) => boolean;
   };
   let convert: ConvertModule;
 
@@ -1117,6 +1158,10 @@ describe('what the Convert surface decides', () => {
     expect(convert.libraryLine({
       ...base, path: '/users/ann/Documents', home: '/Users/Ann',
     })).toBe('Books are saved in /users/ann/Documents.');
+    // A home given WITH its own trailing separator, where the path is the
+    // home folder itself WITHOUT one, is still an exact match.
+    expect(convert.libraryLine({ ...base, path: '/Users/ann', home: '/Users/ann/' }))
+      .toBe('Books are saved in ~.');
   });
 
   test('libraryActions offers Change alone, Change and Reset, or neither', () => {
@@ -1171,6 +1216,16 @@ describe('what the Convert surface decides', () => {
       ok: false, message: convert.NO_LIBRARY_MESSAGE,
     });
     expect(convert.NO_LIBRARY_MESSAGE).toBe('Screepub could not confirm where books are saved.');
+  });
+
+  test('showsMovedLine only after a Change that actually moved the library, never Reset or a same-folder pick', () => {
+    expect(convert.showsMovedLine('change', '/old', { path: '/new' })).toBe(true);
+    // Reset: going back to the default did not convert anything either.
+    expect(convert.showsMovedLine('reset', '/old', { path: '/default' })).toBe(false);
+    // A same-folder pick moved nothing, so this says nothing even if it
+    // were ever asked (in the running surface it never is: run() returns
+    // before the engine call when the pick equals the current path).
+    expect(convert.showsMovedLine('change', '/old', { path: '/old' })).toBe(false);
   });
 });
 

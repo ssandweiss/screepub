@@ -315,7 +315,7 @@ export const movedLine = 'New books go here. Books already converted stay where 
 
 /** The value app-settings' own set option takes for Change (a folder) or
  *  Reset (`null`, back to the default): the one thing that differs between
- *  them, so both go through the same call in appendLibraryLine below. */
+ *  them, so both go through the same call in buildLibrarySlot below. */
 export function libraryChangeArgs(path) {
   return JSON.stringify({ libraryPath: path });
 }
@@ -337,6 +337,15 @@ export function libraryAfter(answer) {
   if (library !== null) return { ok: true, library };
   const message = typeof answer?.error?.message === 'string' ? answer.error.message.trim() : '';
   return { ok: false, message: message === '' ? NO_LIBRARY_MESSAGE : message };
+}
+
+/** Whether a successful Change or Reset should say movedLine under the
+ *  library line: only a Change that actually put the library somewhere new.
+ *  Reset never does, because going back to the default did not convert
+ *  anything either, and neither does a Change that picked the folder
+ *  already in use, because nothing moved. */
+export function showsMovedLine(action, previousPath, library) {
+  return action === 'change' && library.path !== previousPath;
 }
 
 // ------------------------------------------------------------------ drawing
@@ -501,7 +510,7 @@ function buildLibrarySlot() {
       const result = libraryAfter(answer);
       if (result.ok) {
         showLibrary(result.library);
-        showSecondary(action === 'change' ? movedLine : '');
+        showSecondary(showsMovedLine(action, library.path, result.library) ? movedLine : '');
       } else {
         showSecondary(result.message);
       }

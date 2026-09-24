@@ -227,6 +227,10 @@
   font-size: var(--text-note);
   color: var(--ink-muted);
 }
+/* display: flex above outranks the UA's own [hidden] { display: none }, so a
+ * hidden well-ask (the library line, empty or between probes) would
+ * otherwise sit on the page as a blank gap. */
+.well-ask[hidden] { display: none; }
 
 .work-line {
   font-family: var(--font-structure); font-size: var(--text-ui);
