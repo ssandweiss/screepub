@@ -240,22 +240,33 @@ app name and version and nothing else. **Install and Relaunch** verifies the
 DMG's Apple signature against this project's Developer ID *and* checks it is the
 exact version offered before swapping anything.
 
-The cross-platform window touches the network in five places, each needing
+The cross-platform window touches the network in seven places, each needing
 your click: the upload to a docked reMarkable over USB, GitHub when you choose
-**Report a bug**, which opens a pre-filled issue in your browser, Calibre's or
-Amazon's download page when you choose **Get Calibre** or **Get Kindle
-Previewer** on the Send page's KFX checklist, that same checklist's own
-**Install** button, which fetches the KFX plugin from Calibre's own plugin
-index, and this project's `latest.json` on GitHub. That last one is asked
-once a day only if you say yes when the window first asks (one line under the
-drop area, which stays until you answer; the switch in the release notes
-changes your answer later), and once whenever you press **Check for updates**
-in the release notes. The download follows only when you choose **Update to**
-beside the version number, or **Install** in the release notes. Its signature
-is checked against a key built into the app before anything is swapped, and
-the app then restarts itself, waiting first for any conversion, send or
-export that is still running. It has no Send-to-Kindle
-page yet. Showing a book in your file manager is local and reaches nothing.
+**Report a bug**, which opens a pre-filled issue in your browser, Amazon's
+Send to Kindle web page when you choose **Send to Kindle web** on the Send
+page (it opens in your browser beside the book's folder, and you drag the
+book in yourself), Amazon's settings page when you choose **Open Amazon's
+page** on the Send page's email row, where your Kindle's email address and
+approved senders are, Calibre's or Amazon's download page when you choose
+**Get Calibre** or **Get Kindle Previewer** on the Send page's KFX checklist,
+that same checklist's own **Install** button, which fetches the KFX plugin
+from Calibre's own plugin index, and this project's `latest.json` on GitHub.
+That last one is asked once a day only if you say yes when the window first
+asks (one line under the drop area, which stays until you answer; the switch
+in the release notes changes your answer later), and once whenever you press
+**Check for updates** in the release notes. The download follows only when
+you choose **Update to** beside the version number, or **Install** in the
+release notes. Its signature is checked against a key built into the app
+before anything is swapped, and the app then restarts itself, waiting first
+for any conversion, send, export or settings change that is still running.
+
+Three more Send page buttons, on a Mac, hand the book to another app on your
+computer and stop there: **Send to Kindle app** opens Amazon's own app with
+the book, and that app uploads it to Amazon when you send it; **Add to Apple
+Books** adds it to Books, which syncs it through iCloud if Books is set to;
+and **Send to Kindle email** opens a Mail message with the book attached,
+which goes nowhere until you send it. Saving a copy, and showing a book in
+your file manager, are local and reach nothing.
 
 The one thing worth being clear about: **you** can choose to send a script
 somewhere. If you email it to your `@kindle.com` address, Amazon receives it and
