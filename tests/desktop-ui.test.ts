@@ -760,10 +760,13 @@ describe('the Convert surface', () => {
       convert.indexOf('function buildLibrarySlot'),
       convert.indexOf('async function probeLibrary'),
     );
-    expect(slot).toContain("class: 'well-ask'");
+    // well-library is a name for the slot, with no rule of its own: the
+    // capture tool hides the slot by it (tools/capture/steps.js).
+    expect(slot).toContain("class: 'well-ask well-library'");
     expect(slot).not.toMatch(/class:\s*'library/);
-    const css = read('surfaces.css');
+    const css = cssFiles().map(read).join('\n');
     expect(css).not.toContain('.library');
+    expect(css).not.toContain('.well-library');
   });
 
   test('a hidden well-ask line takes no space: .well-ask is flex, which beats the UA [hidden] rule', () => {
@@ -2226,6 +2229,159 @@ describe('the window knows when the engine is working, and can restart', () => {
     expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
   });
 
+  test('a hold counts like a running call: busy at once, and whenIdle waits for its release plus the quiet period', async () => {
+    // tune.js holds a moved knob for SETTLE_MS before it asks the engine to
+    // save it, and during that settle no engine call is running at all. A
+    // restart already waiting on whenIdle() used to fire in that gap and
+    // drop the change (spec 2026-09-23-update-notice-and-window-drag-design
+    // Part 3, the known gap). A hold is how a surface says "work is owed".
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+    expect(app.engineBusy()).toBe(false);
+
+    const release = app.holdEngine();
+    try {
+      expect(typeof release).toBe('function');
+      expect(app.engineBusy()).toBe(true);
+      let idle = false;
+      const waiting = app.whenIdle().then(() => { idle = true; });
+      await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+      // Held longer than the quiet period, and still not idle: no engine
+      // call ran, but the hold is what a restart must wait for.
+      expect(idle).toBe(false);
+
+      release();
+      expect(app.engineBusy()).toBe(false);
+      await new Promise((r) => setTimeout(r, 0));
+      // Released, but the quiet period starts from the release, exactly as
+      // it starts from the end of a counted call.
+      expect(idle).toBe(false);
+      await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+      await waiting;
+      expect(idle).toBe(true);
+    } finally {
+      release();
+    }
+  });
+
+  test('releasing a hold twice is releasing it once: the count never goes below zero', async () => {
+    // A surface can have more than one way out of a hold (its save starts,
+    // its schedule is cancelled, the script is closed). If the second
+    // release subtracted again, the count would sit at -1, and the next
+    // real call would read as idle while it ran.
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    const release = app.holdEngine();
+    release();
+    release();
+    expect(app.engineBusy()).toBe(false);
+
+    let answer: (v: string) => void = () => {};
+    win.window = {
+      __TAURI__: { core: { invoke: () => new Promise<string>((resolve) => { answer = resolve; }) } },
+    };
+    try {
+      const call = app.runEngine(['send', 'x.epub', '--json']);
+      expect(app.engineBusy()).toBe(true);
+      expect(Bun.peek.status(app.whenIdle())).toBe('pending');
+      answer('{"ok":true}');
+      await call;
+      expect(app.engineBusy()).toBe(false);
+    } finally {
+      answer('{}');
+      await new Promise((r) => setTimeout(r, 0));
+      delete win.window;
+    }
+  });
+
+  test('two holds and a call overlap and are each counted once', async () => {
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    const first = app.holdEngine();
+    const second = app.holdEngine();
+    first();
+    first();
+    expect(app.engineBusy()).toBe(true); // the second is still held
+    second();
+    expect(app.engineBusy()).toBe(false);
+  });
+
+  test('an open native dialog holds a restart off, whichever door opened it, until it closes', async () => {
+    // Save a Kindle file builds the file, then opens the Save box with no
+    // engine call running; Change… opens the folder picker the same way. A
+    // restart waiting on whenIdle() used to be free to land on top of
+    // either. Every dialog goes through app.js's one guard, so the hold is
+    // taken there and no surface can forget it.
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+    const doors: [string, () => Promise<unknown>][] = [
+      ['pickScreenplay', () => app.pickScreenplay()],
+      ['pickFolder', () => app.pickFolder({ defaultPath: '/s' })],
+      ['saveDialog', () => app.saveDialog({ defaultPath: '/s/x.epub', filters: [] })],
+    ];
+    for (const [name, open] of doors) {
+      let close: (v: unknown) => void = () => {};
+      const pendingDialog = () => new Promise((resolve) => { close = resolve; });
+      win.window = {
+        __TAURI__: { core: { invoke: pendingDialog }, dialog: { open: pendingDialog, save: pendingDialog } },
+      };
+      try {
+        expect(`${name} before: ${app.engineBusy()}`).toBe(`${name} before: false`);
+        const asked = open();
+        expect(`${name} open: ${app.engineBusy()}`).toBe(`${name} open: true`);
+        let idle = false;
+        const waiting = app.whenIdle().then(() => { idle = true; });
+        await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+        expect(`${name} still open, idle: ${idle}`).toBe(`${name} still open, idle: false`);
+
+        close(null);
+        await asked;
+        expect(`${name} closed: ${app.engineBusy()}`).toBe(`${name} closed: false`);
+        await new Promise((r) => setTimeout(r, app.ENGINE_QUIET_MS + 50));
+        await waiting;
+        expect(`${name} idle: ${idle}`).toBe(`${name} idle: true`);
+      } finally {
+        close(null);
+        await new Promise((r) => setTimeout(r, 0));
+        delete win.window;
+      }
+    }
+  });
+
+  test('a dialog that fails lets its hold go, and an ask refused by the guard takes none', async () => {
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle(); // start from a genuinely idle baseline
+    const settle = { resolve: (_v: unknown) => {}, reject: (_e: unknown) => {} };
+    win.window = {
+      __TAURI__: {
+        core: {
+          invoke: () => new Promise((resolve, reject) => {
+            settle.resolve = resolve;
+            settle.reject = reject;
+          }),
+        },
+      },
+    };
+    try {
+      const first = app.pickScreenplay();
+      expect(app.engineBusy()).toBe(true);
+      // Refused by the one-dialog guard: nothing opened, nothing held, and
+      // above all the FIRST dialog's hold is not released by it.
+      expect(await app.pickScreenplay()).toBeNull();
+      expect(app.engineBusy()).toBe(true);
+
+      settle.reject('no portal');
+      expect(await first.then(() => 'resolved', () => 'rejected')).toBe('rejected');
+      expect(app.engineBusy()).toBe(false);
+    } finally {
+      settle.resolve(null);
+      await new Promise((r) => setTimeout(r, 0));
+      delete win.window;
+    }
+  });
+
   test('restart is offered only when the process plugin is in this build', async () => {
     const app = await import(join(UI, 'app.js'));
     let relaunched = 0;
@@ -3282,6 +3438,45 @@ describe('the Tune surface', () => {
     expect(source).toMatch(/running\s*=\s*running/);
   });
 
+  test('a knob held in the settle is held against a restart too, and let go once its save has started', () => {
+    // Between a knob moving and the save's engine call starting, no engine
+    // call is running, so an update restart already waiting on whenIdle()
+    // used to fire in that SETTLE_MS gap and drop the change. schedule()
+    // takes a hold (app.js's holdEngine) and flush() lets it go only once
+    // the save's own engine call has started, and so is counted itself.
+    expect(source).toMatch(/import \{[^}]*\bholdEngine\b[^}]*\} from '\.\/app\.js'/);
+    const schedule = source.slice(source.indexOf('function schedule('), source.indexOf('async function flush('));
+    expect(schedule).toContain('holdEngine()');
+    // One hold for however many knobs move inside one settle: taken only
+    // when none is held, never stacked per keystroke.
+    expect(schedule).toMatch(/if \(hold === null\) hold = holdEngine\(\)/);
+
+    // Comments out: the claims below are about CODE, and the comment that
+    // explains the release rightly mentions both `runEngine()` and `await`.
+    const flush = source.slice(source.indexOf('async function flush('), source.indexOf('function say('))
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/.*$/gm, ' ');
+    // Released AFTER the save's engine call is issued (runEngine counts it
+    // synchronously, before its first await) and BEFORE that call is
+    // awaited: never a moment with neither the hold nor the call counted.
+    const issued = flush.indexOf('runEngine(');
+    const released = flush.indexOf('releaseHold()', issued);
+    expect(issued).toBeGreaterThan(-1);
+    expect(released).toBeGreaterThan(issued);
+    expect(flush.slice(issued, released)).not.toContain('await');
+    // A flush that finds nothing to save lets the hold go too, rather than
+    // holding a restart off for a save that is never coming.
+    const early = /if \(!isPending\(owed\) \|\| !script\?\.fountainPath\) \{([\s\S]*?)\}/.exec(flush);
+    expect(early, 'flush() has no early return').not.toBe(null);
+    expect(early![1]).toContain('releaseHold()');
+
+    // A cancelled schedule lets it go: a new script clears what was owed.
+    const changed = source.slice(
+      source.indexOf('export function scriptChanged('), source.indexOf('export async function show('));
+    expect(changed).toContain('releaseHold()');
+    expect(changed.indexOf('releaseHold()')).toBeLessThan(changed.indexOf('draw()'));
+  });
+
 
   test('the sentence beside a knob is the CURRENT one, in both directions', () => {
     // Found live, after idleReason() was tested hard and then bound wrongly:
@@ -3408,8 +3603,11 @@ describe('the Tune surface', () => {
     expect(changed.slice(0, 200)).toContain('era += 1');
     const flush = source.slice(source.indexOf('async function flush('));
     expect(flush.slice(0, 900)).toMatch(/const mine = era/);
-    // Checked after every await, and before anything is painted.
-    const awaits = [...flush.matchAll(/await runEngine/g)].length;
+    // Checked after every engine call, and before anything is painted.
+    // Counted as calls rather than as `await runEngine`: the save's call is
+    // issued, then its settle hold released, then awaited (see the hold
+    // test above), so that one is not written as `await runEngine(` at all.
+    const awaits = [...flush.replace(/\/\/.*$/gm, ' ').matchAll(/runEngine\(/g)].length;
     expect(awaits).toBe(2);
     expect([...flush.matchAll(/stale\(\)/g)].length).toBeGreaterThanOrEqual(awaits + 1);
     expect(flush.indexOf('stale()')).toBeLessThan(flush.indexOf('renderReader'));
@@ -3893,6 +4091,49 @@ describe('the Tune surface: app defaults for new scripts', () => {
     expect(pane.find('tune-defaults')).toBeNull();
   });
 
+  // The update restart's known gap, closed (spec 2026-09-23-update-notice-
+  // and-window-drag-design.md, Part 3). Placed before any test here that
+  // leaves a save's engine call unanswered: app.js's count is one module
+  // for the whole file, and this test reads it.
+  test('a moved knob holds a restart off through its settle, and its save call takes over from the hold', async () => {
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle();
+    expect(app.engineBusy(), 'an earlier test left a counted engine call running').toBe(false);
+    const { pane } = await mountReady(engine);
+
+    moveKnob(pane, 'dialogueSideMarginPct', '27');
+    // No engine call yet, and still busy: the settle is owed work.
+    expect(engine.calls.length).toBe(1);
+    expect(app.engineBusy()).toBe(true);
+    expect(Bun.peek.status(app.whenIdle())).toBe('pending');
+
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    expect(engine.calls.length).toBe(2);
+    expect(engine.calls[1].args[0]).toBe('settings');
+    expect(app.engineBusy()).toBe(true);
+
+    engine.resolve(1, settingsAnswer({ settings: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 27 } }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The hold went when the call started, and the call has ended: nothing
+    // is counted twice, and nothing is left holding a restart off.
+    expect(app.engineBusy()).toBe(false);
+  });
+
+  test('a settle cancelled by a new script lets its hold go, and sends nothing', async () => {
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle();
+    expect(app.engineBusy(), 'an earlier test left a counted engine call running').toBe(false);
+    const { pane } = await mountReady(engine);
+    moveKnob(pane, 'dialogueSideMarginPct', '27');
+    expect(app.engineBusy()).toBe(true);
+    tune.scriptChanged();
+    expect(app.engineBusy()).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    expect(engine.calls.length).toBe(1);
+    expect(app.engineBusy()).toBe(false);
+  });
+
   test('"Use these for new scripts" sends this script’s CURRENT settings, moved after the foot was drawn, not the shipped or app defaults', async () => {
     // Three distinct values in play, so a mutant that sends the wrong one
     // has nowhere to hide: shipped (20, DEFAULT_FORMAT_OPTIONS' own),
@@ -4137,6 +4378,219 @@ describe('the Tune surface: app defaults for new scripts', () => {
     expect(pane.find('defaults-note')!.hidden).toBe(false);
     expect(footButtons(pane).use!.disabled).toBe(false);
     expect(footButtons(pane).reset!.disabled).toBe(false);
+  });
+
+  // ---- "When a PDF is converted": keep its settings, or follow the defaults
+  //
+  // Spec 2026-09-24-keep-script-settings-choice-design.md. An app-wide
+  // choice read off the same settings answer as the defaults above and
+  // written through the same app-settings --set.
+
+  test('the choice’s words are the owner’s, pinned exactly, and carry no em dash', () => {
+    expect(tune.KEEP_CHOICE.legend).toBe('When a PDF is converted');
+    expect(tune.KEEP_CHOICE.options.map((o: any) => [o.keep, o.label, o.line])).toEqual([
+      [true, 'Keep its settings',
+        'The script keeps the settings it was made with. Changing the defaults later won’t change it.'],
+      [false, 'Follow the defaults',
+        'Scripts you haven’t tuned change when the defaults do. Scripts that already have their own settings keep them.'],
+    ]);
+    expect(tune.KEEP_SAVED_NOTE).toBe('Saved. It applies to PDFs you convert from now on.');
+    for (const line of [
+      tune.KEEP_CHOICE.legend, tune.KEEP_SAVED_NOTE,
+      ...tune.KEEP_CHOICE.options.flatMap((o: any) => [o.label, o.line]),
+    ]) {
+      expect(line).not.toContain('\u2014');
+    }
+  });
+
+  test('keepChoiceFrom takes only a boolean, and keepWriteArgs is the --set value for either option', () => {
+    expect(tune.keepChoiceFrom({ keepScriptSettings: true })).toBe(true);
+    expect(tune.keepChoiceFrom({ keepScriptSettings: false })).toBe(false);
+    // An answer that breaks the contract draws no choice rather than a
+    // guessed one.
+    expect(tune.keepChoiceFrom({ keepScriptSettings: 'false' })).toBeNull();
+    expect(tune.keepChoiceFrom({})).toBeNull();
+    expect(tune.keepChoiceFrom(undefined)).toBeNull();
+    expect(tune.keepWriteArgs(false)).toBe('{"keepScriptSettings":false}');
+    expect(tune.keepWriteArgs(true)).toBe('{"keepScriptSettings":true}');
+  });
+
+  test('keepWriteOutcome: another script’s write and a superseded write are not painted; the latest is applied or reported', () => {
+    const ok = (keep: boolean) => ({ ok: true, keepScriptSettings: keep });
+    // The page moved to another script: nothing, not even the stored value,
+    // belongs to what is on screen now.
+    expect(tune.keepWriteOutcome(1, 2, 1, 1, ok(false))).toEqual({ stale: true, stored: null });
+    // A newer choice is queued behind this one: what the engine stored is
+    // still recorded, but the radios and the note are the newer write's.
+    expect(tune.keepWriteOutcome(1, 1, 1, 2, ok(false))).toEqual({ stale: true, stored: false });
+    expect(tune.keepWriteOutcome(1, 1, 2, 2, ok(false))).toEqual({
+      stale: false, applied: true, stored: false, message: tune.KEEP_SAVED_NOTE,
+    });
+    expect(tune.keepWriteOutcome(1, 1, 2, 2, { ok: false, error: { message: 'cannot save the settings file' } }))
+      .toEqual({ stale: false, applied: false, stored: null, message: 'cannot save the settings file' });
+    // ok without the value in it is not a confirmation of anything.
+    expect(tune.keepWriteOutcome(1, 1, 2, 2, { ok: true }))
+      .toEqual({ stale: false, applied: false, stored: null, message: tune.NO_MESSAGE });
+  });
+
+  /** The choice's two radios, keyed by what each one keeps. */
+  function keepRadios(pane: FakeNode) {
+    const radios = pane.findTag('input').filter((n) => n.getAttribute('type') === 'radio');
+    const byLabel = (label: string) => {
+      const option = tune.KEEP_CHOICE.options.find((o: any) => o.label === label);
+      return radios.find((r) => r.getAttribute('id') === option.id) ?? null;
+    };
+    return { all: radios, keep: byLabel('Keep its settings'), follow: byLabel('Follow the defaults') };
+  }
+
+  test('it is a real radio group: a fieldset with a legend, two radios sharing a name, each labelled and described', async () => {
+    const { pane } = await mountReady(engine, { keepScriptSettings: true });
+    const box = pane.find('keep-choice');
+    expect(box).not.toBeNull();
+    expect(box!.tagName).toBe('fieldset');
+    const legend = box!.findTag('legend');
+    expect(legend.length).toBe(1);
+    expect(legend[0].textContent).toBe('When a PDF is converted');
+
+    const { all, keep, follow } = keepRadios(pane);
+    expect(all.length).toBe(2);
+    // One name, so the platform makes them one group: one Tab stop, arrow
+    // keys between the two, and only one ever checked.
+    expect(new Set(all.map((r) => r.getAttribute('name'))).size).toBe(1);
+    expect(all[0].getAttribute('name')).not.toBeNull();
+    const labels = box!.findTag('label');
+    const paragraphs = box!.findTag('p');
+    for (const radio of [keep!, follow!]) {
+      const id = radio.getAttribute('id')!;
+      const option = tune.KEEP_CHOICE.options.find((o: any) => o.id === id);
+      expect(labels.find((l) => l.getAttribute('for') === id)?.textContent).toBe(option.label);
+      const described = radio.getAttribute('aria-describedby');
+      expect(paragraphs.find((p) => p.getAttribute('id') === described)?.textContent).toBe(option.line);
+    }
+    expect(keep!.checked).toBe(true);
+    expect(follow!.checked).toBe(false);
+    // Beside the defaults foot, in the knobs column.
+    const knobs = pane.find('tune-knobs')!;
+    expect(knobs.kids.indexOf(box!)).toBeGreaterThan(knobs.kids.indexOf(pane.find('tune-defaults')!));
+  });
+
+  test('it opens on what the engine says is stored, and an answer without it draws no choice at all', async () => {
+    const off = await mountReady(engine, { keepScriptSettings: false });
+    expect(keepRadios(off.pane).follow!.checked).toBe(true);
+    expect(keepRadios(off.pane).keep!.checked).toBe(false);
+
+    engine = stubEngine();
+    const missing = await mountReady(engine);
+    expect(missing.pane.find('keep-choice')).toBeNull();
+  });
+
+  test('choosing "Follow the defaults" writes it through app-settings, never disables the radios, and confirms', async () => {
+    const { pane } = await mountReady(engine, { keepScriptSettings: true });
+    const { keep, follow } = keepRadios(pane);
+    follow!.checked = true;
+    follow!.dispatch('change');
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(engine.calls.length).toBe(2);
+    expect(engine.calls[1].args).toEqual(['app-settings', '--json', '--set', '{"keepScriptSettings":false}']);
+    // Not disabled while the write is out: an arrow key both moves focus
+    // and changes the choice, and a disabled radio drops the keyboard.
+    expect(keep!.disabled).toBe(false);
+    expect(follow!.disabled).toBe(false);
+    expect(follow!.checked).toBe(true);
+
+    engine.resolve(1, { ok: true, keepScriptSettings: false });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pane.find('keep-note')!.textContent).toBe(tune.KEEP_SAVED_NOTE);
+    expect(pane.find('keep-note')!.hidden).toBe(false);
+    expect(pane.find('keep-note')!.getAttribute('role')).toBe('status');
+    expect(follow!.checked).toBe(true);
+    expect(keep!.checked).toBe(false);
+    // Updated in place: the radio the reader is on is the same node.
+    expect(keepRadios(pane).follow).toBe(follow);
+  });
+
+  test('a refusal puts the radios back to what the engine holds, and shows its sentence', async () => {
+    const { pane } = await mountReady(engine, { keepScriptSettings: true });
+    const { keep, follow } = keepRadios(pane);
+    follow!.checked = true;
+    follow!.dispatch('change');
+    await new Promise((r) => setTimeout(r, 0));
+    engine.resolve(1, { ok: false, error: { code: 'bad-settings', message: 'cannot save the settings file' } });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(keep!.checked).toBe(true);
+    expect(follow!.checked).toBe(false);
+    expect(pane.find('keep-note')!.textContent).toBe('cannot save the settings file');
+
+    // A throw (the engine did not answer at all) is reported the same way.
+    follow!.checked = true;
+    follow!.dispatch('change');
+    await new Promise((r) => setTimeout(r, 0));
+    engine.reject(2, 'the engine is not there');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(keep!.checked).toBe(true);
+    expect(pane.find('keep-note')!.textContent).toBe('the engine is not there');
+  });
+
+  test('two quick choices are sent one after the other, and only the latest is painted', async () => {
+    const { pane } = await mountReady(engine, { keepScriptSettings: true });
+    const { keep, follow } = keepRadios(pane);
+    follow!.checked = true;
+    follow!.dispatch('change');
+    await new Promise((r) => setTimeout(r, 0));
+    keep!.checked = true;
+    follow!.checked = false;
+    keep!.dispatch('change');
+    await new Promise((r) => setTimeout(r, 0));
+    // Queued, not raced: the second write waits for the first to answer.
+    expect(engine.calls.length).toBe(2);
+
+    engine.resolve(1, { ok: true, keepScriptSettings: false });
+    await new Promise((r) => setTimeout(r, 0));
+    // The first answer is superseded: the reader's latest choice stays shown.
+    expect(keep!.checked).toBe(true);
+    expect(pane.find('keep-note')!.textContent).toBe('');
+    expect(engine.calls.length).toBe(3);
+    expect(engine.calls[2].args).toContain('{"keepScriptSettings":true}');
+
+    engine.resolve(2, { ok: true, keepScriptSettings: true });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(keep!.checked).toBe(true);
+    expect(pane.find('keep-note')!.textContent).toBe(tune.KEEP_SAVED_NOTE);
+  });
+
+  test('a choice made on one script is still sent after the page moves on, but not painted onto the next script', async () => {
+    const { pane, ctx } = await mountReady(engine, { keepScriptSettings: true });
+    const { follow } = keepRadios(pane);
+    follow!.checked = true;
+    follow!.dispatch('change');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(engine.calls.length).toBe(2);
+
+    ctx.state.script = {
+      fountainPath: '/scripts/other.fountain', epubPath: null, previewHtml: undefined, settings: null,
+    };
+    tune.scriptChanged();
+    const shown = tune.show();
+    engine.resolve(2, settingsAnswer({ keepScriptSettings: true }));
+    await shown;
+    expect(keepRadios(pane).keep!.checked).toBe(true);
+
+    engine.resolve(1, { ok: true, keepScriptSettings: false });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(keepRadios(pane).keep!.checked).toBe(true);
+    expect(pane.find('keep-note')!.textContent).toBe('');
+  });
+
+  test('scriptChanged resets the choice’s state with the rest of the foot', () => {
+    const changed = source.slice(
+      source.indexOf('export function scriptChanged('), source.indexOf('export async function show('));
+    for (const line of [
+      'keepSettings = null', 'keepShown = null', "keepNote = ''",
+      'keepRadios = null', 'keepNoteEl = null',
+    ]) {
+      expect(changed).toContain(line);
+    }
   });
 });
 

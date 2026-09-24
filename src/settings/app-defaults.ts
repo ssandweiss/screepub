@@ -6,7 +6,8 @@
 // through the one merge resolveFormatOptions already is.
 //
 // `screepub app-settings` (src/cli-app-settings.ts) is the verb that WRITES
-// `formatDefaults` into the app settings file. This module only reads it.
+// `formatDefaults` and `keepScriptSettings` into the app settings file. This
+// module only reads them.
 import { appSettingsPath, readAppSettings } from './app';
 import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from '../options';
 
@@ -44,4 +45,18 @@ export function appDefaultsCustomized(settingsPath: string = appSettingsPath()):
   const options = appDefaultOptions(settingsPath);
   const keys = Object.keys(DEFAULT_FORMAT_OPTIONS) as Array<keyof FormatOptions>;
   return keys.some((key) => options[key] !== DEFAULT_FORMAT_OPTIONS[key]);
+}
+
+/** Whether a `--library` conversion that finds no sidecar for its script
+ * saves the settings it started from as that script's own (the "pin",
+ * src/cli.ts). The Settings page's "When a PDF is converted" choice: true
+ * is "Keep its settings", false is "Follow the defaults". Spec:
+ * docs/superpowers/specs/2026-09-24-keep-script-settings-choice-design.md.
+ *
+ * Only a stored `false` turns it off. Absent is today's behaviour, and so is
+ * anything that is not a boolean: a hand-edited `"false"` or a half-written
+ * file must not quietly stop every new script from keeping its settings,
+ * the same reason storedFormatDefaults ignores a value it cannot read. */
+export function keepsScriptSettings(settingsPath: string = appSettingsPath()): boolean {
+  return readAppSettings(settingsPath).keepScriptSettings !== false;
 }

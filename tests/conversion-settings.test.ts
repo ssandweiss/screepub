@@ -228,10 +228,13 @@ describe('a library conversion saves the settings it started from', () => {
    * the settings.json path inside it: matching appSettingsPath's own rule
    * for a SCREEPUB_CONFIG_DIR override (folder + 'settings.json'), so
    * writing here is writing exactly what the spawned CLI will read. */
-  function appConfig(formatDefaults: Record<string, unknown>): { dir: string; file: string } {
+  function appConfig(
+    formatDefaults: Record<string, unknown>,
+    other: Record<string, unknown> = {},
+  ): { dir: string; file: string } {
     const dir = scratch('config');
     const file = join(dir, 'settings.json');
-    writeAppSettings({ formatDefaults }, file);
+    writeAppSettings({ formatDefaults, ...other }, file);
     return { dir, file };
   }
 
@@ -445,5 +448,109 @@ describe('a library conversion saves the settings it started from', () => {
     const lines = stderr.trim().split('\n').filter((l) => l !== '');
     expect(lines.length).toBe(1);
     expect(lines[0]).toContain('could not save');
+  }, 120000);
+});
+
+// The Settings page's choice (spec 2026-09-24-keep-script-settings-choice-
+// design.md). keepScriptSettings: false in the app settings file means
+// "Follow the defaults": the pin above is skipped, so an untuned script
+// keeps following the app defaults. It is ONLY the pin that is skipped: a
+// sidecar that is already there, pinned or tuned (the two cannot be told
+// apart), is never deleted or rewritten because of this setting.
+describe('keepScriptSettings chooses whether a library conversion pins', () => {
+  const APP_MARGIN = 19;
+
+  function appConfig(settings: Record<string, unknown>): { dir: string; file: string } {
+    const dir = scratch('config');
+    const file = join(dir, 'settings.json');
+    writeAppSettings(settings, file);
+    return { dir, file };
+  }
+
+  beforeAll(() => {
+    expect(DEFAULTS.dialogueSideMarginPct).not.toBe(APP_MARGIN);
+  });
+
+  test('OFF: an untuned script gets no sidecar, and a later app-default change reaches it', async () => {
+    const { dir: configDir, file } = appConfig({
+      formatDefaults: { dialogueSideMarginPct: APP_MARGIN }, keepScriptSettings: false,
+    });
+    const scripts = await scriptFolder('Follows.pdf');
+    const root = scratch('lib');
+
+    const { stdout, exitCode } = await runCli(
+      [join(scripts, 'Follows.pdf'), '--library', '--json'],
+      { SCREEPUB_LIBRARY: root, SCREEPUB_CONFIG_DIR: configDir },
+    );
+    expect(exitCode).toBe(0);
+    const answer = JSON.parse(stdout);
+    // The book itself is still built at the app defaults: the choice is
+    // about what LATER reads see, not this conversion's output.
+    expect(await epubCss(answer.epubPath)).toContain(`margin-left: ${APP_MARGIN}%`);
+    expect(existsSync(join(root, 'Follows', 'Follows.screepub.json'))).toBe(false);
+
+    // The opposite of the pin's regression test: the app defaults move, and
+    // this script, having nothing of its own, moves with them.
+    writeAppSettings({ formatDefaults: { dialogueSideMarginPct: 27 } }, file);
+    const said = await runCli(['settings', answer.fountainPath, '--json'], { SCREEPUB_CONFIG_DIR: configDir });
+    expect(said.exitCode).toBe(0);
+    expect(JSON.parse(said.stdout).settings.dialogueSideMarginPct).toBe(27);
+  }, 120000);
+
+  test('ON, stored explicitly: the pin is written, the same as when the key is absent', async () => {
+    const { dir: configDir } = appConfig({
+      formatDefaults: { dialogueSideMarginPct: APP_MARGIN }, keepScriptSettings: true,
+    });
+    const scripts = await scriptFolder('Keeps.pdf');
+    const root = scratch('lib');
+    const { exitCode } = await runCli(
+      [join(scripts, 'Keeps.pdf'), '--library', '--json'],
+      { SCREEPUB_LIBRARY: root, SCREEPUB_CONFIG_DIR: configDir },
+    );
+    expect(exitCode).toBe(0);
+    const sidecar = join(root, 'Keeps', 'Keeps.screepub.json');
+    expect(JSON.parse(readFileSync(sidecar, 'utf8')).dialogueSideMarginPct).toBe(APP_MARGIN);
+  }, 120000);
+
+  test('switching OFF never deletes or rewrites a sidecar already in the library, pinned or tuned', async () => {
+    const { dir: configDir, file } = appConfig({ formatDefaults: { dialogueSideMarginPct: APP_MARGIN } });
+    const scripts = await scriptFolder('Already.pdf');
+    const root = scratch('lib');
+    const env = { SCREEPUB_LIBRARY: root, SCREEPUB_CONFIG_DIR: configDir };
+
+    // ON (absent): the first conversion pins.
+    const first = await runCli([join(scripts, 'Already.pdf'), '--library', '--json'], env);
+    expect(first.exitCode).toBe(0);
+    const sidecar = join(root, 'Already', 'Already.screepub.json');
+    const pinned = readFileSync(sidecar, 'utf8');
+
+    // OFF now, and the app defaults moved too: converting again leaves the
+    // pinned file exactly as it was, byte for byte, and renders with it.
+    writeAppSettings({ keepScriptSettings: false, formatDefaults: { dialogueSideMarginPct: 31 } }, file);
+    const second = await runCli([join(scripts, 'Already.pdf'), '--library', '--json'], env);
+    expect(second.exitCode).toBe(0);
+    expect(readFileSync(sidecar, 'utf8')).toBe(pinned);
+    expect(await epubCss(JSON.parse(second.stdout).epubPath)).toContain(`margin-left: ${APP_MARGIN}%`);
+
+    // A partial, hand-tuned sidecar is the same story: not expanded, not
+    // removed.
+    writeFileSync(sidecar, '{"cueIndentPct":41}\n');
+    const third = await runCli([join(scripts, 'Already.pdf'), '--library', '--json'], env);
+    expect(third.exitCode).toBe(0);
+    expect(readFileSync(sidecar, 'utf8')).toBe('{"cueIndentPct":41}\n');
+  }, 180000);
+
+  test('OFF: a sidecar beside the PDF is still adopted, because that one is tuning, not a pin', async () => {
+    const { dir: configDir } = appConfig({ keepScriptSettings: false });
+    const scripts = await scriptFolder('Beside.pdf');
+    writeFileSync(join(scripts, 'Beside.screepub.json'), '{"cueIndentPct":41}\n');
+    const root = scratch('lib');
+    const { exitCode } = await runCli(
+      [join(scripts, 'Beside.pdf'), '--library', '--json'],
+      { SCREEPUB_LIBRARY: root, SCREEPUB_CONFIG_DIR: configDir },
+    );
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(readFileSync(join(root, 'Beside', 'Beside.screepub.json'), 'utf8')))
+      .toEqual({ cueIndentPct: 41 });
   }, 120000);
 });

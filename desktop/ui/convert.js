@@ -465,8 +465,11 @@ function askLine() {
  *  (movedLine's own spot): `line` and its buttons are left exactly as the
  *  last good library drew them, so the reader can just try again. */
 function buildLibrarySlot() {
-  const line = el('p', { class: 'well-ask', hidden: true });
-  const secondary = el('p', { class: 'well-ask', hidden: true }, '');
+  // well-library names the slot as a whole, and no stylesheet gives it a
+  // rule. The README pictures hide the slot by that name, because there it
+  // would name the scratch folder the pictures were taken with.
+  const line = el('p', { class: 'well-ask well-library', hidden: true });
+  const secondary = el('p', { class: 'well-ask well-library', hidden: true }, '');
   let buttons = [];
 
   function showLibrary(library) {

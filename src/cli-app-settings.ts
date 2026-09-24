@@ -1,8 +1,9 @@
 // The `app-settings` verb: where books land, and what new scripts start
-// from. Reads and writes the two keys of the app settings file that belong
-// to piece C, `libraryPath` and `formatDefaults`. `lastRoute` (piece B) is
-// not writable from here. Like the other verb handlers, this RETURNS a
-// result and never prints; cli.ts owns stdout.
+// from. Reads and writes the three keys of the app settings file that belong
+// to piece C: `libraryPath`, `formatDefaults` and `keepScriptSettings` (the
+// Settings page's "When a PDF is converted" choice, spec 2026-09-24).
+// `lastRoute` (piece B) is not writable from here. Like the other verb
+// handlers, this RETURNS a result and never prints; cli.ts owns stdout.
 import { accessSync, constants, mkdirSync } from 'node:fs';
 import { CliError, errorMessage } from './cli-errors';
 import {
@@ -11,18 +12,19 @@ import {
 } from './library';
 import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from './options';
 import { appSettingsPath, writeAppSettings, type AppSettings } from './settings/app';
-import { appDefaultOptions, appDefaultsCustomized } from './settings/app-defaults';
+import { appDefaultOptions, appDefaultsCustomized, keepsScriptSettings } from './settings/app-defaults';
 
 type Env = Record<string, string | undefined>;
 
-// The only two keys this verb may write. Anything else, most notably
+// The only three keys this verb may write. Anything else, most notably
 // `lastRoute` (piece B's key in the same file), is refused before anything
 // is touched, so this verb can never step on a setting it does not own.
-const WRITABLE_KEYS = ['libraryPath', 'formatDefaults'] as const;
+const WRITABLE_KEYS = ['libraryPath', 'formatDefaults', 'keepScriptSettings'] as const;
 
 export interface AppSettingsOptions {
-  /** A JSON object with `libraryPath` and/or `formatDefaults`; either may be
-   * `null` to reset it. Omitted: a plain read. */
+  /** A JSON object with any of `libraryPath`, `formatDefaults` and
+   * `keepScriptSettings`; each may be `null` to reset it. Omitted: a plain
+   * read. */
   set?: string;
 }
 
@@ -58,6 +60,9 @@ export interface AppSettingsResult {
   formatDefaults: FormatOptions;
   shippedDefaults: FormatOptions;
   customized: boolean;
+  /** Whether a new library conversion keeps the settings it started from
+   * (the pin in src/cli.ts): true unless `false` is stored. */
+  keepScriptSettings: boolean;
 }
 
 /** Node's fs error codes, translated to a sentence fragment a person who has
@@ -122,6 +127,19 @@ function validatedFormatDefaults(value: unknown): FormatOptions | undefined {
   return resolveFormatOptions(value as Record<string, unknown>, DEFAULT_FORMAT_OPTIONS);
 }
 
+/** `keepScriptSettings` from a validated `--set` patch: `undefined` to
+ * remove the key (back to the default, which is to keep), or the boolean
+ * itself. Pure. Anything else is refused rather than coerced: a string
+ * "false" stored as-is would read back as ON (keepsScriptSettings honours
+ * only a real `false`), which is the opposite of what the caller asked. */
+function validatedKeepScriptSettings(value: unknown): boolean | undefined {
+  if (value === null) return undefined;
+  if (typeof value !== 'boolean') {
+    throw new CliError('bad-settings', 'keepScriptSettings must be true, false or null');
+  }
+  return value;
+}
+
 function buildAnswer(file: string, platform: NodeJS.Platform, env: Env): AppSettingsResult {
   return {
     file,
@@ -135,6 +153,7 @@ function buildAnswer(file: string, platform: NodeJS.Platform, env: Env): AppSett
     formatDefaults: appDefaultOptions(file),
     shippedDefaults: DEFAULT_FORMAT_OPTIONS,
     customized: appDefaultsCustomized(file),
+    keepScriptSettings: keepsScriptSettings(file),
   };
 }
 
@@ -165,30 +184,34 @@ export function appSettingsCommand(
       if (!(WRITABLE_KEYS as readonly string[]).includes(key)) {
         throw new CliError(
           'usage',
-          `app-settings --set takes only libraryPath and formatDefaults, not "${key}"`,
+          `app-settings --set takes only libraryPath, formatDefaults and keepScriptSettings, not "${key}"`,
         );
       }
     }
 
     const hasLibraryPath = 'libraryPath' in patch;
     const hasFormatDefaults = 'formatDefaults' in patch;
+    const hasKeepScriptSettings = 'keepScriptSettings' in patch;
 
     // An empty object changes nothing: it answers like a plain read rather
     // than writing (and potentially overwriting an existing, even corrupt,
     // file with) `{}`.
-    if (!hasLibraryPath && !hasFormatDefaults) {
+    if (!hasLibraryPath && !hasFormatDefaults && !hasKeepScriptSettings) {
       return buildAnswer(file, platform, env);
     }
 
-    // Phase 1: every PURE check runs first, for BOTH keys, before either one
-    // touches disk. A bad formatDefaults must refuse before a good, brand
-    // new libraryPath's folder is ever created, and a bad libraryPath must
-    // refuse before formatDefaults is stored: neither check below has a
-    // side effect, so which one the caller's JSON happened to name first
-    // cannot change that.
+    // Phase 1: every PURE check runs first, for EVERY key, before any one
+    // touches disk. A bad formatDefaults or keepScriptSettings must refuse
+    // before a good, brand new libraryPath's folder is ever created, and a
+    // bad libraryPath must refuse before either of the others is stored:
+    // none of the checks below has a side effect, so which one the caller's
+    // JSON happened to name first cannot change that.
     const write: Partial<AppSettings> = {};
     const libraryFolder = hasLibraryPath ? checkedLibraryPath(patch.libraryPath, platform) : undefined;
     if (hasFormatDefaults) write.formatDefaults = validatedFormatDefaults(patch.formatDefaults);
+    if (hasKeepScriptSettings) {
+      write.keepScriptSettings = validatedKeepScriptSettings(patch.keepScriptSettings);
+    }
 
     // Phase 2: the one side effect (creating and probing the chosen
     // folder), run LAST, only once every pure check above has already

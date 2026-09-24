@@ -38,6 +38,17 @@ the app defaults reaches only scripts converted afterwards; a script
 already in the library from before this change has no saved settings, and
 keeps following the app defaults until it is tuned once.
 
+**That save is a choice (2026-09-24):** the Settings page's "When a PDF is
+converted" offers "Keep its settings" (the default, the behaviour above)
+and "Follow the defaults", stored as `keepScriptSettings` in the app
+settings file and written with `screepub app-settings --set
+'{"keepScriptSettings":false}'`. Off, a library conversion saves nothing,
+so a script nobody has tuned keeps following the app defaults. Switching
+reaches only conversions from then on: a script that already has a
+sidecar keeps it, because a saved one and a tuned one are the same file
+and the engine never deletes or rewrites either because of this choice.
+Spec: `docs/superpowers/specs/2026-09-24-keep-script-settings-choice-design.md`.
+
 **Coverage of these entries by the committed torture fixture is tracked in
 `tools/torture-manifest.json`**, one row per entry, and
 `tests/torture-coverage.test.ts` fails when an entry has no decision

@@ -134,7 +134,7 @@ describe('appSettingsCommand: setting and resetting formatDefaults', () => {
 });
 
 describe('appSettingsCommand: refusals before anything is written', () => {
-  test('an unknown key is usage, naming the two allowed keys, and writes nothing', () => {
+  test('an unknown key is usage, naming the allowed keys, and writes nothing', () => {
     const file = settingsFile();
     let err: unknown;
     try {
@@ -492,6 +492,110 @@ describe('appSettingsCommand: home', () => {
   });
 });
 
+// The Settings page's choice (spec 2026-09-24-keep-script-settings-choice-
+// design.md): whether a new library conversion pins the settings it
+// started from. The third key this verb may write, with the same
+// discipline as the other two: checked before anything is written, and
+// a write that keeps every other key in the file.
+describe('appSettingsCommand: keepScriptSettings', () => {
+  test('a plain read answers true when nothing is stored: keeping is the default', () => {
+    const file = settingsFile();
+    const result = appSettingsCommand({}, { settingsPath: file, platform: 'linux', env: env() });
+    expect(result.keepScriptSettings).toBe(true);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  test('false is stored and answered, and every other key in the file survives the write', () => {
+    const file = settingsFile();
+    writeAppSettings({ lastRoute: 'kindle', formatDefaults: { justifyText: true } }, file);
+    const result = appSettingsCommand(
+      { set: JSON.stringify({ keepScriptSettings: false }) },
+      { settingsPath: file, platform: 'linux', env: env() },
+    );
+    expect(result.keepScriptSettings).toBe(false);
+    const onDisk = readAppSettings(file);
+    expect(onDisk.keepScriptSettings).toBe(false);
+    expect(onDisk.lastRoute).toBe('kindle');
+    expect((onDisk.formatDefaults as Record<string, unknown>).justifyText).toBe(true);
+    // The other answers are untouched by it: customized still reads the
+    // stored formatDefaults, not a side effect of this key.
+    expect(result.customized).toBe(true);
+  });
+
+  test('true is stored as true, and null removes the key, which reads as the default again', () => {
+    const file = settingsFile();
+    appSettingsCommand({ set: '{"keepScriptSettings":false}' }, { settingsPath: file, platform: 'linux', env: env() });
+    const on = appSettingsCommand(
+      { set: '{"keepScriptSettings":true}' }, { settingsPath: file, platform: 'linux', env: env() },
+    );
+    expect(on.keepScriptSettings).toBe(true);
+    expect(readAppSettings(file).keepScriptSettings).toBe(true);
+
+    appSettingsCommand({ set: '{"keepScriptSettings":false}' }, { settingsPath: file, platform: 'linux', env: env() });
+    const reset = appSettingsCommand(
+      { set: '{"keepScriptSettings":null}' }, { settingsPath: file, platform: 'linux', env: env() },
+    );
+    expect(reset.keepScriptSettings).toBe(true);
+    expect('keepScriptSettings' in readAppSettings(file)).toBe(false);
+  });
+
+  test('anything but true, false or null is bad-settings, and nothing is written', () => {
+    for (const value of ['false', 0, 1, {}, []]) {
+      const file = settingsFile();
+      let err: unknown;
+      try {
+        appSettingsCommand(
+          { set: JSON.stringify({ keepScriptSettings: value }) },
+          { settingsPath: file, platform: 'linux', env: env() },
+        );
+      } catch (e) { err = e; }
+      expect(`${JSON.stringify(value)}: ${codeOf(err)}`).toBe(`${JSON.stringify(value)}: bad-settings`);
+      expect((err as Error).message).toContain('keepScriptSettings');
+      expect(existsSync(file)).toBe(false);
+    }
+  });
+
+  test('a good keepScriptSettings alongside a bad formatDefaults stores neither', () => {
+    const file = settingsFile();
+    let err: unknown;
+    try {
+      appSettingsCommand(
+        { set: JSON.stringify({ keepScriptSettings: false, formatDefaults: 'kindleEink' }) },
+        { settingsPath: file, platform: 'linux', env: env() },
+      );
+    } catch (e) { err = e; }
+    expect(codeOf(err)).toBe('bad-settings');
+    expect(existsSync(file)).toBe(false);
+  });
+
+  test('a bad keepScriptSettings alongside a good NEW libraryPath creates no folder, stores neither', () => {
+    const file = settingsFile();
+    const chosen = join(scratch('keep-lib'), 'not-yet-made');
+    let err: unknown;
+    try {
+      appSettingsCommand(
+        { set: JSON.stringify({ libraryPath: chosen, keepScriptSettings: 'no' }) },
+        { settingsPath: file, platform: 'linux', env: env() },
+      );
+    } catch (e) { err = e; }
+    expect(codeOf(err)).toBe('bad-settings');
+    expect(existsSync(chosen)).toBe(false);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  test('an unknown key is refused naming all three keys this verb may write', () => {
+    const file = settingsFile();
+    let err: unknown;
+    try {
+      appSettingsCommand({ set: JSON.stringify({ theme: 'dark' }) }, { settingsPath: file, platform: 'linux', env: env() });
+    } catch (e) { err = e; }
+    expect(codeOf(err)).toBe('usage');
+    expect((err as Error).message).toBe(
+      'app-settings --set takes only libraryPath, formatDefaults and keepScriptSettings, not "theme"',
+    );
+  });
+});
+
 describe('screepub app-settings (through the CLI)', () => {
   async function runCli(args: string[], extraEnv: Record<string, string> = {}) {
     const proc = Bun.spawn(['bun', `${ROOT}src/cli.ts`, ...args], {
@@ -526,6 +630,7 @@ describe('screepub app-settings (through the CLI)', () => {
     expect(answer.formatDefaults).toBeDefined();
     expect(answer.shippedDefaults).toBeDefined();
     expect(answer.customized).toBe(false);
+    expect(answer.keepScriptSettings).toBe(true);
   });
 
   test('--set round-trips through the CLI', async () => {
@@ -561,6 +666,22 @@ describe('screepub app-settings (through the CLI)', () => {
     );
     const { stdout } = await runCli(['app-settings'], { SCREEPUB_CONFIG_DIR: configDir });
     expect(stdout.trim().split('\n')[1]).toBe('new scripts start from: your own defaults');
+  });
+
+  test('human output says what a converted PDF does: keeps its settings by default, or follows the defaults', async () => {
+    const configDir = scratch('config');
+    const before = await runCli(['app-settings'], { SCREEPUB_CONFIG_DIR: configDir });
+    expect(before.stdout.trim().split('\n')[2]).toBe('when a PDF is converted: keep its settings');
+
+    const set = await runCli(
+      ['app-settings', '--set', '{"keepScriptSettings":false}', '--json'],
+      { SCREEPUB_CONFIG_DIR: configDir },
+    );
+    expect(set.exitCode).toBe(0);
+    expect(JSON.parse(set.stdout).keepScriptSettings).toBe(false);
+
+    const after = await runCli(['app-settings'], { SCREEPUB_CONFIG_DIR: configDir });
+    expect(after.stdout.trim().split('\n')[2]).toBe('when a PDF is converted: follow the defaults');
   });
 
   test('human output says "the folder you chose" once one is stored', async () => {
@@ -623,6 +744,12 @@ describe('screepub app-settings (through the CLI)', () => {
     expect(stdout).toContain('libraryPath');
     expect(stdout).toContain('formatDefaults');
     expect(stdout).toContain('SCREEPUB_LIBRARY');
+  });
+
+  test('--help describes keepScriptSettings', async () => {
+    const { stdout } = await runCli(['app-settings', '--help']);
+    expect(stdout).toContain('keepScriptSettings');
+    expect(stdout).not.toContain('\u2014');
   });
 
   test('--help says formatDefaults REPLACES the stored defaults, unlike settings --set', async () => {

@@ -4,7 +4,7 @@
 import { statSync } from 'node:fs';
 import { CliError } from './cli-errors';
 import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from './options';
-import { appDefaultOptions } from './settings/app-defaults';
+import { appDefaultOptions, keepsScriptSettings } from './settings/app-defaults';
 import {
   DEVICE_PRESETS,
   matchingPreset,
@@ -24,6 +24,10 @@ export interface SettingsResult {
   preset: DevicePresetId | null;
   presets: { id: DevicePresetId; displayName: string; settings: FormatOptions }[];
   sidecar: string;
+  /** The app-wide "When a PDF is converted" choice (`keepsScriptSettings`),
+   * carried here beside appDefaults for the same reason: the window's
+   * Settings page draws everything it shows from this one answer. */
+  keepScriptSettings: boolean;
 }
 
 export interface SettingsOptions {
@@ -86,5 +90,6 @@ export function settingsCommand(options: SettingsOptions): SettingsResult {
       settings: DEVICE_PRESETS[id].settings,
     })),
     sidecar: sidecarPath(options.fountain),
+    keepScriptSettings: keepsScriptSettings(options.appSettingsPath),
   };
 }
