@@ -78,12 +78,20 @@ export class CalibreFailedError extends Error {
 
 /** Exported because export/kfx.ts runs the same tool with the same guards.
  *  `env` replaces the child's environment when given (kfx.ts uses it to
- *  hand Kindle Previewer a temp folder of its own); omitted, the child
- *  inherits this process's. */
+ *  hand Kindle Previewer a temp folder of its own); omitted, the child gets
+ *  this process's environment as it stands NOW.
+ *
+ *  That is why the default is process.env and not a missing `env`: a
+ *  Bun.spawn with no env hands the child the environment bun STARTED with,
+ *  and a later change to process.env never reaches it. The test suite
+ *  depends on the difference. tests/isolate-calibre-config.ts points
+ *  CALIBRE_CONFIG_DIRECTORY at a scratch copy of Calibre's settings folder
+ *  at run time, and Calibre has to see it or it rewrites the real one.
+ *  kfx.ts's own Calibre spawns pass process.env for the same reason. */
 export async function runCalibre(
   tool: string,
   args: string[],
-  env?: Record<string, string | undefined>,
+  env: Record<string, string | undefined> = process.env,
 ): Promise<void> {
   const proc = Bun.spawn([tool, ...args], { stdout: 'pipe', stderr: 'pipe', env });
   const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);

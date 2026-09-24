@@ -32,5 +32,7 @@ minimumReleaseAge = 86400
 # Test-run isolation: no test may reach the developer's real app settings
 # file. This is half of the guard; the other half is root .env.test. See
 # tests/isolate-app-settings.ts for what each half does and why both exist.
+# The second preload does the same for Calibre's settings folder, with its
+# own line in .env.test; tests/isolate-calibre-config.ts explains it.
 [test]
-preload = ["./tests/isolate-app-settings.ts"]
+preload = ["./tests/isolate-app-settings.ts", "./tests/isolate-calibre-config.ts"]

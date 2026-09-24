@@ -36,7 +36,8 @@ export function previewerPath(): string | null {
 }
 
 async function pluginInstalled(customize: string): Promise<boolean> {
-  const proc = Bun.spawn([customize, '--list-plugins'], { stdout: 'pipe', stderr: 'pipe' });
+  // env: process.env, not left out: see runCalibre in calibre.ts.
+  const proc = Bun.spawn([customize, '--list-plugins'], { stdout: 'pipe', stderr: 'pipe', env: process.env });
   const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
   return code === 0 && listsKfxOutput(stdout);
 }
@@ -351,7 +352,8 @@ export interface KfxInstallResult {
 type DebugRunner = (argv: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
 
 const realDebugRun: DebugRunner = async (argv) => {
-  const proc = Bun.spawn(argv, { stdout: 'pipe', stderr: 'pipe' });
+  // env: process.env, not left out: see runCalibre in calibre.ts.
+  const proc = Bun.spawn(argv, { stdout: 'pipe', stderr: 'pipe', env: process.env });
   const [code, stdout, stderr] = await Promise.all([
     proc.exited,
     new Response(proc.stdout).text(),

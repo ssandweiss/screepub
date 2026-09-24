@@ -352,9 +352,12 @@ describe('listsKfxOutput', () => {
     // Found the way listsKfxOutput() finds it, not assumed to be line 0: a
     // calibre that printed a warning first would still parse, and this must
     // not fail on it any more than the parse does.
+    // env: process.env carries the suite's scratch copy of Calibre's
+    // settings folder; left out, Calibre gets .env.test's guard and fails
+    // (tests/isolate-calibre-config.ts).
     const customize = calibreTool('calibre-customize');
     if (customize === null) return;
-    const proc = Bun.spawn([customize, '--list-plugins'], { stdout: 'pipe', stderr: 'pipe' });
+    const proc = Bun.spawn([customize, '--list-plugins'], { stdout: 'pipe', stderr: 'pipe', env: process.env });
     const [, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
     expect(pluginTableHeader(stdout)).toMatch(/^Type +Name +Version +Disabled +Site Customization$/);
   });
