@@ -1,8 +1,18 @@
 import { describe, test, expect } from 'bun:test';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { themeColors, parseThemeColors, cssValue, contrast, fromHex } from './theme-colors';
 
 const tokens = await Bun.file(new URL('../brand/tokens.json', import.meta.url)).json();
 const colors = tokens.colors;
+
+// brand/tokens.json is the source of truth (F3 acceptance criterion 12,
+// docs/superpowers/specs/2026-09-14-retire-swiftui-design.md). Only the one
+// test below still reads Swift, and only to catch the FROZEN Theme.swift
+// drifting from the values it was pinned FROM; every other test in this file
+// reads tokens.json, tokens.css and the component previews, never Swift.
+const THEME_SWIFT = fileURLToPath(new URL('../app/Sources/ScreepubApp/Theme.swift', import.meta.url));
+const themeSwiftExists = existsSync(THEME_SWIFT);
 
 // Every (label, foreground token, fg hex, bg hex, floor) row the contrast
 // test checks. The token name rides alongside the hex value specifically
@@ -44,10 +54,11 @@ const textBearing = Object.entries(colors)
   .map(([name]) => name);
 
 describe('brand tokens', () => {
-  test('tokens sourced from Theme.swift match it exactly', async () => {
-    // The Swift app is the source of truth for the shared palette. This is
-    // the same arrangement format-defaults.json has with options.test.ts:
-    // the two languages can no longer drift silently.
+  // Runs the check backwards from how it used to (see the top-of-file
+  // comment): confirms the frozen Swift file has not drifted, rather than
+  // pinning tokens.json to it. Skips once that file is gone at F3, which is
+  // expected then, not a coverage gap.
+  test.skipIf(!themeSwiftExists)('the frozen Theme.swift still matches brand/tokens.json', async () => {
     const theme = await themeColors();
     const pinned = Object.entries(colors).filter(
       ([, v]: [string, any]) => v.from === 'Theme.swift',
@@ -63,11 +74,11 @@ describe('brand tokens', () => {
       expect(theme[swiftName], `Theme.swift has no color named ${swiftName}`).toBeDefined();
       expect(
         cssValue(theme[swiftName].light),
-        `${name} light drifted from Theme.swift; Theme.swift is the source, so fix brand/tokens.json to match`,
+        `brand/tokens.json is the source; the frozen Swift app has drifted (${name} light), which should never happen because app/ is frozen`,
       ).toBe(value.light);
       expect(
         cssValue(theme[swiftName].dark),
-        `${name} dark drifted from Theme.swift; Theme.swift is the source, so fix brand/tokens.json to match`,
+        `brand/tokens.json is the source; the frozen Swift app has drifted (${name} dark), which should never happen because app/ is frozen`,
       ).toBe(value.dark);
     }
   });
