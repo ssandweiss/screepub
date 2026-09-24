@@ -499,17 +499,22 @@ let presetsBox = null;
 // engine round trip Settings already makes; a second probe just to draw a
 // caption would be the well's old library-line mistake repeated.
 //
-// drawDefaultsFoot() is a pure function OF this state, called both by draw()
-// and by refreshDefaultsFoot() below, so a redraw that happens for some
-// other reason while a write is in flight (a preset click's applyAll, or
-// flush()'s own correcting redraw) still shows the true busy/message state
-// rather than a fresh, wrongly-idle foot built from nothing: there is only
-// ever one place these five variables are read from.
+// applyDefaultsFootState() is the one function that writes these four onto
+// the foot's own nodes (also declared here, not local to drawDefaultsFoot):
+// a redraw that happens for some other reason while a write is in flight (a
+// preset click's applyAll, or flush()'s own correcting redraw) still shows
+// the true busy/message state, because drawDefaultsFoot() calls the same
+// function right after building fresh nodes; and a write's own update lands
+// on the SAME nodes a reader may still have a hand on, rather than a
+// replacement that would drop their focus and never announce itself.
 let appDefaults = null;
 let shippedDefaults = null;
 let defaultsBusy = false;
 let defaultsNote = '';
-let defaultsBox = null;
+let defaultsCaptionEl = null;
+let defaultsNoteEl = null;
+let defaultsUseButton = null;
+let defaultsResetButton = null;
 let previewFrame = null;
 let previewCss = '';
 let loaded = false;
@@ -545,6 +550,10 @@ export function scriptChanged() {
   shippedDefaults = null;
   defaultsBusy = false;
   defaultsNote = '';
+  defaultsCaptionEl = null;
+  defaultsNoteEl = null;
+  defaultsUseButton = null;
+  defaultsResetButton = null;
   pending = {};
   clearTimeout(timer);
   draw();
@@ -627,7 +636,7 @@ function draw(status) {
         (presetsBox = drawPresets()),
         ...GROUPS.map(drawGroup),
         statusLine,
-        (defaultsBox = drawDefaultsFoot()),
+        drawDefaultsFoot(),
       ),
       drawPreview(),
     ),
@@ -697,16 +706,16 @@ function drawPresets() {
 }
 
 /** The foot of the Settings page: which defaults a NEW script starts from,
- *  and a way to change that. Built FRESH each time, always from the five
- *  module variables above (never from a closure captured at some earlier
- *  moment), because this is called from two places that both need the
- *  CURRENT truth: draw(), whenever the whole pane is rebuilt for any reason
- *  (a preset click's applyAll, flush()'s own correcting redraw) while a
- *  write may still be in flight; and refreshDefaultsFoot() below, once that
- *  write has answered. A version that captured `defaultsBusy` once at
- *  construction time would show ENABLED buttons on a foot a mid-write
- *  redraw just rebuilt, which is exactly the second send this disabling was
- *  meant to prevent.
+ *  and a way to change that. Built once per full draw() and then left ALONE:
+ *  a write updates the four nodes below (defaultsCaptionEl, defaultsNoteEl,
+ *  defaultsUseButton, defaultsResetButton) in place, through
+ *  applyDefaultsFootState(), rather than rebuilding them. Two reasons, both
+ *  the same rule the rest of this file already follows for a knob's own
+ *  state(): replacing the button a reader just pressed would drop their
+ *  focus onto the body the moment they clicked it, and a role="status" node
+ *  has to already be sitting in the page, empty, before its text changes
+ *  for most screen readers to announce the change at all. A live region
+ *  that appears already full announces nothing.
  *
  *  Neither button ever calls argv.settings(: this surface's OWN save path
  *  (change() through schedule() to flush()) is untouched by either one,
@@ -716,38 +725,44 @@ function drawDefaultsFoot() {
   // A malformed answer, the engine's contract broken, not a reader's doing,
   // leaves nothing this block could honestly claim. Absent rather than
   // wrong, the same call drawPresets() makes with an empty list.
-  if (appDefaults === null || shippedDefaults === null) return null;
-  const caption = el('p', { class: 'caption' }, defaultsCaption(appDefaults, shippedDefaults));
-  const note = el('p', {
-    class: 'caption defaults-note', role: 'status', hidden: defaultsNote === '',
-  }, defaultsNote);
-  const useButton = el('button', {
-    type: 'button', class: 'btn-quiet', disabled: defaultsBusy,
+  if (appDefaults === null || shippedDefaults === null) {
+    defaultsCaptionEl = null;
+    defaultsNoteEl = null;
+    defaultsUseButton = null;
+    defaultsResetButton = null;
+    return null;
+  }
+  defaultsCaptionEl = el('p', { class: 'caption' });
+  defaultsNoteEl = el('p', { class: 'caption defaults-note', role: 'status' });
+  defaultsUseButton = el('button', {
+    type: 'button', class: 'btn-quiet',
     onclick: () => writeDefaults(settings, USE_DEFAULTS_NOTE),
   }, USE_DEFAULTS_LABEL);
-  const resetButton = el('button', {
-    type: 'button', class: 'btn-quiet', disabled: defaultsBusy,
-    hidden: !canResetDefaults(appDefaults, shippedDefaults),
+  defaultsResetButton = el('button', {
+    type: 'button', class: 'btn-quiet',
     onclick: () => writeDefaults(null, RESET_DEFAULTS_NOTE),
   }, RESET_DEFAULTS_LABEL);
+  applyDefaultsFootState();
   return el('div', { class: 'tune-defaults' },
-    caption,
-    el('div', { class: 'tune-defaults-row' }, useButton, resetButton),
-    note);
+    defaultsCaptionEl,
+    el('div', { class: 'tune-defaults-row' }, defaultsUseButton, defaultsResetButton),
+    defaultsNoteEl);
 }
 
-/** Swap the foot for a fresh one built from the module state writeDefaults()
- *  just updated. Same reason refreshPresets() exists: a full draw() under
- *  the reader's pointer would drop whatever they were doing elsewhere on the
- *  page, so only this box is rebuilt. Silent if there is no box to replace
- *  (the pane is not showing the knobs right now, or the answer never
- *  produced usable defaults) rather than throwing partway through a write. */
-function refreshDefaultsFoot() {
-  if (defaultsBox === null) return;
-  const next = drawDefaultsFoot();
-  if (next === null) return;
-  defaultsBox.replaceWith(next);
-  defaultsBox = next;
+/** The one place that writes appDefaults/shippedDefaults/defaultsBusy/
+ *  defaultsNote onto the four nodes drawDefaultsFoot() built: called right
+ *  after building them, so the first paint agrees with every later refresh,
+ *  and by writeDefaults() below on every way out. Silent when the foot is
+ *  not on screen (defaultsCaptionEl is null: the fault or reading state, or
+ *  a malformed answer) rather than throwing partway through a write. */
+function applyDefaultsFootState() {
+  if (defaultsCaptionEl === null) return;
+  text(defaultsCaptionEl, defaultsCaption(appDefaults, shippedDefaults));
+  defaultsUseButton.disabled = defaultsBusy;
+  defaultsResetButton.disabled = defaultsBusy;
+  defaultsResetButton.hidden = !canResetDefaults(appDefaults, shippedDefaults);
+  text(defaultsNoteEl, defaultsNote);
+  defaultsNoteEl.hidden = defaultsNote === '';
 }
 
 /** `next` is this script's current settings (Use these) or null (Reset).
@@ -757,15 +772,17 @@ function refreshDefaultsFoot() {
  *  uses, because this write, like that one, can outlive the script it was
  *  started from: the reader may have opened a different script's Settings,
  *  whose own foot is what is actually on screen, before this one's engine
- *  call returns. defaultsWriteOutcome makes the era check, the success
- *  path and the refusal path each one branch a test can drive without a
- *  DOM; this function is the thin glue that applies its answer to the
- *  module state and repaints. */
+ *  call returns, and that foot's nodes are what module state now refers to
+ *  (a stale `era` is the only thing that still says whose write this was).
+ *  defaultsWriteOutcome makes the era check, the success path and the
+ *  refusal path each one branch a test can drive without a DOM; this
+ *  function is the thin glue that applies its answer to the module state
+ *  and updates the foot's own nodes to match. */
 async function writeDefaults(next, confirmed) {
   const mine = era;
   defaultsBusy = true;
   defaultsNote = '';
-  refreshDefaultsFoot();
+  applyDefaultsFootState();
   try {
     const answer = await runEngine(argv.appSettings(defaultsWriteArgs(next)));
     const outcome = defaultsWriteOutcome(mine, era, answer, confirmed);
@@ -781,7 +798,7 @@ async function writeDefaults(next, confirmed) {
   } finally {
     if (era === mine) {
       defaultsBusy = false;
-      refreshDefaultsFoot();
+      applyDefaultsFootState();
     }
   }
 }
