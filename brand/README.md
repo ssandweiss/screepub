@@ -17,13 +17,14 @@ this file is the operating manual.
 ## The pinning rule
 
 Seven tokens (`paper`, `ink`, `ink-muted`, `ink-on-brass`, `brass`, `alarm`,
-`hole`) are shared with the Mac app. `app/Sources/ScreepubApp/Theme.swift` is
-the source and `tokens.json` mirrors it. `tests/brand-tokens.test.ts` parses
-the Swift and fails if they disagree, the same arrangement
-`format-defaults.json` has with `options.test.ts`.
+`hole`) are shared with the frozen Swift Mac app. `tokens.json` is the source
+(changed 2026-09-23, ahead of deleting the Swift app). While
+`app/Sources/ScreepubApp/Theme.swift` still exists,
+`tests/brand-tokens.test.ts` parses it and fails if it has drifted from
+`tokens.json`; once `app/` is deleted that check skips itself.
 
-**If that test fails, change `tokens.json`, not the app.** Change the app only
-when you mean to change the app, and then update `tokens.json` to match.
+**If that test fails, something edited the frozen app.** `app/` is frozen, so
+put the Swift file back rather than changing `tokens.json` to match it.
 
 Token names are kebab-case, Swift properties are camelCase. Where the two
 differ, the token carries an explicit `swift` field (`ink-on-brass` →

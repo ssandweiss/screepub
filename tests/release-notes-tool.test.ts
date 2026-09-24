@@ -1,5 +1,5 @@
-import { describe, test, expect } from 'bun:test';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, test, expect } from 'bun:test';
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -10,6 +10,9 @@ import {
   changedRegistryEntries,
   isUserVisible,
 } from '../tools/release-notes';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-release-notes-tool-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 /** Run a setup command in a scratch repo and fail loudly if it didn't
  *  work, instead of silently leaving the repo half set up. Without this,
@@ -28,7 +31,7 @@ function run(dir: string, cmd: string): void {
  *  makes every `git commit` in this file fail silently in an environment
  *  that has no signing key configured for tests. */
 function scratchRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'relnotes-'));
+  const dir = mkdtempSync(join(SCRATCH, 'relnotes-'));
   run(dir, 'git init -q');
   run(dir, 'git config user.email dev@example.com');
   run(dir, 'git config user.name Dev');

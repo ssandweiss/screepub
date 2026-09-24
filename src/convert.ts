@@ -69,6 +69,10 @@ export interface ConvertResult {
   screenplay: ParsedScreenplay | null;
   meta: BookMeta;
   warnings: string[];
+  /** Word spaces pdf.js invented that were removed against the glyph stream.
+   *  Reported rather than hidden: this edits the author's text, so the
+   *  number is part of the answer. Normally 0. */
+  spacingRepairs: number;
 }
 
 function resolveMeta(detected: TitleMeta, opts: ConvertOptions): BookMeta {
@@ -109,7 +113,7 @@ export async function convertPdf(
 ): Promise<ConvertResult> {
   const warnings: string[] = [];
 
-  const { lines, pageCount } = await extractDocument(pdfBytes, undefined, (page, pages) =>
+  const { lines, pageCount, spacingRepairs } = await extractDocument(pdfBytes, undefined, (page, pages) =>
     opts.onProgress?.('parse', (page / pages) * PARSE_SHARE),
   );
   if (lines.length < pageCount * MIN_LINES_PER_PAGE) {
@@ -133,7 +137,7 @@ export async function convertPdf(
   const { epub, mobi, previewHtml } = await renderBooks(fountainText, meta, opts.mobi ?? false, format);
   opts.onProgress?.('render', 1);
 
-  return { epub, mobi, previewHtml, fountainText, screenplay, meta, warnings };
+  return { epub, mobi, previewHtml, fountainText, screenplay, meta, warnings, spacingRepairs };
 }
 
 /** A forced cue line still carrying a (CONT'D) — the shape serialize.ts
@@ -180,6 +184,9 @@ export async function convertFountain(
     previewHtml,
     fountainText,
     screenplay: null,
+    // Fountain input never went through pdf.js, so there was no invented
+    // space to undo. Zero is the honest answer, not "unknown".
+    spacingRepairs: 0,
     meta,
     warnings: stageOneWarnings(fountainText, format),
   };
