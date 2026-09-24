@@ -131,7 +131,7 @@ test('toKepub converts to .kepub then renames to .kepub.epub (fake ebook-convert
     writeFileSync(epub, 'fake epub bytes');
     const rawKepub = join(workDir, 'book.kepub');
     const finalKepub = join(workDir, 'book.kepub.epub');
-    writeFileSync(finalKepub, 'stale leftover'); // proves the rmSync-before-rename step
+    writeFileSync(finalKepub, 'stale leftover'); // proves the rename replaces what is there
 
     const out = await toKepub(epub);
 

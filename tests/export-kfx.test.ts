@@ -124,10 +124,15 @@ test('toKfx writes to a .kfx scratch path and renames it onto kfxSibling', async
   const { tool, argvLog, workDir } = fakeEbookConvert();
   const epub = join(workDir, 'book.epub');
   writeFileSync(epub, 'fake epub bytes');
+  // An older conversion already there is replaced by the rename itself,
+  // with no delete first: a rename that failed after a delete would leave
+  // the book with no .kfx at all.
+  writeFileSync(kfxSibling(epub), 'an older conversion');
 
   const out = await toKfx(epub, undefined, { tool: () => tool, status: async () => READY });
 
   expect(out).toBe(kfxSibling(epub));
+  expect(readFileSync(out, 'utf8')).toBe(''); // the fake's output, not the older one
   const argv = readFileSync(argvLog, 'utf8').split('\n').filter(Boolean);
   expect(argv[0]).toBe(epub);
   expect(argv[1].endsWith('.kfx')).toBe(true);

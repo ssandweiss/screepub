@@ -185,7 +185,9 @@ export async function toKfx(
     if (!existsSync(scratch)) {
       throw new CalibreFailedError('ebook-convert exited cleanly but produced no .kfx');
     }
-    rmSync(kfx, { force: true });
+    // No delete first: the rename replaces an older .kfx in one step (on
+    // Windows too), so a rename that fails leaves that older one in place
+    // rather than no book at all.
     renameSync(scratch, kfx);
   } catch (error) {
     rmSync(scratch, { force: true });

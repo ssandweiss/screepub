@@ -128,7 +128,8 @@ export async function toAzw3(epub: string, deps: Azw3Deps = {}): Promise<string>
     if (!existsSync(scratch)) {
       throw new CalibreFailedError('ebook-convert exited cleanly but produced no .azw3');
     }
-    rmSync(azw3, { force: true });
+    // No delete first, as in toKfx: the rename replaces an older .azw3 in
+    // one step, and a failed one leaves it where it was.
     renameSync(scratch, azw3);
   } catch (error) {
     rmSync(scratch, { force: true });
@@ -174,7 +175,6 @@ export async function toKepub(epub: string): Promise<string> {
   if (!existsSync(raw)) {
     throw new CalibreFailedError('ebook-convert exited cleanly but produced no .kepub');
   }
-  rmSync(kepub, { force: true });
-  renameSync(raw, kepub);
+  renameSync(raw, kepub); // replaces an older .kepub.epub in one step
   return kepub;
 }
