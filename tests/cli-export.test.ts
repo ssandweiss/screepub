@@ -434,6 +434,100 @@ describe('exportCommand: app-wide defaults underneath --options-json', () => {
   });
 });
 
+// Review fix: send.js's own comment (ensureSettings, around line 552) says
+// "the Kindle rung that does will fall back to this script's defaults", but
+// until now the export command never read the script's sidecar at all, only
+// the app-wide ones. When export is told which script it is (--fountain),
+// its base is THIS SCRIPT'S settings, resolved over the app defaults, same
+// as a conversion's own precedence: flags > sidecar > app defaults >
+// shipped. --fountain is optional (a bare `--for epub` never needs it, and
+// a window whose settings read failed sends none), so when it is absent the
+// base stays the app defaults, exactly as before this fix.
+describe('exportCommand: the script\'s own sidecar, when --fountain names one', () => {
+  function appSettingsWith(formatDefaults: Record<string, unknown>): string {
+    const path = join(dir, `app-settings-${Math.random()}.json`);
+    writeFileSync(path, JSON.stringify({ formatDefaults }));
+    return path;
+  }
+
+  test('no --options-json: the ladder gets the sidecar\'s own value, not the app defaults', async () => {
+    writeFileSync(join(dir, 'Script.screepub.json'), JSON.stringify({ dialogueSideMarginPct: 13 }));
+    const seen: { format?: FormatOptions } = {};
+    await exportCommand(
+      { epub, for: 'kindle', fountain },
+      {
+        calibreAvailable: () => true,
+        kfxStatus: async () => calibreOnlyStatus,
+        appSettingsPath: appSettingsWith({ dialogueSideMarginPct: 5 }),
+        freshKindleArtifact: async (opts) => {
+          seen.format = opts.format;
+          return join(dir, 'Script.azw3');
+        },
+      },
+    );
+    expect(seen.format?.dialogueSideMarginPct).toBe(13);
+  });
+
+  test('a partial --options-json moves the named knob and leaves the sidecar\'s other values standing', async () => {
+    writeFileSync(
+      join(dir, 'Script.screepub.json'),
+      JSON.stringify({ dialogueSideMarginPct: 13, justifyText: true }),
+    );
+    const seen: { format?: FormatOptions } = {};
+    await exportCommand(
+      { epub, for: 'kindle', fountain, optionsJson: '{"dialogueSideMarginPct":24}' },
+      {
+        calibreAvailable: () => true,
+        kfxStatus: async () => calibreOnlyStatus,
+        appSettingsPath: appSettingsWith({ dialogueSideMarginPct: 5 }),
+        freshKindleArtifact: async (opts) => {
+          seen.format = opts.format;
+          return join(dir, 'Script.azw3');
+        },
+      },
+    );
+    // The knob --options-json named:
+    expect(seen.format?.dialogueSideMarginPct).toBe(24);
+    // The sidecar's other value, untouched by either --options-json or the
+    // app defaults:
+    expect(seen.format?.justifyText).toBe(true);
+  });
+
+  test('no sidecar on disk: falls back to the app defaults, not the shipped ones', async () => {
+    const seen: { format?: FormatOptions } = {};
+    await exportCommand(
+      { epub, for: 'kindle', fountain },
+      {
+        calibreAvailable: () => true,
+        kfxStatus: async () => calibreOnlyStatus,
+        appSettingsPath: appSettingsWith({ dialogueSideMarginPct: 5 }),
+        freshKindleArtifact: async (opts) => {
+          seen.format = opts.format;
+          return join(dir, 'Script.azw3');
+        },
+      },
+    );
+    expect(seen.format?.dialogueSideMarginPct).toBe(5);
+  });
+
+  test('no --fountain at all: still the app defaults, unaffected by this fix', async () => {
+    const seen: { format?: FormatOptions } = {};
+    await exportCommand(
+      { epub, for: 'kindle' },
+      {
+        calibreAvailable: () => true,
+        kfxStatus: async () => calibreOnlyStatus,
+        appSettingsPath: appSettingsWith({ dialogueSideMarginPct: 5 }),
+        freshKindleArtifact: async (opts) => {
+          seen.format = opts.format;
+          return join(dir, 'Script.azw3');
+        },
+      },
+    );
+    expect(seen.format?.dialogueSideMarginPct).toBe(5);
+  });
+});
+
 describe('screepub export (through the CLI)', () => {
   test('--json prints one object with the path and the available formats', () => {
     const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'export', epub, '--for', 'epub', '--json']);

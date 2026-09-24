@@ -39,14 +39,15 @@ effect here (asking to strip (CONT'D) warns rather than failing silently),
 and the scanned-PDF and not-a-screenplay guards are PDF-only. See the
 README's "Fountain input" section.
 
-Every conversion starts from your app-wide format defaults, when you have
-set any, underneath all of this.
-
 A script's saved settings are used by the conversion that finds them: if
 <script>.screepub.json sits beside the input — or in the script's library
 folder, under --library — this run renders with it and says so on stderr.
 --options/--options-json override it knob by knob. Write one with the
 settings command.
+
+Underneath those saved settings and any --options you pass, a conversion
+starts from the format defaults you chose in the app, if you chose any, and
+otherwise from Screepub's own.
 
 Options:
   -o, --output <file>    EPUB output path (default: <input>.epub)
@@ -132,7 +133,9 @@ Usage:
 
 Reads the settings stored beside the script (<Stem>.screepub.json). --set
 overlays a partial JSON object on what is there and saves it; knobs you do
-not mention keep their values.
+not mention keep their values. A script with no saved settings of its own
+starts from the format defaults you chose in the app, if you chose any, and
+otherwise from Screepub's own.
 
 Options:
   --set <json>           a partial FormatOptions object to overlay and save

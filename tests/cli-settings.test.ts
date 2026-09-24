@@ -58,6 +58,15 @@ describe('settingsCommand', () => {
     expect(result.settings.showSceneNumbers).toBe(true);
   });
 
+  // Review fix: resolveFormatOptions' dualDialogue merge used to read
+  // 'sideBySide' the same as absent, so once a sidecar held 'sequential'
+  // nothing could ever move it back through --set either.
+  test('--set sequential then --set sideBySide ends sideBySide', () => {
+    settingsCommand({ fountain, set: '{"dualDialogue":"sequential"}' });
+    const result = settingsCommand({ fountain, set: '{"dualDialogue":"sideBySide"}' });
+    expect(result.settings.dualDialogue).toBe('sideBySide');
+  });
+
   test('a tuned script matches no preset', () => {
     const result = settingsCommand({ fountain, set: '{"elementSpacingEm":1.9}' });
     expect(result.preset).toBeNull();
@@ -271,5 +280,14 @@ describe('screepub settings (through the CLI)', () => {
     const answer = JSON.parse(proc.stdout.toString());
     expect(answer.ok).toBe(false);
     expect(answer.error.code).toBe('usage');
+  });
+
+  // Review fix: a script with no saved settings does not start at
+  // DEFAULT_FORMAT_OPTIONS, it starts at the app defaults, which are the
+  // shipped ones only until the user chooses otherwise. --help said neither.
+  test('--help says a script with no saved settings starts from the app defaults', () => {
+    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'settings', '--help']);
+    const stdout = proc.stdout.toString();
+    expect(stdout).toContain('starts from the format defaults you chose in the app');
   });
 });

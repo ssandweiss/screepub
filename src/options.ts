@@ -109,7 +109,8 @@ export function resolveFormatOptions(
     includeTitlePage: bool('includeTitlePage'),
     showSceneNumbers: bool('showSceneNumbers'),
     showPageMarkers: bool('showPageMarkers'),
-    dualDialogue: p.dualDialogue === 'sequential' ? 'sequential' : d.dualDialogue,
+    dualDialogue:
+      p.dualDialogue === 'sequential' || p.dualDialogue === 'sideBySide' ? p.dualDialogue : d.dualDialogue,
     justifyText: bool('justifyText'),
     printSplitMinimums: bool('printSplitMinimums'),
     preserveFontShifts: bool('preserveFontShifts'),

@@ -103,6 +103,27 @@ describe('resolveFormatOptions', () => {
     expect(resolveFormatOptions({ dialogueSideMarginPct: 999 }, base).dialogueSideMarginPct).toBe(30);
     expect(resolveFormatOptions({ dialogueSideMarginPct: 'nope' }, base).dialogueSideMarginPct).toBe(12);
   });
+
+  // dualDialogue used to be merged as `p.dualDialogue === 'sequential' ?
+  // 'sequential' : d.dualDialogue`, which reads an explicit 'sideBySide' the
+  // same as an absent or invalid value: it always fell through to the base.
+  // A base of 'sequential' (a user's own app defaults, the Phone preset
+  // saved as their starting point) then could never be moved back to
+  // 'sideBySide' by anything downstream, no matter how explicitly asked.
+  test('an explicit sideBySide overrides a sequential base', () => {
+    const base: FormatOptions = { ...DEFAULT_FORMAT_OPTIONS, dualDialogue: 'sequential' };
+    expect(resolveFormatOptions({ dualDialogue: 'sideBySide' }, base).dualDialogue).toBe('sideBySide');
+  });
+
+  test('an explicit sequential still overrides a sideBySide base', () => {
+    const base: FormatOptions = { ...DEFAULT_FORMAT_OPTIONS, dualDialogue: 'sideBySide' };
+    expect(resolveFormatOptions({ dualDialogue: 'sequential' }, base).dualDialogue).toBe('sequential');
+  });
+
+  test('an invalid dualDialogue value falls back to the base, same as the other enums', () => {
+    const base: FormatOptions = { ...DEFAULT_FORMAT_OPTIONS, dualDialogue: 'sequential' };
+    expect(resolveFormatOptions({ dualDialogue: 'nonsense' }, base).dualDialogue).toBe('sequential');
+  });
 });
 
 // ── screenplayCss(options) ───────────────────────────────

@@ -1,9 +1,10 @@
 // A conversion's own precedence (flags > sidecar > defaults, see
-// tests/conversion-settings.test.ts) gains one more layer underneath the
-// defaults: the user's app-wide format defaults (piece C), read from the
-// app settings file. Every assertion here is a DISAGREEMENT, the same
-// discipline conversion-settings.test.ts uses: the same fixture, converted
-// with and without the app defaults, must produce different CSS.
+// tests/conversion-settings.test.ts) gains one more layer: the user's
+// app-wide format defaults (piece C), read from the app settings file,
+// sitting over Screepub's shipped defaults and under a script's own
+// sidecar. Every assertion here is a DISAGREEMENT, the same discipline
+// conversion-settings.test.ts uses: the same fixture, converted with and
+// without the app defaults, must produce different CSS.
 import { afterAll, beforeAll, describe, test, expect } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,6 +31,17 @@ function scratch(name: string): string {
 async function scriptFolder(pdfName = 'Tuned.pdf'): Promise<string> {
   const dir = scratch('scripts');
   await Bun.write(join(dir, pdfName), Bun.file(`${FIXTURES}screenplay.pdf`));
+  return dir;
+}
+
+/** Same shape, but copies torture.pdf: screenplay.pdf (the happy-path
+ * fixture every other test here uses) has no dual-dialogue scene, and
+ * dualDialogue's effect is invisible in CSS (it moves a marker into the
+ * .fountain at stage 1, not a CSS property), so it needs a fixture that
+ * actually has one. */
+async function dualDialogueScriptFolder(pdfName = 'Dual.pdf'): Promise<string> {
+  const dir = scratch('scripts');
+  await Bun.write(join(dir, pdfName), Bun.file(`${FIXTURES}torture.pdf`));
   return dir;
 }
 
@@ -181,12 +193,61 @@ describe('a conversion starts from the app-wide format defaults', () => {
     expect(css).not.toContain(`margin-left: ${SIDECAR_SIDE}%`);
     expect(css).not.toContain(`margin-left: ${APP_SIDE}%`);
   }, 120000);
+
+  // Review fix: resolveFormatOptions' dualDialogue merge used to read an
+  // explicit 'sideBySide' the same as absent, always falling through to the
+  // base. A user who saved the Phone preset (dualDialogue: 'sequential') as
+  // their app defaults could then never get side-by-side dual dialogue back
+  // for any script: not from a sidecar, not from --options-json. The fixture
+  // caret ` ^` (fountain/serialize.ts) is how a right-hand dual cue is
+  // marked sideBySide; a sequential render omits it entirely.
+  test('a sidecar sideBySide wins over app defaults sequential, through the real precedence chain', async () => {
+    const scripts = await dualDialogueScriptFolder('Dual.pdf');
+    const configDir = appConfigDir({ dualDialogue: 'sequential' });
+    writeFileSync(join(scripts, 'Dual.screepub.json'), JSON.stringify({ dualDialogue: 'sideBySide' }));
+    const out = join(scratch('out'), 'dual-sidecar.epub');
+
+    const { stdout, exitCode } = await runCli(
+      [join(scripts, 'Dual.pdf'), '-o', out, '--json'],
+      { SCREEPUB_CONFIG_DIR: configDir },
+    );
+    expect(exitCode).toBe(0);
+    const answer = JSON.parse(stdout);
+    const fountainText = readFileSync(answer.fountainPath, 'utf8');
+    expect(fountainText).toContain(' ^');
+  }, 120000);
+
+  test('an explicit --options-json flag wins the same way, over a sequential sidecar and app defaults', async () => {
+    const scripts = await dualDialogueScriptFolder('DualFlag.pdf');
+    const configDir = appConfigDir({ dualDialogue: 'sequential' });
+    writeFileSync(join(scripts, 'DualFlag.screepub.json'), JSON.stringify({ dualDialogue: 'sequential' }));
+    const out = join(scratch('out'), 'dual-flag.epub');
+
+    const { stdout, exitCode } = await runCli(
+      [join(scripts, 'DualFlag.pdf'), '-o', out, '--json',
+        '--options-json', JSON.stringify({ dualDialogue: 'sideBySide' })],
+      { SCREEPUB_CONFIG_DIR: configDir },
+    );
+    expect(exitCode).toBe(0);
+    const answer = JSON.parse(stdout);
+    const fountainText = readFileSync(answer.fountainPath, 'utf8');
+    expect(fountainText).toContain(' ^');
+  }, 120000);
 });
 
 describe('conversion --help', () => {
-  test('says a conversion starts from the app-wide format defaults', async () => {
+  // Review fix: the line used to sit after the Fountain-input paragraph,
+  // so "underneath all of this" pointed at nothing in particular, and it
+  // never said where the app defaults come from. Moved after the
+  // saved-settings paragraph it actually sits underneath, and reworded to
+  // name the app.
+  test('says a conversion starts from the format defaults chosen in the app, underneath the saved settings', async () => {
     const { stdout, exitCode } = await runCli(['--help']);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain('app-wide format defaults');
+    const savedSettingsAt = stdout.indexOf("A script's saved settings");
+    const appDefaultsAt = stdout.indexOf('the format defaults you chose in the app');
+    expect(savedSettingsAt).toBeGreaterThan(-1);
+    expect(appDefaultsAt).toBeGreaterThan(-1);
+    expect(appDefaultsAt).toBeGreaterThan(savedSettingsAt);
   });
 });

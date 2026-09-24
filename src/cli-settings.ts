@@ -50,7 +50,7 @@ export function settingsCommand(options: SettingsOptions): SettingsResult {
   }
 
   // The app-wide defaults are the base a script with no sidecar of its own
-  // reads over, one layer under the shipped defaults (piece C). Read once:
+  // reads over, one layer over the shipped defaults (piece C). Read once:
   // both the plain read below and a --set that follows use the SAME base,
   // so a --set on an untouched script overlays onto the user's own tuning
   // rather than resetting it to Screepub's.

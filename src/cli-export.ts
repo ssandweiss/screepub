@@ -15,6 +15,7 @@ import { fileExtension, formatLabel, type ExportFormat } from './export/formats'
 import { kfxStatus as realKfxStatus, type KfxStatus } from './export/kfx';
 import { resolveFormatOptions, type FormatOptions } from './options';
 import { appDefaultOptions } from './settings/app-defaults';
+import { loadScriptSettings } from './settings/sidecar';
 
 export interface ExportResult {
   path: string;
@@ -61,16 +62,22 @@ export interface ExportDeps {
   appSettingsPath?: string;
 }
 
-/** `--options-json`, overlaid on the app-wide format defaults (piece C) so
- * the same precedence a conversion honours (flags > sidecar > app defaults
- * > shipped) holds here too: a rebuild through the MOBI rung must start
- * from the user's own defaults, not Screepub's, when the caller mentioned
- * no `--options-json` knob at all, or only some of them. A FULL object (what
- * the window actually sends: `screepub settings`'s answer, read back
- * whole) leaves nothing for the app defaults to fill, so this changes
- * nothing observable for it. */
-function readFormat(optionsJson: string | undefined, appSettingsPath: string | undefined): FormatOptions {
-  const base = appDefaultOptions(appSettingsPath);
+/** The base `--options-json` overlays: the same precedence a conversion
+ * honours (flags > sidecar > app defaults > shipped), so a rebuild through
+ * the MOBI rung starts from this SCRIPT'S own tuning, not a stranger's
+ * defaults, whenever export is told which script it is. `--fountain` is
+ * optional (a bare `--for epub` never needs it, and a window whose settings
+ * read failed sends none), so when it is absent the base is just the app
+ * defaults, same as before this script-aware read existed. */
+function readFormatBase(fountainPath: string | undefined, appSettingsPath: string | undefined): FormatOptions {
+  const appDefaults = appDefaultOptions(appSettingsPath);
+  return fountainPath === undefined ? appDefaults : loadScriptSettings(fountainPath, appDefaults);
+}
+
+/** `--options-json`, overlaid on `base`. A FULL object (what the window
+ * actually sends: `screepub settings`'s answer, read back whole) leaves
+ * nothing for `base` to fill, so this changes nothing observable for it. */
+function readFormat(optionsJson: string | undefined, base: FormatOptions): FormatOptions {
   if (optionsJson === undefined) return base;
   let parsed: unknown;
   try {
@@ -111,7 +118,8 @@ export async function exportCommand(
   // VALUE (it converts nothing), but a window sending malformed JSON must
   // hear the same 'bad-options' either way, or the same argv is valid and
   // invalid at once.
-  const formatOptions = readFormat(options.optionsJson, deps.appSettingsPath);
+  const formatBase = readFormatBase(options.fountain, deps.appSettingsPath);
+  const formatOptions = readFormat(options.optionsJson, formatBase);
 
   const calibreAvailable = (deps.calibreAvailable ?? isCalibreAvailable)();
   const available = availableFormats(options.epub, calibreAvailable);

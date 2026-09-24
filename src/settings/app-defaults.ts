@@ -1,5 +1,5 @@
 // App-wide format defaults: the base every script starts from, one layer
-// under Screepub's own shipped defaults and one layer above a script's own
+// OVER Screepub's own shipped defaults and one layer UNDER a script's own
 // sidecar. Piece C's "use these settings for new scripts" (the owner's
 // decision in docs/superpowers/specs/2026-09-23-app-settings-gear-design.md):
 // explicit flags > the script's sidecar > these > DEFAULT_FORMAT_OPTIONS,
@@ -10,14 +10,12 @@
 import { appSettingsPath, readAppSettings } from './app';
 import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from '../options';
 
-/** `formatDefaults` off the app settings file, or undefined when there is
- * nothing usable there. A stored value that JSON allows but is not a plain
- * object (an array, a string, a number, null) is not something
- * resolveFormatOptions can read knobs off, so it reads as absent rather than
- * throwing or silently becoming `{}` in a way that would hide the
- * distinction from "never set". readAppSettings has already turned a
- * missing, unreadable or corrupt settings FILE into `{}`, so this only
- * needs to judge the one key. */
+/** `formatDefaults` off the app settings file, or undefined when the stored
+ * value is not a plain object. JSON allows an array, a string, a number or
+ * null there too, and none of those is something resolveFormatOptions can
+ * read knobs off, so this type-guards the one key before handing it on.
+ * readAppSettings has already turned a missing, unreadable or corrupt
+ * settings FILE into `{}`, so this is the only check left to make. */
 function storedFormatDefaults(settingsPath: string): Record<string, unknown> | undefined {
   const stored = readAppSettings(settingsPath).formatDefaults;
   if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) return undefined;
