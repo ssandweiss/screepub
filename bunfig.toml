@@ -28,3 +28,9 @@
 # 24 hours so it never proposes a bump this would then refuse to install.
 [install]
 minimumReleaseAge = 86400
+
+# Test-run isolation: no test may reach the developer's real app settings
+# file. This is half of the guard; the other half is root .env.test. See
+# tests/isolate-app-settings.ts for what each half does and why both exist.
+[test]
+preload = ["./tests/isolate-app-settings.ts"]
