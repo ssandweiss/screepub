@@ -38,11 +38,18 @@ pub const LINE_EVENT: &str = "engine-line";
 pub async fn run(app: &AppHandle, args: Vec<String>) -> Result<String, String> {
     // Nothing here kills the engine if the app quits while this call is
     // running: the engine finishes its work in the background. Deliberate,
-    // and approved by the owner on 2026-09-24 after a code review. Killing
-    // it mid-write could leave a half-written book or a half-installed
-    // Calibre plugin; letting it finish is the safer failure, and every
-    // file the engine writes goes to a temporary file first and is renamed
-    // into place.
+    // and approved by the owner on 2026-09-24 after a code review: killing
+    // it mid-write is the worse failure. The book, its Kindle files, the
+    // settings files and a copy to a reader each go to a temporary file
+    // first and are renamed into place, so a kill there leaves the old
+    // file. Not everything does. A Calibre plugin install is Calibre's own
+    // and can be left half done. And src/library.ts writes two small files
+    // in place when a script first enters the library: its folder's
+    // source.json marker (cut short, the folder no longer knows its script)
+    // and a settings sidecar adopted from beside the original (cut short,
+    // those settings are lost). The debug dump is written in place too, and
+    // this window never asks for it. Letting the call finish leaves every
+    // one of them whole.
     let (mut rx, _child) = app
         .shell()
         .sidecar(SIDECAR)

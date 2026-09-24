@@ -1134,3 +1134,43 @@ describe('the updater overlay: the archive is a RELEASE artifact, not a build ar
     expect(readme).toContain('TAURI_SIGNING_PRIVATE_KEY');
   });
 });
+
+describe('what sidecar.rs says about a quit mid-call is true of the engine', () => {
+  // sidecar.rs lets an engine call finish when the app quits under it, and
+  // says why that is safe: which of the engine's writes go through a
+  // temporary file and a rename, and which are made in place. That is a
+  // claim about src/, so this counts the engine's file writes by file. A new
+  // write, or one that moved, fails here until someone has checked whether
+  // the comment is still true and changed the count to match.
+  const engineWrites = () => {
+    const found: Record<string, number> = {};
+    const src = join(REPO, 'src');
+    for (const f of readdirSync(src, { recursive: true }) as string[]) {
+      if (!f.endsWith('.ts')) continue;
+      const calls = readFileSync(join(src, f), 'utf8')
+        .match(/\b(writeFileSync|writeFile|copyFileSync|copyFile|appendFileSync|appendFile|createWriteStream|Bun\.write)\(/g);
+      if (calls !== null) found[`src/${f.split('\\').join('/')}`] = calls.length;
+    }
+    return found;
+  };
+
+  test('every engine write is temp-then-rename except the ones the comment names', () => {
+    expect(engineWrites()).toEqual({
+      // temp-then-rename: the writeFileAtomic helpers and their like
+      'src/cli.ts': 2, // writeFileAtomic, and the --debug dump written in place
+      'src/cli-export.ts': 1,
+      'src/export/artifact.ts': 1,
+      'src/replace-file.ts': 1,
+      'src/settings/app.ts': 1,
+      'src/settings/sidecar.ts': 1,
+      // in place: the folder's source.json marker, and an adopted sidecar
+      'src/library.ts': 2,
+    });
+    const sidecar = rustSources.find((f) => basename(f.name) === 'sidecar.rs')!.text;
+    const comment = sidecar.slice(sidecar.indexOf('pub async fn run('), sidecar.indexOf('let (mut rx'));
+    for (const named of ['src/library.ts', 'source.json', 'sidecar', 'debug', 'temporary file']) {
+      expect(`sidecar.rs's quit comment names ${named}: ${comment.includes(named)}`)
+        .toBe(`sidecar.rs's quit comment names ${named}: true`);
+    }
+  });
+});
