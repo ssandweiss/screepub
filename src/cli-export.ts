@@ -66,12 +66,12 @@ export interface ExportDeps {
  * honours (flags > sidecar > app defaults > shipped), so a rebuild through
  * the MOBI rung starts from this SCRIPT'S own tuning, not a stranger's
  * defaults, whenever export is told which script it is. `--fountain` is
- * optional (a bare `--for epub` never needs it, and it is left out only
- * when the script has no .fountain, for example one converted from
- * Fountain input; a window whose settings read failed drops
- * `--options-json` instead, never `--fountain`), so when it is absent the
- * base is just the app defaults, same as before this script-aware read
- * existed. */
+ * optional (a bare `--for epub` never needs it, and the window leaves it
+ * out only when the conversion wrote no .fountain, as with a script
+ * converted from Fountain input; a window whose settings read failed
+ * drops `--options-json` instead, never `--fountain`), so when it is
+ * absent the base is just the app defaults, same as before this
+ * script-aware read existed. */
 function readFormatBase(fountainPath: string | undefined, appSettingsPath: string | undefined): FormatOptions {
   const appDefaults = appDefaultOptions(appSettingsPath);
   return fountainPath === undefined ? appDefaults : loadScriptSettings(fountainPath, appDefaults);

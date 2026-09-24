@@ -325,23 +325,24 @@ that script reaches the library, so tuning is not silently lost. The
 `source.json` in each script folder records which PDF it came from; it is the
 one file a library listing should skip.
 
-The default folder above is not fixed. `screepub app-settings --set
-'{"libraryPath": "/some/folder"}'` chooses a different one, and `null` goes
-back to the default. Precedence is `SCREEPUB_LIBRARY` > the chosen folder >
-the platform default. Moving the chosen folder moves nothing: books already
-converted stay exactly where they are, and only the next conversion lands in
-the new spot.
+The default folder above is not fixed. `screepub app-settings --set '{"libraryPath": "/some/folder"}'` chooses a different one (it must be a
+full path), and `'{"libraryPath": null}'` goes back to the default.
+Precedence is `SCREEPUB_LIBRARY` > the chosen folder > the platform default.
+Choosing a new folder moves nothing: books already converted stay where they
+are, and conversions from then on land in the new one. A script converted
+again after the change starts a fresh folder there, without the tuning
+saved in its old one.
 
-The same command sets the app's format defaults too: the base a new script
-starts from, one layer under a script's own saved settings and one layer
-over Screepub's shipped defaults. Precedence there is explicit flags > the
-script's saved settings (`screepub settings`) > these app defaults >
-Screepub's own. `screepub app-settings [--set <json>] [--json]` reads or
-writes both `libraryPath` and `formatDefaults` in one call.
+The same command sets the app's format defaults too: what a new script
+starts from. Precedence there is explicit flags > the script's saved
+settings (`screepub settings`) > these app defaults > Screepub's own.
+`screepub app-settings [--set <json>] [--json]` reads or writes both
+`libraryPath` and `formatDefaults` in one call (`formatDefaults` replaces
+the whole set; see `--help`).
 
-`screepub reveal <file> [--json]` shows a converted file in the system's
-file manager: Finder with the file selected on macOS, the containing folder
-on Windows and Linux.
+`screepub reveal <file>` (a full path) `[--json]` shows a converted file in
+the system's file manager: Finder with the file selected on macOS, the
+containing folder on Windows and Linux.
 
 Both settings live in one small file outside the library:
 `~/Library/Application Support/Screepub/settings.json` on macOS,
