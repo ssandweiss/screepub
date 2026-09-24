@@ -16,7 +16,7 @@ import {
   type ConvertStage,
 } from './convert';
 import { mapConversionError, CliError, errorMessage, type JsonError } from './cli-errors';
-import { adoptSidecar, existingLibraryOutput, libraryOutput } from './library';
+import { adoptSidecar, existingLibraryOutput, libraryOutput, libraryRoot } from './library';
 import { DEFAULT_FORMAT_OPTIONS, resolveFormatOptions, type FormatOptions } from './options';
 import { readScriptSettings } from './settings/sidecar';
 import { resolveCommand, devicesCommand, sendCommand, VERBS, type Verb } from './cli-devices';
@@ -763,13 +763,22 @@ async function main() {
   let settings: FormatOptions | undefined;
   let settingsPath: string | undefined;
   const sidecarCandidates: string[] = [];
+  // Resolved at most once here and reused below, rather than each of the
+  // two --library uses calling libraryRoot() on its own: two separate
+  // reads of the settings file could disagree with each other if the
+  // chosen library folder changed between them, landing one conversion in
+  // two different folders. Left undefined if resolving it here throws; the
+  // second use recomputes it, and that is where the failure has always
+  // been reported.
+  let libRoot: string | undefined;
   if (values.library) {
     // A sidecar already IN the library outranks the older copy beside the
     // PDF — the same precedence adoptSidecar applies when it refuses to
     // overwrite it. Read-only: resolving it must not create a folder for an
     // input that is about to be refused.
     try {
-      const prefix = existingLibraryOutput(input);
+      libRoot = libraryRoot();
+      const prefix = existingLibraryOutput(input, libRoot);
       if (prefix !== null) sidecarCandidates.push(`${prefix}.fountain`);
     } catch {
       // An unusable library is the conversion's problem, and it is reported
@@ -854,7 +863,7 @@ async function main() {
   let inputStem = join(dirname(input), basename(input, extname(input)));
   if (values.library) {
     try {
-      inputStem = libraryOutput(input);
+      inputStem = libraryOutput(input, libRoot ?? libraryRoot());
       // Tuning the user already did beside the PDF follows the script in,
       // so the library does not start it over at the defaults.
       adoptSidecar(input, inputStem);

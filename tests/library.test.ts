@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, win32 } from 'node:path';
 import { adoptSidecar, libraryOutput, libraryRoot } from '../src/library';
 import { writeAppSettings } from '../src/settings/app';
+import { TEST_SETTINGS_GUARD } from './isolate-app-settings';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const FIXTURES = new URL('./fixtures/', import.meta.url).pathname;
@@ -27,6 +28,22 @@ function scratch(name: string): string {
   const dir = join(SCRATCH, `${name}-${counter++}`);
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+/** libraryRoot, with the test-run guard's SCREEPUB_CONFIG_DIR folded into
+ * env first. A fake env object passed to libraryRoot REPLACES process.env
+ * rather than merging with it, so the outer guard (bunfig.toml's preload,
+ * root .env.test) never reaches a call built from one, and only an
+ * incidentally nonexistent fake HOME protected the tests below before this
+ * existed. Used by every test that does not already inject its own
+ * settingsPath, which bypasses the settings file read (and so this hole)
+ * entirely; those tests call libraryRoot directly. */
+function guardedRoot(
+  platform: NodeJS.Platform,
+  env: Record<string, string | undefined>,
+  settingsPath?: string,
+): string {
+  return libraryRoot(platform, { SCREEPUB_CONFIG_DIR: TEST_SETTINGS_GUARD, ...env }, settingsPath);
 }
 
 async function runCli(args: string[], env: Record<string, string> = {}) {
@@ -51,6 +68,27 @@ async function scriptFolderWith(pdfName: string, fixture = 'screenplay.pdf'): Pr
   return dir;
 }
 
+describe('guardedRoot actually closes the fake-env hole', () => {
+  test('a fake HOME that happens to be real and writable is exactly the hole', () => {
+    // Demonstrates the hole guardedRoot exists to close, not just documents
+    // it. Several tests below pass a fake env object straight to
+    // libraryRoot, which REPLACES process.env rather than merging with it.
+    // So if that fake HOME is a real, writable scratch directory (as many
+    // are, e.g. homeWithUserDirs) and something had written a real-looking
+    // settings file there, libraryRoot would read it, guard or no guard.
+    const home = scratch('home');
+    const settingsPath = join(home, 'Library', 'Application Support', 'Screepub', 'settings.json');
+    writeAppSettings({ libraryPath: '/poisoned' }, settingsPath);
+
+    // Without the guard: libraryRoot reads exactly what is on disk there.
+    expect(libraryRoot('darwin', { HOME: home })).toBe('/poisoned');
+    // guardedRoot's injected SCREEPUB_CONFIG_DIR steers the read away from
+    // that real file entirely, back to the platform default, which is what
+    // every test below that uses guardedRoot is now protected by.
+    expect(guardedRoot('darwin', { HOME: home })).toBe(join(home, 'Documents', 'Screepub'));
+  });
+});
+
 describe('where the library is', () => {
   // Every platform's answer is checked from this one machine: the paths are
   // the product's promise on three operating systems and only one of them
@@ -64,36 +102,36 @@ describe('where the library is', () => {
     // A converted book is the user's document, not our state — and
     // ~/Documents/Screepub is where the SwiftUI app this replaces already
     // keeps one.
-    expect(libraryRoot('darwin', { HOME })).toBe('/home/ada/Documents/Screepub');
-    expect(libraryRoot('linux', { HOME })).toBe('/home/ada/Documents/Screepub');
+    expect(guardedRoot('darwin', { HOME })).toBe('/home/ada/Documents/Screepub');
+    expect(guardedRoot('linux', { HOME })).toBe('/home/ada/Documents/Screepub');
     // The locations this deliberately moved OFF, named so a revert is loud.
     for (const platform of ['darwin', 'win32', 'linux'] as NodeJS.Platform[]) {
-      expect(libraryRoot(platform, { HOME })).not.toContain('.local');
-      expect(libraryRoot(platform, { HOME })).not.toContain('Application Support');
-      expect(libraryRoot(platform, { HOME })).not.toContain('AppData');
+      expect(guardedRoot(platform, { HOME })).not.toContain('.local');
+      expect(guardedRoot(platform, { HOME })).not.toContain('Application Support');
+      expect(guardedRoot(platform, { HOME })).not.toContain('AppData');
     }
   });
 
   test('Windows keeps Documents under the profile, the Windows way', () => {
     // Computed with WINDOWS path rules even from this Linux test run — the
     // seam where a host-flavoured join() gets it wrong.
-    expect(libraryRoot('win32', { USERPROFILE: 'C:\\Users\\Ada' }))
+    expect(guardedRoot('win32', { USERPROFILE: 'C:\\Users\\Ada' }))
       .toBe('C:\\Users\\Ada\\Documents\\Screepub');
     // USERPROFILE stands in for HOME, which Windows usually does not set.
-    expect(libraryRoot('win32', { HOME: 'C:\\Users\\Bo' }))
+    expect(guardedRoot('win32', { HOME: 'C:\\Users\\Bo' }))
       .toBe('C:\\Users\\Bo\\Documents\\Screepub');
   });
 
   test('SCREEPUB_LIBRARY wins on every platform, and that is the test seam', () => {
     for (const platform of ['darwin', 'win32', 'linux'] as NodeJS.Platform[]) {
-      expect(libraryRoot(platform, { HOME, SCREEPUB_LIBRARY: '/tmp/lib' })).toBe('/tmp/lib');
+      expect(guardedRoot(platform, { HOME, SCREEPUB_LIBRARY: '/tmp/lib' })).toBe('/tmp/lib');
     }
   });
 
   test('a blank override is not a library', () => {
     // An empty SCREEPUB_LIBRARY is how an unset variable arrives through a
     // shell wrapper; honouring it would make the library the process's cwd.
-    expect(libraryRoot('linux', { HOME, SCREEPUB_LIBRARY: '  ' }))
+    expect(guardedRoot('linux', { HOME, SCREEPUB_LIBRARY: '  ' }))
       .toBe('/home/ada/Documents/Screepub');
   });
 });
@@ -117,25 +155,25 @@ describe('the Documents folder a Linux user actually has', () => {
     const home = homeWithUserDirs(
       '# generated\nXDG_DESKTOP_DIR="$HOME/Bureaublad"\nXDG_DOCUMENTS_DIR="$HOME/Documenten"\n',
     );
-    expect(libraryRoot('linux', { HOME: home })).toBe(join(home, 'Documenten', 'Screepub'));
+    expect(guardedRoot('linux', { HOME: home })).toBe(join(home, 'Documenten', 'Screepub'));
   });
 
   test('an absolute path in the file is taken as written', () => {
     const home = homeWithUserDirs('XDG_DOCUMENTS_DIR="/mnt/work/docs"\n');
-    expect(libraryRoot('linux', { HOME: home })).toBe('/mnt/work/docs/Screepub');
+    expect(guardedRoot('linux', { HOME: home })).toBe('/mnt/work/docs/Screepub');
   });
 
   test('XDG_CONFIG_HOME says where that file is', () => {
     const home = scratch('home');
     const config = scratch('config');
     writeFileSync(join(config, 'user-dirs.dirs'), 'XDG_DOCUMENTS_DIR="$HOME/Papers"\n');
-    expect(libraryRoot('linux', { HOME: home, XDG_CONFIG_HOME: config }))
+    expect(guardedRoot('linux', { HOME: home, XDG_CONFIG_HOME: config }))
       .toBe(join(home, 'Papers', 'Screepub'));
   });
 
   test('the environment variable wins over the file when it is set', () => {
     const home = homeWithUserDirs('XDG_DOCUMENTS_DIR="$HOME/Documenten"\n');
-    expect(libraryRoot('linux', { HOME: home, XDG_DOCUMENTS_DIR: '/srv/docs' }))
+    expect(guardedRoot('linux', { HOME: home, XDG_DOCUMENTS_DIR: '/srv/docs' }))
       .toBe('/srv/docs/Screepub');
   });
 
@@ -148,18 +186,18 @@ describe('the Documents folder a Linux user actually has', () => {
     const cases = ['$HOME', '$HOME/', '/', '"$HOME/Documenten"'];
     for (const value of cases) {
       const home = homeWithUserDirs(`XDG_DOCUMENTS_DIR=${value}\n`);
-      expect(`${value} → ${libraryRoot('linux', { HOME: home, XDG_DOCUMENTS_DIR: value })}`)
-        .toBe(`${value} → ${libraryRoot('linux', { HOME: home })}`);
+      expect(`${value} → ${guardedRoot('linux', { HOME: home, XDG_DOCUMENTS_DIR: value })}`)
+        .toBe(`${value} → ${guardedRoot('linux', { HOME: home })}`);
     }
     // And what those answers are, so agreeing on a wrong answer is not a pass.
     const home = scratch('home');
     for (const value of ['$HOME', '$HOME/', '/']) {
       // "no such folder", and the filesystem root: neither may hold a library.
-      expect(libraryRoot('linux', { HOME: home, XDG_DOCUMENTS_DIR: value }))
+      expect(guardedRoot('linux', { HOME: home, XDG_DOCUMENTS_DIR: value }))
         .toBe(join(home, 'Documents', 'Screepub'));
     }
     // A quoted value is honoured, not silently dropped on the floor.
-    expect(libraryRoot('linux', { HOME: home, XDG_DOCUMENTS_DIR: '"$HOME/Documenten"' }))
+    expect(guardedRoot('linux', { HOME: home, XDG_DOCUMENTS_DIR: '"$HOME/Documenten"' }))
       .toBe(join(home, 'Documenten', 'Screepub'));
   });
 
@@ -168,27 +206,27 @@ describe('the Documents folder a Linux user actually has', () => {
     // often no Documents folder either. Resolving never creates it — the
     // conversion that needs it does, with mkdir -p.
     const bare = homeWithUserDirs(null);
-    expect(libraryRoot('linux', { HOME: bare })).toBe(join(bare, 'Documents', 'Screepub'));
+    expect(guardedRoot('linux', { HOME: bare })).toBe(join(bare, 'Documents', 'Screepub'));
     expect(existsSync(join(bare, 'Documents'))).toBe(false);
 
     const noEntry = homeWithUserDirs('XDG_MUSIC_DIR="$HOME/Music"\n');
-    expect(libraryRoot('linux', { HOME: noEntry })).toBe(join(noEntry, 'Documents', 'Screepub'));
+    expect(guardedRoot('linux', { HOME: noEntry })).toBe(join(noEntry, 'Documents', 'Screepub'));
 
     // xdg-user-dirs writes `"$HOME/"` for "this user has no such folder".
     // Taking it literally would scatter script folders across the home
     // directory, so it falls through to ~/Documents like the others.
     const disabled = homeWithUserDirs('XDG_DOCUMENTS_DIR="$HOME/"\n');
-    expect(libraryRoot('linux', { HOME: disabled })).toBe(join(disabled, 'Documents', 'Screepub'));
+    expect(guardedRoot('linux', { HOME: disabled })).toBe(join(disabled, 'Documents', 'Screepub'));
 
     const relative = homeWithUserDirs('XDG_DOCUMENTS_DIR="Documenten"\n');
-    expect(libraryRoot('linux', { HOME: relative })).toBe(join(relative, 'Documents', 'Screepub'));
+    expect(guardedRoot('linux', { HOME: relative })).toBe(join(relative, 'Documents', 'Screepub'));
   });
 
   test('macOS and Windows do not read the file, even if one is there', () => {
     // ~/Documents is fixed on both; macOS localizes the display name only.
     const home = homeWithUserDirs('XDG_DOCUMENTS_DIR="$HOME/Documenten"\n');
-    expect(libraryRoot('darwin', { HOME: home })).toBe(join(home, 'Documents', 'Screepub'));
-    expect(libraryRoot('win32', { HOME: home })).toBe(win32.join(home, 'Documents', 'Screepub'));
+    expect(guardedRoot('darwin', { HOME: home })).toBe(join(home, 'Documents', 'Screepub'));
+    expect(guardedRoot('win32', { HOME: home })).toBe(win32.join(home, 'Documents', 'Screepub'));
   });
 });
 
@@ -225,6 +263,21 @@ describe('the library folder the user chose in the app', () => {
     const settingsPath = settingsFileWith('C:\\Books');
     expect(libraryRoot('win32', { USERPROFILE: 'C:\\Users\\Ada' }, settingsPath))
       .toBe('C:\\Books');
+  });
+
+  test('a stored path is resolved, not used verbatim: a trailing slash', () => {
+    const settingsPath = settingsFileWith('/Volumes/Scripts/');
+    expect(libraryRoot('darwin', { HOME }, settingsPath)).toBe('/Volumes/Scripts');
+  });
+
+  test('a stored path is resolved, not used verbatim: .. segments', () => {
+    const settingsPath = settingsFileWith('/a/../b');
+    expect(libraryRoot('linux', { HOME }, settingsPath)).toBe('/b');
+  });
+
+  test('a stored path is resolved, not used verbatim: win32', () => {
+    const settingsPath = settingsFileWith('C:\\Books\\');
+    expect(libraryRoot('win32', { USERPROFILE: 'C:\\Users\\Ada' }, settingsPath)).toBe('C:\\Books');
   });
 
   test('a relative stored path falls through to the default', () => {
@@ -276,6 +329,29 @@ describe('the library folder the user chose in the app', () => {
     const output = libraryOutput(pdfPath, root);
     expect(output).toBe(join(chosen, 'Bright Angel', 'Bright Angel'));
     expect(existsSync(join(chosen, 'Bright Angel', 'source.json'))).toBe(true);
+  });
+
+  // Every test above passes settingsPath, which reads that file directly
+  // and never calls appSettingsPath(platform, env) at all. That proves the
+  // fall-through rules but not the wiring: a libraryRoot that dropped env
+  // (defaulting to appSettingsPath() or appSettingsPath(platform), either
+  // one ignoring the caller's env) would still pass every test above,
+  // since none of them would notice it reading from the wrong place. These
+  // two call libraryRoot with NO settingsPath, the way production does, and
+  // point the settings file at exactly where the given env says to look.
+  test('production shape: SCREEPUB_CONFIG_DIR in the caller\'s env is honoured with no settingsPath', () => {
+    const configDir = scratch('config');
+    const home = scratch('home');
+    writeAppSettings({ libraryPath: '/chosen/via-config-dir' }, join(configDir, 'settings.json'));
+    expect(libraryRoot('linux', { HOME: home, SCREEPUB_CONFIG_DIR: configDir }))
+      .toBe('/chosen/via-config-dir');
+  });
+
+  test('production shape: darwin derives the settings path from HOME alone', () => {
+    const home = scratch('home');
+    const settingsPath = join(home, 'Library', 'Application Support', 'Screepub', 'settings.json');
+    writeAppSettings({ libraryPath: '/chosen/via-home' }, settingsPath);
+    expect(libraryRoot('darwin', { HOME: home })).toBe('/chosen/via-home');
   });
 });
 

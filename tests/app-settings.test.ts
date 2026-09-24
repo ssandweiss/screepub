@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appSettingsPath, readAppSettings, writeAppSettings } from '../src/settings/app';
+import { TEST_SETTINGS_GUARD } from './isolate-app-settings';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 
@@ -153,26 +154,38 @@ describe('writing app settings', () => {
 describe('the test-run guard: no test can reach the real settings file', () => {
   // bunfig.toml preloads tests/isolate-app-settings.ts before any test
   // file runs, which sets SCREEPUB_CONFIG_DIR unless a developer already
-  // set it themselves. These two tests pin that both halves of the promise
-  // hold: this process sees the guard, and so does a child it spawns.
+  // set it themselves. See that file for the full explanation, including
+  // why root .env.test also has to exist.
+
+  // The real per-platform location, computed WITHOUT the guard, so a test
+  // can tell "guarded" from "genuinely the developer's own settings file"
+  // by comparison rather than by assuming the guard's own path. Computed
+  // once and reused below. os.homedir() reads the account's actual home
+  // directory regardless of SCREEPUB_CONFIG_DIR, which is a different
+  // variable.
+  const REAL_SETTINGS_PATH = appSettingsPath(process.platform, { HOME: homedir() });
+
   test('SCREEPUB_CONFIG_DIR is set, and it does not resolve to the real settings file', () => {
     expect((process.env.SCREEPUB_CONFIG_DIR ?? '').trim()).not.toBe('');
     // What appSettingsPath() sees on an ordinary call, with process.env as
     // production code would read it.
-    const guarded = appSettingsPath();
-    // The real per-platform location, computed the same way but WITHOUT
-    // the guard. os.homedir() reads the account's actual home directory
-    // regardless of SCREEPUB_CONFIG_DIR, which is a different variable.
-    const real = appSettingsPath(process.platform, { HOME: homedir() });
-    expect(guarded).not.toBe(real);
+    expect(appSettingsPath()).not.toBe(REAL_SETTINGS_PATH);
   });
 
-  test('a spawned CLI child inherits the same guarded path', async () => {
+  test('a write through the guarded path fails loudly, rather than silently succeeding', () => {
+    // The other half of the guard's promise: not just "empty", but a write
+    // a forgetful test made cannot land anywhere at all. Proves the
+    // /dev/null claim in tests/isolate-app-settings.ts against the actual
+    // guarded path this run is using, not just the literal by itself.
+    expect(() => writeAppSettings({}, appSettingsPath())).toThrow();
+  });
+
+  test('a spawned CLI child inherits the same guarded path, and it is not the real one either', async () => {
     // Most of this suite spawns `bun src/cli.ts` with no `env` option at
     // all, which picks up whatever bun itself started with, not a runtime
-    // mutation of process.env in this process (see .env.test's comment for
-    // why the two differ). That file is what makes this pass, not
-    // tests/isolate-app-settings.ts alone.
+    // mutation of process.env in this process. See tests/isolate-app-
+    // settings.ts for why root .env.test, not this file's preload, is what
+    // makes that work.
     const proc = Bun.spawn(
       ['bun', '-e', "console.log(require('./src/settings/app.ts').appSettingsPath())"],
       { cwd: ROOT, stdout: 'pipe', stderr: 'pipe' },
@@ -184,7 +197,21 @@ describe('the test-run guard: no test can reach the real settings file', () => {
     ]);
     expect(stderr).toBe('');
     expect(exitCode).toBe(0);
+    // Not just "the child agrees with the parent": if BOTH somehow resolved
+    // to the real path, they would still agree with each other and this
+    // test would wrongly pass. Checked independently against the real path.
+    expect(stdout.trim()).not.toBe(REAL_SETTINGS_PATH);
     expect(stdout.trim()).toBe(appSettingsPath());
+  });
+
+  test('.env.test and the preload agree on the guard path', () => {
+    // "Keep the two values identical" is a comment in both files, not
+    // enforced by either. This is the enforcement: a drift here means one
+    // half of the guard silently stops matching the other.
+    const envTest = readFileSync(join(ROOT, '.env.test'), 'utf8');
+    const match = envTest.match(/^SCREEPUB_CONFIG_DIR=(.*)$/m);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe(TEST_SETTINGS_GUARD);
   });
 });
 

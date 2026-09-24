@@ -2,9 +2,6 @@
 .env
 .env.*
 !.env.example
-# Not a secret: the value is a fixed, harmless guard path (see the file
-# itself and tests/isolate-app-settings.ts). bun test auto-loads it.
-!.env.test
 .mcp.json
 *.pem
 *.key
@@ -44,3 +41,7 @@ desktop/src-tauri/binaries/
 desktop/src-tauri/gen/
 # The app-bundles release job writes its installers here (see release.yml)
 /bundles/
+
+# Not a secret, root only: the value is a fixed, harmless guard path (see
+# the file itself and tests/isolate-app-settings.ts). bun test auto-loads it.
+!/.env.test

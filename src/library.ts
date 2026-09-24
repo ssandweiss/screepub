@@ -87,7 +87,8 @@ function xdgDocuments(home: string, env: Env): string | null {
  * always reach, and it would be a strange escape hatch if a saved app
  * setting could override it back. `settingsPath` lets a test point that
  * read at a scratch file instead of the real one; production leaves it
- * unset and reads the real file through `appSettingsPath()`. */
+ * unset, and the default read is `appSettingsPath(platform, env)`, so a
+ * SCREEPUB_CONFIG_DIR in the caller's own env is honoured there too. */
 export function libraryRoot(
   platform: NodeJS.Platform = process.platform,
   env: Env = process.env,
