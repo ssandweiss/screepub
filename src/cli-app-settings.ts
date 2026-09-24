@@ -203,8 +203,11 @@ export function appSettingsCommand(
       // The settings file's own folder can be unwritable too (a locked
       // config directory), which is not the library-folder check above at
       // all. Wrapped the same way, so a raw fs error never reaches the
-      // caller as an uncaught 'internal' failure.
-      throw new CliError('bad-settings', `cannot save the settings file: ${plainReason(err)}`);
+      // caller as an uncaught 'internal' failure. `file` is named, the same
+      // way createdWritableFolder names the library path above: "cannot
+      // save the settings file" alone leaves the reader no way to tell
+      // which file, on a machine that may have several.
+      throw new CliError('bad-settings', `cannot save the settings file ${file}: ${plainReason(err)}`);
     }
   }
 
