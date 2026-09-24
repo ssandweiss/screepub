@@ -39,17 +39,20 @@ test('replaceFile overwrites an existing destination', () => {
 // leave the reader exactly as it was.
 
 test('a copy that fails leaves the old copy byte for byte, and nothing beside it', () => {
-  const dir = temp('replace');
-  // A directory as the source: a real failure, not a mocked one, that
-  // every platform refuses at the copy.
-  const src = join(dir, 'not-a-book');
-  mkdirSync(src);
-  const dest = join(dir, 'b.azw3');
-  const old = Buffer.from([0x00, 0xff, 0x10, 0x42, 0x0a, 0x0d]);
-  writeFileSync(dest, old);
-  expect(() => replaceFile(src, dest)).toThrow();
-  expect(readFileSync(dest).equals(old)).toBe(true);
-  expect(readdirSync(dir).sort()).toEqual(['b.azw3', 'not-a-book']);
+  // Real failures, not mocked ones: a directory as the source, which the
+  // copy refuses, and a source that has gone. The old delete-then-copy lost
+  // the reader's copy to both.
+  for (const source of ['a directory', 'gone']) {
+    const dir = temp('replace');
+    const src = join(dir, 'not-a-book');
+    if (source === 'a directory') mkdirSync(src);
+    const dest = join(dir, 'b.azw3');
+    const old = Buffer.from([0x00, 0xff, 0x10, 0x42, 0x0a, 0x0d]);
+    writeFileSync(dest, old);
+    expect(() => replaceFile(src, dest)).toThrow();
+    expect(readFileSync(dest).equals(old), `${source}: the old copy changed`).toBe(true);
+    expect(readdirSync(dir).filter((f) => f !== 'not-a-book')).toEqual(['b.azw3']);
+  }
 });
 
 test('a copy that lands but cannot be put in place is taken away again', () => {
