@@ -178,9 +178,11 @@ Best Kindle quality ...  (piece D, unchanged)
 
 - One row per route, each with its own button (the Send page already
   works row by row; a picker plus one button would be a second idiom).
-  The chosen route is drawn first with the brass button; every other
-  available route has an outline button; unavailable rows are dimmed, have
-  no button, and show their fix.
+  Rows stay in the engine's order, which never moves: the chosen route is
+  marked by the brass button, not by jumping to the top, because a list
+  that reshuffles after every send is a list you have to reread (decided
+  while building, 2026-09-23). Every other available route has an outline
+  button; unavailable rows are dimmed, have no button, and show their fix.
 - Device rows keep what they have today: the volume line, the unproven
   caveat, the export-then-send flow and its phases.
 - Save rows: "Save the EPUB…" opens the save dialog at `<stem>.epub`, then
