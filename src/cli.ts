@@ -196,10 +196,7 @@ Usage:
 
 <file> must be a full path to a file that already exists. On macOS, Finder
 opens with the file itself selected. On Windows and Linux, the file's
-containing folder opens instead: Windows because \`explorer /select,<file>\`
-breaks on a folder name with both a space and a comma in it, and Linux
-because there is no "select this file" convention to rely on across file
-managers.
+folder opens instead.
 
 Options:
   --json                 machine-readable result on stdout (for the app)

@@ -13,11 +13,17 @@ import { CliError, errorMessage } from './cli-errors';
  *  opener means, without importing across the parity split. */
 export type Opener = (argv: string[]) => Promise<{ code: number; stderr: string }>;
 
-/** The real thing, via Bun.spawn. Kept tiny on purpose: it is the only part
- *  of this file no test ever runs, because running it is exactly the real
- *  reveal every test is forbidden from causing. */
+/** The real thing, via Bun.spawn. Kept tiny on purpose: revealFile's own
+ *  tests all pass a fake in its place, and never a real Finder/Explorer
+ *  argv, so this is the only code path a real reveal ever runs through.
+ *  Tested directly in tests/cli-reveal.test.ts against a throwaway bun
+ *  subprocess (never `open`, `explorer` or `xdg-open`) for the exit-code
+ *  and stderr-capture plumbing, and against a program name that cannot
+ *  exist for the ENOENT path. `stdin: 'ignore'` is explicit, matching piece
+ *  B's performer: none of these tools read from stdin, and inheriting the
+ *  caller's is how a spawned child ends up waiting on input nobody sends. */
 export const spawnOpener: Opener = async (argv) => {
-  const proc = Bun.spawn(argv, { stdout: 'ignore', stderr: 'pipe' });
+  const proc = Bun.spawn(argv, { stdout: 'ignore', stderr: 'pipe', stdin: 'ignore' });
   const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
   return { code, stderr };
 };
@@ -27,14 +33,17 @@ export const spawnOpener: Opener = async (argv) => {
  * darwin: `open -R <path>` selects the file itself in Finder.
  *
  * win32: `explorer <folder>`, opening the CONTAINING folder rather than
- * selecting the file with `explorer /select,<path>`. That flag's argument
- * parsing breaks on a path that has both a space and a comma in it (the
- * comma reads as ending the argument), which is common enough in a folder
- * or script name that it is not a corner case. Piece B's performer learned
- * the same lesson for the same reason; opening the folder sidesteps the
- * quoting problem entirely instead of trying to escape around it.
- * explorer also exits 1 on plenty of perfectly successful runs, so its exit
- * code is not trustworthy and is ignored outright.
+ * selecting the file with `explorer /select,<path>`. That flag breaks on a
+ * folder or script name with a SPACE in it alone (the spawn layer quotes
+ * the whole argv element for the child process, and explorer then reads
+ * the quotes as part of the path instead of as `/select,` followed by one)
+ * or a COMMA in it alone (explorer reads the first comma it finds as the
+ * end of the `/select,` token, wherever that actually falls). Piece B's
+ * performer learned the same lesson for the same reason; opening the
+ * folder sidesteps the quoting problem entirely instead of trying to
+ * escape around it. explorer also exits 1 on plenty of perfectly
+ * successful runs, so its exit code is not trustworthy and is ignored
+ * outright.
  *
  * Everything else: `xdg-open <folder>`. There is no "select this file"
  * convention to rely on across Linux file managers, so this opens the
@@ -45,11 +54,18 @@ export async function revealFile(
   platform: NodeJS.Platform = process.platform,
   open: Opener = spawnOpener,
 ): Promise<void> {
+  // win32.resolve runs BEFORE win32.dirname: a path like `C:\x\a.exe\.`
+  // (a trailing "\." segment, meaning "this same file") is not normalised
+  // by dirname on its own, which strips only the LAST segment and returns
+  // `C:\x\a.exe` right back: the file itself, not its folder. resolve
+  // collapses the trailing "\." away first, the same way a shell would, so
+  // dirname always sees an already-normalised path to strip a real
+  // filename off.
   const argv =
     platform === 'darwin'
       ? ['open', '-R', path]
       : platform === 'win32'
-        ? ['explorer', win32.dirname(path)]
+        ? ['explorer', win32.dirname(win32.resolve(path))]
         : ['xdg-open', posix.dirname(path)];
 
   let result: { code: number; stderr: string };
