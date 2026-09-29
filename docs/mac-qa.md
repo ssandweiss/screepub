@@ -446,12 +446,16 @@ Field Station open, Kindle still unplugged.
   - Do: open Send.
   - See: every row is there straight away, in well under a second. The
     reMarkable row says "checking whether one is docked…" for a moment,
-    then "dock over USB to send". Kindle rows name their file type, for
-    example "Save a Kindle file (.kfx)".
-  - Fail: a blank page for a second or more, or a row that names no type
-    on this Mac.
+    then "dock over USB to send". Buttons that hand over a Kindle file
+    name its type: "Save a Kindle file (.kfx)…", and "Copy to Kindle
+    (.kfx)" when your Kindle is plugged in. The Kindle's own name stays
+    plain.
+  - Fail: a blank page for a second or more, or a Kindle button that names
+    no type on this Mac.
 - [ ] **[hands] The Kindle file builds by itself, and says so** (recheck on the rebuild)
   - Do: in Settings move one knob and wait for "Saved.", then open Send.
+    (It builds ahead only when Kindle is likely: your last way out was a
+    Kindle or Save a Kindle file, or a Kindle is plugged in. Yours is.)
   - See: without pressing anything, "Building the Kindle file. This takes
     about half a minute." with a moving bar. Save the EPUB pressed now
     starts at once, without waiting. When the bar goes, press Save a Kindle
@@ -474,8 +478,9 @@ Field Station open, Kindle still unplugged.
   - Fail: a second build starts, or an error.
 - [x] **[hands] Kindle over USB** (passed 2026-09-28)
   - Do: plug in the Kindle and wait a moment, then press Copy to Kindle.
-  - See: a Kindle row appears with its drive. Then "Building the file
-    Kindle can open…", "Copying it to Kindle…", and a sent line that names
+  - See: a Kindle row appears with its drive. Then "Building the Kindle
+    file…" with a moving bar if the file is out of date, "Copying it to
+    Kindle…", and a sent line that names
     the file and asks you to eject first, plus a line naming KFX. Eject:
     the book is in the Kindle's library, opens, and character names stay
     with their lines. Brass moves to the Kindle.
