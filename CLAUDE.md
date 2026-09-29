@@ -16,6 +16,8 @@ app/build-app.sh            # engine sidecar + SwiftUI app → app/dist/Screepub
 (cd app && swift run -c release kit-check)   # Swift-side behavior checks
 epubcheck <out.epub>        # validate output (brew-installed)
 bun tools/capture-screens.ts   # retake README + site pictures (needs Chrome; macOS)
+bun tools/review-screens.ts --out <page.html>   # which pictures changed, old beside new
+bun tools/bump-version.ts <version>   # release bump: all 4 version files + desktop/ui/notes.js
 ```
 
 ## Architecture

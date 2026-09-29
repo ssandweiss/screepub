@@ -1,8 +1,13 @@
 # Design: a new README, a truthful site, and pictures that retake themselves
 
 Date: 2026-09-22 · Status: approved in conversation, section by section.
-Owner decisions are recorded below as they were made. Nothing here is built
-yet.
+Owner decisions are recorded below as they were made.
+
+Built so far (2026-09-29): part 4 shipped with 0.7.2; part 3 is on main;
+parts 2 and 5 are on branch `site-and-release-skill`. Part 5's durable
+half is `tools/bump-version.ts` and `tools/review-screens.ts`; the skill
+text that calls them lives outside git, as this spec says it must. Part 1
+waits for the identifier release.
 
 ## The problem
 
