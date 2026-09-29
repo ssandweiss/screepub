@@ -309,13 +309,13 @@ Work top to bottom. Kindle unplugged until the Send section says so.
 
 #### Open and convert
 
-- [ ] **[hands] Open the candidate**
+- [YES ] **[hands] Open the candidate**
   - Do: double-click the `Screepub Desktop.app` Claude built (not the one
     in `/Applications`).
   - See: the window, the drop area, and a version stamp at the foot, with
     no line above it saying the engine could not start.
   - Fail: no window, or a line saying the engine could not start.
-- [ ] **[hands] Convert Field Station**
+- [x] **[hands] Convert Field Station** (passed 2026-09-28)
   - Do: drag `tests/fixtures/field-station.pdf` onto the window.
   - See: Field Station, 19 pages, 11 scenes, 4 speaking characters: the
     same numbers the command line gave Claude.
@@ -323,24 +323,24 @@ Work top to bottom. Kindle unplugged until the Send section says so.
 
 #### Moving the window
 
-- [ ] **[hands] Drag by the top strip**
+- [x] **[hands] Drag by the top strip** (passed 2026-09-28)
   - Do: press in the blank band above the tabs and drag.
   - See: the whole window moves with the pointer.
   - Fail: nothing moves, or text gets selected instead.
-- [ ] **[hands] Double-click the top strip**
+- [x] **[hands] Double-click the top strip** (passed 2026-09-28)
   - Do: double-click the same band, then double-click again.
   - See: the window zooms to fill the screen, then goes back.
   - Fail: nothing happens.
-- [ ] **[hands] Drag by the gaps in the tab bar**
+- [x] **[hands] Drag by the gaps in the tab bar** (passed 2026-09-28)
   - Do: press between two tab names, or just right of Send, and drag.
   - See: the window moves.
   - Fail: nothing moves.
-- [ ] **[hands] The tabs still switch**
+- [x] **[hands] The tabs still switch** (passed 2026-09-28)
   - Do: click Convert, Read, Settings and Send in turn; then use the Left
     and Right arrow keys on the tabs.
   - See: each one opens its page.
   - Fail: a click on a tab moves the window, or does nothing.
-- [ ] **[hands] A scrolled page**
+- [x] **[hands] A scrolled page** (passed 2026-09-28)
   - Do: on Read, scroll well down, then click whatever sits near the top
     edge of the window.
   - See: the click works. The strip has scrolled away with the paper; it
@@ -349,29 +349,29 @@ Work top to bottom. Kindle unplugged until the Send section says so.
 
 #### Where books go
 
-- [ ] **[hands] The library line**
+- [x] **[hands] The library line** (passed 2026-09-28)
   - Do: press Convert another to get back to the drop area.
   - See: under it, "Books are saved in ~/Documents/Screepub." and
     Change….
   - Fail: no line, or a different folder.
-- [ ] **[hands] Change the folder**
+- [x] **[hands] Change the folder** (passed 2026-09-28)
   - Do: Change…, make a new folder such as `~/Desktop/Screepub QA`, choose
     it.
   - See: the line names the new folder, a Reset button appears, and a
     second line says "New books go here. Books already converted stay
     where they are."
   - Fail: no folder picker, the line does not change, or an error.
-- [ ] **[hands] New books land there**
+- [x] **[hands] New books land there** (passed 2026-09-28)
   - Do: convert Field Station again.
   - See: the path under the result is inside `Screepub QA`. The earlier
     copy in `~/Documents/Screepub` is still there, untouched.
   - Fail: it lands in the old folder, or the old copy moved or vanished.
-- [ ] **[hands] Show in Finder**
+- [x] **[hands] Show in Finder** (passed 2026-09-28)
   - Do: press Show in Finder on the result.
   - See: Finder opens on the new folder with the `.epub` selected.
   - Fail: nothing opens, the wrong folder, or an error line under the
     path.
-- [ ] **[hands] Reset**
+- [x] **[hands] Reset** (passed 2026-09-28)
   - Do: Convert another, then Reset.
   - See: "Books are saved in ~/Documents/Screepub." again, no Reset
     button, and no second line.
@@ -379,7 +379,7 @@ Work top to bottom. Kindle unplugged until the Send section says so.
 
 #### Release notes
 
-- [ ] **[hands] The switch shows your answer**
+- [x] **[hands] The switch shows your answer** (passed 2026-09-28)
   - Do: click the version stamp at the foot.
   - See: in the release notes, "Look for a new version once a day" is
     ticked (you turned it on in 0.7.1 or 0.7.2).
@@ -389,7 +389,7 @@ Work top to bottom. Kindle unplugged until the Send section says so.
 
 Field Station open, Kindle still unplugged.
 
-- [ ] **[hands] The list**
+- [x] **[hands] The list** (passed 2026-09-28)
   - Do: open Send.
   - See: Apple Books, Send to Kindle web, Save the EPUB, Save a Kindle
     file. Below them, dimmed with their fix: Kindle, Kobo, tolino,
@@ -398,7 +398,7 @@ Field Station open, Kindle still unplugged.
     block: this Mac already makes KFX.
   - Fail: rows shuffle as you watch, a dimmed row has a button, or the
     KFX block shows.
-- [ ] **[hands] Save the EPUB**
+- [x] **[hands] Save the EPUB** (passed 2026-09-28)
   - Do: Save the EPUB…, save to the Desktop. Then press it again and
     cancel.
   - See: the Save box suggests `field-station.epub`; the status says
@@ -407,25 +407,25 @@ Field Station open, Kindle still unplugged.
     changes nothing and says nothing.
   - Fail: no file, a wrong name, the rows reorder, or cancel shows an
     error.
-- [ ] **[hands] Apple Books**
+- [x] **[hands] Apple Books** (passed 2026-09-28)
   - Do: Add to Apple Books.
   - See: Books opens with Field Station in it; the status says "Added to
     Apple Books. It syncs to your iPhone and iPad when Books uses
     iCloud." Later it shows on your iPhone or iPad. Brass moves to Apple
     Books.
   - Fail: Books does not open, the book is missing, or an error line.
-- [ ] **[hands] Send to Kindle web**
+- [x] **[hands] Send to Kindle web** (passed 2026-09-28)
   - Do: press Send to Kindle web.
   - See: your browser opens Amazon's Send to Kindle page, and Finder shows
     the book selected so you can drag it in. The status says so.
     (Sending it through Amazon is up to you.)
   - Fail: the page or Finder does not appear, or an error.
-- [ ] **[hands] Amazon's settings page**
+- [x] **[hands] Amazon's settings page** (passed 2026-09-28)
   - Do: on the email row, press Open Amazon's page.
   - See: your browser opens Amazon's Personal Document Settings, where the
     Kindle's email address and the approved senders list live.
   - Fail: nothing opens, or a different page.
-- [ ] **[hands] Email to your Kindle** (optional)
+- [ ] **[hands] Email to your Kindle** (optional, not run)
   - Do: only if you are willing to switch for a minute: Mail > Settings >
     General > Default email reader: Mail. Back in Send, press Send to
     Kindle email.
@@ -434,19 +434,19 @@ Field Station open, Kindle still unplugged.
     address it to your Kindle's email address. Switch the default back
     afterwards.
   - Fail: a message with no attachment, or the row stays dimmed.
-- [ ] **[hands] A knob moved during a build waits its turn**
+- [ ] **[hands] A knob moved during a build waits its turn** (held for the rebuild with the 2026-09-28 fixes)
   - Do: press Save a Kindle file…, and while it builds, open Settings and
     move a knob. Cancel the Save box when it opens.
   - See: "Waiting for the copy to finish…", then "Saved."
   - Fail: the knob change is lost or saves over the build.
-- [ ] **[hands] Save a Kindle file**
+- [ ] **[hands] Save a Kindle file** (works; 23 s with no progress shown, fix in progress; recheck on the rebuild)
   - Do: Save a Kindle file…, save to the Desktop.
   - See: "Building the Kindle file (Kindle Previewer can take about twenty
     seconds)…", then the Save box suggests `field-station.kfx` with the
     format "Kindle file (KFX)". A line under the status names KFX.
   - Fail: it offers AZW3 or MOBI on this Mac, the box never opens, or an
     error.
-- [ ] **[hands] Kindle over USB**
+- [x] **[hands] Kindle over USB** (passed 2026-09-28)
   - Do: plug in the Kindle and wait a moment, then press Copy to Kindle.
   - See: a Kindle row appears with its drive. Then "Building the file
     Kindle can open…", "Copying it to Kindle…", and a sent line that names
@@ -455,12 +455,12 @@ Field Station open, Kindle still unplugged.
     with their lines. Brass moves to the Kindle.
   - Fail: no Kindle row, an error, or the book is missing or will not
     open.
-- [ ] **[hands] An unplugged Kindle stays chosen**
+- [x] **[hands] An unplugged Kindle stays chosen** (passed 2026-09-28)
   - Do: unplug the Kindle and watch Send; then plug it back in.
   - See: unplugged, the Kindle row dims and no button is brass. Plugged
     back in, Copy to Kindle is brass again.
   - Fail: the brass jumps to another row.
-- [ ] **[hands] reMarkable** (only if you have one)
+- [ ] **[hands] reMarkable** (not run: no reMarkable)
   - Do: dock it over USB, press Upload to reMarkable.
   - See: a reMarkable row appears; the upload finishes; the book is on the
     tablet.
@@ -477,7 +477,7 @@ your real Calibre is not touched. Checked 2026-09-24: with an empty scratch
 folder, Calibre lists no KFX plugin and `screepub kfx-status` says it is
 not installed, while your real Calibre still has KFX Output 2.20.1.
 
-- [ ] **[hands] Open with a scratch Calibre folder**
+- [x] **[hands] Open with a scratch Calibre folder** (passed 2026-09-28)
   - Do: quit Screepub fully (Cmd-Q), then in Terminal:
     ```
     mkdir -p ~/Desktop/calibre-qa
@@ -490,19 +490,19 @@ not installed, while your real Calibre still has KFX Output 2.20.1.
     Its Install button is brass, beside the brass on your last way out.
   - Fail: no block. Most likely Screepub was still running, so the
     setting never reached it: quit and try again.
-- [ ] **[hands] Install the plugin**
+- [x] **[hands] Install the plugin** (passed 2026-09-28)
   - Do: press Install.
   - See: the button reads Installing…; the line says "Downloading and
     installing the KFX plugin. This takes a few seconds."; then
     "Installed the KFX plugin 2.20.1. Kindles now get KFX." (the version
     may be newer).
   - Fail: an error line. Copy its words.
-- [ ] **[hands] The new plugin makes KFX**
+- [x] **[hands] The new plugin makes KFX** (passed 2026-09-28)
   - Do: convert one of your own PDFs (a book not yet built as KFX), then
     Save a Kindle file….
   - See: the Save box suggests a `.kfx` file.
   - Fail: AZW3 is offered, or the build fails.
-- [ ] **[hands] Back to your own Calibre**
+- [x] **[hands] Back to your own Calibre** (passed 2026-09-28)
   - Do: quit, open the candidate normally (double-click), open Send.
   - See: no "Best Kindle quality" block. The brass is still on the last
     way out you used (Save a Kindle file, from the step before).
@@ -515,7 +515,7 @@ The window remembers your answer in its own web storage, and on this Mac
 it already says you answered yes. Moving that folder aside makes it ask
 again. It holds nothing else the window uses.
 
-- [ ] **[hands] See the question**
+- [x] **[hands] See the question** (passed 2026-09-28)
   - Do: quit Screepub (Cmd-Q), then in Terminal:
     ```
     mv ~/Library/WebKit/com.darkwell.screepub.desktop/WebsiteData/Default ~/Library/WebKit/com.darkwell.screepub.desktop/WebsiteData/Default.before-qa
@@ -525,7 +525,7 @@ again. It holds nothing else the window uses.
     Turn on and No thanks, above the library line. Nothing beside the
     version stamp.
   - Fail: no question.
-- [ ] **[hands] Answer it**
+- [x] **[hands] Answer it** (passed 2026-09-28)
   - Do: press Turn on. Open the release notes. Quit and reopen.
   - See: the question goes at once. In the release notes the "once a day"
     box is ticked. After reopening, no question.
@@ -533,7 +533,7 @@ again. It holds nothing else the window uses.
 
 #### Put things back
 
-- [ ] **[hands] Tidy up**
+- [x] **[hands] Tidy up** (passed 2026-09-28)
   - Do: if you switched the default mail app, switch it back. When happy,
     delete `~/Desktop/calibre-qa`, `~/Desktop/Screepub QA` and the
     `Default.before-qa` folder. Quit the candidate.
