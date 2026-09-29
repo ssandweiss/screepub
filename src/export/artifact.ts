@@ -4,7 +4,7 @@ import { convertFountain } from '../convert';
 import type { FormatOptions } from '../options';
 import { azw3Sibling, toAzw3 } from './calibre';
 import { needsRegeneration } from './freshness';
-import type { ExportFormat } from './formats';
+import type { ExportFormat, ToolchainState } from './formats';
 import { kfxSibling, toKfx } from './kfx';
 
 export class RegenerationFailedError extends Error {
@@ -37,6 +37,28 @@ export function availableFormats(epub: string, calibreAvailable: boolean): Expor
   return formats;
 }
 
+/** The Kindle file this machine's ladder hands over for `epub`, without
+ * building anything: where it lives beside the EPUB, whether the one there
+ * now is current, and what builds it when it is not. */
+export interface KindleArtifactPlan {
+  path: string;
+  /** The staleness rule's answer (freshness.ts): present and newer than the
+   * EPUB, so the ladder would hand it back as it is. */
+  fresh: boolean;
+  /** 'calibre' for KFX and AZW3 (ebook-convert, with Kindle Previewer behind
+   * it for KFX), 'screepub' for the engine's own MOBI. */
+  builtBy: 'calibre' | 'screepub';
+}
+
+/** The rung freshKindleArtifact takes, and whether it would reuse or build.
+ * The ladder asks this same question before it builds, so `export --check`
+ * (which answers from here) and the build itself cannot disagree. */
+export function kindleArtifactPlan(epub: string, state: ToolchainState): KindleArtifactPlan {
+  const path = state.kfxReady ? kfxSibling(epub) : state.calibreAvailable ? azw3Sibling(epub) : mobiSibling(epub);
+  const builtBy = state.kfxReady || state.calibreAvailable ? 'calibre' : 'screepub';
+  return { path, fresh: !needsRegeneration(path, epub), builtBy };
+}
+
 export interface FreshKindleArtifactOptions {
   epub: string;
   fountainPath: string | null;
@@ -60,32 +82,25 @@ export interface FreshKindleArtifactOptions {
 export async function freshKindleArtifact(opts: FreshKindleArtifactOptions): Promise<string> {
   const { epub, fountainPath, format, calibreAvailable, kfxReady, onStage } = opts;
 
-  if (kfxReady) {
-    // Same staleness rule as the MOBI branch: the EPUB is the sole input and
-    // the flags are constant, so a sibling .kfx no older than its EPUB is the
-    // previous run's answer — reusing it turns a ~20s Kindle Previewer cold
-    // start into a file stat. toKfx writes scratch-then-rename, so a partial
-    // file never appears at this path to be trusted.
-    const kfx = kfxSibling(epub);
-    if (!needsRegeneration(kfx, epub)) return kfx;
-    return toKfx(epub, onStage);
-  }
+  // One staleness rule for every rung (kindleArtifactPlan): the EPUB is the
+  // sole input and the flags are constant, so a sibling no older than its
+  // EPUB is the previous run's answer. For KFX that turns a ~20s Kindle
+  // Previewer cold start into a file stat; for AZW3 it is why "Save a Kindle
+  // file" does not convert twice on a Calibre-only machine (the window's
+  // `export --for kindle` to learn the extension, then `route save-kindle`).
+  // toKfx and toAzw3 write scratch-then-rename, so a partial file never
+  // appears at the path to be trusted.
+  const plan = kindleArtifactPlan(epub, { calibreAvailable, kfxReady });
+  if (plan.fresh) return plan.path;
+
+  if (kfxReady) return toKfx(epub, onStage);
 
   if (calibreAvailable) {
-    // Same staleness rule as the KFX rung above, for the same reason: the
-    // EPUB is the sole input and the flags are constant. Without it, "Save a
-    // Kindle file" converted twice on a Calibre-only machine (the window's
-    // `export --for kindle` to learn the extension, then `route
-    // save-kindle`). toAzw3 writes scratch-then-rename, so a partial file
-    // never appears at this path to be trusted.
-    const azw3 = azw3Sibling(epub);
-    if (!needsRegeneration(azw3, epub)) return azw3;
     onStage?.('converting to AZW3 for Kindle…');
     return toAzw3(epub);
   }
 
-  const mobi = mobiSibling(epub);
-  if (!needsRegeneration(mobi, epub)) return mobi;
+  const mobi = plan.path;
   if (!fountainPath) throw new CannotRegenerateError();
 
   onStage?.('rebuilding the Kindle file…');

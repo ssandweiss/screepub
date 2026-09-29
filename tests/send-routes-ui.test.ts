@@ -36,9 +36,11 @@ type SendModule = {
   connectedDevices: (shown: unknown) => RouteDevice[] | null;
   sameRoutes: (a: unknown, b: unknown) => boolean;
   performerFor: (route: unknown) => string | null;
-  routeLines: (route: unknown, platform: unknown) =>
+  routeLines: (route: unknown, platform: unknown, file?: unknown) =>
     { title: string; detail: string; where: string | null; caveat: string | null };
   kindleFileFrom: (built: unknown) => [string, Record<string, unknown>];
+  kindleCheckFrom: (answer: unknown) => { extension: string; fresh: boolean; builtBy: string } | null;
+  handsOverKindleFile: (route: unknown) => boolean;
   routesFailure: (answer: unknown) => string;
   caveatFor: (device: unknown, platform: unknown) => string | null;
   whereLine: (device: unknown) => string;
@@ -758,6 +760,65 @@ describe('routeLines: what a row says', () => {
   });
 });
 
+describe('routeLines names the Kindle file on the rows that hand one over', () => {
+  // Which file a Kindle gets depends on this computer (KFX with the whole
+  // toolchain, AZW3 with Calibre alone, the engine's MOBI with neither), and
+  // the engine says which before anything is built (`export --check`).
+  const kfx = { extension: 'kfx', fresh: false, builtBy: 'calibre' };
+  const list = routes({
+    platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: true,
+    devices: [kindle, kindleTwin, kobo, rm],
+  });
+  const rows = () => send.routesFrom(answerFor(list, undefined))!.routes;
+  const titled = (file: unknown) => rows().map((r) => send.routeLines(r, 'MacIntel', file).title);
+
+  test('Save a Kindle file and every connected Kindle carry the extension; nothing else changes', () => {
+    const plain = titled(null);
+    const named = titled(kfx);
+    const changed = plain.map((title, i) => [title, named[i]]).filter(([a, b]) => a !== b);
+    expect(changed).toEqual([
+      ['Kindle', 'Kindle (.kfx)'],
+      ['KINDLE2', 'KINDLE2 (.kfx)'],
+      ['Save a Kindle file', 'Save a Kindle file (.kfx)'],
+    ]);
+    expect(titled({ extension: 'azw3', fresh: true, builtBy: 'calibre' })).toContain('Save a Kindle file (.azw3)');
+  });
+
+  test('which rows hand over a Kindle file: the Kindle save, and a Kindle that is plugged in', () => {
+    const handing = rows().filter((r) => send.handsOverKindleFile(r)).map((r) => r.id);
+    expect(handing).toEqual(['device:kindle#/Volumes/Kindle', 'device:kindle#/Volumes/KINDLE2', 'save-kindle']);
+    // A dimmed Kindle row has nothing to press, and says nothing about files.
+    const dimmed = send.routesFrom(answerFor(routes({
+      platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: true, devices: [],
+    }), undefined))!.routes.find((r) => r.key === 'device:kindle')!;
+    expect(send.handsOverKindleFile(dimmed)).toBe(false);
+    expect(send.handsOverKindleFile(null)).toBe(false);
+  });
+});
+
+describe('kindleCheckFrom: what the engine says about the Kindle file before it is built', () => {
+  test('the extension, whether the file beside the book is current, and what builds it', () => {
+    expect(send.kindleCheckFrom({
+      ok: true, path: '/lib/s.kfx', format: 'kindle', extension: 'kfx', label: 'KFX',
+      available: ['epub', 'kindle'], stages: [], fresh: false, builtBy: 'calibre',
+    })).toEqual({ extension: 'kfx', fresh: false, builtBy: 'calibre' });
+    expect(send.kindleCheckFrom({ ok: true, extension: 'mobi', fresh: true, builtBy: 'screepub' }))
+      .toEqual({ extension: 'mobi', fresh: true, builtBy: 'screepub' });
+  });
+
+  test('anything else is not known, which names nothing and builds nothing', () => {
+    const good = { ok: true, extension: 'azw3', fresh: true, builtBy: 'calibre' };
+    for (const bad of [
+      null, {}, { ...good, ok: false }, { ok: false, error: { code: 'x', message: 'no' } },
+      { ...good, extension: '' }, { ...good, extension: '../x' }, { ...good, extension: 7 },
+      { ...good, fresh: 'yes' }, { ...good, fresh: undefined },
+      { ...good, builtBy: 'kindle-previewer' }, { ...good, builtBy: undefined },
+    ]) {
+      expect(`${JSON.stringify(bad)}: ${send.kindleCheckFrom(bad)}`).toBe(`${JSON.stringify(bad)}: null`);
+    }
+  });
+});
+
 describe('kindleFileFrom: what the Kindle save learns from the export', () => {
   test('the extension and the engine’s label for the file it built', () => {
     expect(send.kindleFileFrom({
@@ -1013,15 +1074,22 @@ describe('the Send page, drawn from the route list and performed row by row', ()
   let fresh = 0;
   /** kfx.js's probe answer: by default "no checklist", which keeps the block
    *  out of tests that are not about it. */
-  async function world(kfxAnswer: unknown = { ok: false }) {
+  /** `checkAnswer` is the engine's answer to the Kindle file check the page
+   *  asks when it opens; null leaves that call unanswered for the test. */
+  async function world(kfxAnswer: unknown = { ok: false }, checkAnswer: unknown = { ok: false }) {
     const doc = new StubDocument();
+    const windowListeners = new Map<string, (() => void)[]>();
     const pending: { args: string[]; resolve: (stdout: string) => void }[] = [];
     const dialogs: { options: { defaultPath: string; filters: unknown }; resolve: (path: string | null) => void }[] = [];
     let tick: (() => void) | null = null;
     g.document = doc;
     g.window = {
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
+      addEventListener: (type: string, fn: () => void) => {
+        windowListeners.set(type, [...(windowListeners.get(type) ?? []), fn]);
+      },
+      removeEventListener: (type: string, fn: () => void) => {
+        windowListeners.set(type, (windowListeners.get(type) ?? []).filter((f) => f !== fn));
+      },
       __TAURI__: {
         core: {
           invoke: (_cmd: string, { args }: { args: string[] }) =>
@@ -1087,6 +1155,19 @@ describe('the Send page, drawn from the route list and performed row by row', ()
         if (tick === null) throw new Error('the page is not polling');
         tick();
       },
+      /** The window gets the focus back. */
+      focusWindow() {
+        for (const fn of windowListeners.get('focus') ?? []) fn();
+      },
+      /** Answer the oldest unanswered Kindle file check. */
+      async answerCheck(value: unknown) {
+        const at = pending.findIndex((p) => p.args[0] === 'export' && p.args.includes('--check'));
+        if (at < 0) throw new Error(`nothing asked for a Kindle file check: ${w.asked()}`);
+        const [call] = pending.splice(at, 1);
+        call!.resolve(JSON.stringify(value));
+        await settle();
+        return call!.args;
+      },
       polling: () => tick !== null,
       list: () => pane.all().find((n) => n.className === 'devices')!,
       rows: () => w.list().childNodes.filter((n) => n.className.includes('device-row')),
@@ -1105,8 +1186,17 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     // kfx.js asks what the machine can do when the page shows; its answer is
     // not what these tests are about.
     if (w.asked().includes('kfx-status')) await w.answer('kfx-status', kfxAnswer);
+    // So does the Kindle file check (what the Kindle rows hand over, and
+    // whether it is built yet); by default the engine could not say.
+    if (checkAnswer !== null) await w.answerCheck(checkAnswer);
     return w;
   }
+  /** `export --check`'s answer for a machine that makes `extension`. */
+  const checked = (extension: string, fresh: boolean) => ({
+    ok: true, path: `/lib/field-station/Field Station.${extension}`, format: 'kindle', extension,
+    label: extension.toUpperCase(), available: ['epub', 'kindle'], stages: [], fresh,
+    builtBy: extension === 'mobi' ? 'screepub' : 'calibre',
+  });
 
   test('it polls routes, not devices, for this script’s book: a quick answer first, then the full one', async () => {
     const w = await world();
@@ -1163,6 +1253,72 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     w.poll();
     expect(w.asked()).toEqual(['routes']);
     await w.answer('routes', listed([]));
+  });
+
+  test('the rows that hand over a Kindle file say which file, as the engine’s check named it', async () => {
+    const w = await world(undefined, null);
+    expect(await w.answerCheck(checked('kfx', true)))
+      .toEqual(['export', EPUB, '--json', '--for', 'kindle', '--check']);
+    await w.open(listed([kindle, kobo]));
+    expect(w.titles()).toContain('Kindle (.kfx)');
+    expect(w.titles()).toContain('Save a Kindle file (.kfx)');
+    expect(w.titles()).toContain('KOBOeReader');
+    expect(w.titles()).toContain('Save the EPUB');
+  });
+
+  test('a check that lands after the rows renames them, and the keyboard stays on its button', async () => {
+    const w = await world(undefined, null);
+    await w.open(listed([]));
+    expect(w.titles()).toContain('Save a Kindle file');
+    w.button('Save the EPUB…').focus();
+    await w.answerCheck(checked('azw3', false));
+    expect(w.titles()).toContain('Save a Kindle file (.azw3)');
+    expect(w.doc.activeElement).toBe(w.button('Save the EPUB…'));
+    expect(w.ctx.restored).toBe(0);
+    // The next poll's same list leaves the renamed rows as they are.
+    w.poll();
+    await w.answer('routes', listed([]));
+    expect(w.titles()).toContain('Save a Kindle file (.azw3)');
+  });
+
+  test('a check that fails names nothing: the rows keep their plain titles', async () => {
+    const w = await world(undefined, null);
+    await w.answerCheck({ ok: false, error: { code: 'unreadable', message: 'Cannot read the book.' } });
+    await w.open(listed([kindle]));
+    expect(w.titles()).toContain('Kindle');
+    expect(w.titles()).toContain('Save a Kindle file');
+    expect(w.status().textContent).toBe('');
+  });
+
+  test('the check is asked again when the window gets the focus back: a toolchain installed meanwhile renames the rows', async () => {
+    const w = await world(undefined, checked('azw3', true));
+    await w.open(listed([]));
+    expect(w.titles()).toContain('Save a Kindle file (.azw3)');
+    w.focusWindow(); // back from installing Kindle Previewer
+    if (w.asked().includes('kfx-status')) await w.answer('kfx-status', { ok: false });
+    await w.answerCheck(checked('kfx', true));
+    expect(w.titles()).toContain('Save a Kindle file (.kfx)');
+    w.send.hide();
+    w.focusWindow();
+    expect(w.asked()).toEqual([]);
+  });
+
+  test('a KFX install that ends asks the check again, so the rows name the KFX', async () => {
+    const notReady = {
+      ok: true,
+      ...kfxSetup({ calibre: true, previewer: true, pluginInstalled: false, ready: false }, 'darwin'),
+    };
+    const w = await world(notReady, checked('azw3', true));
+    await w.open(listed([]));
+    expect(w.titles()).toContain('Save a Kindle file (.azw3)');
+    const install = w.pane.all().find((n) => n.tagName === 'BUTTON' && n.getAttribute('data-step') === 'plugin')!;
+    install.click();
+    await w.answer('kfx-install', {
+      ok: true, version: '2.20.1', removed: [],
+      setup: kfxSetup({ calibre: true, previewer: true, pluginInstalled: true, ready: true }, 'darwin'),
+    });
+    await w.answerCheck(checked('kfx', false));
+    expect(w.titles()).toContain('Save a Kindle file (.kfx)');
   });
 
   test('every row in the engine’s order: brass for the chosen one, outline for the rest, dimmed ones with no button', async () => {

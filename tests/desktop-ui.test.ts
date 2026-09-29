@@ -242,6 +242,7 @@ describe('the engine contract lives in exactly one file', () => {
       reveal: argv.reveal('/s/script.epub'),
       routes: argv.routes('/s/script.epub'),
       routesQuick: argv.routes('/s/script.epub', { quick: true }),
+      kindleCheck: argv.kindleCheck('/s/script.epub'),
       route: argv.route('apple-books', '/s/script.epub'),
       routeSaveEpub: argv.route('save-epub', '/s/script.epub', { out: '/s/out.epub' }),
       routeSaveKindle: argv.route('save-kindle', '/s/script.epub', {
@@ -252,7 +253,7 @@ describe('the engine contract lives in exactly one file', () => {
     // Every builder the interface promises is exercised above.
     expect(Object.keys(argv).sort()).toEqual(
       ['appSettings', 'convert', 'devices', 'emailSetup', 'export', 'kfxInstall', 'kfxStatus',
-        'reconvert', 'reveal', 'route', 'routes', 'send', 'settings', 'version'].sort(),
+        'kindleCheck', 'reconvert', 'reveal', 'route', 'routes', 'send', 'settings', 'version'].sort(),
     );
     for (const [name, args] of Object.entries(built)) {
       expect(`${name} has --json: ${args.includes('--json')}`).toBe(`${name} has --json: true`);
@@ -262,6 +263,12 @@ describe('the engine contract lives in exactly one file', () => {
         `${name} args: `,
       );
     }
+  });
+
+  test('the Kindle file check is export for kindle with --check, and nothing else', async () => {
+    const { argv } = await import(join(UI, 'app.js'));
+    expect(argv.kindleCheck('/s/script.epub'))
+      .toEqual(['export', '/s/script.epub', '--json', '--for', 'kindle', '--check']);
   });
 
   test('the KFX builders are exactly the two verbs, with nothing else on them', async () => {
@@ -2314,6 +2321,35 @@ describe('the window knows when the engine is working, and can restart', () => {
       expect(app.engineBusy()).toBe(false);
       expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
       await call;
+      expect(app.engineBusy()).toBe(false);
+    } finally {
+      delete win.window;
+    }
+  });
+
+  test('a Kindle file check is never counted; the build it can lead to is', async () => {
+    // The check reads two file dates and asks Calibre what is installed; the
+    // Send page asks it on every visit and every time the window gets the
+    // focus back, never mid-job. The export that builds the file is a job,
+    // and a restart must wait for it, whether a press started it or the page
+    // started it in the background.
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle();
+    win.window = {
+      __TAURI__: {
+        core: { invoke: () => new Promise((resolve) => setTimeout(() => resolve('{"ok":true}'), 10)) },
+      },
+    };
+    try {
+      const check = app.runEngine(app.argv.kindleCheck('/s/script.epub'));
+      expect(app.engineBusy()).toBe(false);
+      expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
+      await check;
+
+      const build = app.runEngine(app.argv.export('/s/script.epub', { forFormat: 'kindle' }));
+      expect(app.engineBusy()).toBe(true);
+      expect(Bun.peek.status(app.whenIdle())).toBe('pending');
+      await build;
       expect(app.engineBusy()).toBe(false);
     } finally {
       delete win.window;
@@ -5054,6 +5090,10 @@ describe('the Send surface', () => {
       .map((m) => `${m[2]}:${m[1]}`).sort();
     expect(building).toEqual(['export:copy', 'export:send', 'send:send']);
     expect(code.match(/argv\.(export|send)\(/g)?.length).toBe(3);
+    // The Kindle file check reads the book's date, so it waits its turn too:
+    // a save still settling lands first, and the answer is about the book
+    // as it will be.
+    expect(code).toMatch(/onBook\(book, 'check', argv\.kindleCheck\(book\)\)/);
     // The route: through the door only when the flow reads the book.
     expect(code.match(/argv\.route\(/g)?.length).toBe(1);
     expect(code).toMatch(/readsTheBook\(how\) \? onBook\(script\.epubPath, 'copy', call\) : runEngine\(call\)/);
@@ -5317,7 +5357,8 @@ describe('the Send page performs every route: shape', () => {
     const refresh = body('async function refresh(');
     expect(refresh).toContain('const shown = routesFrom(answer);');
     expect(refresh).toContain('ctx.state.devices = connectedDevices(shown);');
-    expect(refresh).toContain('if (sameRoutes(drawn, shown)) return;');
+    // The same list, titled with the same Kindle file type, is left alone.
+    expect(refresh).toContain('if (sameRoutes(drawn, shown) && titledWith === (kindle?.extension ?? null)) return;');
     expect(refresh).toContain('fault(routesFailure(answer))');
   });
 
@@ -8246,12 +8287,15 @@ describe('the Send page’s KFX block: wiring, second pass', () => {
     // After the rows as well: a block that hides while it holds the focus
     // hands it to the page's first stop, which should be the new Send
     // button and not the pane (seen in a browser, 2026-09-23).
-    const rows = refresh.indexOf('list.append(routeRow(route, shown.chosen))');
-    expect(rows).toBeGreaterThan(-1);
+    const rows = refresh.indexOf('fillRows()');
+    expect(rows).toBeGreaterThan(assigned);
     expect(told).toBeGreaterThan(rows);
+    expect(body(send, 'function fillRows(')).toContain('list.append(routeRow(route, drawn.chosen))');
     expect(send).toContain('devices: () => connectedDevices(drawn)');
     expect(send).toContain('isSending: () => sending');
-    expect(send).toContain('onBusy: (on) => { for (const button of buttons()) button.disabled = on; }');
+    // The busy hook takes every button out of reach, and back.
+    const busy = send.slice(send.indexOf('onBusy: (on) => {'));
+    expect(busy.slice(0, busy.indexOf('\n    },'))).toContain('for (const button of buttons()) button.disabled = on;');
   });
 });
 

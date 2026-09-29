@@ -164,6 +164,7 @@ const EXPORT_USAGE = `screepub export — the file you would put on a reader
 
 Usage:
   screepub export <file.epub> [--for kindle|epub] [--fountain <f>] [--out <path>] [--json]
+  screepub export <file.epub> --for kindle --check [--json]
 
 export never sends: it produces (or reuses) the right file, and
 \`screepub send\` moves it. Kindle climbs KFX → AZW3 → MOBI, taking the best
@@ -175,6 +176,9 @@ Options:
   --options-json <json>  this script's settings, so a rebuild keeps them
   --out <path>           also copy the result to this absolute path (its
                          extension must match the file produced)
+  --check                build nothing: say which file this computer makes,
+                         whether the one beside the book is current, and
+                         what builds it (builtBy: calibre or screepub)
   --json                 machine-readable result on stdout (for the app)
   -h, --help             show this help
 `;
@@ -519,6 +523,7 @@ function parseVerbArgs(args: string[]) {
       'opted-in': { type: 'boolean', default: false },
       'last-checked': { type: 'string' },
       quick: { type: 'boolean', default: false },
+      check: { type: 'boolean', default: false },
       json: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -544,7 +549,7 @@ const VERB_FLAGS: Record<Verb, readonly VerbFlag[]> = {
   devices: [],
   send: ['--device'],
   settings: ['--set'],
-  export: ['--for', '--fountain', '--options-json', '--out'],
+  export: ['--for', '--fountain', '--options-json', '--out', '--check'],
   'update-decision': ['--offered', '--current'],
   'update-should-check': ['--opted-in', '--last-checked'],
   'kfx-status': [],
@@ -562,7 +567,7 @@ const VERB_FLAGS: Record<Verb, readonly VerbFlag[]> = {
  * first, except on those two verbs, which name the other one's flags last. */
 const UPDATE_FLAGS: readonly VerbFlag[] = ['--offered', '--current', '--last-checked', '--opted-in'];
 const OTHER_FLAGS: readonly VerbFlag[] = [
-  '--out', '--device', '--set', '--for', '--fountain', '--options-json', '--quick',
+  '--out', '--device', '--set', '--for', '--fountain', '--options-json', '--quick', '--check',
 ];
 
 /** The refusal for the first flag given that `verb` does not act on, naming
@@ -724,6 +729,7 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
         fountain: values.fountain,
         optionsJson: values['options-json'],
         out: values.out,
+        check: values.check,
       });
       if (jsonMode) {
         console.log(JSON.stringify({ ok: true, ...result }));
@@ -731,6 +737,9 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       }
       for (const stage of result.stages) console.log(`  ${stage}`);
       console.log(`${result.label}\n  ${result.path}`);
+      if (result.fresh !== undefined) {
+        console.log(result.fresh ? '  built, and current' : '  not built yet, or older than the book');
+      }
       return;
     }
 

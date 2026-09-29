@@ -57,6 +57,12 @@ export const argv = {
       fountain ? '--fountain' : null, fountain,
       optionsJson ? '--options-json' : null, optionsJson].filter((a) => a !== null),
 
+  /** Which Kindle file `export --for kindle` would hand over on this
+   *  computer (KFX, AZW3 or MOBI), whether the one beside the book is
+   *  current, and what builds it, with nothing built. The Send page asks it
+   *  when it opens, to name the file on the rows that hand one over. */
+  kindleCheck: (epub) => ['export', epub, '--json', '--for', 'kindle', '--check'],
+
   /** Can this computer make KFX for a Kindle? Installs nothing. */
   kfxStatus: () => ['kfx-status', '--json'],
 
@@ -176,6 +182,12 @@ let settleTimer = null;
  *  mid-job. WITH `--set` it writes that file, so only the write counts, the
  *  same split as kfx-status and kfx-install above.
  *
+ *  `export --check` is not counted either: it reads two file dates and asks
+ *  Calibre what is installed, builds nothing, and the Send page asks it on
+ *  every visit and whenever the window gets the focus back. An `export`
+ *  without it builds the Kindle file and stays counted, whether a press
+ *  asked for it or the page started it in the background.
+ *
  *  `reveal` is not counted either, but for a different reason: it writes
  *  nothing at all, and on some Linux desktops the xdg-open call behind it
  *  can keep running until the file manager window it opened is closed,
@@ -184,6 +196,7 @@ function countsTowardBusy(args) {
   if (args[0] === argv.devices()[0] || args[0] === argv.kfxStatus()[0]
     || args[0] === argv.routes('')[0]) return false;
   if (args[0] === argv.appSettings()[0]) return args.includes('--set');
+  if (args[0] === argv.kindleCheck('')[0]) return !args.includes('--check');
   if (args[0] === argv.reveal('')[0]) return false;
   return true;
 }

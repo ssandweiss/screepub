@@ -396,6 +396,31 @@ export function buttonClassFor(route, chosenId) {
   return route.id === chosenId ? 'btn btn-brad' : 'btn btn-outline';
 }
 
+/** Whether a row's button hands over the Kindle file, whose type depends on
+ *  this computer (KFX, AZW3 or MOBI): Save a Kindle file, and a Kindle that
+ *  is plugged in. A dimmed Kindle row carries no device and has nothing to
+ *  press. */
+export function handsOverKindleFile(route) {
+  if (route?.key === 'save-kindle') return true;
+  const device = route?.device;
+  return typeof device === 'object' && device !== null && forFormat(device) === 'kindle';
+}
+
+/** What `export --for kindle --check` says about this script's Kindle file
+ *  before anything is built: `{ extension, fresh, builtBy }`, or null when
+ *  the answer is not one (a refusal included), which names nothing on the
+ *  rows. `fresh` is the engine's staleness rule, `builtBy` what makes the
+ *  file when it is not: 'calibre' for KFX and AZW3, 'screepub' for the
+ *  engine's own MOBI. */
+export function kindleCheckFrom(answer) {
+  if (answer?.ok !== true) return null;
+  const extension = typeof answer.extension === 'string' ? bareExtension(answer.extension.trim()) : '';
+  if (!/^[A-Za-z0-9]+$/.test(extension)) return null;
+  if (typeof answer.fresh !== 'boolean') return null;
+  if (answer.builtBy !== 'calibre' && answer.builtBy !== 'screepub') return null;
+  return { extension, fresh: answer.fresh, builtBy: answer.builtBy };
+}
+
 /** Used only when a path has no name in it at all, so the dialog never
  *  starts on a bare ".epub", which a Mac would hide. */
 const SAVE_FALLBACK = 'Screenplay';
@@ -522,11 +547,17 @@ export function sameRoutes(a, b) {
  *  unproven caveat and, for a reader that mounts, the volume the file lands
  *  on. A docked reMarkable never mounts and gets no such line: the engine's
  *  detail already says how it is reached, and whereLine()'s stand-in beside
- *  it said the same thing twice. */
-export function routeLines(route, platform) {
+ *  it said the same thing twice.
+ *
+ *  `file` is kindleCheckFrom()'s answer, or null. A row that hands over the
+ *  Kindle file names its type after the title, "Save a Kindle file (.kfx)",
+ *  because which file that is depends on this computer; with no answer the
+ *  title stands alone rather than guessing. */
+export function routeLines(route, platform, file = null) {
   const device = route?.device ?? null;
+  const named = file !== null && file !== undefined && handsOverKindleFile(route);
   return {
-    title: route?.title,
+    title: named ? `${route.title} (.${file.extension})` : route?.title,
     detail: route?.detail,
     where: device !== null && isText(device.volume) ? whereLine(device) : null,
     caveat: device === null ? null : caveatFor(device, platform),
@@ -599,6 +630,15 @@ let newest = 0;
  *  whole timeout, and piling a second on top of it would only add another
  *  engine run to wait for. */
 let fullOut = 0;
+/** What the engine last said about this script's Kindle file
+ *  (kindleCheckFrom()), or null when it has not said, and the book it said
+ *  it about: kept across a hide and a show of the same book, so the rows do
+ *  not lose their file type for the moment the check takes to answer again. */
+let kindle = null;
+let kindleBook = null;
+/** The extension the rows on screen were titled with, so a check that
+ *  changes it redraws them and one that does not leaves them alone. */
+let titledWith = null;
 /** A send or a route in flight (sendTo() and perform() share it). Two at
  *  once would be a genuine race and not a cosmetic one: the MOBI rung of
  *  src/export/artifact.ts REWRITES the library EPUB in place before it
@@ -631,6 +671,7 @@ export function scriptChanged() {
 
 export function show() {
   draw();
+  window.addEventListener('focus', onFocus);
   // Two asks at once. The quick one leaves out the reMarkable probe, which
   // runs to its whole timeout (a second and a half) on every machine with no
   // tablet docked, so the rows are on screen as soon as the mount scan
@@ -646,6 +687,14 @@ export function show() {
   clearInterval(poll);
   poll = setInterval(tick, POLL_MS);
   kfxShown();
+  checkKindle();
+}
+
+/** Back from somewhere else, perhaps from installing Kindle Previewer: the
+ *  Kindle file may be a different kind now. kfx.js re-asks its checklist on
+ *  the same event. */
+function onFocus() {
+  checkKindle();
 }
 
 /** One tick of the poll: a full ask, unless the last one has not answered. */
@@ -657,6 +706,7 @@ function tick() {
 export function hide() {
   clearInterval(poll);
   poll = null;
+  window.removeEventListener('focus', onFocus);
   kfxHidden();
 }
 
@@ -666,6 +716,10 @@ function draw() {
   statusLine = null;
   artifactNote = null;
   drawn = null;
+  if (ctx.state.script?.epubPath !== kindleBook) {
+    kindle = null;
+    kindleBook = null;
+  }
 
   if (!ctx.state.script) {
     pane.append(
@@ -712,7 +766,11 @@ function draw() {
     // (Kindle advice is for Kindles) reads it as it read `devices`. Null
     // until the first answer, so the block does not flash up and vanish.
     devices: () => connectedDevices(drawn),
-    onBusy: (on) => { for (const button of buttons()) button.disabled = on; },
+    onBusy: (on) => {
+      for (const button of buttons()) button.disabled = on;
+      // An install just ended: the Kindle file may be a KFX from now on.
+      if (!on) checkKindle();
+    },
     // Its redraws hand the keyboard back through the same plan as every
     // other surface's (focus.js), when a control it held is gone.
     restoreFocus: () => ctx.restoreFocus(),
@@ -754,14 +812,46 @@ async function refresh({ quick = false } = {}) {
   ctx.state.devices = connectedDevices(shown);
   // Nothing changed, so nothing is redrawn: a rebuild every two seconds
   // would take the focus off a button someone had just tabbed to.
-  if (sameRoutes(drawn, shown)) return;
+  if (sameRoutes(drawn, shown) && titledWith === (kindle?.extension ?? null)) return;
   drawn = shown;
-  rebuild(() => {
-    for (const route of shown.routes) list.append(routeRow(route, shown.chosen));
-  });
+  fillRows();
   // After the rows, not before: a KFX block that hides now while it held
   // the keyboard hands it to the page's first stop, which should be a row.
   kfxDevicesChanged();
+}
+
+/** The rows, from the list on screen and what the check said about the
+ *  Kindle file. */
+function fillRows() {
+  titledWith = kindle?.extension ?? null;
+  rebuild(() => {
+    for (const route of drawn.routes) list.append(routeRow(route, drawn.chosen));
+  });
+}
+
+/** Ask the engine about this script's Kindle file (`export --check`): which
+ *  file this computer makes, and whether the one beside the book is current.
+ *  It takes its turn on the book (book-queue.js), so a save still settling
+ *  on the Settings page lands first and the answer is about the book as it
+ *  will be. A check that fails names nothing: the rows keep their plain
+ *  titles, and a press still builds and says what went wrong in its own
+ *  words. */
+async function checkKindle() {
+  const script = ctx.state.script;
+  if (list === null || blockedReason(script) !== null) return;
+  const book = script.epubPath;
+  const mine = era;
+  let answer = null;
+  try {
+    answer = await onBook(book, 'check', argv.kindleCheck(book));
+  } catch {
+    // As a refusal: nothing known.
+  }
+  if (era !== mine || list === null) return;
+  kindle = kindleCheckFrom(answer);
+  kindleBook = book;
+  // Rows are never rebuilt under a send; the poll after it catches up.
+  if (drawn !== null && !sending && titledWith !== (kindle?.extension ?? null)) fillRows();
 }
 
 /** A route or a send just worked, and the engine now remembers it: ask again
@@ -844,7 +934,7 @@ function readerRow(reader, platform) {
  *  Each button carries its route's id as data-route, which is how a rebuild
  *  finds the same route's button again. */
 function routeRow(route, chosen) {
-  const lines = routeLines(route, navigator.platform);
+  const lines = routeLines(route, navigator.platform, kindle);
   const hint = emailSetupHint(route);
   const style = buttonClassFor(route, chosen);
   // The poll keeps running through a KFX install (it stops only for a send),

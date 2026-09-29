@@ -10,7 +10,9 @@ import { CliError, errorMessage } from './cli-errors';
 import {
   availableFormats,
   freshKindleArtifact as realFreshKindleArtifact,
+  kindleArtifactPlan,
   type FreshKindleArtifactOptions,
+  type KindleArtifactPlan,
 } from './export/artifact';
 import { isCalibreAvailable } from './export/calibre';
 import { fileExtension, formatLabel, type ExportFormat } from './export/formats';
@@ -26,6 +28,11 @@ export interface ExportResult {
   label: string;
   available: ExportFormat[];
   stages: string[];
+  /** --check only: whether the file at `path` is current (the EPUB always
+   * is: it is the book itself). */
+  fresh?: boolean;
+  /** --check, --for kindle only: what builds the file when it is not. */
+  builtBy?: KindleArtifactPlan['builtBy'];
 }
 
 export interface ExportOptions {
@@ -41,6 +48,11 @@ export interface ExportOptions {
    * never writes a file itself (see cli.ts's --out); when given, it MUST
    * be absolute, checked before any toolchain probe or ladder run. */
   out?: string;
+  /** Say which file this machine hands over and whether the one on disk is
+   * current, and build nothing: the window asks this when the Send page
+   * opens, to name the file on its rows and to decide whether to start a
+   * slow build before anyone presses anything. */
+  check?: boolean;
 }
 
 // Injectable seams, same shape as tools/build-cli.ts's `Spawn` and
@@ -194,6 +206,9 @@ export async function exportCommand(
   if (options.out !== undefined && !isAbsolute(options.out)) {
     throw new CliError('usage', 'the path given with --out must be absolute');
   }
+  if (options.check === true && options.out !== undefined) {
+    throw new CliError('usage', '--check builds and writes nothing, so it takes no --out');
+  }
 
   // Parsed here, before the epub branch returns and before any toolchain
   // probe: --options-json is either well-formed argv or it is not, and that
@@ -224,11 +239,27 @@ export async function exportCommand(
       label: formatLabel(format, state),
       available,
       stages: [],
+      ...(options.check === true ? { fresh: true } : {}),
     };
   }
 
   const kfx = await (deps.kfxStatus ?? realKfxStatus)();
   const state = { calibreAvailable, kfxReady: kfx.ready };
+
+  if (options.check === true) {
+    // The ladder's own plan, asked without walking it.
+    const plan = kindleArtifactPlan(options.epub, state);
+    return {
+      path: plan.path,
+      format,
+      extension: fileExtension(format, state),
+      label: formatLabel(format, state),
+      available,
+      stages: [],
+      fresh: plan.fresh,
+      builtBy: plan.builtBy,
+    };
+  }
   const stages: string[] = [];
   let path: string;
   try {
