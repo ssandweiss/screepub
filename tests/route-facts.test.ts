@@ -349,3 +349,32 @@ describe('routeFacts: platform', () => {
     expect(facts.platform).toBe(process.platform);
   });
 });
+
+describe('routeFacts: the quick answer, without the reMarkable probe', () => {
+  test('skipRemarkable lists the mounted readers, never probes, and says the tablet was not looked for', async () => {
+    let probes = 0;
+    const facts = await routeFacts(
+      { platform: 'darwin', exists: () => false, mailtoHandler: async () => null },
+      {
+        scan: () => [kindle],
+        probe: () => {
+          probes += 1;
+          return new Promise<boolean>(() => {});
+        },
+        skipRemarkable: true,
+      },
+    );
+    expect(facts.devices).toEqual([kindle]);
+    expect(facts.remarkableChecked).toBe(false);
+    expect(probes).toBe(0);
+  });
+
+  test('a full answer looked for the tablet, and carries no such fact', async () => {
+    const facts = await routeFacts(
+      { platform: 'darwin', exists: () => false, mailtoHandler: async () => null },
+      { scan: () => [kindle], probe: async () => false },
+    );
+    expect(facts.devices).toEqual([kindle]);
+    expect('remarkableChecked' in facts).toBe(false);
+  });
+});

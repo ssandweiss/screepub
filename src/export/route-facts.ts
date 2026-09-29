@@ -221,6 +221,8 @@ export async function routeFacts(
   }
 
   const devices = await devicesPromise;
-
-  return { platform, devices, booksApp, sendToKindleApp, appleMailDefault };
+  const facts: RouteFacts = { platform, devices, booksApp, sendToKindleApp, appleMailDefault };
+  // Said only when it is so: a full answer looked, and carries no such fact.
+  if (deviceOptions?.skipRemarkable === true) facts.remarkableChecked = false;
+  return facts;
 }

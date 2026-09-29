@@ -529,6 +529,24 @@ describe('three kinds of unavailable, on the right rows', () => {
     expect(row?.available).toBe(false);
     expect(row?.unavailable).toBe('connect');
   });
+
+  test('a reMarkable not looked for yet (routes --quick) says so, rather than telling you to dock it', () => {
+    // The quick answer skips the probe so the Send page can draw at once; a
+    // tablet that IS docked must not be told to dock while the full answer
+    // is still on its way. Still dimmed, still connect: nothing to press yet.
+    const row = find(routes(facts({ remarkableChecked: false })), 'remarkable');
+    expect(row).toEqual({
+      id: 'remarkable',
+      key: 'remarkable',
+      title: 'reMarkable',
+      detail: 'checking whether one is docked…',
+      button: 'Upload to reMarkable',
+      available: false,
+      unavailable: 'connect',
+    });
+    expect(find(routes(facts({ remarkableChecked: true })), 'remarkable')?.detail).toBe('dock over USB to send');
+    expect(find(routes(facts()), 'remarkable')?.detail).toBe('dock over USB to send');
+  });
 });
 
 describe('row identity and the device a row carries', () => {

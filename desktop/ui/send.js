@@ -61,7 +61,7 @@ export const READERS = [
     // engine's MOBI. Listing it any other way would read as a preference the
     // engine does not hold.
     route: 'Over USB. Kindles never index a sideloaded EPUB, so Screepub builds a KFX, '
-      + 'an AZW3 or its own MOBI — whichever is the best this computer can make — and copies '
+      + 'an AZW3 or its own MOBI, whichever is the best this computer can make, and copies '
       + 'that across instead.',
   },
   {
@@ -112,7 +112,7 @@ export function provenNote(platform) {
   const where = platformOf(platform);
   if (where === PROVEN.platform) {
     return 'A Kindle over USB, on a Mac, is the one route anyone has actually run. The others '
-      + 'are built and code-tested, and that is all — they are listed because Screepub will '
+      + 'are built and code-tested, and that is all. They are listed because Screepub will '
       + 'try, not because anyone can promise.';
   }
   // Named only when it is known. An absent navigator.platform must not be
@@ -120,7 +120,7 @@ export function provenNote(platform) {
   const named = where === 'windows' ? 'from Windows'
     : where === 'linux' ? 'from Linux'
       : 'on this computer’s platform';
-  return `Sending has ${UNPROVEN} ${named} — the one route anyone has run was a Kindle `
+  return `Sending has ${UNPROVEN} ${named}. The one route anyone has run was a Kindle `
     + 'over USB, on a Mac. The code is the same on all three platforms; the confidence is not.';
 }
 
@@ -146,7 +146,7 @@ export function caveatFor(device, platform) {
     : 'this reader';
   if (device?.kind === PROVEN.kind) {
     if (where === PROVEN.platform) return null;
-    return `Sending to a Kindle has ${UNPROVEN} on this computer’s platform — only on a Mac.`;
+    return `Sending to a Kindle has ${UNPROVEN} on this computer’s platform. It has only been run on a Mac.`;
   }
   return `Sending to a ${name} has ${UNPROVEN}. It is built and code-tested; nobody has `
     + 'plugged one in.';
@@ -213,7 +213,7 @@ export function sentLine(device, answer) {
   if (answer?.uploaded === true || destination === '') {
     return `${SENT_LABEL} ${device.name}.`;
   }
-  return `${SENT_LABEL} ${device.name} — ${destination}. Eject the volume before you unplug it.`;
+  return `${SENT_LABEL} ${device.name}: ${destination}. Eject the volume before you unplug it.`;
 }
 
 /** What actually went across, in the engine's own words. `label` is
@@ -238,10 +238,10 @@ export const NO_MESSAGE = 'The engine refused to send without saying why.';
  *  one has to clear the alarm, not inherit it.
  *
  *  The route phases sit beside the device ones: `opening` names the route
- *  (its title, the engine's word for it), `saving` is the dialog's copy, and
- *  `building-kindle` says the wait up front, because the Kindle rung can sit
- *  in Kindle Previewer for twenty seconds with nothing else moving. `done` is
- *  a route's own sentence, as `sent` is a device's. */
+ *  (its title, the engine's word for it), and `saving` is the dialog's copy.
+ *  A Kindle file building is not a status: it has its own line and bar
+ *  (buildLine()), because one started when the page opened outlives any
+ *  press. `done` is a route's own sentence, as `sent` is a device's. */
 export function statusFor(phase, { device = null, detail = '', route = null } = {}) {
   const name = device?.name ?? 'the reader';
   if (phase === 'failed') {
@@ -249,7 +249,6 @@ export function statusFor(phase, { device = null, detail = '', route = null } = 
     return { line: said === '' ? NO_MESSAGE : said, bad: true };
   }
   if (phase === 'sent' || phase === 'done') return { line: detail, bad: false };
-  if (phase === 'building') return { line: `Building the file ${name} can open…`, bad: false };
   if (phase === 'preparing') return { line: `Getting the book ready for ${name}…`, bad: false };
   if (phase === 'copying') return { line: `Copying it to ${name}…`, bad: false };
   if (phase === 'opening') {
@@ -257,12 +256,6 @@ export function statusFor(phase, { device = null, detail = '', route = null } = 
     return { line: title === '' ? 'Opening…' : `Opening ${title}…`, bad: false };
   }
   if (phase === 'saving') return { line: 'Saving…', bad: false };
-  if (phase === 'building-kindle') {
-    return {
-      line: 'Building the Kindle file (Kindle Previewer can take about twenty seconds)…',
-      bad: false,
-    };
-  }
   return { line: '', bad: false };
 }
 
@@ -300,10 +293,85 @@ export function needsSettings(script) {
 }
 
 /** Which phase the wait is in before the copy starts. The Kindle rung can
- *  take twenty seconds of Kindle Previewer; the EPUB rung is a stat. Saying
- *  "building" for the one that builds nothing would be theatre. */
-export function preparingPhase(device) {
-  return forFormat(device) === 'kindle' ? 'building' : 'preparing';
+ *  take half a minute of Kindle Previewer, and 'building' puts up the build
+ *  line and its bar for it; the EPUB rung is a stat, and so is a Kindle file
+ *  the engine's check (`file`, kindleCheckFrom()'s) says is current. Saying
+ *  "building" for one that builds nothing would be theatre. */
+export function preparingPhase(device, file = null) {
+  return forFormat(device) === 'kindle' && mayBuild(file) ? 'building' : 'preparing';
+}
+
+/** The turn a Kindle file export takes on its book (book-queue.js's TURNS
+ *  says what each does to it). Calibre builds KFX and AZW3 from the EPUB and
+ *  writes them beside it: 'kindle', a reader, which runs beside a save of the
+ *  EPUB or a copy to a Kobo. The engine's own MOBI rung rewrites the EPUB in
+ *  place before it writes the .mobi: 'kindle-mobi', a writer, which runs
+ *  alone. With no check to go by (`file` null) the page cannot rule the MOBI
+ *  rung out, so it takes the book alone too. */
+export function kindleTurn(file) {
+  return file?.builtBy === 'calibre' ? 'kindle' : 'kindle-mobi';
+}
+
+/** Whether a press's `export --for kindle` may have to build the file, and
+ *  so shows the build line and bar while it runs: always, unless the
+ *  engine's check said the file beside the book is current, when the export
+ *  only finds it. */
+export function mayBuild(file) {
+  return file?.fresh !== true;
+}
+
+/** Whether the Send page starts building the Kindle file as it opens,
+ *  before anyone presses anything, so a press finds it built or building.
+ *  Every condition, in one place:
+ *  - the engine's check (kindleCheckFrom()) says the file is out of date:
+ *    not current, and not merely unknown;
+ *  - Calibre is what builds it (KFX, AZW3): a machine with no Calibre never
+ *    has it started, and the engine's own MOBI rewrites the library EPUB in
+ *    place in a moment, so building it ahead buys nothing;
+ *  - a Kindle is in play (`forKindle`, wantsKindleFile()): a Kobo or a
+ *    reMarkable session must not start Kindle Previewer for nobody;
+ *  - once per version of the book and kind of file: never again for the
+ *    attemptKey() a build was already started for (`triedFor`), so a build
+ *    that failed is not retried every time the window gets the focus back,
+ *    while a KFX wanted after an AZW3 was built ahead (the KFX plugin just
+ *    installed) still is; a file with no book date to tell versions apart by
+ *    is never started;
+ *  - not while one is running for the book (`building`), nor while a send,
+ *    a route or a KFX install is (`busy`). */
+export function buildsAhead(file, {
+  building = false, busy = false, triedFor = null, forKindle = false,
+} = {}) {
+  if (file === null || file === undefined) return false;
+  if (file.fresh !== false || file.builtBy !== 'calibre') return false;
+  if (typeof file.bookDate !== 'number' || attemptKey(file) === triedFor) return false;
+  return forKindle === true && !building && !busy;
+}
+
+/** What one build ahead is an attempt at: this kind of file, from this
+ *  version of the book. */
+export function attemptKey(file) {
+  return `${file?.extension}@${file?.bookDate}`;
+}
+
+/** Whether this is a Kindle session, read off the route list: the route
+ *  the page would choose (the one used last time, or the first that can
+ *  fire) is a Kindle or Save a Kindle file, or a Kindle is plugged in now. */
+export function wantsKindleFile(shown) {
+  if (!Array.isArray(shown?.routes)) return false;
+  if (shown.routes.some((route) => route.device?.kind === 'kindle')) return true;
+  const chosen = shown.routes.find((route) => route.id === shown.chosen);
+  return chosen?.key === 'save-kindle' || chosen?.key === 'device:kindle';
+}
+
+/** The line over the moving bar while the Kindle file builds, by the file
+ *  being built. Kindle Previewer's cold start is most of a KFX build: 23 s
+ *  for the 18-page demo, measured, and the owner saw 30 to 40 on a longer
+ *  script. Calibre's AZW3 and the engine's MOBI took under a second there.
+ *  With no check to go by, it says only what it is doing. */
+export function buildLine(extension) {
+  if (extension === 'kfx') return 'Building the Kindle file. This takes about half a minute.';
+  if (isText(extension)) return 'Building the Kindle file. This takes a moment.';
+  return 'Building the Kindle file…';
 }
 
 // Routes: every way the book can leave, as `screepub routes` lists them.
@@ -394,6 +462,35 @@ export function isDeviceRoute(route) {
 export function buttonClassFor(route, chosenId) {
   if (route?.available !== true) return null;
   return route.id === chosenId ? 'btn btn-brad' : 'btn btn-outline';
+}
+
+/** Whether a row's button hands over the Kindle file, whose type depends on
+ *  this computer (KFX, AZW3 or MOBI): Save a Kindle file, and a Kindle that
+ *  is plugged in. A dimmed Kindle row carries no device and has nothing to
+ *  press. */
+export function handsOverKindleFile(route) {
+  if (route?.key === 'save-kindle') return true;
+  const device = route?.device;
+  return typeof device === 'object' && device !== null && forFormat(device) === 'kindle';
+}
+
+/** What `export --for kindle --check` says about this script's Kindle file
+ *  before anything is built: `{ extension, fresh, builtBy }`, or null when
+ *  the answer is not one (a refusal included), which names nothing on the
+ *  rows. `fresh` is the engine's staleness rule, `builtBy` what makes the
+ *  file when it is not: 'calibre' for KFX and AZW3, 'screepub' for the
+ *  engine's own MOBI; `bookDate` when the EPUB was last written. */
+export function kindleCheckFrom(answer) {
+  if (answer?.ok !== true) return null;
+  const extension = typeof answer.extension === 'string' ? bareExtension(answer.extension.trim()) : '';
+  if (!/^[A-Za-z0-9]+$/.test(extension)) return null;
+  if (typeof answer.fresh !== 'boolean') return null;
+  if (answer.builtBy !== 'calibre' && answer.builtBy !== 'screepub') return null;
+  // When the book was last written: which version of it this answer is
+  // about. Not known is not a reason to drop the rest of the answer; it only
+  // means the page will not build ahead on it (buildsAhead()).
+  const bookDate = Number.isFinite(answer.bookDate) ? answer.bookDate : null;
+  return { extension, fresh: answer.fresh, builtBy: answer.builtBy, bookDate };
 }
 
 /** Used only when a path has no name in it at all, so the dialog never
@@ -522,7 +619,9 @@ export function sameRoutes(a, b) {
  *  unproven caveat and, for a reader that mounts, the volume the file lands
  *  on. A docked reMarkable never mounts and gets no such line: the engine's
  *  detail already says how it is reached, and whereLine()'s stand-in beside
- *  it said the same thing twice. */
+ *  it said the same thing twice. The title is the route's own, and a
+ *  reader's is the name it mounts as: the Kindle file's type goes on the
+ *  button (buttonLabel()), which is what hands the file over. */
 export function routeLines(route, platform) {
   const device = route?.device ?? null;
   return {
@@ -531,6 +630,19 @@ export function routeLines(route, platform) {
     where: device !== null && isText(device.volume) ? whereLine(device) : null,
     caveat: device === null ? null : caveatFor(device, platform),
   };
+}
+
+/** What a row's button says: the engine's words, and on a button that hands
+ *  over the Kindle file, its type, because which file that is depends on
+ *  this computer: "Copy to Kindle (.kfx)", "Save a Kindle file (.kfx)…".
+ *  Before the ellipsis a button that opens a Save box ends with. `file` is
+ *  kindleCheckFrom()'s answer; with none the words stand alone rather than
+ *  guessing. */
+export function buttonLabel(route, file = null) {
+  const words = route?.button;
+  if (file === null || file === undefined || !handsOverKindleFile(route)) return words;
+  const type = `(.${file.extension})`;
+  return words.endsWith('…') ? `${words.slice(0, -1)} ${type}…` : `${words} ${type}`;
 }
 
 /** Stand-in when the export says it built the Kindle file but not what kind
@@ -594,6 +706,80 @@ let drawn = null;
  *  so a slow poll cannot put back a list a faster, later one replaced. */
 let asks = 0;
 let newest = 0;
+/** Full asks (the reMarkable probe included) whose answer is still out. A
+ *  tick of the poll while one is out asks nothing: each can take the probe's
+ *  whole timeout, and piling a second on top of it would only add another
+ *  engine run to wait for. */
+let fullOut = 0;
+/** What the engine last said about this script's Kindle file
+ *  (kindleCheckFrom()), or null when it has not said, and the book it said
+ *  it about: kept across a hide and a show of the same book, so the rows do
+ *  not lose their file type for the moment the check takes to answer again. */
+let kindle = null;
+let kindleBook = null;
+/** The extension the buttons on screen were labelled with, so a check that
+ *  changes it redraws them and one that does not leaves them alone. */
+let labelledWith = null;
+/** Kindle file exports of one book, one at a time: the tail of each book's
+ *  line. Two at once would run Kindle Previewer twice over the same scratch
+ *  file. This is a rule about the Kindle FILE, not the book, so it is kept
+ *  here and not in book-queue.js's readers and writers: a Kindle export
+ *  takes its place in this line first and its turn on the book after, so
+ *  one waiting here holds no turn on the book, and a Settings save that
+ *  arrives meanwhile goes ahead of it and is in the file it builds. */
+const kindleLines = new Map();
+
+/** Run `work` once every Kindle export of `book` ahead of it has finished,
+ *  however it finished, and hand back its own promise. With none ahead it
+ *  starts in the caller's own tick. */
+function inKindleLine(book, work) {
+  const ahead = kindleLines.get(book);
+  let run;
+  if (ahead === undefined) {
+    try {
+      run = Promise.resolve(work());
+    } catch (err) {
+      run = Promise.reject(err);
+    }
+  } else {
+    run = ahead.then(work);
+  }
+  const tail = run.then(() => {}, () => {});
+  kindleLines.set(book, tail);
+  tail.then(() => { if (kindleLines.get(book) === tail) kindleLines.delete(book); });
+  return run;
+}
+
+/** A Kindle file export of `book` (or the save of one, which exports again):
+ *  in the Kindle line, then on its turn on the book as kindleTurn() says. A
+ *  press during a build therefore waits for that build, then finds the file
+ *  it made current (the engine's freshness rule) rather than building
+ *  another. */
+function onKindleFile(book, args) {
+  const label = kindleTurn(kindle);
+  return inKindleLine(book, () => onBook(book, label, args));
+}
+
+/** Kindle file builds out now, by book: `{ runs, file }`, how many exports
+ *  that may build it are out (one started as the page opened, a press queued
+ *  behind it) and what the check said the file is. Kept at module level and
+ *  not with the page, because a build outlives a redraw, a new script and a
+ *  hidden page, and a page that comes back to its book must find it still
+ *  going rather than start another. */
+const builds = new Map();
+/** What each book's last background build was started for (attemptKey()),
+ *  so the page builds ahead once per version of a book and kind of file
+ *  (buildsAhead()'s `triedFor`).
+ *  At module level, as `builds` is: a hide and a show, or a new script and
+ *  back, is still the same version of the book. */
+const triedFor = new Map();
+/** From show() to hide(): the page may build ahead, when the check and the
+ *  route list both say so. Either can answer first, so each looks again
+ *  when it lands (maybeBuildAhead()). */
+let aheadWanted = false;
+/** The build line and its bar, and the line's own node. */
+let buildNote = null;
+let buildWords = null;
 /** A send or a route in flight (sendTo() and perform() share it). Two at
  *  once would be a genuine race and not a cosmetic one: the MOBI rung of
  *  src/export/artifact.ts REWRITES the library EPUB in place before it
@@ -620,25 +806,59 @@ export function mount(node, context) {
 
 export function scriptChanged() {
   era += 1;
+  aheadWanted = false;
   drawn = null;
   draw();
 }
 
 export function show() {
   draw();
+  window.addEventListener('focus', onFocus);
+  // Two asks at once. The quick one leaves out the reMarkable probe, which
+  // runs to its whole timeout (a second and a half) on every machine with no
+  // tablet docked, so the rows are on screen as soon as the mount scan
+  // answers, with the reMarkable row saying it is still checking. The full
+  // one fills that row in. Asked second, the full answer is the newer one,
+  // so refresh()'s ordering drops the quick answer if it lands last.
+  refresh({ quick: true });
   refresh();
   // A reader plugs something in while looking at this surface; the list has
   // to notice on its own. Cleared first: a second show() without an
   // intervening hide() would otherwise leave the first interval running
   // forever with nothing holding its handle.
   clearInterval(poll);
-  poll = setInterval(refresh, POLL_MS);
+  poll = setInterval(tick, POLL_MS);
   kfxShown();
+  // What the last visit learnt is kept (the buttons keep naming the file), but
+  // not whether the file is current: a Settings save may have rewritten the
+  // book since, and a press before the check answers must put the build
+  // line up rather than trust a send from before. Unknown, not stale, so
+  // nothing is built ahead on it either.
+  if (kindle !== null) kindle = { ...kindle, fresh: null };
+  aheadWanted = true;
+  checkKindle();
+}
+
+/** Back from somewhere else, perhaps from installing Kindle Previewer: the
+ *  Kindle file may be a different kind now, so the buttons are named again.
+ *  Only named: focus comes back after every Save box and every switch of
+ *  app, and it never starts a build. kfx.js re-asks its checklist on the
+ *  same event. */
+function onFocus() {
+  checkKindle({ ahead: false });
+}
+
+/** One tick of the poll: a full ask, unless the last one has not answered. */
+function tick() {
+  if (fullOut > 0) return;
+  refresh();
 }
 
 export function hide() {
   clearInterval(poll);
   poll = null;
+  aheadWanted = false;
+  window.removeEventListener('focus', onFocus);
   kfxHidden();
 }
 
@@ -647,7 +867,13 @@ function draw() {
   list = null;
   statusLine = null;
   artifactNote = null;
+  buildNote = null;
+  buildWords = null;
   drawn = null;
+  if (ctx.state.script?.epubPath !== kindleBook) {
+    kindle = null;
+    kindleBook = null;
+  }
 
   if (!ctx.state.script) {
     pane.append(
@@ -673,6 +899,14 @@ function draw() {
   list = el('div', { class: 'devices' },
     el('p', { class: 'caption' }, LOOKING));
   statusLine = el('p', { class: 'caption send-status', role: 'status' }, '');
+  // No percent to show: the engine says nothing while Kindle Previewer
+  // works, so the bar sweeps rather than fills. The line is what is read
+  // out; the bar is there to be seen moving.
+  buildWords = el('p', { class: 'caption kindle-build-line' }, '');
+  buildNote = el('div', { class: 'kindle-build', role: 'status' },
+    buildWords,
+    el('div', { class: 'track', 'aria-hidden': 'true' }, el('div', { class: 'build-sweep' })));
+  buildNote.hidden = true;
   artifactNote = el('p', { class: 'caption send-artifact' }, '');
   artifactNote.hidden = true;
   const kfxNode = el('section', { class: 'kfx-setup', 'aria-label': HEADING });
@@ -682,19 +916,27 @@ function draw() {
     el('h2', { class: 'slug' }, 'Send it'),
     el('p', { class: 'prose' }, LEDE),
     list,
+    buildNote,
     statusLine,
     artifactNote,
     kfxNode,
     reach(),
   );
   // After the append: kfx.js draws only into a node that is in the page.
+  showBuild();
   mountKfx(kfxNode, {
-    isSending: () => sending,
+    // A build counts: the plugin must not be swapped under a KFX conversion.
+    isSending: () => sending || builds.size > 0,
     // What is connected, read off the route list: the block's relevance
     // (Kindle advice is for Kindles) reads it as it read `devices`. Null
     // until the first answer, so the block does not flash up and vanish.
     devices: () => connectedDevices(drawn),
-    onBusy: (on) => { for (const button of buttons()) button.disabled = on; },
+    onBusy: (on) => {
+      for (const button of buttons()) button.disabled = on;
+      // An install just ended: the Kindle file may be a KFX from now on,
+      // and on a Kindle session it is worth starting.
+      if (!on) checkKindle();
+    },
     // Its redraws hand the keyboard back through the same plan as every
     // other surface's (focus.js), when a control it held is gone.
     restoreFocus: () => ctx.restoreFocus(),
@@ -702,22 +944,27 @@ function draw() {
 }
 
 /** Every route this book can take, as `screepub routes` lists them, asked
- *  again every two seconds so a reader plugged in turns up on its own. */
-async function refresh() {
+ *  again every two seconds so a reader plugged in turns up on its own.
+ *  `quick` is the page's first ask only (show()): the same list without the
+ *  reMarkable probe. */
+async function refresh({ quick = false } = {}) {
   if (list === null) return;
   // Rows must not be rebuilt out from under a send in progress.
   if (sending) return;
   const into = list;
   const mine = ++asks;
+  if (!quick) fullOut += 1;
   let answer;
   try {
-    answer = await runEngine(argv.routes(ctx.state.script.epubPath));
+    answer = await runEngine(argv.routes(ctx.state.script.epubPath, { quick }));
   } catch (err) {
     // The same three reasons to drop an answer as below.
     if (list !== into || sending || mine <= newest) return;
     newest = mine;
     fault(err.message);
     return;
+  } finally {
+    if (!quick) fullOut -= 1;
   }
   // A new script's page, a send begun since, or a newer answer already
   // drawn: this one is out of date, and drawing it would undo something.
@@ -731,14 +978,144 @@ async function refresh() {
   ctx.state.devices = connectedDevices(shown);
   // Nothing changed, so nothing is redrawn: a rebuild every two seconds
   // would take the focus off a button someone had just tabbed to.
-  if (sameRoutes(drawn, shown)) return;
+  if (sameRoutes(drawn, shown) && labelledWith === (kindle?.extension ?? null)) return;
   drawn = shown;
-  rebuild(() => {
-    for (const route of shown.routes) list.append(routeRow(route, shown.chosen));
-  });
+  fillRows();
   // After the rows, not before: a KFX block that hides now while it held
   // the keyboard hands it to the page's first stop, which should be a row.
   kfxDevicesChanged();
+  // The list decides whether a Kindle is in play: it may be the answer a
+  // build ahead was waiting for, or a Kindle just plugged in.
+  maybeBuildAhead();
+}
+
+/** The rows, from the list on screen and what the check said about the
+ *  Kindle file. */
+function fillRows() {
+  labelledWith = kindle?.extension ?? null;
+  rebuild(() => {
+    for (const route of drawn.routes) list.append(routeRow(route, drawn.chosen));
+  });
+}
+
+/** Ask the engine about this script's Kindle file (`export --check`): which
+ *  file this computer makes, and whether the one beside the book is current.
+ *  It takes its turn on the book (book-queue.js), so a save still settling
+ *  on the Settings page lands first and the answer is about the book as it
+ *  will be. A check that fails names nothing: the buttons keep their plain
+ *  words, and a press still builds and says what went wrong in its own
+ *  words. `ahead` false names the file and nothing more: the check on a
+ *  focus return and the one after a build never start a build. */
+async function checkKindle({ ahead = true } = {}) {
+  const script = ctx.state.script;
+  if (list === null || blockedReason(script) !== null) return;
+  const book = script.epubPath;
+  // A build already out for this book knows what it is building, and until
+  // it lands the check could only say "out of date".
+  const running = builds.get(book);
+  if (running !== undefined) {
+    if (running.file !== null) useKindle(book, running.file);
+    return;
+  }
+  const mine = era;
+  let answer = null;
+  try {
+    answer = await onBook(book, 'check', argv.kindleCheck(book));
+  } catch {
+    // As a refusal: nothing known.
+  }
+  if (era !== mine || list === null) return;
+  useKindle(book, kindleCheckFrom(answer));
+  if (ahead) maybeBuildAhead();
+}
+
+/** Start the build ahead if everything buildsAhead() asks for is so right
+ *  now, on a page that is on screen with its list drawn. */
+function maybeBuildAhead() {
+  if (!aheadWanted || poll === null || drawn === null) return;
+  const script = ctx.state.script;
+  const book = script?.epubPath;
+  if (kindleBook !== book) return;
+  if (!buildsAhead(kindle, {
+    building: builds.has(book),
+    busy: sending || kfxInstalling(),
+    triedFor: triedFor.get(book) ?? null,
+    forKindle: wantsKindleFile(drawn),
+  })) return;
+  triedFor.set(book, attemptKey(kindle));
+  buildInBackground(script);
+}
+
+/** What is known about this book's Kindle file, onto the buttons. */
+function useKindle(book, file) {
+  kindle = file;
+  kindleBook = book;
+  // Rows are never rebuilt under a send; the poll after it catches up.
+  if (drawn !== null && !sending && labelledWith !== (kindle?.extension ?? null)) fillRows();
+}
+
+/** Build the Kindle file now, on the book's turn, so a press finds it built
+ *  or building. It is an engine call like any other, so an update's restart
+ *  waits for it (app.js counts every `export` that builds). A build that
+ *  fails says nothing here: nobody asked for it, and a press builds again
+ *  and says what went wrong in the engine's own words.
+ *
+ *  One that worked is followed by a check, not by taking the file as
+ *  current: a Settings save that waited behind the build rebuilds the book
+ *  right after it, and a press that trusted the build would then rebuild the
+ *  Kindle file with no line up. The check waits behind that save and says.
+ *  It never starts a build of its own: a file the engine still calls out of
+ *  date straight after being built (a book dated in the future) would
+ *  otherwise build again, and again, for as long as the page is open. */
+function buildInBackground(script) {
+  const book = script.epubPath;
+  const run = track(book, kindle, onKindleFile(book, argv.export(book, {
+    forFormat: 'kindle',
+    fountain: script.fountainPath,
+    optionsJson: optionsJsonFor(script),
+  })));
+  run.then((answer) => {
+    if (answer?.ok === true && poll !== null) checkKindle({ ahead: false });
+  }, () => {});
+}
+
+/** Count `run`, an export that may build this book's Kindle file, as a build
+ *  for as long as it is out: the build line and its bar stay up until the
+ *  last one for the book answers. Hands `run` back, answer and all. */
+function track(book, file, run) {
+  const entry = builds.get(book) ?? { runs: 0, file };
+  entry.runs += 1;
+  if (file !== null) entry.file = file;
+  builds.set(book, entry);
+  showBuild();
+  kfxRedraw();
+  const done = () => {
+    entry.runs -= 1;
+    if (entry.runs === 0 && builds.get(book) === entry) builds.delete(book);
+    showBuild();
+    kfxRedraw();
+  };
+  run.then(done, done);
+  return run;
+}
+
+/** A press's own export just handed over a Kindle file for `book`: it is
+ *  current as of now, so the next press is a lookup and puts up no build
+ *  line for it. */
+function builtNow(book) {
+  if (kindleBook === book && kindle !== null) kindle = { ...kindle, fresh: true };
+}
+
+/** The build line and its bar, up while this page's book has a build out. */
+function showBuild() {
+  if (buildNote === null) return;
+  const running = builds.get(ctx.state.script?.epubPath) ?? null;
+  buildNote.hidden = running === null;
+  if (running === null) return;
+  const words = buildLine(running.file?.extension ?? null);
+  // Only when the words change: rewritten into a live region, the same words
+  // can be read out again.
+  if (buildWords.textContent !== words) text(buildWords, words);
 }
 
 /** A route or a send just worked, and the engine now remembers it: ask again
@@ -830,7 +1207,7 @@ function routeRow(route, chosen) {
   const button = style === null ? null : el('button', {
     type: 'button', class: style, 'data-route': route.id, disabled: kfxInstalling(),
     onclick: () => choose(route),
-  }, route.button);
+  }, buttonLabel(route, kindle));
   return el('div', { class: route.available ? 'device-row' : 'device-row route-unavailable' },
     el('div', { class: 'device-what' },
       el('p', { class: 'device-name' }, lines.title),
@@ -905,8 +1282,9 @@ async function ensureSettings() {
  *  an export (whose MOBI rung rebuilds it), a send, a save (readsTheBook()
  *  says which flows). Every one goes through here, to take its turn on the
  *  book with the Settings page's saves, which rebuild that same file in
- *  place; book-queue.js says what a turn promises. `label` is what the
- *  Settings page says it is waiting for. */
+ *  place. `label` is a row of book-queue.js's TURNS, which says whether the
+ *  call reads the book (and runs beside other readers) or writes it (and
+ *  runs alone), and is what the Settings page says it is waiting for. */
 function onBook(book, label, args) {
   return inTurn(book, label, () => runEngine(args));
 }
@@ -927,16 +1305,26 @@ async function sendTo(device) {
     await ensureSettings();
     if (stale()) return;
     const script = ctx.state.script;
-    say(statusFor(preparingPhase(device), { device }));
+    // A Kindle file that may have to be built gets the build line and its
+    // bar rather than a status (preparingPhase()), and waits behind a build
+    // already out for the book instead of starting another (onKindleFile()):
+    // the engine then finds the file that build made, current, and hands it
+    // back. Every other reader takes the EPUB as it is, beside any build.
+    const waiting = preparingPhase(device, kindle);
+    say(waiting === 'building' ? statusFor('idle') : statusFor(waiting, { device }));
 
     // The library artifact is what Read previewed and what Tune rebuilds, so
     // it is the only file handed to a transfer. What the Kindle rung makes
     // of it is the engine's ladder, not this window's.
-    const built = await onBook(script.epubPath, 'send', argv.export(script.epubPath, {
+    const call = argv.export(script.epubPath, {
       forFormat: forFormat(device),
       fountain: script.fountainPath,
       optionsJson: optionsJsonFor(script),
-    }));
+    });
+    const exporting = forFormat(device) === 'kindle'
+      ? onKindleFile(script.epubPath, call)
+      : onBook(script.epubPath, 'send', call);
+    const built = await (waiting === 'building' ? track(script.epubPath, kindle, exporting) : exporting);
 
     // Nothing is copied when nothing was built: the export's refusal is the
     // whole answer, and asking `send` to move a file that does not exist
@@ -946,6 +1334,7 @@ async function sendTo(device) {
       say(statusFor(...outcomeFor(built, null, device)));
       return;
     }
+    if (waiting === 'building') builtNow(script.epubPath);
 
     say(statusFor('copying', { device }));
     const sent = await onBook(script.epubPath, 'send', argv.send(built.path, device.id));
@@ -960,8 +1349,8 @@ async function sendTo(device) {
     artifactNote.hidden = what === '';
   } catch (err) {
     // The engine's own sentence, verbatim. Every one of them is already
-    // written for a person — "no reader is connected — plug one in over USB
-    // and try again", "reMarkable accepts PDF and EPUB, not .mobi." — and
+    // written for a person ("no reader is connected: plug one in over USB
+    // and try again", "reMarkable accepts PDF and EPUB, not .mobi.") and
     // this window is not better placed to say it.
     if (!stale()) say(statusFor('failed', { device, detail: err.message }));
   } finally {
@@ -969,6 +1358,8 @@ async function sendTo(device) {
     for (const button of buttons()) button.disabled = false;
     kfxRedraw();
     if (worked && !stale()) repoll();
+    // A check that landed meanwhile was refused as busy; look again.
+    if (!stale()) maybeBuildAhead();
   }
 }
 
@@ -1009,19 +1400,24 @@ async function perform(route) {
     } else if (how === 'save-kindle') {
       // The Kindle file is built (or found fresh) first, with this script's
       // own settings: which rung it reaches (KFX, AZW3, MOBI) is what names
-      // the file in the Save box.
+      // the file in the Save box. Behind a build already out for the book it
+      // waits for that build rather than starting another, and the build
+      // line stays up until it is done; unless the check said the file is
+      // current, its own export shows that line too.
       await ensureSettings();
       if (stale()) return;
       const settings = { fountain: script.fountainPath, optionsJson: optionsJsonFor(script) };
-      say(statusFor('building-kindle'));
-      const built = await onBook(script.epubPath, 'copy',
+      say(statusFor('idle'));
+      const exporting = onKindleFile(script.epubPath,
         argv.export(script.epubPath, { forFormat: 'kindle', ...settings }));
+      const built = await (mayBuild(kindle) ? track(script.epubPath, kindle, exporting) : exporting);
       if (stale()) return;
       const [phase, file] = kindleFileFrom(built);
       if (phase === 'failed') {
         say(statusFor(phase, file));
         return;
       }
+      builtNow(script.epubPath);
       // The wait is over; the Save box is the next thing on screen.
       say(statusFor('idle'));
       const out = await saveDialog({
@@ -1039,7 +1435,11 @@ async function perform(route) {
       say(statusFor('opening', { route }));
     }
     const call = how === 'setup' ? argv.emailSetup() : argv.route(route.key, script.epubPath, options);
-    const answer = await (readsTheBook(how) ? onBook(script.epubPath, 'copy', call) : runEngine(call));
+    // The save of a Kindle file exports it again (the engine finds it
+    // current), so it keeps the Kindle file's line and turn; Save the EPUB
+    // only reads the book.
+    const answer = await (how === 'save-kindle' ? onKindleFile(script.epubPath, call)
+      : readsTheBook(how) ? onBook(script.epubPath, 'copy', call) : runEngine(call));
     if (stale()) return;
     const [phase, detail] = routeNoteFrom(answer);
     say(statusFor(phase, detail));
@@ -1057,6 +1457,9 @@ async function perform(route) {
     for (const button of buttons()) button.disabled = false;
     kfxRedraw();
     if (worked && !stale()) repoll();
+    // A check that landed meanwhile (a Save box was up) was refused as busy,
+    // and a cancelled save asks for no new list: look again now.
+    if (!stale()) maybeBuildAhead();
   }
 }
 

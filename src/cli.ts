@@ -32,7 +32,7 @@ import { kfxPossible } from './export/kfx-setup';
 import { routeFacts } from './export/route-facts';
 import type { ListDevicesOptions } from './device/list';
 
-const USAGE = `screepub — screenplay PDF → reflowable EPUB3 (via Fountain)
+const USAGE = `screepub: screenplay PDF → reflowable EPUB3 (via Fountain)
 
 Usage:
   screepub <input.pdf | input.fountain> [options]
@@ -44,8 +44,8 @@ and the scanned-PDF and not-a-screenplay guards are PDF-only. See the
 README's "Fountain input" section.
 
 A script's saved settings are used by the conversion that finds them: if
-<script>.screepub.json sits beside the input — or in the script's library
-folder, under --library — this run renders with it and says so on stderr.
+<script>.screepub.json sits beside the input (or in the script's library
+folder, under --library), this run renders with it and says so on stderr.
 --options/--options-json override it knob by knob. Write one with the
 settings command. The first --library conversion of a PDF with none saves
 the settings it started from as the script's own, so a later change to the
@@ -62,7 +62,7 @@ Options:
   -o, --output <file>    EPUB output path (default: <input>.epub)
   --library              write into the library folder instead of beside the
                          input: <library>/<stem>/<stem>.epub. The library is
-                         <Documents>/Screepub — ~/Documents on macOS and
+                         <Documents>/Screepub: ~/Documents on macOS and
                          Windows, and XDG_DOCUMENTS_DIR (else ~/Documents)
                          elsewhere; a folder chosen with screepub app-settings
                          overrides that, and $SCREEPUB_LIBRARY overrides both
@@ -96,7 +96,8 @@ Commands:
   screepub reveal <file> [--json]           show a file in the system's file manager
   screepub kfx-status [--json]              can this computer make KFX for a Kindle?
   screepub kfx-install [--json]             add the KFX plugin to Calibre (online)
-  screepub routes <file.epub> [--json]      every way this book can leave, best first
+  screepub routes <file.epub> [--quick] [--json]
+                                            every way this book can leave, best first
   screepub route <key> <file.epub> [--out <path>] [--json]
                                             send it to Apple Books, Amazon, Mail, or save a copy
   screepub update-decision --offered <v> --current <v> [--json]
@@ -113,7 +114,7 @@ Each verb has its own --help.
 // --device, --json and -h and nothing else; printing the conversion usage here
 // offered -o, --mobi, --options and --progress, every one of which the verb
 // parser rejects as an unknown flag.
-const DEVICES_USAGE = `screepub devices — list every connected e-reader
+const DEVICES_USAGE = `screepub devices: list every connected e-reader
 
 Usage:
   screepub devices [--json]
@@ -126,7 +127,7 @@ Options:
   -h, --help             show this help
 `;
 
-const SEND_USAGE = `screepub send — send an existing file to a connected reader
+const SEND_USAGE = `screepub send: send an existing file to a connected reader
 
 Usage:
   screepub send <file> [--device <id>] [--json]
@@ -142,7 +143,7 @@ Options:
   -h, --help             show this help
 `;
 
-const SETTINGS_USAGE = `screepub settings — this script's own formatting
+const SETTINGS_USAGE = `screepub settings: this script's own formatting
 
 Usage:
   screepub settings <file.fountain> [--set <json>] [--json]
@@ -159,10 +160,11 @@ Options:
   -h, --help             show this help
 `;
 
-const EXPORT_USAGE = `screepub export — the file you would put on a reader
+const EXPORT_USAGE = `screepub export: the file you would put on a reader
 
 Usage:
   screepub export <file.epub> [--for kindle|epub] [--fountain <f>] [--out <path>] [--json]
+  screepub export <file.epub> --for kindle --check [--json]
 
 export never sends: it produces (or reuses) the right file, and
 \`screepub send\` moves it. Kindle climbs KFX → AZW3 → MOBI, taking the best
@@ -174,6 +176,10 @@ Options:
   --options-json <json>  this script's settings, so a rebuild keeps them
   --out <path>           also copy the result to this absolute path (its
                          extension must match the file produced)
+  --check                build nothing: say which file this computer makes,
+                         whether the one beside the book is current, what
+                         builds it (builtBy: calibre or screepub), and when
+                         the book was last written (bookDate, in ms)
   --json                 machine-readable result on stdout (for the app)
   -h, --help             show this help
 `;
@@ -259,7 +265,7 @@ Options:
 const ROUTES_USAGE = `screepub routes: every way this book can leave, best first
 
 Usage:
-  screepub routes <file.epub> [--json]
+  screepub routes <file.epub> [--quick] [--json]
 
 Lists every route: readers plugged in over USB, a docked reMarkable, Apple
 Books, Amazon's Send to Kindle, email, and saving a copy. The route chosen
@@ -267,7 +273,13 @@ last time is marked, even while it cannot fire; otherwise the first one that
 can. A route that cannot fire right now is still listed, with what would fix
 it. Reads the app settings file, never writes it.
 
+Looking for a reMarkable means asking its USB web interface, which takes a
+second and a half to give up when no tablet is docked. --quick does not ask:
+its reMarkable row says it is still checking, and a second call without
+--quick fills it in. Readers that mount as a drive are found either way.
+
 Options:
+  --quick                answer at once, without looking for a reMarkable
   --json                 machine-readable result on stdout (for the app)
   -h, --help             show this help
 `;
@@ -307,7 +319,7 @@ Options:
   -h, --help             show this help
 `;
 
-const UPDATE_DECISION_USAGE = `screepub update-decision — should this update be offered?
+const UPDATE_DECISION_USAGE = `screepub update-decision: should this update be offered?
 
 Usage:
   screepub update-decision --offered <version> --current <version> [--json]
@@ -329,7 +341,7 @@ Options:
   -h, --help           show this help
 `;
 
-const UPDATE_SHOULD_CHECK_USAGE = `screepub update-should-check — may a check be made right now?
+const UPDATE_SHOULD_CHECK_USAGE = `screepub update-should-check: may a check be made right now?
 
 Usage:
   screepub update-should-check [--opted-in] [--last-checked <epoch-ms>] [--json]
@@ -455,7 +467,7 @@ function verbHint(input: string): string {
   if (extname(input) !== '') return '';
   if (!(VERBS as readonly string[]).includes(input)) return '';
   if (existsSync(input)) return '';
-  return ` — did you mean \`screepub ${input}\`? the verb must come first`;
+  return `. Did you mean \`screepub ${input}\`? The verb must come first`;
 }
 
 function parseCliArgs() {
@@ -511,6 +523,8 @@ function parseVerbArgs(args: string[]) {
       current: { type: 'string' },
       'opted-in': { type: 'boolean', default: false },
       'last-checked': { type: 'string' },
+      quick: { type: 'boolean', default: false },
+      check: { type: 'boolean', default: false },
       json: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -536,14 +550,14 @@ const VERB_FLAGS: Record<Verb, readonly VerbFlag[]> = {
   devices: [],
   send: ['--device'],
   settings: ['--set'],
-  export: ['--for', '--fountain', '--options-json', '--out'],
+  export: ['--for', '--fountain', '--options-json', '--out', '--check'],
   'update-decision': ['--offered', '--current'],
   'update-should-check': ['--opted-in', '--last-checked'],
   'kfx-status': [],
   'kfx-install': [],
   'app-settings': ['--set'],
   reveal: [],
-  routes: [],
+  routes: ['--quick'],
   // For some keys only: routeCommand refuses each for every key that cannot
   // act on it.
   route: ['--out', '--fountain', '--options-json'],
@@ -553,7 +567,9 @@ const VERB_FLAGS: Record<Verb, readonly VerbFlag[]> = {
  * exactly as it was when each verb refused its own: the update verbs' flags
  * first, except on those two verbs, which name the other one's flags last. */
 const UPDATE_FLAGS: readonly VerbFlag[] = ['--offered', '--current', '--last-checked', '--opted-in'];
-const OTHER_FLAGS: readonly VerbFlag[] = ['--out', '--device', '--set', '--for', '--fountain', '--options-json'];
+const OTHER_FLAGS: readonly VerbFlag[] = [
+  '--out', '--device', '--set', '--for', '--fountain', '--options-json', '--quick', '--check',
+];
 
 /** The refusal for the first flag given that `verb` does not act on, naming
  *  the verbs that do, in VERBS order; null when every flag given is the
@@ -566,7 +582,7 @@ function foreignFlagRefusal(verb: Verb, values: VerbValues): string | null {
     // --opted-in is a boolean that defaults to false: false is "not given".
     if (value === undefined || value === false || VERB_FLAGS[verb].includes(flag)) continue;
     const owners = VERBS.filter((v) => VERB_FLAGS[v].includes(flag)).join(' and ');
-    const aside = verb === 'devices' && flag === '--device' ? ' — it lists every reader' : '';
+    const aside = verb === 'devices' && flag === '--device' ? ': it lists every reader' : '';
     return `${verb} takes no ${flag}${aside} (${flag} belongs to ${owners})`;
   }
   return null;
@@ -611,7 +627,7 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
         console.log('no devices connected');
         return;
       }
-      for (const d of devices) console.log(`${d.name} (${d.kind}) — ${d.id}`);
+      for (const d of devices) console.log(`${d.name} (${d.kind}): ${d.id}`);
       return;
     }
 
@@ -697,7 +713,7 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
         console.log(JSON.stringify({ ok: true, ...result }));
         return;
       }
-      console.log(`settings for ${basename(positionals[0])} — ${result.sidecar}`);
+      console.log(`settings for ${basename(positionals[0])}: ${result.sidecar}`);
       for (const [key, value] of Object.entries(result.settings)) {
         console.log(`  ${key}: ${value}`);
       }
@@ -714,6 +730,7 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
         fountain: values.fountain,
         optionsJson: values['options-json'],
         out: values.out,
+        check: values.check,
       });
       if (jsonMode) {
         console.log(JSON.stringify({ ok: true, ...result }));
@@ -721,6 +738,9 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       }
       for (const stage of result.stages) console.log(`  ${stage}`);
       console.log(`${result.label}\n  ${result.path}`);
+      if (result.fresh !== undefined) {
+        console.log(result.fresh ? '  built, and current' : '  not built yet, or older than the book');
+      }
       return;
     }
 
@@ -770,8 +790,10 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       if (positionals.length !== 1) {
         fail({ code: 'usage', message: 'expected exactly one .epub (see --help)' });
       }
+      // --quick leaves the reMarkable probe out, and says so on its row:
+      // the Send page draws this at once, then asks again in full.
       const answer = await routesCommand(positionals[0], {
-        facts: () => routeFacts({}, deviceSeams()),
+        facts: () => routeFacts({}, { ...deviceSeams(), skipRemarkable: values.quick }),
       });
       if (jsonMode) {
         console.log(JSON.stringify({ ok: true, ...answer }));
@@ -829,7 +851,7 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
     console.log(
       sent.uploaded
         ? `sent ${basename(positionals[0])} to ${sent.device.name}`
-        : `sent ${basename(positionals[0])} to ${sent.device.name} — ${sent.destination}`,
+        : `sent ${basename(positionals[0])} to ${sent.device.name}: ${sent.destination}`,
     );
   } catch (err) {
     if (err instanceof CliError) fail(err.toJson());
@@ -912,7 +934,7 @@ async function main() {
   if (values.library && values.output !== undefined) {
     fail({
       code: 'usage',
-      message: 'pass --library or -o, not both — -o already says where the output goes',
+      message: 'pass --library or -o, not both: -o already says where the output goes',
     });
   }
   let format: Record<string, unknown> | undefined;
@@ -1019,14 +1041,14 @@ async function main() {
       // shrugging SILENTLY is how "why does this look different from last
       // time" goes unanswered.
       process.stderr.write(
-        `screepub: ignoring ${read.path} — it is not a settings object\n`,
+        `screepub: ignoring ${read.path}, which is not a settings object\n`,
       );
       continue;
     }
     settings = read.settings;
     settingsPath = read.path;
     process.stderr.write(
-      `screepub: using this script's saved settings — ${read.path}` +
+      `screepub: using this script's saved settings in ${read.path}` +
         `${format ? ' (the options you passed override them)' : ''}\n`,
     );
     break;
@@ -1069,7 +1091,7 @@ async function main() {
       fail({
         code: 'unsupported-type',
         message:
-          `unsupported input type "${ext}" — expected .pdf, .fountain, or .txt` +
+          `unsupported input type "${ext}": expected .pdf, .fountain, or .txt` +
           verbHint(input),
       });
     }
@@ -1109,7 +1131,7 @@ async function main() {
       // person who can fix. "EACCES … mkdir '/home/ada/Documents/Screepub'"
       // is the whole of the fix; "cannot open the library folder" alone
       // would send them looking for a location we never named.
-      fail({ code: 'library', message: `cannot open the library folder — ${errorMessage(err)}` });
+      fail({ code: 'library', message: `cannot open the library folder: ${errorMessage(err)}` });
     }
   }
   const epubPath = values.output ?? `${inputStem}.epub`;
@@ -1237,7 +1259,7 @@ async function main() {
     return;
   }
 
-  console.log(`${result.meta.title}${result.meta.author ? ` — ${result.meta.author}` : ''}`);
+  console.log(`${result.meta.title}${result.meta.author ? `, by ${result.meta.author}` : ''}`);
   if (sp) {
     const top = sp.characters
       .slice(0, 5)

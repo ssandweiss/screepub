@@ -67,6 +67,10 @@ export interface RouteFacts {
   platform: string;
   /** listDevices(), a docked reMarkable included (kind 'remarkable'). */
   devices: ConnectedDevice[];
+  /** False when the reMarkable was not looked for (`routes --quick`), so its
+   *  absence from `devices` means "not known yet" rather than "not docked".
+   *  Absent, or true, when it was. */
+  remarkableChecked?: boolean;
   booksApp: boolean;
   sendToKindleApp: boolean;
   appleMailDefault: boolean;
@@ -82,6 +86,7 @@ const DEVICE_DETAIL = 'over USB, offline, nothing leaves this computer';
 const PLUG_IN = 'plug in over USB to send';
 const TOLINO_ON_WINDOWS = 'cannot be found on Windows: a Windows drive carries no volume name';
 const REMARKABLE = { title: 'reMarkable', button: 'Upload to reMarkable' } as const;
+const REMARKABLE_CHECKING = 'checking whether one is docked…';
 const APPLE_BOOKS = { title: 'Apple Books', button: 'Add to Apple Books' } as const;
 const EMAIL = { title: 'Send to Kindle email', button: 'Send to Kindle email' } as const;
 
@@ -174,7 +179,10 @@ export function routes(facts: RouteFacts): Route[] {
     );
   }
   if (!remarkable) {
-    list.push(dimmed('remarkable', REMARKABLE.title, 'dock over USB to send', REMARKABLE.button, 'connect'));
+    // Not looked for yet is not the same as not docked: a tablet that is
+    // docked must not be told to dock while the full answer is on its way.
+    const detail = facts.remarkableChecked === false ? REMARKABLE_CHECKING : 'dock over USB to send';
+    list.push(dimmed('remarkable', REMARKABLE.title, detail, REMARKABLE.button, 'connect'));
   }
   // On a Mac with no Books.app the row is hidden, as the Swift app hid it:
   // structural absence on the one platform that has it is not a fix a person

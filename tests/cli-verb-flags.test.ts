@@ -43,6 +43,8 @@ const FLAGS: Record<string, string[]> = {
   '--current': ['--current', '1.0.0'],
   '--opted-in': ['--opted-in'],
   '--last-checked': ['--last-checked', '5'],
+  '--quick': ['--quick'],
+  '--check': ['--check'],
 };
 
 /** What each verb owns, and a well-formed set of positionals for it. */
@@ -50,14 +52,14 @@ const VERB_SHAPE: Record<Verb, { own: string[]; positionals: string[] }> = {
   devices: { own: [], positionals: [] },
   send: { own: ['--device'], positionals: ['/nowhere/x.epub'] },
   settings: { own: ['--set'], positionals: ['/nowhere/x.fountain'] },
-  export: { own: ['--for', '--fountain', '--options-json', '--out'], positionals: ['/nowhere/x.epub'] },
+  export: { own: ['--for', '--fountain', '--options-json', '--out', '--check'], positionals: ['/nowhere/x.epub'] },
   'update-decision': { own: ['--offered', '--current'], positionals: [] },
   'update-should-check': { own: ['--opted-in', '--last-checked'], positionals: [] },
   'kfx-status': { own: [], positionals: [] },
   'kfx-install': { own: [], positionals: [] },
   'app-settings': { own: ['--set'], positionals: [] },
   reveal: { own: [], positionals: ['/nowhere/x.epub'] },
-  routes: { own: [], positionals: ['/nowhere/x.epub'] },
+  routes: { own: ['--quick'], positionals: ['/nowhere/x.epub'] },
   route: { own: ['--out', '--fountain', '--options-json'], positionals: ['save-kindle', '/nowhere/x.epub'] },
 };
 

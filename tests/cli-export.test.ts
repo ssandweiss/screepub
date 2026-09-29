@@ -541,6 +541,103 @@ describe('exportCommand: the script\'s own sidecar, when --fountain names one', 
   });
 });
 
+describe('exportCommand --check: which Kindle file, and whether it is built, without building it', () => {
+  const never = async (): Promise<string> => {
+    throw new Error('the ladder was not expected to run');
+  };
+  const older = (path: string) => {
+    const at = new Date(Date.now() - 60_000);
+    utimesSync(path, at, at);
+  };
+
+  test('KFX ready and no .kfx yet: kfx, not fresh, built by Calibre, and nothing is built', async () => {
+    const result = await exportCommand(
+      { epub, for: 'kindle', check: true },
+      { calibreAvailable: () => true, kfxStatus: async () => kfxReadyStatus, freshKindleArtifact: never },
+    );
+    expect(result).toMatchObject({
+      path: join(dir, 'Script.kfx'), format: 'kindle', extension: 'kfx', fresh: false, builtBy: 'calibre',
+      stages: [], bookDate: statSync(epub).mtimeMs,
+    });
+    expect(result.label).toContain('best quality');
+    expect(existsSync(join(dir, 'Script.kfx'))).toBe(false);
+  });
+
+  test('Calibre alone, with an .azw3 newer than the book: azw3, fresh', async () => {
+    older(epub);
+    writeFileSync(join(dir, 'Script.azw3'), 'azw3');
+    const result = await exportCommand(
+      { epub, for: 'kindle', check: true },
+      { calibreAvailable: () => true, kfxStatus: async () => calibreOnlyStatus, freshKindleArtifact: never },
+    );
+    expect(result).toMatchObject({ extension: 'azw3', fresh: true, builtBy: 'calibre' });
+  });
+
+  test('no toolchain: the engine’s own mobi, which Screepub builds itself', async () => {
+    const result = await exportCommand(
+      { epub, for: 'kindle', check: true, fountain },
+      { calibreAvailable: () => false, kfxStatus: async () => noToolchainStatus, freshKindleArtifact: never },
+    );
+    expect(result).toMatchObject({ extension: 'mobi', fresh: false, builtBy: 'screepub' });
+    expect(existsSync(join(dir, 'Script.mobi'))).toBe(false);
+  });
+
+  test('an .azw3 older than the book is not fresh', async () => {
+    writeFileSync(join(dir, 'Script.azw3'), 'azw3');
+    older(join(dir, 'Script.azw3'));
+    const result = await exportCommand(
+      { epub, for: 'kindle', check: true },
+      { calibreAvailable: () => true, kfxStatus: async () => calibreOnlyStatus, freshKindleArtifact: never },
+    );
+    expect(result.fresh).toBe(false);
+  });
+
+  test('the EPUB is the book itself: always there and current, and nothing builds it', async () => {
+    const result = await exportCommand({ epub, for: 'epub', check: true }, { calibreAvailable: () => false });
+    expect(result).toMatchObject({ path: epub, extension: 'epub', fresh: true });
+    expect(result.builtBy).toBeUndefined();
+  });
+
+  test('--check writes nothing, so --out beside it is refused before anything is probed', async () => {
+    let probed = 0;
+    const deps = {
+      calibreAvailable: () => { probed += 1; return true; },
+      kfxStatus: async () => { probed += 1; return kfxReadyStatus; },
+      freshKindleArtifact: never,
+    };
+    // Absolute or not: the refusal is about --check taking no --out at all,
+    // not about the shape of a path it would never use.
+    for (const out of [join(dir, 'Copy.kfx'), 'Copy.kfx']) {
+      const err = await exportCommand({ epub, for: 'kindle', check: true, out }, deps)
+        .catch((e: unknown) => e as { code?: string; message?: string });
+      expect(`${out}: ${(err as { code?: string }).code}`).toBe(`${out}: usage`);
+      expect((err as { message?: string }).message).toContain('--check');
+    }
+    expect(probed).toBe(0);
+  });
+
+  test('through the CLI: one object, the extension this machine makes, and no file beside the book', () => {
+    const before = readdirSync(dir).sort();
+    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'export', epub, '--for', 'kindle', '--check', '--json'], {
+      env: process.env,
+    });
+    const lines = proc.stdout.toString().trim().split('\n');
+    expect(lines).toHaveLength(1);
+    const answer = JSON.parse(lines[0]!);
+    expect(answer.ok).toBe(true);
+    expect(['kfx', 'azw3', 'mobi']).toContain(answer.extension);
+    expect(typeof answer.fresh).toBe('boolean');
+    expect(answer.builtBy).toBe(answer.extension === 'mobi' ? 'screepub' : 'calibre');
+    expect(answer.bookDate).toBe(statSync(epub).mtimeMs);
+    expect(readdirSync(dir).sort()).toEqual(before);
+  });
+
+  test('export --help names --check', () => {
+    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'export', '--help']);
+    expect(proc.stdout.toString()).toContain('--check');
+  });
+});
+
 describe('screepub export (through the CLI)', () => {
   test('--json prints one object with the path and the available formats', () => {
     const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'export', epub, '--for', 'epub', '--json']);

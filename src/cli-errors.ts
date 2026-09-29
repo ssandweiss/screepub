@@ -44,13 +44,13 @@ export function mapConversionError(err: unknown): JsonError | null {
   if (name === 'PasswordException') {
     return {
       code: 'password',
-      message: 'this PDF is password-protected — remove the password first',
+      message: 'this PDF is password-protected: remove the password first',
     };
   }
   if (name === 'InvalidPDFException') {
     return {
       code: 'unreadable',
-      message: 'this file is not a readable PDF — it may be corrupt or mislabeled',
+      message: 'this file is not a readable PDF. It may be corrupt or mislabeled',
     };
   }
   const fsCode = (err as NodeJS.ErrnoException)?.code;

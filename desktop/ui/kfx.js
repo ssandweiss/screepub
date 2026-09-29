@@ -89,9 +89,10 @@ export function showSetup(setup, devices, justInstalled, installing = false) {
   return !setup.ready;
 }
 
-/** What stands to the right of one step. `busy` is true while a send or an
- *  install is running: the plugin must not be swapped under a running KFX
- *  conversion. Opening a web page is harmless at any time. */
+/** What stands to the right of one step. `busy` is true while a send, a
+ *  Kindle file build (send.js starts one as the page opens) or an install is
+ *  running: the plugin must not be swapped under a running KFX conversion.
+ *  Opening a web page is harmless at any time. */
 export function controlFor(step, busy) {
   const fix = step.fix;
   if (fix === null) return { type: 'status', text: INSTALLED };

@@ -412,7 +412,11 @@
   background: var(--paper);
   /* The hairline reads as the edge of the binding the panel came out of. */
   border-right: 1px solid var(--hole);
-  padding: 0 var(--space-4) var(--space-3) var(--space-3);
+  /* The same room at the top as at the bottom: with none, the count sat
+   * hard against the panel's top edge (QA, 0.7.3). The bottom's is kept
+   * when scrolled to the end, in WebKit as in Chrome (measured 2026-09-28
+   * in a WKWebView: 13px of padding left 13px below the last entry). */
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-3);
   /* Shut. Opacity is what actually hides it; the translate is only the
    * motion. A translate alone cannot be trusted to clear the window, because
    * the margin GROWS with the window: on a wide display a panel shifted by
@@ -771,6 +775,35 @@
   color: var(--ink-muted);
   margin-top: var(--space-1);
 }
+/* A Kindle file building, started as the page opened or by a press: the
+ * line, and under it the Convert page's track with a sweep in place of a
+ * fill, because the engine names no percent while Kindle Previewer works.
+ * It keeps moving so a half-minute wait never looks stuck. */
+.kindle-build { margin-top: var(--space-5); }
+.kindle-build .caption { margin: 0 0 var(--space-2); }
+.kindle-build .track { width: 220px; max-width: 70%; }
+.build-sweep {
+  position: absolute; inset: 0 auto 0 0; width: 30%;
+  background: var(--brass);
+  animation: build-sweep 1.4s ease-in-out infinite;
+}
+@keyframes build-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(334%); }
+}
+/* Still moving, but not across: the whole track breathes instead. */
+@keyframes build-breathe {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .build-sweep {
+    width: 100%;
+    transform: none;
+    animation: build-breathe 1.6s ease-in-out infinite alternate;
+  }
+}
+
 /* The KFX checklist, under the send status: its own section, set apart. */
 .kfx-setup { margin-top: var(--space-6); }
 

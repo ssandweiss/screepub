@@ -241,6 +241,8 @@ describe('the engine contract lives in exactly one file', () => {
       appSettingsSet: argv.appSettings('{"libraryPath":"/abs"}'),
       reveal: argv.reveal('/s/script.epub'),
       routes: argv.routes('/s/script.epub'),
+      routesQuick: argv.routes('/s/script.epub', { quick: true }),
+      kindleCheck: argv.kindleCheck('/s/script.epub'),
       route: argv.route('apple-books', '/s/script.epub'),
       routeSaveEpub: argv.route('save-epub', '/s/script.epub', { out: '/s/out.epub' }),
       routeSaveKindle: argv.route('save-kindle', '/s/script.epub', {
@@ -251,7 +253,7 @@ describe('the engine contract lives in exactly one file', () => {
     // Every builder the interface promises is exercised above.
     expect(Object.keys(argv).sort()).toEqual(
       ['appSettings', 'convert', 'devices', 'emailSetup', 'export', 'kfxInstall', 'kfxStatus',
-        'reconvert', 'reveal', 'route', 'routes', 'send', 'settings', 'version'].sort(),
+        'kindleCheck', 'reconvert', 'reveal', 'route', 'routes', 'send', 'settings', 'version'].sort(),
     );
     for (const [name, args] of Object.entries(built)) {
       expect(`${name} has --json: ${args.includes('--json')}`).toBe(`${name} has --json: true`);
@@ -261,6 +263,12 @@ describe('the engine contract lives in exactly one file', () => {
         `${name} args: `,
       );
     }
+  });
+
+  test('the Kindle file check is export for kindle with --check, and nothing else', async () => {
+    const { argv } = await import(join(UI, 'app.js'));
+    expect(argv.kindleCheck('/s/script.epub'))
+      .toEqual(['export', '/s/script.epub', '--json', '--for', 'kindle', '--check']);
   });
 
   test('the KFX builders are exactly the two verbs, with nothing else on them', async () => {
@@ -284,6 +292,8 @@ describe('the engine contract lives in exactly one file', () => {
     // is exactly what a wrong edit leaves behind.
     const { argv } = await import(join(UI, 'app.js'));
     expect(argv.routes('/s/script.epub')).toEqual(['routes', '/s/script.epub', '--json']);
+    expect(argv.routes('/s/script.epub', { quick: true }))
+      .toEqual(['routes', '/s/script.epub', '--json', '--quick']);
 
     expect(argv.route('apple-books', '/s/script.epub')).toEqual(
       ['route', 'apple-books', '/s/script.epub', '--json'],
@@ -982,7 +992,7 @@ describe('what the Convert surface decides', () => {
       // The engine's sentence is written for a terminal and is right there.
       // In the window it lands directly above a Convert anyway button that
       // does exactly what it asks for.
-      const said = 'No scene headings and no dialogue found — this does not look like a '
+      const said = 'No scene headings and no dialogue found: this does not look like a '
         + 'screenplay. Pass --force to convert it anyway.';
       const shown = convert.failureFor({ code: 'not-screenplay', message: said });
       // Asserted against the value it CHANGED FROM, so a function that did
@@ -990,7 +1000,7 @@ describe('what the Convert surface decides', () => {
       // does not, and what is left is the diagnosis, whole and unedited.
       expect(said).toContain('Pass --force');
       expect(shown.message).toBe(
-        'No scene headings and no dialogue found — this does not look like a screenplay.',
+        'No scene headings and no dialogue found: this does not look like a screenplay.',
       );
       expect(shown.canForce).toBe(true);
       // And the button is still there: the remedy did not go away, it moved.
@@ -2069,9 +2079,9 @@ describe('what runEngine does with the answer it is handed', () => {
   });
 
   test('the engine’s own words come back unedited', async () => {
-    // The refusal a reader sees is the engine's sentence, em dash and all.
+    // The refusal a reader sees is the engine's sentence, accents and all.
     // runEngine must hand it over exactly, not normalise or re-encode it.
-    const message = 'No scene headings — this does not look like a screenplay. é 日本語';
+    const message = 'No scene headings: this does not look like a screenplay. é 日本語 ’';
     const json = JSON.stringify({ ok: false, error: { code: 'not-screenplay', message } });
     const parsed = await answering(json);
     expect((parsed as { error: { message: string } }).error.message).toBe(message);
@@ -2311,6 +2321,35 @@ describe('the window knows when the engine is working, and can restart', () => {
       expect(app.engineBusy()).toBe(false);
       expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
       await call;
+      expect(app.engineBusy()).toBe(false);
+    } finally {
+      delete win.window;
+    }
+  });
+
+  test('a Kindle file check is never counted; the build it can lead to is', async () => {
+    // The check reads two file dates and asks Calibre what is installed; the
+    // Send page asks it on every visit and every time the window gets the
+    // focus back, never mid-job. The export that builds the file is a job,
+    // and a restart must wait for it, whether a press started it or the page
+    // started it in the background.
+    const app = await import(join(UI, 'app.js'));
+    await app.whenIdle();
+    win.window = {
+      __TAURI__: {
+        core: { invoke: () => new Promise((resolve) => setTimeout(() => resolve('{"ok":true}'), 10)) },
+      },
+    };
+    try {
+      const check = app.runEngine(app.argv.kindleCheck('/s/script.epub'));
+      expect(app.engineBusy()).toBe(false);
+      expect(Bun.peek.status(app.whenIdle())).toBe('fulfilled');
+      await check;
+
+      const build = app.runEngine(app.argv.export('/s/script.epub', { forFormat: 'kindle' }));
+      expect(app.engineBusy()).toBe(true);
+      expect(Bun.peek.status(app.whenIdle())).toBe('pending');
+      await build;
       expect(app.engineBusy()).toBe(false);
     } finally {
       delete win.window;
@@ -3510,12 +3549,31 @@ describe('the Tune surface', () => {
     expect(tune.statusFor('waiting', 'send')).toEqual({ line: 'Waiting for the send to finish…', bad: false });
     expect(tune.statusFor('waiting', 'copy').line).toBe('Waiting for the copy to finish…');
     expect(tune.statusFor('waiting', 'convert').line).toBe('Waiting for the conversion to finish…');
+    // The Send page builds the Kindle file on its own when it opens; a save
+    // waiting on that says so rather than "in a moment".
+    expect(tune.statusFor('waiting', 'kindle').line).toBe('Waiting for the Kindle file to finish building…');
+    expect(tune.statusFor('waiting', 'kindle-mobi').line).toBe('Waiting for the Kindle file to finish building…');
+    // Readers run side by side, so a save can wait on several at once
+    // (book-queue.js's holders()): it names the one that takes longest.
+    expect(tune.statusFor('waiting', ['copy', 'kindle']).line).toBe('Waiting for the Kindle file to finish building…');
+    expect(tune.statusFor('waiting', ['check', 'send']).line).toBe('Waiting for the send to finish…');
+    expect(tune.statusFor('waiting', ['check']).line).toBe(tune.STATUS.pending);
+    expect(tune.statusFor('waiting', []).line).toBe(tune.STATUS.pending);
     expect(tune.statusFor('waiting', 'save').line).toBe(tune.STATUS.pending);
     expect(tune.statusFor('waiting', 'anything else').line).toBe(tune.STATUS.pending);
     for (const line of Object.values(tune.WAITING) as string[]) {
       expect(line).not.toContain('\u2014');
       expect(line).not.toContain('Saved');
     }
+  });
+
+  test('every turn this page can wait on has words, except the two that take a moment', async () => {
+    // book-queue.js's table is the list of labels; a save that waits names
+    // what it waits for, and "in a moment" is left for this page's own
+    // earlier save and the Send page's date check, which are both quick.
+    const { TURNS } = await import(join(UI, 'book-queue.js'));
+    const unnamed = Object.keys(TURNS).filter((label) => tune.WAITING[label] === undefined).sort();
+    expect(unnamed).toEqual(['check', 'save']);
   });
 
   test('the surface never says "saved" about something that was not', () => {
@@ -3545,8 +3603,11 @@ describe('the Tune surface', () => {
     const spacing = tune.knobFor('elementSpacingEm');
     expect(tune.displayValue(spacing, 1)).toBe('1.0 em');
     expect(tune.displayValue(spacing, 1.25)).toBe('1.3 em');
-    expect(tune.displayValue(spacing, undefined)).toBe('—');
-    expect(tune.displayValue(spacing, null)).toBe('—');
+    // Said in words: a dash standing in for a value is the one mark the
+    // owner keeps out of every line the window shows.
+    expect(tune.displayValue(spacing, undefined)).toBe('not set');
+    expect(tune.displayValue(spacing, null)).toBe('not set');
+    expect(tune.NOT_SET).toBe('not set');
   });
 
   test('two settings objects are compared by the eighteen, not by identity', () => {
@@ -4411,6 +4472,35 @@ describe('the Tune surface: app defaults for new scripts', () => {
     await tick();
   });
 
+  test('a save made while the Send page builds the Kindle file waits for the build, and says so', async () => {
+    // The build only READS the book, so Save the EPUB runs beside it; a save
+    // here REWRITES the book, so it waits for the build to finish reading it,
+    // and a KFX build is about half a minute, not "a moment".
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const { inTurn } = await import(join(UI, 'book-queue.js'));
+    const { pane, script } = await mountReady(engine);
+    (script as { epubPath: string | null }).epubPath = '/scripts/demo.epub';
+    const status = () => pane.find('tune-status')?.textContent ?? '';
+    let built: (value: string) => void = () => {};
+    const building = inTurn('/scripts/demo.epub', 'kindle',
+      () => new Promise<string>((resolve) => { built = resolve; }));
+    const before = engine.calls.length;
+    moveKnob(pane, 'dialogueSideMarginPct', '27');
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    expect(engine.calls.length).toBe(before);
+    expect(status()).toBe('Waiting for the Kindle file to finish building…');
+    built('built');
+    expect(await building).toBe('built');
+    await tick();
+    expect(engine.calls.length).toBe(before + 1);
+    expect(engine.calls[before].args[0]).toBe('settings');
+    expect(status()).toBe(tune.STATUS.saving);
+    engine.resolve(before, settingsAnswer({ settings: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 27 } }));
+    await tick();
+    engine.resolve(before + 1, { ok: false, error: { message: 'not what this test is about' } });
+    await tick();
+  });
+
   test('another book’s turn does not hold this script’s save', async () => {
     // One queue per book: the old script's minute-long KFX export must not
     // hold the new script's saves, and an engine call that never answers
@@ -4896,12 +4986,25 @@ describe('the Tune surface: app defaults for new scripts', () => {
 });
 
 describe('turns on a book: book-queue.js', () => {
-  // One queue per library EPUB. A module of its own per test: the queues
-  // and the registered hooks live as long as the module does.
+  // One queue per library EPUB, readers and writers. A call that only READS
+  // the book (a Kindle file built beside it, a copy, a send, the check) runs
+  // beside other readers; one that WRITES it (a Settings save and its
+  // rebuild, a conversion of the same PDF again, the engine's MOBI rung) runs
+  // alone. Arrival order is kept: a reader that arrives behind a waiting
+  // writer waits for it, so a Settings change always lands before a later
+  // send reads the book, and a writer is never starved by a stream of
+  // readers. A module of its own per test: the queues and the registered
+  // hooks live as long as the module does.
+  //
+  // Adapted from the one-at-a-time queue (2026-09-28): 'on one book, a turn
+  // waits for the one before it' now puts a WRITER between two readers,
+  // which is what still waits; `holder` became `holders`, every turn
+  // running now rather than the one; the other two tests are unchanged.
   type Queue = {
     inTurn: <T>(book: string, label: string, work: () => T | Promise<T>) => Promise<T>;
-    holder: (book: string) => string | null;
+    holders: (book: string) => string[];
     beforeEveryTurn: (hook: () => void) => void;
+    TURNS: Record<string, string>;
   };
   let fresh = 0;
   const load = async () => (await import(`${join(UI, 'book-queue.js')}?turns-${++fresh}`)) as Queue;
@@ -4912,6 +5015,21 @@ describe('turns on a book: book-queue.js', () => {
     return { promise, release };
   };
 
+  test('every label says, in one table, whether it reads the book or writes it', async () => {
+    const q = await load();
+    expect(q.TURNS).toEqual({
+      save: 'write',
+      convert: 'write',
+      'kindle-mobi': 'write',
+      kindle: 'read',
+      send: 'read',
+      copy: 'read',
+      check: 'read',
+    });
+    // A label with no row is a mistake in the caller, not a guess here.
+    expect(() => q.inTurn('/lib/a.epub', 'mystery', () => 'x')).toThrow('mystery');
+  });
+
   test('with nothing queued, a turn starts in the caller’s own tick', async () => {
     const q = await load();
     let ran = false;
@@ -4920,7 +5038,69 @@ describe('turns on a book: book-queue.js', () => {
     expect(await turn).toBe('sent');
   });
 
-  test('on one book, a turn waits for the one before it, and a failure does not stop the next', async () => {
+  test('two readers run at once', async () => {
+    // The background Kindle build reads the book for half a minute; Save the
+    // EPUB pressed meanwhile starts at once rather than waiting it out.
+    const q = await load();
+    const build = held();
+    const order: string[] = [];
+    const a = q.inTurn('/lib/a.epub', 'kindle', () => { order.push('kindle'); return build.promise; });
+    const b = q.inTurn('/lib/a.epub', 'copy', () => { order.push('copy'); return 'copied'; });
+    expect(order).toEqual(['kindle', 'copy']);
+    expect(await b).toBe('copied');
+    expect(q.holders('/lib/a.epub')).toEqual(['kindle']);
+    build.release('built');
+    expect(await a).toBe('built');
+    await tick();
+    expect(q.holders('/lib/a.epub')).toEqual([]);
+  });
+
+  test('a writer waits for every reader running, and runs alone', async () => {
+    const q = await load();
+    const build = held();
+    const copy = held();
+    const order: string[] = [];
+    q.inTurn('/lib/a.epub', 'kindle', () => { order.push('kindle'); return build.promise; });
+    q.inTurn('/lib/a.epub', 'copy', () => { order.push('copy'); return copy.promise; });
+    const save = held();
+    const writing = q.inTurn('/lib/a.epub', 'save', () => { order.push('save'); return save.promise; });
+    await tick();
+    expect(order).toEqual(['kindle', 'copy']);
+    expect(q.holders('/lib/a.epub')).toEqual(['kindle', 'copy']);
+    copy.release('copied');
+    await tick();
+    expect(order).toEqual(['kindle', 'copy']); // the build still reads it
+    build.release('built');
+    await tick();
+    expect(order).toEqual(['kindle', 'copy', 'save']);
+    expect(q.holders('/lib/a.epub')).toEqual(['save']);
+    // Nothing starts beside a writer, not even a reader.
+    let checked = false;
+    const check = q.inTurn('/lib/a.epub', 'check', () => { checked = true; return 'checked'; });
+    await tick();
+    expect(checked).toBe(false);
+    save.release('saved');
+    expect(await writing).toBe('saved');
+    expect(await check).toBe('checked');
+  });
+
+  test('a reader arriving behind a waiting writer waits for it: the change lands before the book is read', async () => {
+    const q = await load();
+    const build = held();
+    const order: string[] = [];
+    q.inTurn('/lib/a.epub', 'kindle', () => { order.push('kindle'); return build.promise; });
+    const saving = q.inTurn('/lib/a.epub', 'save', () => { order.push('save'); return 'saved'; });
+    const sending = q.inTurn('/lib/a.epub', 'send', () => { order.push('send'); return 'sent'; });
+    await tick();
+    // Not beside the running reader: behind the writer that waits for it.
+    expect(order).toEqual(['kindle']);
+    build.release('built');
+    expect(await saving).toBe('saved');
+    expect(await sending).toBe('sent');
+    expect(order).toEqual(['kindle', 'save', 'send']);
+  });
+
+  test('on one book, a writer between two readers waits for the first, and a failure does not stop the next', async () => {
     const q = await load();
     const first = held();
     const order: string[] = [];
@@ -4929,30 +5109,33 @@ describe('turns on a book: book-queue.js', () => {
     const c = q.inTurn('/lib/a.epub', 'copy', () => { order.push('copy'); return 'copied'; });
     await tick();
     expect(order).toEqual(['send']);
-    expect(q.holder('/lib/a.epub')).toBe('send');
+    expect(q.holders('/lib/a.epub')).toEqual(['send']);
     first.release('sent');
     expect(await a).toBe('sent');
     await expect(b).rejects.toThrow('refused');
     expect(await c).toBe('copied');
     expect(order).toEqual(['send', 'save', 'copy']);
     await tick();
-    expect(q.holder('/lib/a.epub')).toBe(null);
+    expect(q.holders('/lib/a.epub')).toEqual([]);
   });
 
   test('another book does not wait: a hung call holds up its own book and nothing else', async () => {
     const q = await load();
     const hung = held();
-    q.inTurn('/lib/old.epub', 'send', () => hung.promise);
+    q.inTurn('/lib/old.epub', 'save', () => hung.promise);
     let ran = false;
     const other = q.inTurn('/lib/new.epub', 'save', () => { ran = true; return 'saved'; });
     expect(ran).toBe(true);
     expect(await other).toBe('saved');
-    expect(q.holder('/lib/old.epub')).toBe('send');
-    expect(q.holder('/lib/new.epub')).toBe(null);
+    expect(q.holders('/lib/old.epub')).toEqual(['save']);
+    expect(q.holders('/lib/new.epub')).toEqual([]);
     hung.release('late');
   });
 
-  test('what a page owes goes first: a hook runs before every turn joins its queue', async () => {
+  test('what a page owes goes first: a pending settle is flushed before a reader starts', async () => {
+    // tune.js's settle, still counting down after a knob moved, joins the
+    // queue as a writer AHEAD of the reader that asked, so a send never
+    // reads a book with a change still only on screen.
     const q = await load();
     const order: string[] = [];
     let owing = true;
@@ -4999,7 +5182,7 @@ describe('the Send surface', () => {
     // other way out, so nothing on the page still asks `devices` (a second
     // poll would double the reMarkable probe's 1.5 s every two seconds).
     // Still the ENGINE's knowledge, never the window's.
-    expect(send).toContain('argv.routes(ctx.state.script.epubPath)');
+    expect(send).toContain('argv.routes(ctx.state.script.epubPath, { quick })');
     expect(send).not.toContain('argv.devices');
     // A window that knew what a Kindle volume looks like would be the exact
     // duplication the ADR forbids.
@@ -5045,15 +5228,39 @@ describe('the Send surface', () => {
     expect(`send.js imports book-queue.js's inTurn: ${imported}`).toBe('send.js imports book-queue.js\'s inTurn: true');
     const door = code.slice(code.indexOf('function onBook('));
     expect(door.slice(0, door.indexOf('\n}'))).toMatch(/return inTurn\(book, label, \(\) => runEngine\(args\)\)/);
-    // Both exports (a device send, Save a Kindle file) and the send, each on
-    // this script's book and named for what the Settings page waits on.
-    const building = [...code.matchAll(/onBook\(script\.epubPath, '(\w+)',\s*argv\.(export|send)\(/g)]
-      .map((m) => `${m[2]}:${m[1]}`).sort();
-    expect(building).toEqual(['export:copy', 'export:send', 'send:send']);
-    expect(code.match(/argv\.(export|send)\(/g)?.length).toBe(3);
-    // The route: through the door only when the flow reads the book.
+    // Every Kindle file export goes through the Kindle file's own line
+    // first, and then the same door, under the label kindleTurn() picks: a
+    // reader when Calibre builds the file, a writer when the MOBI rung may
+    // rewrite the book.
+    const kindleDoor = code.slice(code.indexOf('function onKindleFile('));
+    expect(kindleDoor.slice(0, kindleDoor.indexOf('\n}')))
+      .toMatch(/const label = kindleTurn\(kindle\);\s*return inKindleLine\(book, \(\) => onBook\(book, label, args\)\);/);
+    // The readers that take the EPUB as it is, and the copy to a reader,
+    // each on this script's book, named for what the Settings page waits on.
+    const reading = [...code.matchAll(/onBook\(script\.epubPath, '([\w-]+)',\s*(argv\.\w+\(|call\b)/g)]
+      .map((m) => `${m[2]}${m[1]}`).sort();
+    expect(reading).toEqual(['argv.send(send', 'callcopy', 'callsend']);
+    // The Kindle file exports: the build as the page opens, a Kindle device
+    // send's export (the same `call` as another reader's), Save a Kindle
+    // file's export, and its save.
+    expect(code).toMatch(/onKindleFile\(book, argv\.export\(book, \{/);
+    expect(code).toMatch(/forFormat\(device\) === 'kindle'\s*\? onKindleFile\(script\.epubPath, call\)\s*: onBook\(script\.epubPath, 'send', call\)/);
+    expect(code).toMatch(/onKindleFile\(script\.epubPath,\s*argv\.export\(script\.epubPath, \{ forFormat: 'kindle'/);
+    expect(code.match(/argv\.(export|send)\(/g)?.length).toBe(4);
+    // The Kindle file check reads the book's date, so it waits its turn too:
+    // a save still settling lands first, and the answer is about the book
+    // as it will be.
+    expect(code).toMatch(/onBook\(book, 'check', argv\.kindleCheck\(book\)\)/);
+    // The route: through the door only when the flow reads the book, and
+    // the save of a Kindle file keeps the Kindle file's line.
     expect(code.match(/argv\.route\(/g)?.length).toBe(1);
-    expect(code).toMatch(/readsTheBook\(how\) \? onBook\(script\.epubPath, 'copy', call\) : runEngine\(call\)/);
+    expect(code).toMatch(/how === 'save-kindle' \? onKindleFile\(script\.epubPath, call\)\s*: readsTheBook\(how\) \? onBook\(script\.epubPath, 'copy', call\) : runEngine\(call\)/);
+    // Every label send.js names is a row of the queue's table.
+    const { TURNS } = await import(join(UI, 'book-queue.js'));
+    const named = new Set([...code.matchAll(/onBook\([^,]+, '([\w-]+)'/g)].map((m) => m[1]));
+    named.add('kindle');
+    named.add('kindle-mobi');
+    for (const label of named) expect(`${label}: ${TURNS[label] !== undefined}`).toBe(`${label}: true`);
     // What else goes straight to runEngine reads nothing of the book's
     // content: the route list, the settings read, and `call` above. And
     // `args`, which is onBook()'s own call, pinned above.
@@ -5314,7 +5521,9 @@ describe('the Send page performs every route: shape', () => {
     const refresh = body('async function refresh(');
     expect(refresh).toContain('const shown = routesFrom(answer);');
     expect(refresh).toContain('ctx.state.devices = connectedDevices(shown);');
-    expect(refresh).toContain('if (sameRoutes(drawn, shown)) return;');
+    // The same list, its buttons labelled with the same Kindle file type, is
+    // left alone.
+    expect(refresh).toContain('if (sameRoutes(drawn, shown) && labelledWith === (kindle?.extension ?? null)) return;');
     expect(refresh).toContain('fault(routesFailure(answer))');
   });
 
@@ -5371,7 +5580,7 @@ describe('what the Send surface decides', () => {
     artifactLine: (built: unknown) => string;
     statusFor: (phase: string, opts?: { device?: unknown; detail?: string })
       => { line: string; bad: boolean };
-    preparingPhase: (device: unknown) => string;
+    preparingPhase: (device: unknown, file?: unknown) => string;
     failureMessage: (answer: unknown) => string;
     outcomeFor: (built: unknown, sent: unknown, device: unknown)
       => [string, { device: unknown; detail: string }];
@@ -5535,6 +5744,8 @@ describe('what the Send surface decides', () => {
     // that builds nothing would be theatre.
     expect(send.preparingPhase(kindle)).toBe('building');
     expect(send.preparingPhase(kobo)).toBe('preparing');
+    // A Kindle file the engine says is current is a stat too.
+    expect(send.preparingPhase(kindle, { extension: 'kfx', fresh: true, builtBy: 'calibre' })).toBe('preparing');
   });
 
   test('a reMarkable is not described as if it had a volume', () => {
@@ -5578,10 +5789,11 @@ describe('what the Send surface decides', () => {
     // Neither field: still sent — the engine said ok — but no invented path.
     expect(send.sentLine(kobo, { ok: true })).toBe('Sent to Kobo.');
     expect(send.sentLine(kobo, { ok: true })).not.toContain('—');
+    expect(copied).toBe('Sent to Kindle: /m/Kindle/x.azw3. Eject the volume before you unplug it.');
   });
 
   test('the status line alarms on failure and on nothing else', () => {
-    for (const phase of ['idle', 'building', 'preparing', 'copying', 'sent']) {
+    for (const phase of ['idle', 'preparing', 'copying', 'sent']) {
       const { bad } = send.statusFor(phase, { device: kindle, detail: 'Sent to Kindle.' });
       expect(`${phase} is bad: ${bad}`).toBe(`${phase} is bad: false`);
     }
@@ -5598,7 +5810,7 @@ describe('what the Send surface decides', () => {
     expect(send.statusFor('failed', { device: kindle, detail: 'it broke' }).line)
       .not.toContain('Sent');
     // Each working phase names the reader it is working on.
-    for (const phase of ['building', 'preparing', 'copying']) {
+    for (const phase of ['preparing', 'copying']) {
       expect(send.statusFor(phase, { device: kindle }).line).toContain('Kindle');
     }
   });
@@ -5609,7 +5821,7 @@ describe('what the Send surface decides', () => {
     // "no destination" is also the shape a reMarkable upload takes — so it
     // would render a refusal as "Sent to Kindle." with no alarm. Both answers
     // are checked here, and both are checked in the failing direction.
-    const good = { ok: true, label: 'AZW3 — for USB sideload to Kindle', path: '/x.azw3' };
+    const good = { ok: true, label: 'AZW3: for USB sideload to Kindle', path: '/x.azw3' };
     const refusedExport = {
       ok: false,
       error: { code: 'export-failed', message: "Can't rebuild the Kindle file." },
@@ -5671,8 +5883,8 @@ describe('what the Send surface decides', () => {
   });
 
   test('what went across is named in the engine’s words, not guessed at', () => {
-    expect(send.artifactLine({ label: 'AZW3 — for USB sideload to Kindle', path: '/x.azw3' }))
-      .toBe('AZW3 — for USB sideload to Kindle');
+    expect(send.artifactLine({ label: 'AZW3: for USB sideload to Kindle', path: '/x.azw3' }))
+      .toBe('AZW3: for USB sideload to Kindle');
     expect(send.artifactLine({ path: '/x.azw3' })).toBe('/x.azw3');
     expect(send.artifactLine({})).toBe('');
     expect(send.artifactLine(null)).toBe('');
@@ -7471,6 +7683,17 @@ describe('the scene index is a drawer in the binding margin', () => {
     expect(block).toMatch(/position:\s*(relative|absolute|fixed|sticky)/);
   });
 
+  test('the list stands clear of the drawer’s top and bottom edges', () => {
+    // QA, 0.7.3: the count ("93 SCENES") sat right against the drawer's top
+    // edge, even scrolled to the top. The top gets the same room the bottom
+    // already had, in the window's own spacing, so the list reads as set
+    // inside the panel at both ends rather than cut off at one.
+    const block = ruleBlock(read('surfaces.css'), '.scene-rail');
+    const [top, , bottom] = block.match(/\bpadding:\s*([^;]+);/)?.[1]?.trim().split(/\s+/) ?? [];
+    expect(top).toBe('var(--space-3)');
+    expect(bottom).toBe('var(--space-3)');
+  });
+
   test('hiding it does not rely on moving it', () => {
     // A translate alone cannot be trusted to clear the window: the margin
     // GROWS with the window, so on a wide display a panel shifted by its own
@@ -8243,12 +8466,14 @@ describe('the Send page’s KFX block: wiring, second pass', () => {
     // After the rows as well: a block that hides while it holds the focus
     // hands it to the page's first stop, which should be the new Send
     // button and not the pane (seen in a browser, 2026-09-23).
-    const rows = refresh.indexOf('list.append(routeRow(route, shown.chosen))');
-    expect(rows).toBeGreaterThan(-1);
+    const rows = refresh.indexOf('fillRows()');
+    expect(rows).toBeGreaterThan(assigned);
     expect(told).toBeGreaterThan(rows);
+    expect(body(send, 'function fillRows(')).toContain('list.append(routeRow(route, drawn.chosen))');
     expect(send).toContain('devices: () => connectedDevices(drawn)');
-    expect(send).toContain('isSending: () => sending');
-    expect(send).toContain('onBusy: (on) => { for (const button of buttons()) button.disabled = on; }');
+    // The busy hook takes every button out of reach, and back.
+    const busy = send.slice(send.indexOf('onBusy: (on) => {'));
+    expect(busy.slice(0, busy.indexOf('\n    },'))).toContain('for (const button of buttons()) button.disabled = on;');
   });
 });
 

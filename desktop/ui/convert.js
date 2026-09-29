@@ -173,7 +173,7 @@ export function failureFor(input) {
 export function stillOpenNote(script) {
   const title = typeof script?.title === 'string' ? script.title.trim() : '';
   if (title === '') return null;
-  return `${title} is still open — this changed nothing about it.`;
+  return `${title} is still open. This changed nothing about it.`;
 }
 
 /** The bar's next position, given where it already is and one progress line.

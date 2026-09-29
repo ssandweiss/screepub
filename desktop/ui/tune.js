@@ -12,7 +12,7 @@
 // tests/desktop-ui.test.ts. Below the line is drawing, which holds no rule of
 // its own and rides on the live run.
 import { runEngine, argv, holdEngine } from './app.js';
-import { inTurn, holder, beforeEveryTurn } from './book-queue.js';
+import { inTurn, holders, beforeEveryTurn } from './book-queue.js';
 import { el, clear, text } from './dom.js';
 import { render as renderReader, splitPreview, dressFrame } from './read.js';
 
@@ -152,7 +152,7 @@ export const GROUPS = [
     effect: 'reconvert',
     note: 'These four are decided while the PDF is being read. Everything else re-renders '
       + 'from the script Screepub already read, so changing one here saves it for the next '
-      + 'time you convert this PDF — it will not change what you see now.',
+      + 'time you convert this PDF. It will not change what you see now.',
     knobs: [
       {
         key: 'rejoinSplitDialogue', label: 'Rejoin speeches split across pages', kind: 'toggle',
@@ -228,15 +228,19 @@ export function canExplain(knob) {
   return Boolean(knob?.needs) || typeof knob?.help === 'string';
 }
 
+/** A read-out with no value to show: said in words, not stood in for by a
+ *  dash. */
+export const NOT_SET = 'not set';
+
 /** What a control's read-out says. Tabular and unit-carrying: "20%" is an
  *  answer, "20" is a number. A value the engine never sends still has to
  *  render as something rather than as NaN. */
 export function displayValue(knob, value) {
   // Number(null) is 0 and Number('') is 0: a missing value must read as
   // missing, not as a knob sitting at zero.
-  if (value === null || value === undefined || value === '') return '—';
+  if (value === null || value === undefined || value === '') return NOT_SET;
   const number = Number(value);
-  if (!Number.isFinite(number)) return '—';
+  if (!Number.isFinite(number)) return NOT_SET;
   const decimals = knob.step < 1 ? 1 : 0;
   return `${number.toFixed(decimals)}${knob.unit ?? ''}`;
 }
@@ -355,24 +359,35 @@ export const STATUS = {
 
 /** What a save waiting its turn on the book says, by what holds the book
  *  (book-queue.js's labels). "In a moment" would not be true while a
- *  minute-long KFX export has the book. */
+ *  half-minute KFX build has the book. A save REWRITES the book, so it waits
+ *  for every turn running on it, and readers run side by side: the order
+ *  here is which one it names when several are, the longest wait first. The
+ *  Send page starts a Kindle file build as it opens, so that is the usual
+ *  one. */
 export const WAITING = {
+  kindle: 'Waiting for the Kindle file to finish building…',
+  'kindle-mobi': 'Waiting for the Kindle file to finish building…',
+  convert: 'Waiting for the conversion to finish…',
   send: 'Waiting for the send to finish…',
   copy: 'Waiting for the copy to finish…',
-  convert: 'Waiting for the conversion to finish…',
 };
 
 export const NO_MESSAGE = 'The engine refused the change without saying why.';
 
 /** The status line for a phase. `message` is the engine's sentence for
- *  'failed', and what holds the book for 'waiting' (this page's own
- *  earlier save waiting is still "in a moment"). */
+ *  'failed', and what holds the book for 'waiting': one label, or every one
+ *  running (holders()), named by WAITING's order. This page's own earlier
+ *  save, and a label with no words, are still "in a moment". */
 export function statusFor(phase, message) {
   if (phase === 'failed') {
     const said = typeof message === 'string' ? message.trim() : '';
     return { line: said === '' ? NO_MESSAGE : said, bad: true };
   }
-  if (phase === 'waiting') return { line: WAITING[message] ?? STATUS.pending, bad: false };
+  if (phase === 'waiting') {
+    const labels = [].concat(message);
+    const named = Object.keys(WAITING).find((label) => labels.includes(label));
+    return { line: named === undefined ? STATUS.pending : WAITING[named], bad: false };
+  }
   return { line: STATUS[phase] ?? '', bad: false };
 }
 
@@ -1161,8 +1176,9 @@ function settle() {
   timer = null;
   const mine = era;
   const book = bookOf(ctx.state.script);
-  const ahead = holder(book);
-  if (ahead !== null) say(statusFor('waiting', ahead));
+  // A save rewrites the book, so it waits for every turn running on it.
+  const ahead = holders(book);
+  if (ahead.length > 0) say(statusFor('waiting', ahead));
   // Tied to the script it was queued for. Its turn can come long after
   // (behind a minute-long KFX send), and flush() reads the script on screen
   // and what it owes when it runs: by then another script's changes, whose

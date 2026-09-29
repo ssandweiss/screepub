@@ -1,9 +1,15 @@
 import { afterAll, test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, utimesSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, utimesSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
-import { mobiSibling, availableFormats, freshKindleArtifact, CannotRegenerateError } from '../src/export/artifact';
+import {
+  mobiSibling,
+  availableFormats,
+  freshKindleArtifact,
+  kindleArtifactPlan,
+  CannotRegenerateError,
+} from '../src/export/artifact';
 import { kfxSibling, KfxToolchainNotReadyError } from '../src/export/kfx';
 import { azw3Sibling, CalibreMissingError, CalibreFailedError } from '../src/export/calibre';
 
@@ -282,4 +288,75 @@ test('calibreAvailable is used over an existing fresh .mobi, not reused as a sho
       (C) => error instanceof C,
     ),
   ).toBe(true);
+});
+
+// ---- kindleArtifactPlan: what the ladder would hand over, without building --
+
+/** An EPUB, and a sibling `ext` either newer than it (fresh) or older (stale),
+ *  or none at all. Dated ten seconds apart, so filesystem mtime resolution
+ *  cannot turn either one into the tie that counts as stale. */
+function withSibling(ext: string | null, fresh: boolean): string {
+  const dir = scratch();
+  const epub = join(dir, 'Script.epub');
+  writeFileSync(epub, 'epub');
+  const now = Date.now();
+  const epubAt = new Date(now - 5_000);
+  utimesSync(epub, epubAt, epubAt);
+  if (ext !== null) {
+    const sibling = join(dir, `Script.${ext}`);
+    writeFileSync(sibling, ext);
+    const at = new Date(fresh ? now : now - 10_000);
+    utimesSync(sibling, at, at);
+  }
+  return epub;
+}
+
+test('the plan names the rung the ladder takes, where its file lives, what builds it, and the book’s date', () => {
+  const epub = withSibling(null, false);
+  const bookDate = statSync(epub).mtimeMs;
+  expect(kindleArtifactPlan(epub, { calibreAvailable: true, kfxReady: true }))
+    .toEqual({ path: kfxSibling(epub), fresh: false, builtBy: 'calibre', bookDate });
+  expect(kindleArtifactPlan(epub, { calibreAvailable: true, kfxReady: false }))
+    .toEqual({ path: azw3Sibling(epub), fresh: false, builtBy: 'calibre', bookDate });
+  expect(kindleArtifactPlan(epub, { calibreAvailable: false, kfxReady: false }))
+    .toEqual({ path: mobiSibling(epub), fresh: false, builtBy: 'screepub', bookDate });
+});
+
+test('the book’s date moves when the book is rewritten, and is null when it cannot be read', () => {
+  // The window builds ahead once per version of the book: this date is what
+  // tells one version from the next (a Settings save rewrites the EPUB).
+  const epub = withSibling(null, false);
+  const state = { calibreAvailable: true, kfxReady: true };
+  const before = kindleArtifactPlan(epub, state).bookDate;
+  const later = new Date(Date.now() + 60_000);
+  utimesSync(epub, later, later);
+  expect(kindleArtifactPlan(epub, state).bookDate).toBe(later.getTime());
+  expect(kindleArtifactPlan(epub, state).bookDate).not.toBe(before);
+  expect(kindleArtifactPlan(join(scratch(), 'gone.epub'), state).bookDate).toBe(null);
+});
+
+test('the plan is fresh exactly when the ladder would reuse the file: newer than the EPUB', () => {
+  for (const [ext, state] of [
+    ['kfx', { calibreAvailable: true, kfxReady: true }],
+    ['azw3', { calibreAvailable: true, kfxReady: false }],
+    ['mobi', { calibreAvailable: false, kfxReady: false }],
+  ] as const) {
+    expect(`${ext} newer: ${kindleArtifactPlan(withSibling(ext, true), state).fresh}`).toBe(`${ext} newer: true`);
+    expect(`${ext} older: ${kindleArtifactPlan(withSibling(ext, false), state).fresh}`).toBe(`${ext} older: false`);
+  }
+  // Another rung's file does not count: a fresh .azw3 is not a KFX.
+  expect(kindleArtifactPlan(withSibling('azw3', true), { calibreAvailable: true, kfxReady: true }).fresh).toBe(false);
+});
+
+test('a fresh plan is what the ladder hands back, untouched', async () => {
+  // The two read one rule: whatever the plan calls fresh, the ladder returns
+  // as it is, with no converter run (none is installed here to run).
+  const epub = withSibling('azw3', true);
+  const plan = kindleArtifactPlan(epub, { calibreAvailable: true, kfxReady: false });
+  expect(plan.fresh).toBe(true);
+  const out = await freshKindleArtifact({
+    epub, fountainPath: null, format: DEFAULT_FORMAT_OPTIONS, calibreAvailable: true, kfxReady: false,
+  });
+  expect(out).toBe(plan.path);
+  expect(readFileSync(out, 'utf8')).toBe('azw3');
 });
