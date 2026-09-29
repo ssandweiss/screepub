@@ -238,12 +238,10 @@ export const NO_MESSAGE = 'The engine refused to send without saying why.';
  *  one has to clear the alarm, not inherit it.
  *
  *  The route phases sit beside the device ones: `opening` names the route
- *  (its title, the engine's word for it), `saving` is the dialog's copy, and
- *  `waiting-build` is a save or a send to another reader waiting its turn on
- *  the book behind a Kindle file build. The build itself is not a status: it
- *  has its own line and bar (buildLine()), because one started when the page
- *  opened outlives any press. `done` is a route's own sentence, as `sent` is
- *  a device's. */
+ *  (its title, the engine's word for it), and `saving` is the dialog's copy.
+ *  A Kindle file building is not a status: it has its own line and bar
+ *  (buildLine()), because one started when the page opened outlives any
+ *  press. `done` is a route's own sentence, as `sent` is a device's. */
 export function statusFor(phase, { device = null, detail = '', route = null } = {}) {
   const name = device?.name ?? 'the reader';
   if (phase === 'failed') {
@@ -258,9 +256,6 @@ export function statusFor(phase, { device = null, detail = '', route = null } = 
     return { line: title === '' ? 'Opening…' : `Opening ${title}…`, bad: false };
   }
   if (phase === 'saving') return { line: 'Saving…', bad: false };
-  if (phase === 'waiting-build') {
-    return { line: 'Waiting for the Kindle file to finish building…', bad: false };
-  }
   return { line: '', bad: false };
 }
 
@@ -306,10 +301,16 @@ export function preparingPhase(device, file = null) {
   return forFormat(device) === 'kindle' && mayBuild(file) ? 'building' : 'preparing';
 }
 
-/** The turn a Kindle file build takes on its book (book-queue.js). The
- *  Settings page has words for it (tune.js's WAITING): a save waiting behind
- *  a KFX build waits about half a minute, not "a moment". */
-export const BUILD_TURN = 'build';
+/** The turn a Kindle file export takes on its book (book-queue.js's TURNS
+ *  says what each does to it). Calibre builds KFX and AZW3 from the EPUB and
+ *  writes them beside it: 'kindle', a reader, which runs beside a save of the
+ *  EPUB or a copy to a Kobo. The engine's own MOBI rung rewrites the EPUB in
+ *  place before it writes the .mobi: 'kindle-mobi', a writer, which runs
+ *  alone. With no check to go by (`file` null) the page cannot rule the MOBI
+ *  rung out, so it takes the book alone too. */
+export function kindleTurn(file) {
+  return file?.builtBy === 'calibre' ? 'kindle' : 'kindle-mobi';
+}
 
 /** Whether a press's `export --for kindle` may have to build the file, and
  *  so shows the build line and bar while it runs: always, unless the
@@ -676,6 +677,46 @@ let kindleBook = null;
 /** The extension the rows on screen were titled with, so a check that
  *  changes it redraws them and one that does not leaves them alone. */
 let titledWith = null;
+/** Kindle file exports of one book, one at a time: the tail of each book's
+ *  line. Two at once would run Kindle Previewer twice over the same scratch
+ *  file. This is a rule about the Kindle FILE, not the book, so it is kept
+ *  here and not in book-queue.js's readers and writers: a Kindle export
+ *  takes its place in this line first and its turn on the book after, so
+ *  one waiting here holds no turn on the book, and a Settings save that
+ *  arrives meanwhile goes ahead of it and is in the file it builds. */
+const kindleLines = new Map();
+
+/** Run `work` once every Kindle export of `book` ahead of it has finished,
+ *  however it finished, and hand back its own promise. With none ahead it
+ *  starts in the caller's own tick. */
+function inKindleLine(book, work) {
+  const ahead = kindleLines.get(book);
+  let run;
+  if (ahead === undefined) {
+    try {
+      run = Promise.resolve(work());
+    } catch (err) {
+      run = Promise.reject(err);
+    }
+  } else {
+    run = ahead.then(work);
+  }
+  const tail = run.then(() => {}, () => {});
+  kindleLines.set(book, tail);
+  tail.then(() => { if (kindleLines.get(book) === tail) kindleLines.delete(book); });
+  return run;
+}
+
+/** A Kindle file export of `book` (or the save of one, which exports again):
+ *  in the Kindle line, then on its turn on the book as kindleTurn() says. A
+ *  press during a build therefore waits for that build, then finds the file
+ *  it made current (the engine's freshness rule) rather than building
+ *  another. */
+function onKindleFile(book, args) {
+  const label = kindleTurn(kindle);
+  return inKindleLine(book, () => onBook(book, label, args));
+}
+
 /** Kindle file builds out now, by book: `{ runs, file }`, how many exports
  *  that may build it are out (one started as the page opened, a press queued
  *  behind it) and what the check said the file is. Kept at module level and
@@ -900,8 +941,8 @@ async function checkKindle({ ahead = true } = {}) {
   const script = ctx.state.script;
   if (list === null || blockedReason(script) !== null) return;
   const book = script.epubPath;
-  // A build already out for this book knows what it is building, and the
-  // check would only queue behind it for as long as it runs.
+  // A build already out for this book knows what it is building, and until
+  // it lands the check could only say "out of date".
   const running = builds.get(book);
   if (running !== undefined) {
     if (running.file !== null) useKindle(book, running.file);
@@ -945,7 +986,7 @@ function useKindle(book, file) {
  *  otherwise build again, and again, for as long as the page is open. */
 function buildInBackground(script) {
   const book = script.epubPath;
-  const run = track(book, kindle, onBook(book, BUILD_TURN, argv.export(book, {
+  const run = track(book, kindle, onKindleFile(book, argv.export(book, {
     forFormat: 'kindle',
     fountain: script.fountainPath,
     optionsJson: optionsJsonFor(script),
@@ -1158,8 +1199,9 @@ async function ensureSettings() {
  *  an export (whose MOBI rung rebuilds it), a send, a save (readsTheBook()
  *  says which flows). Every one goes through here, to take its turn on the
  *  book with the Settings page's saves, which rebuild that same file in
- *  place; book-queue.js says what a turn promises. `label` is what the
- *  Settings page says it is waiting for. */
+ *  place. `label` is a row of book-queue.js's TURNS, which says whether the
+ *  call reads the book (and runs beside other readers) or writes it (and
+ *  runs alone), and is what the Settings page says it is waiting for. */
 function onBook(book, label, args) {
   return inTurn(book, label, () => runEngine(args));
 }
@@ -1182,21 +1224,23 @@ async function sendTo(device) {
     const script = ctx.state.script;
     // A Kindle file that may have to be built gets the build line and its
     // bar rather than a status (preparingPhase()), and waits behind a build
-    // already out for the book instead of starting another: the engine then
-    // finds the file that build made, current, and hands it back. Anything
-    // else queued behind such a build says what it is waiting for.
+    // already out for the book instead of starting another (onKindleFile()):
+    // the engine then finds the file that build made, current, and hands it
+    // back. Every other reader takes the EPUB as it is, beside any build.
     const waiting = preparingPhase(device, kindle);
-    say(waiting === 'building' ? statusFor('idle')
-      : builds.has(script.epubPath) ? statusFor('waiting-build') : statusFor(waiting, { device }));
+    say(waiting === 'building' ? statusFor('idle') : statusFor(waiting, { device }));
 
     // The library artifact is what Read previewed and what Tune rebuilds, so
     // it is the only file handed to a transfer. What the Kindle rung makes
     // of it is the engine's ladder, not this window's.
-    const exporting = onBook(script.epubPath, 'send', argv.export(script.epubPath, {
+    const call = argv.export(script.epubPath, {
       forFormat: forFormat(device),
       fountain: script.fountainPath,
       optionsJson: optionsJsonFor(script),
-    }));
+    });
+    const exporting = forFormat(device) === 'kindle'
+      ? onKindleFile(script.epubPath, call)
+      : onBook(script.epubPath, 'send', call);
     const built = await (waiting === 'building' ? track(script.epubPath, kindle, exporting) : exporting);
 
     // Nothing is copied when nothing was built: the export's refusal is the
@@ -1267,7 +1311,7 @@ async function perform(route) {
       });
       if (stale() || out === null) return;
       options = { out };
-      say(savingLine(script.epubPath));
+      say(statusFor('saving'));
     } else if (how === 'save-kindle') {
       // The Kindle file is built (or found fresh) first, with this script's
       // own settings: which rung it reaches (KFX, AZW3, MOBI) is what names
@@ -1279,7 +1323,7 @@ async function perform(route) {
       if (stale()) return;
       const settings = { fountain: script.fountainPath, optionsJson: optionsJsonFor(script) };
       say(statusFor('idle'));
-      const exporting = onBook(script.epubPath, 'copy',
+      const exporting = onKindleFile(script.epubPath,
         argv.export(script.epubPath, { forFormat: 'kindle', ...settings }));
       const built = await (mayBuild(kindle) ? track(script.epubPath, kindle, exporting) : exporting);
       if (stale()) return;
@@ -1301,12 +1345,16 @@ async function perform(route) {
       if (stale() || out === null) return;
       options = { out, ...settings };
       what = artifactLine(built);
-      say(savingLine(script.epubPath));
+      say(statusFor('saving'));
     } else {
       say(statusFor('opening', { route }));
     }
     const call = how === 'setup' ? argv.emailSetup() : argv.route(route.key, script.epubPath, options);
-    const answer = await (readsTheBook(how) ? onBook(script.epubPath, 'copy', call) : runEngine(call));
+    // The save of a Kindle file exports it again (the engine finds it
+    // current), so it keeps the Kindle file's line and turn; Save the EPUB
+    // only reads the book.
+    const answer = await (how === 'save-kindle' ? onKindleFile(script.epubPath, call)
+      : readsTheBook(how) ? onBook(script.epubPath, 'copy', call) : runEngine(call));
     if (stale()) return;
     const [phase, detail] = routeNoteFrom(answer);
     say(statusFor(phase, detail));
@@ -1325,11 +1373,6 @@ async function perform(route) {
     kfxRedraw();
     if (worked && !stale()) repoll();
   }
-}
-
-/** "Saving…", or what it waits for while a Kindle file build has the book. */
-function savingLine(book) {
-  return builds.has(book) ? statusFor('waiting-build') : statusFor('saving');
 }
 
 function say(status) {

@@ -45,7 +45,7 @@ type SendModule = {
   mayBuild: (file: unknown) => boolean;
   buildLine: (extension: unknown) => string;
   preparingPhase: (device: unknown, file?: unknown) => string;
-  BUILD_TURN: string;
+  kindleTurn: (file: unknown) => string;
   routesFailure: (answer: unknown) => string;
   caveatFor: (device: unknown, platform: unknown) => string | null;
   whereLine: (device: unknown) => string;
@@ -537,15 +537,11 @@ describe('statusFor: the route phases, beside the device ones', () => {
     }
   });
 
-  test('saving, and waiting for a Kindle file that is building', () => {
+  test('saving', () => {
+    // A Kindle file building is not a status: it has its own line and bar
+    // (buildLine()), and nothing on this page that only reads the book waits
+    // for it.
     expect(send.statusFor('saving')).toEqual({ line: 'Saving…', bad: false });
-    // A save or a send to another reader asked while the Kindle file builds
-    // waits its turn on the book, and says so rather than "Saving…" for half
-    // a minute. The build itself has its own line and bar (buildLine()).
-    expect(send.statusFor('waiting-build')).toEqual({
-      line: 'Waiting for the Kindle file to finish building…',
-      bad: false,
-    });
   });
 
   test('done shows the detail it is handed, as good news', () => {
@@ -845,6 +841,18 @@ describe('building the Kindle file before anyone presses anything', () => {
     expect(send.preparingPhase(kobo, file('kfx', false))).toBe('preparing');
   });
 
+  test('a Kindle file Calibre builds only reads the book; the engine’s MOBI rewrites it, and so does not knowing which', () => {
+    // book-queue.js's table says which label reads and which writes; this is
+    // which label a Kindle file export takes. Calibre (KFX, AZW3) converts
+    // from the EPUB and writes beside it. The engine's MOBI rung rewrites
+    // the EPUB in place first, and with no check to go by the page cannot
+    // rule that out, so it takes the book alone.
+    expect(send.kindleTurn(file('kfx', false))).toBe('kindle');
+    expect(send.kindleTurn(file('azw3', true))).toBe('kindle');
+    expect(send.kindleTurn(file('mobi', false, 'screepub'))).toBe('kindle-mobi');
+    expect(send.kindleTurn(null)).toBe('kindle-mobi');
+  });
+
   test('the line says how long, by the file being built', () => {
     // Kindle Previewer's cold start is most of a KFX build: 23 s for the
     // 18-page demo, measured. Calibre's AZW3 and the engine's MOBI take well
@@ -938,7 +946,6 @@ describe('the words this adds', () => {
       send.statusFor('opening', { route: { title: send.SETUP_TITLE } }).line,
       send.statusFor('opening').line,
       send.statusFor('saving').line,
-      send.statusFor('waiting-build').line,
       send.buildLine('kfx'),
       send.buildLine('azw3'),
       send.buildLine(null),
@@ -1525,18 +1532,73 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     await w.answer('routes', listed([kindle], 'device:kindle'));
   });
 
-  test('Save the EPUB pressed mid-build says what it is waiting for', async () => {
+  test('Save the EPUB during a background build starts at once: both only read the book', async () => {
     const w = await world(undefined, checked('kfx', false));
     await w.open(listed([]));
     w.button('Save the EPUB…').click();
     await w.choose('/Users/me/Desktop/Field Station.epub');
-    expect(w.status().textContent).toBe('Waiting for the Kindle file to finish building…');
-    expect(w.asked()).toEqual(['export']);
-    await w.answer('export', builtKfx);
+    expect(w.status().textContent).toBe('Saving…');
+    expect(w.asked()).toEqual(['export', 'route']);
     await w.answer('route', { ok: true, key: 'save-epub', note: 'Saved.' });
     expect(w.status().textContent).toBe('Saved.');
-    await w.answerCheck(checked('kfx', true));
     await w.answer('routes', listed([], 'save-epub'));
+    // The build is still going, and still says so.
+    expect(w.build()).toBe(HALF_A_MINUTE);
+    await w.answer('export', builtKfx);
+    await w.answerCheck(checked('kfx', true));
+  });
+
+  test('a copy to a Kobo during a background build starts at once too', async () => {
+    const w = await world(undefined, checked('kfx', false));
+    await w.open(listed([kobo]));
+    w.button('Copy to KOBOeReader').click();
+    await settle();
+    expect(w.status().textContent).toBe('Getting the book ready for KOBOeReader…');
+    // Two exports out at once: the build, and this one for the EPUB.
+    expect(w.builds()).toBe(2);
+    expect(w.pending.map((p) => p.args.slice(3, 5).join(' '))).toEqual(['--for kindle', '--for epub']);
+    await w.answerNewest('export', { ok: true, path: EPUB, extension: 'epub', label: 'EPUB' });
+    await w.answer('send', { ok: true, destination: '/Volumes/KOBOeReader/Field Station.epub' });
+    expect(w.status().textContent).toContain('Sent to KOBOeReader');
+    await w.answer('routes', listed([kobo], 'device:kobo'));
+    expect(w.build()).toBe(HALF_A_MINUTE);
+    await w.answer('export', builtKfx);
+    await w.answerCheck(checked('kfx', true));
+  });
+
+  test('a Settings save during a background build waits for it: the build reads the book, the save rewrites it', async () => {
+    const { inTurn, holders } = await import(join(UI, 'book-queue.js'));
+    const w = await world(undefined, checked('kfx', false));
+    await w.open(listed([]));
+    expect(holders(EPUB)).toEqual(['kindle']);
+    let saved = false;
+    const saving = inTurn(EPUB, 'save', () => { saved = true; });
+    await settle();
+    expect(saved).toBe(false);
+    await w.answer('export', builtKfx);
+    await saving;
+    expect(saved).toBe(true);
+    await settle();
+    await w.answerCheck(checked('kfx', false));
+  });
+
+  test('with no Calibre, Save a Kindle file rewrites the book (the MOBI rung), so it waits for a reader and runs alone', async () => {
+    const { inTurn, holders } = await import(join(UI, 'book-queue.js'));
+    const w = await world(undefined, checked('mobi', false));
+    await w.open(listed([]));
+    let copied: () => void = () => {};
+    const copying = inTurn(EPUB, 'copy', () => new Promise<void>((resolve) => { copied = resolve; }));
+    w.button('Save a Kindle file…').click();
+    await settle();
+    expect(w.builds()).toBe(0); // waiting for the copy to finish reading
+    expect(w.build()).toBe('Building the Kindle file. This takes a moment.');
+    copied();
+    await copying;
+    await settle();
+    expect(w.builds()).toBe(1);
+    expect(holders(EPUB)).toEqual(['kindle-mobi']);
+    await w.answer('export', { ok: true, path: '/lib/field-station/Field Station.mobi', extension: 'mobi' });
+    await w.choose(null);
   });
 
   test('a press finds the file current: no build line, and straight to the Save box', async () => {
