@@ -11,6 +11,12 @@ export interface ListDevicesOptions {
   /** reMarkable base URL; defaults to the fixed USB address. */
   remarkableEndpoint?: string;
   probeTimeoutMs?: number;
+  /** List only what the mount scan sees, and never start the reMarkable
+   *  probe. The probe waits out its whole timeout on every machine with no
+   *  tablet docked, so a caller that has to answer at once (`routes --quick`,
+   *  the Send page's first rows) leaves the tablet out and asks again in
+   *  full. */
+  skipRemarkable?: boolean;
   /** Seams, injected only by tests. Production uses the two real functions. */
   scan?: (roots?: string[]) => ConnectedDevice[] | Promise<ConnectedDevice[]>;
   probe?: (endpoint: string, timeoutMs: number) => Promise<boolean>;
@@ -30,6 +36,7 @@ export async function listDevices(options: ListDevicesOptions = {}): Promise<Con
   const timeoutMs = options.probeTimeoutMs ?? REMARKABLE_PROBE_TIMEOUT_MS;
 
   const scanning = Promise.resolve(scan(options.roots));
+  if (options.skipRemarkable === true) return [...(await scanning)];
   const probing = probe(endpoint, timeoutMs).catch(() => false);
 
   const [mounted, remarkablePresent] = await Promise.all([scanning, probing]);

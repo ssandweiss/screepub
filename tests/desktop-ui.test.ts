@@ -241,6 +241,7 @@ describe('the engine contract lives in exactly one file', () => {
       appSettingsSet: argv.appSettings('{"libraryPath":"/abs"}'),
       reveal: argv.reveal('/s/script.epub'),
       routes: argv.routes('/s/script.epub'),
+      routesQuick: argv.routes('/s/script.epub', { quick: true }),
       route: argv.route('apple-books', '/s/script.epub'),
       routeSaveEpub: argv.route('save-epub', '/s/script.epub', { out: '/s/out.epub' }),
       routeSaveKindle: argv.route('save-kindle', '/s/script.epub', {
@@ -284,6 +285,8 @@ describe('the engine contract lives in exactly one file', () => {
     // is exactly what a wrong edit leaves behind.
     const { argv } = await import(join(UI, 'app.js'));
     expect(argv.routes('/s/script.epub')).toEqual(['routes', '/s/script.epub', '--json']);
+    expect(argv.routes('/s/script.epub', { quick: true }))
+      .toEqual(['routes', '/s/script.epub', '--json', '--quick']);
 
     expect(argv.route('apple-books', '/s/script.epub')).toEqual(
       ['route', 'apple-books', '/s/script.epub', '--json'],
@@ -4999,7 +5002,7 @@ describe('the Send surface', () => {
     // other way out, so nothing on the page still asks `devices` (a second
     // poll would double the reMarkable probe's 1.5 s every two seconds).
     // Still the ENGINE's knowledge, never the window's.
-    expect(send).toContain('argv.routes(ctx.state.script.epubPath)');
+    expect(send).toContain('argv.routes(ctx.state.script.epubPath, { quick })');
     expect(send).not.toContain('argv.devices');
     // A window that knew what a Kindle volume looks like would be the exact
     // duplication the ADR forbids.

@@ -79,8 +79,12 @@ export const argv = {
   reveal: (path) => ['reveal', path, '--json'],
 
   /** Every route this script can be sent by, in the engine's order, read-only
-   *  (parity piece B). send.js polls this the way it used to poll `devices`. */
-  routes: (epub) => ['routes', epub, '--json'],
+   *  (parity piece B). send.js polls this the way it used to poll `devices`.
+   *  `quick` leaves out the reMarkable probe, which waits out its whole
+   *  timeout when no tablet is docked, so the Send page's first rows need
+   *  not wait for it; the row says it is still checking. */
+  routes: (epub, { quick = false } = {}) =>
+    ['routes', epub, '--json', quick ? '--quick' : null].filter((a) => a !== null),
 
   /** Perform one route: open an app (`apple-books`, `send-to-kindle`,
    *  `email-to-kindle`), or write a copy (`save-epub`, `save-kindle`) when

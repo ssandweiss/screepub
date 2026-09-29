@@ -387,7 +387,7 @@ overrides that folder everywhere.
 ```bash
 bun src/cli.ts devices [--json]                          # list connected e-readers
 bun src/cli.ts send <file> [--device <id>] [--json]      # send an existing file to one
-bun src/cli.ts routes <file.epub> [--json]               # every way this book can leave, best first
+bun src/cli.ts routes <file.epub> [--quick] [--json]     # every way this book can leave, best first
 bun src/cli.ts route <key> <file.epub> [--out <path>]    # send it to Apple Books, Amazon or Mail, or save a copy
 bun src/cli.ts kfx-status [--json]                       # can this computer make KFX for a Kindle?
 bun src/cli.ts kfx-install [--json]                      # install the KFX plugin into Calibre (online)
@@ -410,6 +410,9 @@ chose last time marked as the choice, even when it can't fire right now.
 `email-to-kindle`, `save-epub`, `save-kindle`) and remembers it for next time;
 `route kindle-email-setup` takes no file and opens Amazon's Personal Document
 Settings page, where a Kindle's email address and the approved senders live.
+Looking for a docked reMarkable takes `routes` a second and a half when none
+is there; `routes --quick` skips that look and says the tablet is still being
+checked, which is how the app's Send page shows its list at once.
 The two saves need an absolute `--out` path; Apple Books and email are
 Mac only, and email needs Apple Mail set as the default mail app. The
 remembered choice lives in an app settings file, not the library: macOS

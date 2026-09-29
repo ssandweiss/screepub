@@ -594,6 +594,11 @@ let drawn = null;
  *  so a slow poll cannot put back a list a faster, later one replaced. */
 let asks = 0;
 let newest = 0;
+/** Full asks (the reMarkable probe included) whose answer is still out. A
+ *  tick of the poll while one is out asks nothing: each can take the probe's
+ *  whole timeout, and piling a second on top of it would only add another
+ *  engine run to wait for. */
+let fullOut = 0;
 /** A send or a route in flight (sendTo() and perform() share it). Two at
  *  once would be a genuine race and not a cosmetic one: the MOBI rung of
  *  src/export/artifact.ts REWRITES the library EPUB in place before it
@@ -626,14 +631,27 @@ export function scriptChanged() {
 
 export function show() {
   draw();
+  // Two asks at once. The quick one leaves out the reMarkable probe, which
+  // runs to its whole timeout (a second and a half) on every machine with no
+  // tablet docked, so the rows are on screen as soon as the mount scan
+  // answers, with the reMarkable row saying it is still checking. The full
+  // one fills that row in. Asked second, the full answer is the newer one,
+  // so refresh()'s ordering drops the quick answer if it lands last.
+  refresh({ quick: true });
   refresh();
   // A reader plugs something in while looking at this surface; the list has
   // to notice on its own. Cleared first: a second show() without an
   // intervening hide() would otherwise leave the first interval running
   // forever with nothing holding its handle.
   clearInterval(poll);
-  poll = setInterval(refresh, POLL_MS);
+  poll = setInterval(tick, POLL_MS);
   kfxShown();
+}
+
+/** One tick of the poll: a full ask, unless the last one has not answered. */
+function tick() {
+  if (fullOut > 0) return;
+  refresh();
 }
 
 export function hide() {
@@ -702,22 +720,27 @@ function draw() {
 }
 
 /** Every route this book can take, as `screepub routes` lists them, asked
- *  again every two seconds so a reader plugged in turns up on its own. */
-async function refresh() {
+ *  again every two seconds so a reader plugged in turns up on its own.
+ *  `quick` is the page's first ask only (show()): the same list without the
+ *  reMarkable probe. */
+async function refresh({ quick = false } = {}) {
   if (list === null) return;
   // Rows must not be rebuilt out from under a send in progress.
   if (sending) return;
   const into = list;
   const mine = ++asks;
+  if (!quick) fullOut += 1;
   let answer;
   try {
-    answer = await runEngine(argv.routes(ctx.state.script.epubPath));
+    answer = await runEngine(argv.routes(ctx.state.script.epubPath, { quick }));
   } catch (err) {
     // The same three reasons to drop an answer as below.
     if (list !== into || sending || mine <= newest) return;
     newest = mine;
     fault(err.message);
     return;
+  } finally {
+    if (!quick) fullOut -= 1;
   }
   // A new script's page, a send begun since, or a newer answer already
   // drawn: this one is out of date, and drawing it would undo something.

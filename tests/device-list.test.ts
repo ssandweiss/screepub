@@ -91,3 +91,21 @@ test('a probe that throws is a tablet that is not there, not a crash', async () 
   });
   expect(devices).toEqual([]);
 });
+
+test('skipRemarkable lists what the mount scan sees and never starts the probe', async () => {
+  // `routes --quick`, the Send page's first answer: the probe waits out its
+  // whole timeout on every machine with no tablet docked, and that wait is
+  // what kept the page empty for a second and a half. The probe here never
+  // answers at all, so a listing that still waited for it would hang.
+  let probes = 0;
+  const devices = await listDevices({
+    scan: () => [{ kind: 'kindle', name: 'Kindle', volume: '/v/Kindle' }],
+    probe: () => {
+      probes += 1;
+      return new Promise<boolean>(() => {});
+    },
+    skipRemarkable: true,
+  });
+  expect(devices.map((d) => d.kind)).toEqual(['kindle']);
+  expect(probes).toBe(0);
+});

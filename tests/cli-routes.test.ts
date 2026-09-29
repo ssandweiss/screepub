@@ -818,6 +818,38 @@ describe('screepub routes (through the CLI)', () => {
     expect(stdout).toContain('(dimmed: ');
   });
 
+  test('--quick answers without asking the reMarkable, and says the tablet is still being looked for', async () => {
+    // A stand-in tablet on this machine that takes every request and never
+    // answers, so no real network is involved: a full `routes` waits out the
+    // probe's whole timeout on it, which is the wait the Send page's first
+    // rows used to sit behind. The quick answer must not ask it at all.
+    let asked = 0;
+    const tablet = Bun.serve({
+      port: 0,
+      fetch: () => {
+        asked += 1;
+        return new Promise<Response>(() => {});
+      },
+    });
+    try {
+      const env = { SCREEPUB_REMARKABLE_ENDPOINT: `http://127.0.0.1:${tablet.port}` };
+      const quick = await runCli(['routes', book(), '--quick', '--json'], env);
+      expect(quick.exitCode).toBe(0);
+      const quickRow = soleJson(quick.stdout).routes.find((r: any) => r.key === 'remarkable');
+      expect(quickRow.detail).toBe('checking whether one is docked…');
+      expect(asked).toBe(0);
+
+      // The full answer is the one that looks, and waits for it.
+      const full = await runCli(['routes', book(), '--json'], env);
+      expect(full.exitCode).toBe(0);
+      const fullRow = soleJson(full.stdout).routes.find((r: any) => r.key === 'remarkable');
+      expect(fullRow.detail).toBe('dock over USB to send');
+      expect(asked).toBe(1);
+    } finally {
+      tablet.stop(true);
+    }
+  });
+
   test('a missing book is unreadable', async () => {
     const { stdout, exitCode } = await runCli(['routes', join(SCRATCH, 'ghost.epub'), '--json']);
     expect(exitCode).toBe(1);
@@ -859,6 +891,7 @@ describe('screepub routes (through the CLI)', () => {
     expect(exitCode).toBe(0);
     const { usage } = soleJson(stdout);
     expect(usage).toContain('screepub routes <file.epub>');
+    expect(usage).toContain('--quick');
     expect(usage).not.toContain('--mobi');
     expect(usage).not.toContain('--out');
     expect(usage).not.toContain(EM_DASH);
@@ -866,7 +899,7 @@ describe('screepub routes (through the CLI)', () => {
 
   test('the main usage lists it', async () => {
     const { stdout } = await runCli(['--help']);
-    expect(stdout).toContain('screepub routes <file.epub> [--json]');
+    expect(stdout).toContain('screepub routes <file.epub> [--quick] [--json]');
   });
 });
 

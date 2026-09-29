@@ -1000,6 +1000,14 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     const list = routes({ platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: mail, devices });
     return { ok: true, routes: list, chosen: preselected(list, last).id };
   };
+  /** `routes --quick` for these facts: the reMarkable not looked for. */
+  const listedQuick = (devices: ConnectedDevice[]) => {
+    const list = routes({
+      platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: true, devices,
+      remarkableChecked: false,
+    });
+    return { ok: true, routes: list, chosen: preselected(list, undefined).id };
+  };
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   let fresh = 0;
@@ -1054,6 +1062,12 @@ describe('the Send page, drawn from the route list and performed row by row', ()
         await settle();
         return call!.args;
       },
+      /** The page's first answer: the quick call and the full one it asks
+       *  together when it is shown, oldest first, both with `value` (no
+       *  tablet docked, so the two lists are the same). */
+      async open(value: unknown) {
+        return [await w.answer('routes', value), await w.answer('routes', value)];
+      },
       /** The newest unanswered call to `verb`, answered first (a race). */
       async answerNewest(verb: string, value: unknown) {
         const at = pending.map((p) => p.args[0]).lastIndexOf(verb);
@@ -1094,9 +1108,10 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     return w;
   }
 
-  test('it polls routes, not devices, for this script’s book', async () => {
+  test('it polls routes, not devices, for this script’s book: a quick answer first, then the full one', async () => {
     const w = await world();
-    expect(w.asked()).toEqual(['routes']);
+    expect(w.asked()).toEqual(['routes', 'routes']);
+    expect(await w.answer('routes', listedQuick([]))).toEqual(['routes', EPUB, '--json', '--quick']);
     expect(await w.answer('routes', listed([]))).toEqual(['routes', EPUB, '--json']);
     w.poll();
     expect(w.asked()).toEqual(['routes']);
@@ -1105,10 +1120,55 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     expect(w.polling()).toBe(false);
   });
 
+  test('the rows are drawn from the quick answer at once, and the reMarkable row fills in when the full one lands', async () => {
+    // The quick answer leaves out the reMarkable probe, the one thing the
+    // page used to wait for: with no tablet docked it runs to its whole
+    // timeout, a second and a half with nothing on screen.
+    const w = await world();
+    await w.answer('routes', listedQuick([kindle]));
+    expect(w.asked()).toEqual(['routes']); // the full answer is still out
+    expect(w.titles()).toEqual(listedQuick([kindle]).routes.map((r) => r.title));
+    expect(w.button('Copy to Kindle').disabled).toBe(false);
+    const tablet = () => w.rows().find((r) => r.textContent.startsWith('reMarkable'))!;
+    expect(tablet().textContent).toContain('checking whether one is docked…');
+    expect(tablet().className).toContain('route-unavailable');
+    // A docked tablet answers the full probe, and its row can fire now.
+    await w.answer('routes', listed([kindle, rm]));
+    expect(tablet().className).toBe('device-row');
+    expect(w.button('Upload to reMarkable').disabled).toBe(false);
+  });
+
+  test('a full answer that lands before the quick one is not replaced by it', async () => {
+    const w = await world();
+    await w.answerNewest('routes', listed([kindle, rm]));
+    await w.answer('routes', listedQuick([kindle]));
+    expect(w.buttons().map((b) => b.textContent)).toContain('Upload to reMarkable');
+    expect(w.list().textContent).not.toContain('checking whether one is docked');
+  });
+
+  test('a tick while a full answer is still out asks nothing more, so polls never pile up', async () => {
+    // Each full answer can take the probe's whole timeout; on a slow machine
+    // an interval that asked regardless would stack engine runs on each other.
+    const w = await world();
+    await w.answer('routes', listedQuick([]));
+    w.poll();
+    w.poll();
+    expect(w.asked()).toEqual(['routes']);
+    await w.answer('routes', listed([]));
+    w.poll();
+    expect(w.asked()).toEqual(['routes']);
+    w.poll();
+    expect(w.asked()).toEqual(['routes']);
+    await w.answer('routes', listed([]));
+    w.poll();
+    expect(w.asked()).toEqual(['routes']);
+    await w.answer('routes', listed([]));
+  });
+
   test('every row in the engine’s order: brass for the chosen one, outline for the rest, dimmed ones with no button', async () => {
     const w = await world();
     const answer = listed([kindle, kobo], 'apple-books');
-    await w.answer('routes', answer);
+    await w.open(answer);
     expect(w.titles()).toEqual(answer.routes.map((r) => r.title));
     const rows = w.rows();
     answer.routes.forEach((route, i) => {
@@ -1141,7 +1201,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('a refusal draws the engine’s sentence and a malformed list draws its own line, never a short list', async () => {
     const w = await world();
-    await w.answer('routes', { ok: false, error: { code: 'unreadable', message: 'Cannot read the book.' } });
+    await w.open({ ok: false, error: { code: 'unreadable', message: 'Cannot read the book.' } });
     expect(w.fault()).toBe('Cannot read the book.');
     expect(w.buttons()).toEqual([]);
     w.poll();
@@ -1157,7 +1217,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('the same answer again leaves every row alone, so the keyboard stays put', async () => {
     const w = await world();
-    await w.answer('routes', listed([kindle]));
+    await w.open(listed([kindle]));
     const save = w.button('Save the EPUB…');
     save.focus();
     w.poll();
@@ -1169,7 +1229,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('a changed list is rebuilt, and the keyboard goes back to the same route’s button', async () => {
     const w = await world();
-    await w.answer('routes', listed([]));
+    await w.open(listed([]));
     w.button('Save the EPUB…').focus();
     w.poll();
     await w.answer('routes', listed([kindle])); // a Kindle turned up: a new first row
@@ -1181,7 +1241,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('when the focused route is gone, the page’s own plan takes the keyboard', async () => {
     const w = await world();
-    await w.answer('routes', listed([kindle]));
+    await w.open(listed([kindle]));
     w.button('Copy to Kindle').focus();
     w.poll();
     await w.answer('routes', listed([])); // unplugged
@@ -1192,7 +1252,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     // A rebuild mid-route would hand back fresh, enabled buttons and let a
     // second route (or a send) start while the first is still writing.
     const w = await world();
-    await w.answer('routes', listed([]));
+    await w.open(listed([]));
     w.poll();
     w.button('Add to Apple Books').click();
     await w.answer('routes', listed([kindle])); // a Kindle turned up meanwhile
@@ -1210,7 +1270,8 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     w.ctx.state.script = { ...script(), epubPath: '/lib/other/Other.epub' };
     w.send.scriptChanged();
     if (w.asked().includes('kfx-status')) await w.answer('kfx-status', { ok: false });
-    await w.answer('routes', { ok: false, error: { code: 'unreadable', message: 'Cannot read the book.' } });
+    // Both of the old page's first asks, quick and full, come back refused.
+    await w.open({ ok: false, error: { code: 'unreadable', message: 'Cannot read the book.' } });
     expect(w.fault()).toBe(null);
     expect(w.list().textContent).toBe('Looking for every way to send it…');
     w.poll();
@@ -1229,7 +1290,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     const w = await world(notReady);
     const block = w.pane.all().find((n) => n.className === 'kfx-setup')!;
     expect(block.hidden).toBe(true);
-    await w.answer('routes', listed([]));
+    await w.open(listed([]));
     expect(block.hidden).toBe(false);
     w.poll();
     await w.answer('routes', listed([kobo]));
@@ -1241,7 +1302,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('the keyboard goes back to Save the EPUB after its Save box is cancelled', async () => {
     const w = await world();
-    await w.answer('routes', listed([]));
+    await w.open(listed([]));
     const save = w.button('Save the EPUB…');
     save.focus();
     save.click(); // Return on the focused button
@@ -1256,7 +1317,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('the keyboard goes back to the route’s button after a refusal, and after a success', async () => {
     const w = await world();
-    await w.answer('routes', listed([]));
+    await w.open(listed([]));
     const books = w.button('Add to Apple Books');
     books.focus();
     books.click();
@@ -1275,7 +1336,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('a device send and the setup link hand the keyboard back the same way', async () => {
     const w = await world();
-    await w.answer('routes', listed([kobo]));
+    await w.open(listed([kobo]));
     w.button('Copy to KOBOeReader').focus();
     w.button('Copy to KOBOeReader').click();
     await settle();
@@ -1293,7 +1354,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     // Nothing to put back when the keyboard was not in the list, and nothing
     // to take it from when the reader has moved on.
     const w = await world();
-    await w.answer('routes', listed([]));
+    await w.open(listed([]));
     const summary = w.pane.all().find((n) => n.tagName === 'SUMMARY')!;
     summary.focus();
     w.button('Add to Apple Books').click(); // a click does not focus a button in WebKit
@@ -1320,7 +1381,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     // It never mounts, so it has no volume line; the engine's detail already
     // says how it is reached. A mounted reader keeps its volume line.
     const w = await world();
-    await w.answer('routes', listed([kobo, rm]));
+    await w.open(listed([kobo, rm]));
     const [koboRow, rmRow] = w.rows();
     expect(rmRow!.all().filter((n) => n.className === 'route-detail').map((n) => n.textContent))
       .toEqual(['the EPUB, over its USB connection']);
@@ -1330,7 +1391,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('Apple Books: every button dead while it runs, the engine’s note after, then the list again', async () => {
     const w = await world();
-    await w.answer('routes', listed([kindle], 'device:kindle'));
+    await w.open(listed([kindle], 'device:kindle'));
     w.button('Add to Apple Books').click();
     expect(w.status().textContent).toBe('Opening Apple Books…');
     expect(w.buttons().every((b) => b.disabled)).toBe(true);
@@ -1357,7 +1418,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     // hold every Settings save that long. A save copies the book itself, so
     // it waits for whatever holds the book (here, a turn already running).
     const w = await world();
-    await w.answer('routes', listed([]));
+    await w.open(listed([]));
     const { inTurn } = await import(join(UI, 'book-queue.js'));
     let free: () => void = () => {};
     const holding = inTurn(EPUB, 'save', () => new Promise<void>((resolve) => { free = resolve; }));
@@ -1382,7 +1443,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('a refused route says the engine’s sentence as an alarm, and asks for nothing more', async () => {
     const w = await world();
-    await w.answer('routes', listed([]));
+    await w.open(listed([]));
     w.button('Send to Kindle web').click();
     await w.answer('route', { ok: false, error: { code: 'open-failed', message: 'Could not open the page.' } });
     expect(w.status().textContent).toBe('Could not open the page.');
@@ -1392,7 +1453,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('an older poll that lands after the repoll cannot put the brass back', async () => {
     const w = await world();
-    await w.answer('routes', listed([], 'save-kindle'));
+    await w.open(listed([], 'save-kindle'));
     w.poll(); // out before the route below starts...
     w.button('Add to Apple Books').click();
     await w.answer('route', { ok: true, note: 'Added to Apple Books.' });
@@ -1404,7 +1465,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('Save the EPUB: the Save box first, named after the book; a cancel does nothing and says nothing', async () => {
     const w = await world();
-    await w.answer('routes', listed([]));
+    await w.open(listed([]));
     w.button('Save the EPUB…').click();
     expect(w.asked()).toEqual([]);
     const options = await w.choose(null);
@@ -1425,7 +1486,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('Save a Kindle file: built first with this script’s settings, then the Save box, then the copy', async () => {
     const w = await world();
-    await w.answer('routes', listed([]));
+    await w.open(listed([]));
     w.button('Save a Kindle file…').click();
     await settle(); // past ensureSettings(), which has nothing to fetch here
     expect(w.status().textContent).toBe('Building the Kindle file (Kindle Previewer can take about twenty seconds)…');
@@ -1452,7 +1513,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('Save a Kindle file: a refused build is said, and no Save box opens; a cancel after it asks nothing more', async () => {
     const w = await world();
-    await w.answer('routes', listed([]));
+    await w.open(listed([]));
     w.button('Save a Kindle file…').click();
     await settle();
     await w.answer('export', { ok: false, error: { code: 'export-failed', message: 'Calibre could not build it.' } });
@@ -1472,7 +1533,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('a script replaced mid-route hears nothing about it', async () => {
     const w = await world();
-    await w.answer('routes', listed([]));
+    await w.open(listed([]));
     w.button('Add to Apple Books').click();
     w.ctx.state.script = { ...script(), epubPath: '/lib/other/Other.epub' };
     w.send.scriptChanged();
@@ -1486,7 +1547,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('the email row carries its first-time step, and the link asks the engine to open Amazon’s page', async () => {
     const w = await world();
-    await w.answer('routes', listed([]));
+    await w.open(listed([]));
     const email = w.rows().find((r) => r.textContent.startsWith('Send to Kindle email'))!;
     expect(email.textContent).toContain('First time? Amazon needs your sender address approved');
     const link = email.querySelectorAll('button').find((b) => b.textContent === 'Open Amazon’s page')!;
@@ -1501,7 +1562,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('a dimmed email row still offers the setup link, and no send button', async () => {
     const w = await world();
-    await w.answer('routes', listed([], undefined, false));
+    await w.open(listed([], undefined, false));
     const email = w.rows().find((r) => r.textContent.startsWith('Send to Kindle email'))!;
     expect(email.className).toContain('route-unavailable');
     expect(email.querySelectorAll('button').map((b) => b.textContent)).toEqual(['Open Amazon’s page']);
@@ -1509,7 +1570,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('a device row still exports then sends, and the list is asked for again after', async () => {
     const w = await world();
-    await w.answer('routes', listed([kobo]));
+    await w.open(listed([kobo]));
     w.button('Copy to KOBOeReader').click();
     await settle();
     const exported = await w.answer('export', { ok: true, path: EPUB, extension: 'epub', label: 'EPUB' });

@@ -96,7 +96,8 @@ Commands:
   screepub reveal <file> [--json]           show a file in the system's file manager
   screepub kfx-status [--json]              can this computer make KFX for a Kindle?
   screepub kfx-install [--json]             add the KFX plugin to Calibre (online)
-  screepub routes <file.epub> [--json]      every way this book can leave, best first
+  screepub routes <file.epub> [--quick] [--json]
+                                            every way this book can leave, best first
   screepub route <key> <file.epub> [--out <path>] [--json]
                                             send it to Apple Books, Amazon, Mail, or save a copy
   screepub update-decision --offered <v> --current <v> [--json]
@@ -259,7 +260,7 @@ Options:
 const ROUTES_USAGE = `screepub routes: every way this book can leave, best first
 
 Usage:
-  screepub routes <file.epub> [--json]
+  screepub routes <file.epub> [--quick] [--json]
 
 Lists every route: readers plugged in over USB, a docked reMarkable, Apple
 Books, Amazon's Send to Kindle, email, and saving a copy. The route chosen
@@ -267,7 +268,13 @@ last time is marked, even while it cannot fire; otherwise the first one that
 can. A route that cannot fire right now is still listed, with what would fix
 it. Reads the app settings file, never writes it.
 
+Looking for a reMarkable means asking its USB web interface, which takes a
+second and a half to give up when no tablet is docked. --quick does not ask:
+its reMarkable row says it is still checking, and a second call without
+--quick fills it in. Readers that mount as a drive are found either way.
+
 Options:
+  --quick                answer at once, without looking for a reMarkable
   --json                 machine-readable result on stdout (for the app)
   -h, --help             show this help
 `;
@@ -511,6 +518,7 @@ function parseVerbArgs(args: string[]) {
       current: { type: 'string' },
       'opted-in': { type: 'boolean', default: false },
       'last-checked': { type: 'string' },
+      quick: { type: 'boolean', default: false },
       json: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -543,7 +551,7 @@ const VERB_FLAGS: Record<Verb, readonly VerbFlag[]> = {
   'kfx-install': [],
   'app-settings': ['--set'],
   reveal: [],
-  routes: [],
+  routes: ['--quick'],
   // For some keys only: routeCommand refuses each for every key that cannot
   // act on it.
   route: ['--out', '--fountain', '--options-json'],
@@ -553,7 +561,9 @@ const VERB_FLAGS: Record<Verb, readonly VerbFlag[]> = {
  * exactly as it was when each verb refused its own: the update verbs' flags
  * first, except on those two verbs, which name the other one's flags last. */
 const UPDATE_FLAGS: readonly VerbFlag[] = ['--offered', '--current', '--last-checked', '--opted-in'];
-const OTHER_FLAGS: readonly VerbFlag[] = ['--out', '--device', '--set', '--for', '--fountain', '--options-json'];
+const OTHER_FLAGS: readonly VerbFlag[] = [
+  '--out', '--device', '--set', '--for', '--fountain', '--options-json', '--quick',
+];
 
 /** The refusal for the first flag given that `verb` does not act on, naming
  *  the verbs that do, in VERBS order; null when every flag given is the
@@ -770,8 +780,10 @@ async function runVerb(verb: Verb, args: string[]): Promise<void> {
       if (positionals.length !== 1) {
         fail({ code: 'usage', message: 'expected exactly one .epub (see --help)' });
       }
+      // --quick leaves the reMarkable probe out, and says so on its row:
+      // the Send page draws this at once, then asks again in full.
       const answer = await routesCommand(positionals[0], {
-        facts: () => routeFacts({}, deviceSeams()),
+        facts: () => routeFacts({}, { ...deviceSeams(), skipRemarkable: values.quick }),
       });
       if (jsonMode) {
         console.log(JSON.stringify({ ok: true, ...answer }));

@@ -43,6 +43,7 @@ const FLAGS: Record<string, string[]> = {
   '--current': ['--current', '1.0.0'],
   '--opted-in': ['--opted-in'],
   '--last-checked': ['--last-checked', '5'],
+  '--quick': ['--quick'],
 };
 
 /** What each verb owns, and a well-formed set of positionals for it. */
@@ -57,7 +58,7 @@ const VERB_SHAPE: Record<Verb, { own: string[]; positionals: string[] }> = {
   'kfx-install': { own: [], positionals: [] },
   'app-settings': { own: ['--set'], positionals: [] },
   reveal: { own: [], positionals: ['/nowhere/x.epub'] },
-  routes: { own: [], positionals: ['/nowhere/x.epub'] },
+  routes: { own: ['--quick'], positionals: ['/nowhere/x.epub'] },
   route: { own: ['--out', '--fountain', '--options-json'], positionals: ['save-kindle', '/nowhere/x.epub'] },
 };
 
