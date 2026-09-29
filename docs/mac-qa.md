@@ -347,6 +347,14 @@ Work top to bottom. Kindle unplugged until the Send section says so.
     comes back when you scroll to the top.
   - Fail: a control near the top edge cannot be clicked.
 
+#### Reading
+
+- [ ] **[hands] The scene list has room at the top** (recheck on the rebuild with the 2026-09-28 fixes)
+  - Do: open Read and show the scene list, scrolled to the top.
+  - See: the count ("11 SCENES" for Field Station) sits clear of the
+    list's top edge, with the same room as below the last scene.
+  - Fail: the count touches the top edge.
+
 #### Where books go
 
 - [x] **[hands] The library line** (passed 2026-09-28)
@@ -434,18 +442,36 @@ Field Station open, Kindle still unplugged.
     address it to your Kindle's email address. Switch the default back
     afterwards.
   - Fail: a message with no attachment, or the row stays dimmed.
-- [ ] **[hands] A knob moved during a build waits its turn** (held for the rebuild with the 2026-09-28 fixes)
-  - Do: press Save a Kindle file…, and while it builds, open Settings and
-    move a knob. Cancel the Save box when it opens.
-  - See: "Waiting for the copy to finish…", then "Saved."
-  - Fail: the knob change is lost or saves over the build.
-- [ ] **[hands] Save a Kindle file** (works; 23 s with no progress shown, fix in progress; recheck on the rebuild)
-  - Do: Save a Kindle file…, save to the Desktop.
-  - See: "Building the Kindle file (Kindle Previewer can take about twenty
-    seconds)…", then the Save box suggests `field-station.kfx` with the
-    format "Kindle file (KFX)". A line under the status names KFX.
-  - Fail: it offers AZW3 or MOBI on this Mac, the box never opens, or an
-    error.
+- [ ] **[hands] The Send page opens at once** (recheck on the rebuild with the 2026-09-28 fixes)
+  - Do: open Send.
+  - See: every row is there straight away, in well under a second. The
+    reMarkable row says "checking whether one is docked…" for a moment,
+    then "dock over USB to send". Kindle rows name their file type, for
+    example "Save a Kindle file (.kfx)".
+  - Fail: a blank page for a second or more, or a row that names no type
+    on this Mac.
+- [ ] **[hands] The Kindle file builds by itself, and says so** (recheck on the rebuild)
+  - Do: in Settings move one knob and wait for "Saved.", then open Send.
+  - See: without pressing anything, "Building the Kindle file. This takes
+    about half a minute." with a moving bar. Save the EPUB pressed now
+    starts at once, without waiting. When the bar goes, press Save a Kindle
+    file (.kfx)…: the Save box opens straight away and suggests
+    `field-station.kfx`.
+  - Fail: nothing shows while it builds, Save the EPUB waits for the build,
+    or the Save box offers AZW3 or MOBI on this Mac.
+- [ ] **[hands] A knob moved during a build waits its turn** (recheck on the rebuild)
+  - Do: move a knob and wait for "Saved.", open Send, and while the bar
+    moves go to Settings and move another knob.
+  - See: "Waiting for the Kindle file to finish building…", then "Saved."
+    once the bar is gone.
+  - Fail: the knob change is lost, or it saves while the bar is still
+    moving.
+- [ ] **[hands] Pressing during a build waits for it** (recheck on the rebuild)
+  - Do: start a build as above and, while the bar moves, press Save a
+    Kindle file (.kfx)….
+  - See: the building line stays up until the build ends, then the Save
+    box opens. Only one build runs.
+  - Fail: a second build starts, or an error.
 - [x] **[hands] Kindle over USB** (passed 2026-09-28)
   - Do: plug in the Kindle and wait a moment, then press Copy to Kindle.
   - See: a Kindle row appears with its drive. Then "Building the file
