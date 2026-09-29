@@ -45,7 +45,7 @@ type SendModule = {
   wantsKindleFile: (shown: unknown) => boolean;
   handsOverKindleFile: (route: unknown) => boolean;
   buildsAhead: (file: unknown, opts?: {
-    building?: boolean; busy?: boolean; triedFor?: number | null; forKindle?: boolean;
+    building?: boolean; busy?: boolean; triedFor?: string | null; forKindle?: boolean;
   }) => boolean;
   mayBuild: (file: unknown) => boolean;
   buildLine: (extension: unknown) => string;
@@ -841,13 +841,16 @@ describe('building the Kindle file before anyone presses anything', () => {
     expect(send.buildsAhead(file('kfx', false), { forKindle: false })).toBe(false);
   });
 
-  test('once per version of the book: not again for the date a build was already started for', () => {
+  test('once per version of the book and kind of file: not again for what a build was already started for', () => {
     // Focus comes back constantly (every closed Save box, every switch of
     // app), and a build that failed leaves the file out of date: without
     // this, every return started another half-minute run.
-    expect(send.buildsAhead(file('kfx', false, 'calibre', 1000), { ...go, triedFor: 1000 })).toBe(false);
+    expect(send.buildsAhead(file('kfx', false, 'calibre', 1000), { ...go, triedFor: 'kfx@1000' })).toBe(false);
     // A Settings save rewrites the book, which moves its date.
-    expect(send.buildsAhead(file('kfx', false, 'calibre', 2000), { ...go, triedFor: 1000 })).toBe(true);
+    expect(send.buildsAhead(file('kfx', false, 'calibre', 2000), { ...go, triedFor: 'kfx@1000' })).toBe(true);
+    // The KFX plugin installed after an AZW3 was built ahead: the same book,
+    // a different file, and worth building.
+    expect(send.buildsAhead(file('kfx', false, 'calibre', 1000), { ...go, triedFor: 'azw3@1000' })).toBe(true);
     // No date to tell versions apart by: nothing can stop a retry, so no start.
     expect(send.buildsAhead(file('kfx', false, 'calibre', null), go)).toBe(false);
   });
@@ -1588,6 +1591,61 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     expect(w.builds()).toBe(1);
     await w.answer('export', builtKfx);
     await w.answerCheck(checked('kfx', true, 2000));
+  });
+
+  test('an AZW3 built ahead, then the KFX plugin installed: exactly one KFX build ahead', async () => {
+    const notReady = {
+      ok: true,
+      ...kfxSetup({ calibre: true, previewer: true, pluginInstalled: false, ready: false }, 'darwin'),
+    };
+    const w = await world(notReady, checked('azw3', false));
+    await w.open(forKindle());
+    expect(w.builds()).toBe(1);
+    await w.answer('export', { ok: true, path: '/lib/field-station/Field Station.azw3', extension: 'azw3' });
+    await w.answerCheck(checked('azw3', true));
+    expect(w.builds()).toBe(0);
+    // The Install button in the KFX block: the same book, now a KFX to build.
+    w.pane.all().find((n) => n.tagName === 'BUTTON' && n.getAttribute('data-step') === 'plugin')!.click();
+    await w.answer('kfx-install', {
+      ok: true, version: '2.20.1', removed: [],
+      setup: kfxSetup({ calibre: true, previewer: true, pluginInstalled: true, ready: true }, 'darwin'),
+    });
+    await w.answerCheck(checked('kfx', false));
+    expect(w.builds()).toBe(1);
+    expect(w.build()).toBe(HALF_A_MINUTE);
+    // It fails; a focus return does not try it again.
+    await w.answer('export', { ok: false, error: { code: 'export-failed', message: 'Kindle Previewer quit.' } });
+    w.focusWindow();
+    if (w.asked().includes('kfx-status')) await w.answer('kfx-status', notReady);
+    await w.answerCheck(checked('kfx', false));
+    expect(w.builds()).toBe(0);
+  });
+
+  test('a check refused as busy (a Save box open) is looked at again when the save ends', async () => {
+    const w = await world(undefined, null);
+    await w.open(forKindle());
+    w.button('Save the EPUB…').click();
+    await w.answerCheck(checked('kfx', false));
+    expect(w.builds()).toBe(0); // the Save box is up: busy
+    await w.choose(null); // cancelled: no repoll, nothing new in the list
+    expect(w.builds()).toBe(1);
+    expect(w.build()).toBe(HALF_A_MINUTE);
+    await w.answer('export', builtKfx);
+    await w.answerCheck(checked('kfx', true));
+  });
+
+  test('and when a send ends', async () => {
+    const w = await world(undefined, null);
+    await w.open(listed([kobo], 'save-kindle'));
+    w.button('Copy to KOBOeReader').click();
+    await settle();
+    await w.answerCheck(checked('kfx', false));
+    expect(w.builds()).toBe(1); // the Kobo's own export, for the EPUB
+    await w.answer('export', { ok: false, error: { code: 'export-failed', message: 'No book.' } });
+    expect(w.builds()).toBe(1); // now the Kindle file, built ahead
+    expect(w.build()).toBe(HALF_A_MINUTE);
+    await w.answer('export', builtKfx);
+    await w.answerCheck(checked('kfx', true));
   });
 
   test('a check that answers after the page is hidden starts nothing', async () => {

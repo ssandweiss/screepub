@@ -330,10 +330,12 @@ export function mayBuild(file) {
  *    place in a moment, so building it ahead buys nothing;
  *  - a Kindle is in play (`forKindle`, wantsKindleFile()): a Kobo or a
  *    reMarkable session must not start Kindle Previewer for nobody;
- *  - once per version of the book: never again for the book date a build
- *    was already started for (`triedFor`), so a build that failed is not
- *    retried every time the window gets the focus back, and one with no date
- *    to tell versions apart by is never started;
+ *  - once per version of the book and kind of file: never again for the
+ *    attemptKey() a build was already started for (`triedFor`), so a build
+ *    that failed is not retried every time the window gets the focus back,
+ *    while a KFX wanted after an AZW3 was built ahead (the KFX plugin just
+ *    installed) still is; a file with no book date to tell versions apart by
+ *    is never started;
  *  - not while one is running for the book (`building`), nor while a send,
  *    a route or a KFX install is (`busy`). */
 export function buildsAhead(file, {
@@ -341,8 +343,14 @@ export function buildsAhead(file, {
 } = {}) {
   if (file === null || file === undefined) return false;
   if (file.fresh !== false || file.builtBy !== 'calibre') return false;
-  if (typeof file.bookDate !== 'number' || file.bookDate === triedFor) return false;
+  if (typeof file.bookDate !== 'number' || attemptKey(file) === triedFor) return false;
   return forKindle === true && !building && !busy;
+}
+
+/** What one build ahead is an attempt at: this kind of file, from this
+ *  version of the book. */
+export function attemptKey(file) {
+  return `${file?.extension}@${file?.bookDate}`;
 }
 
 /** Whether this is a Kindle session, read off the route list: the route
@@ -759,8 +767,9 @@ function onKindleFile(book, args) {
  *  hidden page, and a page that comes back to its book must find it still
  *  going rather than start another. */
 const builds = new Map();
-/** The book date each book's last background build was started for, so the
- *  page builds ahead once per version of a book (buildsAhead()'s `triedFor`).
+/** What each book's last background build was started for (attemptKey()),
+ *  so the page builds ahead once per version of a book and kind of file
+ *  (buildsAhead()'s `triedFor`).
  *  At module level, as `builds` is: a hide and a show, or a new script and
  *  back, is still the same version of the book. */
 const triedFor = new Map();
@@ -1033,7 +1042,7 @@ function maybeBuildAhead() {
     triedFor: triedFor.get(book) ?? null,
     forKindle: wantsKindleFile(drawn),
   })) return;
-  triedFor.set(book, kindle.bookDate);
+  triedFor.set(book, attemptKey(kindle));
   buildInBackground(script);
 }
 
@@ -1349,6 +1358,8 @@ async function sendTo(device) {
     for (const button of buttons()) button.disabled = false;
     kfxRedraw();
     if (worked && !stale()) repoll();
+    // A check that landed meanwhile was refused as busy; look again.
+    if (!stale()) maybeBuildAhead();
   }
 }
 
@@ -1446,6 +1457,9 @@ async function perform(route) {
     for (const button of buttons()) button.disabled = false;
     kfxRedraw();
     if (worked && !stale()) repoll();
+    // A check that landed meanwhile (a Save box was up) was refused as busy,
+    // and a cancelled save asks for no new list: look again now.
+    if (!stale()) maybeBuildAhead();
   }
 }
 
