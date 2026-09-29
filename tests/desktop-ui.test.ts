@@ -3549,12 +3549,20 @@ describe('the Tune surface', () => {
     expect(tune.statusFor('waiting', 'send')).toEqual({ line: 'Waiting for the send to finish…', bad: false });
     expect(tune.statusFor('waiting', 'copy').line).toBe('Waiting for the copy to finish…');
     expect(tune.statusFor('waiting', 'convert').line).toBe('Waiting for the conversion to finish…');
+    // The Send page builds the Kindle file on its own when it opens, under
+    // this label; a save waiting on that says so rather than "in a moment".
+    expect(tune.statusFor('waiting', 'build').line).toBe('Waiting for the Kindle file to finish building…');
     expect(tune.statusFor('waiting', 'save').line).toBe(tune.STATUS.pending);
     expect(tune.statusFor('waiting', 'anything else').line).toBe(tune.STATUS.pending);
     for (const line of Object.values(tune.WAITING) as string[]) {
       expect(line).not.toContain('\u2014');
       expect(line).not.toContain('Saved');
     }
+  });
+
+  test('the Send page’s Kindle build waits under the label this page has words for', async () => {
+    const sendUi = (await import(join(UI, 'send.js'))) as { BUILD_TURN: string };
+    expect(tune.WAITING[sendUi.BUILD_TURN]).toBe('Waiting for the Kindle file to finish building…');
   });
 
   test('the surface never says "saved" about something that was not', () => {
@@ -5089,7 +5097,10 @@ describe('the Send surface', () => {
     const building = [...code.matchAll(/onBook\(script\.epubPath, '(\w+)',\s*argv\.(export|send)\(/g)]
       .map((m) => `${m[2]}:${m[1]}`).sort();
     expect(building).toEqual(['export:copy', 'export:send', 'send:send']);
-    expect(code.match(/argv\.(export|send)\(/g)?.length).toBe(3);
+    // And the Kindle file build the page starts as it opens, under the label
+    // the Settings page has words for (tune.js's WAITING).
+    expect(code).toMatch(/onBook\(book, BUILD_TURN, argv\.export\(book, \{/);
+    expect(code.match(/argv\.(export|send)\(/g)?.length).toBe(4);
     // The Kindle file check reads the book's date, so it waits its turn too:
     // a save still settling lands first, and the answer is about the book
     // as it will be.
@@ -5415,7 +5426,7 @@ describe('what the Send surface decides', () => {
     artifactLine: (built: unknown) => string;
     statusFor: (phase: string, opts?: { device?: unknown; detail?: string })
       => { line: string; bad: boolean };
-    preparingPhase: (device: unknown) => string;
+    preparingPhase: (device: unknown, file?: unknown) => string;
     failureMessage: (answer: unknown) => string;
     outcomeFor: (built: unknown, sent: unknown, device: unknown)
       => [string, { device: unknown; detail: string }];
@@ -5579,6 +5590,8 @@ describe('what the Send surface decides', () => {
     // that builds nothing would be theatre.
     expect(send.preparingPhase(kindle)).toBe('building');
     expect(send.preparingPhase(kobo)).toBe('preparing');
+    // A Kindle file the engine says is current is a stat too.
+    expect(send.preparingPhase(kindle, { extension: 'kfx', fresh: true, builtBy: 'calibre' })).toBe('preparing');
   });
 
   test('a reMarkable is not described as if it had a volume', () => {
@@ -5625,7 +5638,7 @@ describe('what the Send surface decides', () => {
   });
 
   test('the status line alarms on failure and on nothing else', () => {
-    for (const phase of ['idle', 'building', 'preparing', 'copying', 'sent']) {
+    for (const phase of ['idle', 'preparing', 'copying', 'waiting-build', 'sent']) {
       const { bad } = send.statusFor(phase, { device: kindle, detail: 'Sent to Kindle.' });
       expect(`${phase} is bad: ${bad}`).toBe(`${phase} is bad: false`);
     }
@@ -5642,7 +5655,7 @@ describe('what the Send surface decides', () => {
     expect(send.statusFor('failed', { device: kindle, detail: 'it broke' }).line)
       .not.toContain('Sent');
     // Each working phase names the reader it is working on.
-    for (const phase of ['building', 'preparing', 'copying']) {
+    for (const phase of ['preparing', 'copying']) {
       expect(send.statusFor(phase, { device: kindle }).line).toContain('Kindle');
     }
   });

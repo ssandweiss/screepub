@@ -239,9 +239,11 @@ export const NO_MESSAGE = 'The engine refused to send without saying why.';
  *
  *  The route phases sit beside the device ones: `opening` names the route
  *  (its title, the engine's word for it), `saving` is the dialog's copy, and
- *  `building-kindle` says the wait up front, because the Kindle rung can sit
- *  in Kindle Previewer for twenty seconds with nothing else moving. `done` is
- *  a route's own sentence, as `sent` is a device's. */
+ *  `waiting-build` is a save or a send to another reader waiting its turn on
+ *  the book behind a Kindle file build. The build itself is not a status: it
+ *  has its own line and bar (buildLine()), because one started when the page
+ *  opened outlives any press. `done` is a route's own sentence, as `sent` is
+ *  a device's. */
 export function statusFor(phase, { device = null, detail = '', route = null } = {}) {
   const name = device?.name ?? 'the reader';
   if (phase === 'failed') {
@@ -249,7 +251,6 @@ export function statusFor(phase, { device = null, detail = '', route = null } = 
     return { line: said === '' ? NO_MESSAGE : said, bad: true };
   }
   if (phase === 'sent' || phase === 'done') return { line: detail, bad: false };
-  if (phase === 'building') return { line: `Building the file ${name} can open…`, bad: false };
   if (phase === 'preparing') return { line: `Getting the book ready for ${name}…`, bad: false };
   if (phase === 'copying') return { line: `Copying it to ${name}…`, bad: false };
   if (phase === 'opening') {
@@ -257,11 +258,8 @@ export function statusFor(phase, { device = null, detail = '', route = null } = 
     return { line: title === '' ? 'Opening…' : `Opening ${title}…`, bad: false };
   }
   if (phase === 'saving') return { line: 'Saving…', bad: false };
-  if (phase === 'building-kindle') {
-    return {
-      line: 'Building the Kindle file (Kindle Previewer can take about twenty seconds)…',
-      bad: false,
-    };
+  if (phase === 'waiting-build') {
+    return { line: 'Waiting for the Kindle file to finish building…', bad: false };
   }
   return { line: '', bad: false };
 }
@@ -300,10 +298,49 @@ export function needsSettings(script) {
 }
 
 /** Which phase the wait is in before the copy starts. The Kindle rung can
- *  take twenty seconds of Kindle Previewer; the EPUB rung is a stat. Saying
- *  "building" for the one that builds nothing would be theatre. */
-export function preparingPhase(device) {
-  return forFormat(device) === 'kindle' ? 'building' : 'preparing';
+ *  take half a minute of Kindle Previewer, and 'building' puts up the build
+ *  line and its bar for it; the EPUB rung is a stat, and so is a Kindle file
+ *  the engine's check (`file`, kindleCheckFrom()'s) says is current. Saying
+ *  "building" for one that builds nothing would be theatre. */
+export function preparingPhase(device, file = null) {
+  return forFormat(device) === 'kindle' && mayBuild(file) ? 'building' : 'preparing';
+}
+
+/** The turn a Kindle file build takes on its book (book-queue.js). The
+ *  Settings page has words for it (tune.js's WAITING): a save waiting behind
+ *  a KFX build waits about half a minute, not "a moment". */
+export const BUILD_TURN = 'build';
+
+/** Whether a press's `export --for kindle` may have to build the file, and
+ *  so shows the build line and bar while it runs: always, unless the
+ *  engine's check said the file beside the book is current, when the export
+ *  only finds it. */
+export function mayBuild(file) {
+  return file?.fresh !== true;
+}
+
+/** Whether the Send page starts building the Kindle file as it opens,
+ *  before anyone presses anything, so a press finds it built or building.
+ *  Only when the engine's check (kindleCheckFrom()) says the file is out of
+ *  date AND Calibre is what builds it (KFX, AZW3): a machine with no Calibre
+ *  never has it started, and the engine's own MOBI rewrites the library EPUB
+ *  in place in a moment, so building it ahead buys nothing and holds the
+ *  Settings page's saves. Never a second build for a book that has one
+ *  running, and never while a send, a route or a KFX install is (`busy`). */
+export function buildsAhead(file, { building = false, busy = false } = {}) {
+  if (file === null || file === undefined) return false;
+  return file.fresh === false && file.builtBy === 'calibre' && !building && !busy;
+}
+
+/** The line over the moving bar while the Kindle file builds, by the file
+ *  being built. Kindle Previewer's cold start is most of a KFX build: 23 s
+ *  for the 18-page demo, measured, and the owner saw 30 to 40 on a longer
+ *  script. Calibre's AZW3 and the engine's MOBI took under a second there.
+ *  With no check to go by, it says only what it is doing. */
+export function buildLine(extension) {
+  if (extension === 'kfx') return 'Building the Kindle file. This takes about half a minute.';
+  if (isText(extension)) return 'Building the Kindle file. This takes a moment.';
+  return 'Building the Kindle file…';
 }
 
 // Routes: every way the book can leave, as `screepub routes` lists them.
@@ -639,6 +676,16 @@ let kindleBook = null;
 /** The extension the rows on screen were titled with, so a check that
  *  changes it redraws them and one that does not leaves them alone. */
 let titledWith = null;
+/** Kindle file builds out now, by book: `{ runs, file }`, how many exports
+ *  that may build it are out (one started as the page opened, a press queued
+ *  behind it) and what the check said the file is. Kept at module level and
+ *  not with the page, because a build outlives a redraw, a new script and a
+ *  hidden page, and a page that comes back to its book must find it still
+ *  going rather than start another. */
+const builds = new Map();
+/** The build line and its bar, and the line's own node. */
+let buildNote = null;
+let buildWords = null;
 /** A send or a route in flight (sendTo() and perform() share it). Two at
  *  once would be a genuine race and not a cosmetic one: the MOBI rung of
  *  src/export/artifact.ts REWRITES the library EPUB in place before it
@@ -715,6 +762,8 @@ function draw() {
   list = null;
   statusLine = null;
   artifactNote = null;
+  buildNote = null;
+  buildWords = null;
   drawn = null;
   if (ctx.state.script?.epubPath !== kindleBook) {
     kindle = null;
@@ -745,6 +794,14 @@ function draw() {
   list = el('div', { class: 'devices' },
     el('p', { class: 'caption' }, LOOKING));
   statusLine = el('p', { class: 'caption send-status', role: 'status' }, '');
+  // No percent to show: the engine says nothing while Kindle Previewer
+  // works, so the bar sweeps rather than fills. The line is what is read
+  // out; the bar is there to be seen moving.
+  buildWords = el('p', { class: 'caption kindle-build-line' }, '');
+  buildNote = el('div', { class: 'kindle-build', role: 'status' },
+    buildWords,
+    el('div', { class: 'track', 'aria-hidden': 'true' }, el('div', { class: 'build-sweep' })));
+  buildNote.hidden = true;
   artifactNote = el('p', { class: 'caption send-artifact' }, '');
   artifactNote.hidden = true;
   const kfxNode = el('section', { class: 'kfx-setup', 'aria-label': HEADING });
@@ -754,14 +811,17 @@ function draw() {
     el('h2', { class: 'slug' }, 'Send it'),
     el('p', { class: 'prose' }, LEDE),
     list,
+    buildNote,
     statusLine,
     artifactNote,
     kfxNode,
     reach(),
   );
   // After the append: kfx.js draws only into a node that is in the page.
+  showBuild();
   mountKfx(kfxNode, {
-    isSending: () => sending,
+    // A build counts: the plugin must not be swapped under a KFX conversion.
+    isSending: () => sending || builds.size > 0,
     // What is connected, read off the route list: the block's relevance
     // (Kindle advice is for Kindles) reads it as it read `devices`. Null
     // until the first answer, so the block does not flash up and vanish.
@@ -836,10 +896,17 @@ function fillRows() {
  *  will be. A check that fails names nothing: the rows keep their plain
  *  titles, and a press still builds and says what went wrong in its own
  *  words. */
-async function checkKindle() {
+async function checkKindle({ ahead = true } = {}) {
   const script = ctx.state.script;
   if (list === null || blockedReason(script) !== null) return;
   const book = script.epubPath;
+  // A build already out for this book knows what it is building, and the
+  // check would only queue behind it for as long as it runs.
+  const running = builds.get(book);
+  if (running !== undefined) {
+    if (running.file !== null) useKindle(book, running.file);
+    return;
+  }
   const mine = era;
   let answer = null;
   try {
@@ -848,10 +915,83 @@ async function checkKindle() {
     // As a refusal: nothing known.
   }
   if (era !== mine || list === null) return;
-  kindle = kindleCheckFrom(answer);
+  useKindle(book, kindleCheckFrom(answer));
+  if (!ahead) return;
+  if (buildsAhead(kindle, { building: builds.has(book), busy: sending || kfxInstalling() })) {
+    buildInBackground(ctx.state.script);
+  }
+}
+
+/** What is known about this book's Kindle file, onto the rows. */
+function useKindle(book, file) {
+  kindle = file;
   kindleBook = book;
   // Rows are never rebuilt under a send; the poll after it catches up.
   if (drawn !== null && !sending && titledWith !== (kindle?.extension ?? null)) fillRows();
+}
+
+/** Build the Kindle file now, on the book's turn, so a press finds it built
+ *  or building. It is an engine call like any other, so an update's restart
+ *  waits for it (app.js counts every `export` that builds). A build that
+ *  fails says nothing here: nobody asked for it, and a press builds again
+ *  and says what went wrong in the engine's own words.
+ *
+ *  One that worked is followed by a check, not by taking the file as
+ *  current: a Settings save that waited behind the build rebuilds the book
+ *  right after it, and a press that trusted the build would then rebuild the
+ *  Kindle file with no line up. The check waits behind that save and says.
+ *  It never starts a build of its own: a file the engine still calls out of
+ *  date straight after being built (a book dated in the future) would
+ *  otherwise build again, and again, for as long as the page is open. */
+function buildInBackground(script) {
+  const book = script.epubPath;
+  const run = track(book, kindle, onBook(book, BUILD_TURN, argv.export(book, {
+    forFormat: 'kindle',
+    fountain: script.fountainPath,
+    optionsJson: optionsJsonFor(script),
+  })));
+  run.then((answer) => {
+    if (answer?.ok === true && poll !== null) checkKindle({ ahead: false });
+  }, () => {});
+}
+
+/** Count `run`, an export that may build this book's Kindle file, as a build
+ *  for as long as it is out: the build line and its bar stay up until the
+ *  last one for the book answers. Hands `run` back, answer and all. */
+function track(book, file, run) {
+  const entry = builds.get(book) ?? { runs: 0, file };
+  entry.runs += 1;
+  if (file !== null) entry.file = file;
+  builds.set(book, entry);
+  showBuild();
+  kfxRedraw();
+  const done = () => {
+    entry.runs -= 1;
+    if (entry.runs === 0 && builds.get(book) === entry) builds.delete(book);
+    showBuild();
+    kfxRedraw();
+  };
+  run.then(done, done);
+  return run;
+}
+
+/** A press's own export just handed over a Kindle file for `book`: it is
+ *  current as of now, so the next press is a lookup and puts up no build
+ *  line for it. */
+function builtNow(book) {
+  if (kindleBook === book && kindle !== null) kindle = { ...kindle, fresh: true };
+}
+
+/** The build line and its bar, up while this page's book has a build out. */
+function showBuild() {
+  if (buildNote === null) return;
+  const running = builds.get(ctx.state.script?.epubPath) ?? null;
+  buildNote.hidden = running === null;
+  if (running === null) return;
+  const words = buildLine(running.file?.extension ?? null);
+  // Only when the words change: rewritten into a live region, the same words
+  // can be read out again.
+  if (buildWords.textContent !== words) text(buildWords, words);
 }
 
 /** A route or a send just worked, and the engine now remembers it: ask again
@@ -1040,16 +1180,24 @@ async function sendTo(device) {
     await ensureSettings();
     if (stale()) return;
     const script = ctx.state.script;
-    say(statusFor(preparingPhase(device), { device }));
+    // A Kindle file that may have to be built gets the build line and its
+    // bar rather than a status (preparingPhase()), and waits behind a build
+    // already out for the book instead of starting another: the engine then
+    // finds the file that build made, current, and hands it back. Anything
+    // else queued behind such a build says what it is waiting for.
+    const waiting = preparingPhase(device, kindle);
+    say(waiting === 'building' ? statusFor('idle')
+      : builds.has(script.epubPath) ? statusFor('waiting-build') : statusFor(waiting, { device }));
 
     // The library artifact is what Read previewed and what Tune rebuilds, so
     // it is the only file handed to a transfer. What the Kindle rung makes
     // of it is the engine's ladder, not this window's.
-    const built = await onBook(script.epubPath, 'send', argv.export(script.epubPath, {
+    const exporting = onBook(script.epubPath, 'send', argv.export(script.epubPath, {
       forFormat: forFormat(device),
       fountain: script.fountainPath,
       optionsJson: optionsJsonFor(script),
     }));
+    const built = await (waiting === 'building' ? track(script.epubPath, kindle, exporting) : exporting);
 
     // Nothing is copied when nothing was built: the export's refusal is the
     // whole answer, and asking `send` to move a file that does not exist
@@ -1059,6 +1207,7 @@ async function sendTo(device) {
       say(statusFor(...outcomeFor(built, null, device)));
       return;
     }
+    if (waiting === 'building') builtNow(script.epubPath);
 
     say(statusFor('copying', { device }));
     const sent = await onBook(script.epubPath, 'send', argv.send(built.path, device.id));
@@ -1118,23 +1267,28 @@ async function perform(route) {
       });
       if (stale() || out === null) return;
       options = { out };
-      say(statusFor('saving'));
+      say(savingLine(script.epubPath));
     } else if (how === 'save-kindle') {
       // The Kindle file is built (or found fresh) first, with this script's
       // own settings: which rung it reaches (KFX, AZW3, MOBI) is what names
-      // the file in the Save box.
+      // the file in the Save box. Behind a build already out for the book it
+      // waits for that build rather than starting another, and the build
+      // line stays up until it is done; unless the check said the file is
+      // current, its own export shows that line too.
       await ensureSettings();
       if (stale()) return;
       const settings = { fountain: script.fountainPath, optionsJson: optionsJsonFor(script) };
-      say(statusFor('building-kindle'));
-      const built = await onBook(script.epubPath, 'copy',
+      say(statusFor('idle'));
+      const exporting = onBook(script.epubPath, 'copy',
         argv.export(script.epubPath, { forFormat: 'kindle', ...settings }));
+      const built = await (mayBuild(kindle) ? track(script.epubPath, kindle, exporting) : exporting);
       if (stale()) return;
       const [phase, file] = kindleFileFrom(built);
       if (phase === 'failed') {
         say(statusFor(phase, file));
         return;
       }
+      builtNow(script.epubPath);
       // The wait is over; the Save box is the next thing on screen.
       say(statusFor('idle'));
       const out = await saveDialog({
@@ -1147,7 +1301,7 @@ async function perform(route) {
       if (stale() || out === null) return;
       options = { out, ...settings };
       what = artifactLine(built);
-      say(statusFor('saving'));
+      say(savingLine(script.epubPath));
     } else {
       say(statusFor('opening', { route }));
     }
@@ -1171,6 +1325,11 @@ async function perform(route) {
     kfxRedraw();
     if (worked && !stale()) repoll();
   }
+}
+
+/** "Saving…", or what it waits for while a Kindle file build has the book. */
+function savingLine(book) {
+  return builds.has(book) ? statusFor('waiting-build') : statusFor('saving');
 }
 
 function say(status) {

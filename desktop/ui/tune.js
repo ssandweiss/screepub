@@ -360,6 +360,9 @@ export const WAITING = {
   send: 'Waiting for the send to finish…',
   copy: 'Waiting for the copy to finish…',
   convert: 'Waiting for the conversion to finish…',
+  // The Send page builds the Kindle file as it opens (send.js's BUILD_TURN),
+  // and a KFX build takes about half a minute.
+  build: 'Waiting for the Kindle file to finish building…',
 };
 
 export const NO_MESSAGE = 'The engine refused the change without saying why.';
