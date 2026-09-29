@@ -33,6 +33,9 @@ export interface ExportResult {
   fresh?: boolean;
   /** --check, --for kindle only: what builds the file when it is not. */
   builtBy?: KindleArtifactPlan['builtBy'];
+  /** --check, --for kindle only: when the EPUB was last written (ms), which
+   * tells the window one version of the book from the next. */
+  bookDate?: number | null;
 }
 
 export interface ExportOptions {
@@ -203,11 +206,13 @@ export async function exportCommand(
   // A save dialog always hands back an absolute path, so a relative one here
   // means a caller built the argv by hand and got it wrong; it must not pay
   // for a KFX build to be told so.
-  if (options.out !== undefined && !isAbsolute(options.out)) {
-    throw new CliError('usage', 'the path given with --out must be absolute');
-  }
+  // --check before the shape of --out: a check never uses the path, so what
+  // is wrong with it is that it was given at all.
   if (options.check === true && options.out !== undefined) {
     throw new CliError('usage', '--check builds and writes nothing, so it takes no --out');
+  }
+  if (options.out !== undefined && !isAbsolute(options.out)) {
+    throw new CliError('usage', 'the path given with --out must be absolute');
   }
 
   // Parsed here, before the epub branch returns and before any toolchain
@@ -258,6 +263,7 @@ export async function exportCommand(
       stages: [],
       fresh: plan.fresh,
       builtBy: plan.builtBy,
+      bookDate: plan.bookDate,
     };
   }
   const stages: string[] = [];

@@ -177,8 +177,9 @@ Options:
   --out <path>           also copy the result to this absolute path (its
                          extension must match the file produced)
   --check                build nothing: say which file this computer makes,
-                         whether the one beside the book is current, and
-                         what builds it (builtBy: calibre or screepub)
+                         whether the one beside the book is current, what
+                         builds it (builtBy: calibre or screepub), and when
+                         the book was last written (bookDate, in ms)
   --json                 machine-readable result on stdout (for the app)
   -h, --help             show this help
 `;

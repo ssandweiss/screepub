@@ -322,15 +322,37 @@ export function mayBuild(file) {
 
 /** Whether the Send page starts building the Kindle file as it opens,
  *  before anyone presses anything, so a press finds it built or building.
- *  Only when the engine's check (kindleCheckFrom()) says the file is out of
- *  date AND Calibre is what builds it (KFX, AZW3): a machine with no Calibre
- *  never has it started, and the engine's own MOBI rewrites the library EPUB
- *  in place in a moment, so building it ahead buys nothing and holds the
- *  Settings page's saves. Never a second build for a book that has one
- *  running, and never while a send, a route or a KFX install is (`busy`). */
-export function buildsAhead(file, { building = false, busy = false } = {}) {
+ *  Every condition, in one place:
+ *  - the engine's check (kindleCheckFrom()) says the file is out of date:
+ *    not current, and not merely unknown;
+ *  - Calibre is what builds it (KFX, AZW3): a machine with no Calibre never
+ *    has it started, and the engine's own MOBI rewrites the library EPUB in
+ *    place in a moment, so building it ahead buys nothing;
+ *  - a Kindle is in play (`forKindle`, wantsKindleFile()): a Kobo or a
+ *    reMarkable session must not start Kindle Previewer for nobody;
+ *  - once per version of the book: never again for the book date a build
+ *    was already started for (`triedFor`), so a build that failed is not
+ *    retried every time the window gets the focus back, and one with no date
+ *    to tell versions apart by is never started;
+ *  - not while one is running for the book (`building`), nor while a send,
+ *    a route or a KFX install is (`busy`). */
+export function buildsAhead(file, {
+  building = false, busy = false, triedFor = null, forKindle = false,
+} = {}) {
   if (file === null || file === undefined) return false;
-  return file.fresh === false && file.builtBy === 'calibre' && !building && !busy;
+  if (file.fresh !== false || file.builtBy !== 'calibre') return false;
+  if (typeof file.bookDate !== 'number' || file.bookDate === triedFor) return false;
+  return forKindle === true && !building && !busy;
+}
+
+/** Whether this is a Kindle session, read off the route list: the route
+ *  the page would choose (the one used last time, or the first that can
+ *  fire) is a Kindle or Save a Kindle file, or a Kindle is plugged in now. */
+export function wantsKindleFile(shown) {
+  if (!Array.isArray(shown?.routes)) return false;
+  if (shown.routes.some((route) => route.device?.kind === 'kindle')) return true;
+  const chosen = shown.routes.find((route) => route.id === shown.chosen);
+  return chosen?.key === 'save-kindle' || chosen?.key === 'device:kindle';
 }
 
 /** The line over the moving bar while the Kindle file builds, by the file
@@ -449,14 +471,18 @@ export function handsOverKindleFile(route) {
  *  the answer is not one (a refusal included), which names nothing on the
  *  rows. `fresh` is the engine's staleness rule, `builtBy` what makes the
  *  file when it is not: 'calibre' for KFX and AZW3, 'screepub' for the
- *  engine's own MOBI. */
+ *  engine's own MOBI; `bookDate` when the EPUB was last written. */
 export function kindleCheckFrom(answer) {
   if (answer?.ok !== true) return null;
   const extension = typeof answer.extension === 'string' ? bareExtension(answer.extension.trim()) : '';
   if (!/^[A-Za-z0-9]+$/.test(extension)) return null;
   if (typeof answer.fresh !== 'boolean') return null;
   if (answer.builtBy !== 'calibre' && answer.builtBy !== 'screepub') return null;
-  return { extension, fresh: answer.fresh, builtBy: answer.builtBy };
+  // When the book was last written: which version of it this answer is
+  // about. Not known is not a reason to drop the rest of the answer; it only
+  // means the page will not build ahead on it (buildsAhead()).
+  const bookDate = Number.isFinite(answer.bookDate) ? answer.bookDate : null;
+  return { extension, fresh: answer.fresh, builtBy: answer.builtBy, bookDate };
 }
 
 /** Used only when a path has no name in it at all, so the dialog never
@@ -724,6 +750,15 @@ function onKindleFile(book, args) {
  *  hidden page, and a page that comes back to its book must find it still
  *  going rather than start another. */
 const builds = new Map();
+/** The book date each book's last background build was started for, so the
+ *  page builds ahead once per version of a book (buildsAhead()'s `triedFor`).
+ *  At module level, as `builds` is: a hide and a show, or a new script and
+ *  back, is still the same version of the book. */
+const triedFor = new Map();
+/** From show() to hide(): the page may build ahead, when the check and the
+ *  route list both say so. Either can answer first, so each looks again
+ *  when it lands (maybeBuildAhead()). */
+let aheadWanted = false;
 /** The build line and its bar, and the line's own node. */
 let buildNote = null;
 let buildWords = null;
@@ -753,6 +788,7 @@ export function mount(node, context) {
 
 export function scriptChanged() {
   era += 1;
+  aheadWanted = false;
   drawn = null;
   draw();
 }
@@ -775,14 +811,23 @@ export function show() {
   clearInterval(poll);
   poll = setInterval(tick, POLL_MS);
   kfxShown();
+  // What the last visit learnt is kept (the rows keep naming the file), but
+  // not whether the file is current: a Settings save may have rewritten the
+  // book since, and a press before the check answers must put the build
+  // line up rather than trust a send from before. Unknown, not stale, so
+  // nothing is built ahead on it either.
+  if (kindle !== null) kindle = { ...kindle, fresh: null };
+  aheadWanted = true;
   checkKindle();
 }
 
 /** Back from somewhere else, perhaps from installing Kindle Previewer: the
- *  Kindle file may be a different kind now. kfx.js re-asks its checklist on
- *  the same event. */
+ *  Kindle file may be a different kind now, so the rows are named again.
+ *  Only named: focus comes back after every Save box and every switch of
+ *  app, and it never starts a build. kfx.js re-asks its checklist on the
+ *  same event. */
 function onFocus() {
-  checkKindle();
+  checkKindle({ ahead: false });
 }
 
 /** One tick of the poll: a full ask, unless the last one has not answered. */
@@ -794,6 +839,7 @@ function tick() {
 export function hide() {
   clearInterval(poll);
   poll = null;
+  aheadWanted = false;
   window.removeEventListener('focus', onFocus);
   kfxHidden();
 }
@@ -869,7 +915,8 @@ function draw() {
     devices: () => connectedDevices(drawn),
     onBusy: (on) => {
       for (const button of buttons()) button.disabled = on;
-      // An install just ended: the Kindle file may be a KFX from now on.
+      // An install just ended: the Kindle file may be a KFX from now on,
+      // and on a Kindle session it is worth starting.
       if (!on) checkKindle();
     },
     // Its redraws hand the keyboard back through the same plan as every
@@ -919,6 +966,9 @@ async function refresh({ quick = false } = {}) {
   // After the rows, not before: a KFX block that hides now while it held
   // the keyboard hands it to the page's first stop, which should be a row.
   kfxDevicesChanged();
+  // The list decides whether a Kindle is in play: it may be the answer a
+  // build ahead was waiting for, or a Kindle just plugged in.
+  maybeBuildAhead();
 }
 
 /** The rows, from the list on screen and what the check said about the
@@ -936,7 +986,8 @@ function fillRows() {
  *  on the Settings page lands first and the answer is about the book as it
  *  will be. A check that fails names nothing: the rows keep their plain
  *  titles, and a press still builds and says what went wrong in its own
- *  words. */
+ *  words. `ahead` false names the file and nothing more: the check on a
+ *  focus return and the one after a build never start a build. */
 async function checkKindle({ ahead = true } = {}) {
   const script = ctx.state.script;
   if (list === null || blockedReason(script) !== null) return;
@@ -957,10 +1008,24 @@ async function checkKindle({ ahead = true } = {}) {
   }
   if (era !== mine || list === null) return;
   useKindle(book, kindleCheckFrom(answer));
-  if (!ahead) return;
-  if (buildsAhead(kindle, { building: builds.has(book), busy: sending || kfxInstalling() })) {
-    buildInBackground(ctx.state.script);
-  }
+  if (ahead) maybeBuildAhead();
+}
+
+/** Start the build ahead if everything buildsAhead() asks for is so right
+ *  now, on a page that is on screen with its list drawn. */
+function maybeBuildAhead() {
+  if (!aheadWanted || poll === null || drawn === null) return;
+  const script = ctx.state.script;
+  const book = script?.epubPath;
+  if (kindleBook !== book) return;
+  if (!buildsAhead(kindle, {
+    building: builds.has(book),
+    busy: sending || kfxInstalling(),
+    triedFor: triedFor.get(book) ?? null,
+    forKindle: wantsKindleFile(drawn),
+  })) return;
+  triedFor.set(book, kindle.bookDate);
+  buildInBackground(script);
 }
 
 /** What is known about this book's Kindle file, onto the rows. */

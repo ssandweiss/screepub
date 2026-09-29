@@ -557,7 +557,7 @@ describe('exportCommand --check: which Kindle file, and whether it is built, wit
     );
     expect(result).toMatchObject({
       path: join(dir, 'Script.kfx'), format: 'kindle', extension: 'kfx', fresh: false, builtBy: 'calibre',
-      stages: [],
+      stages: [], bookDate: statSync(epub).mtimeMs,
     });
     expect(result.label).toContain('best quality');
     expect(existsSync(join(dir, 'Script.kfx'))).toBe(false);
@@ -600,16 +600,19 @@ describe('exportCommand --check: which Kindle file, and whether it is built, wit
 
   test('--check writes nothing, so --out beside it is refused before anything is probed', async () => {
     let probed = 0;
-    const err = await exportCommand(
-      { epub, for: 'kindle', check: true, out: join(dir, 'Copy.kfx') },
-      {
-        calibreAvailable: () => { probed += 1; return true; },
-        kfxStatus: async () => { probed += 1; return kfxReadyStatus; },
-        freshKindleArtifact: never,
-      },
-    ).catch((e: unknown) => e as { code?: string; message?: string });
-    expect((err as { code?: string }).code).toBe('usage');
-    expect((err as { message?: string }).message).toContain('--check');
+    const deps = {
+      calibreAvailable: () => { probed += 1; return true; },
+      kfxStatus: async () => { probed += 1; return kfxReadyStatus; },
+      freshKindleArtifact: never,
+    };
+    // Absolute or not: the refusal is about --check taking no --out at all,
+    // not about the shape of a path it would never use.
+    for (const out of [join(dir, 'Copy.kfx'), 'Copy.kfx']) {
+      const err = await exportCommand({ epub, for: 'kindle', check: true, out }, deps)
+        .catch((e: unknown) => e as { code?: string; message?: string });
+      expect(`${out}: ${(err as { code?: string }).code}`).toBe(`${out}: usage`);
+      expect((err as { message?: string }).message).toContain('--check');
+    }
     expect(probed).toBe(0);
   });
 
@@ -625,6 +628,7 @@ describe('exportCommand --check: which Kindle file, and whether it is built, wit
     expect(['kfx', 'azw3', 'mobi']).toContain(answer.extension);
     expect(typeof answer.fresh).toBe('boolean');
     expect(answer.builtBy).toBe(answer.extension === 'mobi' ? 'screepub' : 'calibre');
+    expect(answer.bookDate).toBe(statSync(epub).mtimeMs);
     expect(readdirSync(dir).sort()).toEqual(before);
   });
 

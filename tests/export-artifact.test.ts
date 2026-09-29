@@ -1,5 +1,5 @@
 import { afterAll, test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, utimesSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, utimesSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_FORMAT_OPTIONS } from '../src/options';
@@ -311,14 +311,28 @@ function withSibling(ext: string | null, fresh: boolean): string {
   return epub;
 }
 
-test('the plan names the rung the ladder takes, where its file lives, and what builds it', () => {
+test('the plan names the rung the ladder takes, where its file lives, what builds it, and the book’s date', () => {
   const epub = withSibling(null, false);
+  const bookDate = statSync(epub).mtimeMs;
   expect(kindleArtifactPlan(epub, { calibreAvailable: true, kfxReady: true }))
-    .toEqual({ path: kfxSibling(epub), fresh: false, builtBy: 'calibre' });
+    .toEqual({ path: kfxSibling(epub), fresh: false, builtBy: 'calibre', bookDate });
   expect(kindleArtifactPlan(epub, { calibreAvailable: true, kfxReady: false }))
-    .toEqual({ path: azw3Sibling(epub), fresh: false, builtBy: 'calibre' });
+    .toEqual({ path: azw3Sibling(epub), fresh: false, builtBy: 'calibre', bookDate });
   expect(kindleArtifactPlan(epub, { calibreAvailable: false, kfxReady: false }))
-    .toEqual({ path: mobiSibling(epub), fresh: false, builtBy: 'screepub' });
+    .toEqual({ path: mobiSibling(epub), fresh: false, builtBy: 'screepub', bookDate });
+});
+
+test('the book’s date moves when the book is rewritten, and is null when it cannot be read', () => {
+  // The window builds ahead once per version of the book: this date is what
+  // tells one version from the next (a Settings save rewrites the EPUB).
+  const epub = withSibling(null, false);
+  const state = { calibreAvailable: true, kfxReady: true };
+  const before = kindleArtifactPlan(epub, state).bookDate;
+  const later = new Date(Date.now() + 60_000);
+  utimesSync(epub, later, later);
+  expect(kindleArtifactPlan(epub, state).bookDate).toBe(later.getTime());
+  expect(kindleArtifactPlan(epub, state).bookDate).not.toBe(before);
+  expect(kindleArtifactPlan(join(scratch(), 'gone.epub'), state).bookDate).toBe(null);
 });
 
 test('the plan is fresh exactly when the ladder would reuse the file: newer than the EPUB', () => {

@@ -39,9 +39,13 @@ type SendModule = {
   routeLines: (route: unknown, platform: unknown, file?: unknown) =>
     { title: string; detail: string; where: string | null; caveat: string | null };
   kindleFileFrom: (built: unknown) => [string, Record<string, unknown>];
-  kindleCheckFrom: (answer: unknown) => { extension: string; fresh: boolean; builtBy: string } | null;
+  kindleCheckFrom: (answer: unknown) =>
+    { extension: string; fresh: boolean; builtBy: string; bookDate: number | null } | null;
+  wantsKindleFile: (shown: unknown) => boolean;
   handsOverKindleFile: (route: unknown) => boolean;
-  buildsAhead: (file: unknown, opts?: { building?: boolean; busy?: boolean }) => boolean;
+  buildsAhead: (file: unknown, opts?: {
+    building?: boolean; busy?: boolean; triedFor?: number | null; forKindle?: boolean;
+  }) => boolean;
   mayBuild: (file: unknown) => boolean;
   buildLine: (extension: unknown) => string;
   preparingPhase: (device: unknown, file?: unknown) => string;
@@ -800,29 +804,64 @@ describe('routeLines names the Kindle file on the rows that hand one over', () =
 });
 
 describe('building the Kindle file before anyone presses anything', () => {
-  const file = (extension: string, fresh: boolean, builtBy = 'calibre') => ({ extension, fresh, builtBy });
+  const file = (extension: string, fresh: boolean | null, builtBy = 'calibre', bookDate: number | null = 1000) =>
+    ({ extension, fresh, builtBy, bookDate });
+  /** A Kindle session, and no build tried yet for this book. */
+  const go = { forKindle: true };
 
-  test('out of date, and Calibre builds it (KFX or AZW3): start now', () => {
-    expect(send.buildsAhead(file('kfx', false))).toBe(true);
-    expect(send.buildsAhead(file('azw3', false))).toBe(true);
+  test('out of date, Calibre builds it (KFX or AZW3), and a Kindle is in play: start now', () => {
+    expect(send.buildsAhead(file('kfx', false), go)).toBe(true);
+    expect(send.buildsAhead(file('azw3', false), go)).toBe(true);
   });
 
-  test('current already: nothing to build', () => {
-    expect(send.buildsAhead(file('kfx', true))).toBe(false);
-    expect(send.buildsAhead(file('azw3', true))).toBe(false);
+  test('current already, or not known yet (a page come back to before its check answers): nothing to build', () => {
+    expect(send.buildsAhead(file('kfx', true), go)).toBe(false);
+    expect(send.buildsAhead(file('azw3', true), go)).toBe(false);
+    expect(send.buildsAhead(file('kfx', null), go)).toBe(false);
   });
 
   test('no Calibre: the engine’s own MOBI waits for a press, and Calibre is never started', () => {
     // The MOBI rung rewrites the library EPUB in place and takes a moment;
     // building it ahead buys nothing and holds the Settings page's saves.
-    expect(send.buildsAhead(file('mobi', false, 'screepub'))).toBe(false);
+    expect(send.buildsAhead(file('mobi', false, 'screepub'), go)).toBe(false);
+  });
+
+  test('not a Kindle session (a Kobo, a reMarkable, Apple Books): Kindle Previewer is never started for nobody', () => {
+    expect(send.buildsAhead(file('kfx', false))).toBe(false);
+    expect(send.buildsAhead(file('kfx', false), { forKindle: false })).toBe(false);
+  });
+
+  test('once per version of the book: not again for the date a build was already started for', () => {
+    // Focus comes back constantly (every closed Save box, every switch of
+    // app), and a build that failed leaves the file out of date: without
+    // this, every return started another half-minute run.
+    expect(send.buildsAhead(file('kfx', false, 'calibre', 1000), { ...go, triedFor: 1000 })).toBe(false);
+    // A Settings save rewrites the book, which moves its date.
+    expect(send.buildsAhead(file('kfx', false, 'calibre', 2000), { ...go, triedFor: 1000 })).toBe(true);
+    // No date to tell versions apart by: nothing can stop a retry, so no start.
+    expect(send.buildsAhead(file('kfx', false, 'calibre', null), go)).toBe(false);
   });
 
   test('never a second build, never while the page is busy, never on a check that did not answer', () => {
-    expect(send.buildsAhead(file('kfx', false), { building: true })).toBe(false);
-    expect(send.buildsAhead(file('kfx', false), { busy: true })).toBe(false);
-    expect(send.buildsAhead(null)).toBe(false);
-    expect(send.buildsAhead(undefined)).toBe(false);
+    expect(send.buildsAhead(file('kfx', false), { ...go, building: true })).toBe(false);
+    expect(send.buildsAhead(file('kfx', false), { ...go, busy: true })).toBe(false);
+    expect(send.buildsAhead(null, go)).toBe(false);
+    expect(send.buildsAhead(undefined, go)).toBe(false);
+  });
+
+  test('a Kindle session: the route to choose is a Kindle or Save a Kindle file, or a Kindle is plugged in now', () => {
+    const shown = (devices: ConnectedDevice[], last?: string) => send.routesFrom(answerFor(routes({
+      platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: true, devices,
+    }), last));
+    expect(send.wantsKindleFile(shown([], 'save-kindle'))).toBe(true);
+    expect(send.wantsKindleFile(shown([], 'device:kindle'))).toBe(true); // remembered, unplugged
+    expect(send.wantsKindleFile(shown([kindle]))).toBe(true);
+    expect(send.wantsKindleFile(shown([kobo, kindle], 'device:kobo'))).toBe(true);
+    expect(send.wantsKindleFile(shown([]))).toBe(false); // Apple Books, first on a Mac
+    expect(send.wantsKindleFile(shown([kobo], 'device:kobo'))).toBe(false);
+    expect(send.wantsKindleFile(shown([rm], 'remarkable'))).toBe(false);
+    expect(send.wantsKindleFile(shown([], 'save-epub'))).toBe(false);
+    expect(send.wantsKindleFile(null)).toBe(false);
   });
 
   test('a press may build unless the check said the file is current', () => {
@@ -868,10 +907,17 @@ describe('kindleCheckFrom: what the engine says about the Kindle file before it 
   test('the extension, whether the file beside the book is current, and what builds it', () => {
     expect(send.kindleCheckFrom({
       ok: true, path: '/lib/s.kfx', format: 'kindle', extension: 'kfx', label: 'KFX',
-      available: ['epub', 'kindle'], stages: [], fresh: false, builtBy: 'calibre',
-    })).toEqual({ extension: 'kfx', fresh: false, builtBy: 'calibre' });
-    expect(send.kindleCheckFrom({ ok: true, extension: 'mobi', fresh: true, builtBy: 'screepub' }))
-      .toEqual({ extension: 'mobi', fresh: true, builtBy: 'screepub' });
+      available: ['epub', 'kindle'], stages: [], fresh: false, builtBy: 'calibre', bookDate: 1727000000000.5,
+    })).toEqual({ extension: 'kfx', fresh: false, builtBy: 'calibre', bookDate: 1727000000000.5 });
+    expect(send.kindleCheckFrom({ ok: true, extension: 'mobi', fresh: true, builtBy: 'screepub', bookDate: 5 }))
+      .toEqual({ extension: 'mobi', fresh: true, builtBy: 'screepub', bookDate: 5 });
+  });
+
+  test('a book date that is not a number is not known: the rest of the answer still names the file', () => {
+    const good = { ok: true, extension: 'kfx', fresh: false, builtBy: 'calibre' };
+    for (const bookDate of [undefined, null, 'yesterday', Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(send.kindleCheckFrom({ ...good, bookDate })?.bookDate).toBe(null);
+    }
   });
 
   test('anything else is not known, which names nothing and builds nothing', () => {
@@ -1272,11 +1318,14 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     return w;
   }
   /** `export --check`'s answer for a machine that makes `extension`. */
-  const checked = (extension: string, fresh: boolean) => ({
+  const checked = (extension: string, fresh: boolean, bookDate = 1000) => ({
     ok: true, path: `/lib/field-station/Field Station.${extension}`, format: 'kindle', extension,
     label: extension.toUpperCase(), available: ['epub', 'kindle'], stages: [], fresh,
-    builtBy: extension === 'mobi' ? 'screepub' : 'calibre',
+    builtBy: extension === 'mobi' ? 'screepub' : 'calibre', bookDate,
   });
+  /** Nothing plugged in, and Save a Kindle file used last time: a Kindle
+   *  session, so an out-of-date Kindle file is built as the page opens. */
+  const forKindle = () => listed([], 'save-kindle');
 
   test('it polls routes, not devices, for this script’s book: a quick answer first, then the full one', async () => {
     const w = await world();
@@ -1408,16 +1457,18 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('opening the page with the Kindle file current builds nothing', async () => {
     const w = await world(undefined, checked('kfx', true));
-    await w.open(listed([]));
+    await w.open(forKindle());
     expect(w.builds()).toBe(0);
     expect(w.build()).toBe(null);
   });
 
   test('opening the page with it out of date starts one build, on the book’s turn, and says so with a moving bar', async () => {
     const w = await world(undefined, checked('kfx', false));
+    // Not before the list says this is a Kindle session.
+    expect(w.builds()).toBe(0);
+    await w.open(forKindle());
     expect(w.builds()).toBe(1);
     expect(w.build()).toBe(HALF_A_MINUTE);
-    await w.open(listed([]));
     // Every button still works while it builds: nothing was pressed.
     expect(w.buttons().every((b) => !b.disabled)).toBe(true);
     expect(await w.answer('export', builtKfx)).toEqual(kindleBuild);
@@ -1442,6 +1493,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     let free: () => void = () => {};
     const saving = inTurn(EPUB, 'save', () => new Promise<void>((resolve) => { free = resolve; }));
     const w = await world(undefined, null);
+    await w.open(forKindle());
     // The check itself waits its turn behind the save.
     expect(w.asked().includes('export')).toBe(false);
     free();
@@ -1451,26 +1503,25 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     expect(w.builds()).toBe(1);
     await w.answer('export', builtKfx);
     await w.answerCheck(checked('kfx', true));
-    await w.open(listed([]));
   });
 
   test('with no Calibre to build it (the engine’s MOBI), nothing starts before a press', async () => {
     const w = await world(undefined, checked('mobi', false));
-    await w.open(listed([]));
+    await w.open(forKindle());
     expect(w.builds()).toBe(0);
     expect(w.build()).toBe(null);
   });
 
   test('a build already running is not started again when the page opens again; the book changing since starts the next', async () => {
     const w = await world(undefined, checked('kfx', false));
-    await w.open(listed([]));
+    await w.open(forKindle());
     expect(w.builds()).toBe(1);
     w.send.hide();
     w.send.show();
     // Back on the page: the rows, the checklist, but no second build, and no
-    // check either (it would only queue behind the build it would find).
+    // check either (until the build lands it could only say out of date).
     if (w.asked().includes('kfx-status')) await w.answer('kfx-status', { ok: false });
-    await w.open(listed([]));
+    await w.open(forKindle());
     expect(w.builds()).toBe(1);
     expect(w.asked()).toEqual(['export']);
     expect(w.build()).toBe(HALF_A_MINUTE);
@@ -1480,21 +1531,136 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     await w.answerCheck(checked('kfx', true));
     expect(w.builds()).toBe(0);
 
-    // A setting changed on the Settings page, which rebuilt the book: the
-    // engine's check says the Kindle file is out of date again.
+    // A setting changed on the Settings page, which rebuilt the book: a new
+    // date, and the engine's check says the Kindle file is out of date.
+    w.send.hide();
+    w.send.show();
+    if (w.asked().includes('kfx-status')) await w.answer('kfx-status', { ok: false });
+    await w.answerCheck(checked('kfx', false, 2000));
+    await w.open(forKindle());
+    expect(w.builds()).toBe(1);
+    await w.answer('export', builtKfx);
+    await w.answerCheck(checked('kfx', true, 2000));
+  });
+
+  test('a build that failed is not tried again by focus or a return to the page; the next version of the book is', async () => {
+    const w = await world(undefined, checked('kfx', false));
+    await w.open(forKindle());
+    expect(w.builds()).toBe(1);
+    await w.answer('export', { ok: false, error: { code: 'export-failed', message: 'Kindle Previewer quit.' } });
+    // Focus comes back after every Save box and every switch of app. Each
+    // return asks the check again (it names the file), and none builds.
+    for (let i = 0; i < 3; i += 1) {
+      w.focusWindow();
+      if (w.asked().includes('kfx-status')) await w.answer('kfx-status', { ok: false });
+      await w.answerCheck(checked('kfx', false));
+      expect(w.builds()).toBe(0);
+    }
+    // Nor does leaving the page and coming back to the same book.
     w.send.hide();
     w.send.show();
     if (w.asked().includes('kfx-status')) await w.answer('kfx-status', { ok: false });
     await w.answerCheck(checked('kfx', false));
+    await w.open(forKindle());
+    expect(w.builds()).toBe(0);
+    expect(w.build()).toBe(null);
+    // A Settings save rewrote the book: a new version, built once more.
+    w.send.hide();
+    w.send.show();
+    if (w.asked().includes('kfx-status')) await w.answer('kfx-status', { ok: false });
+    await w.answerCheck(checked('kfx', false, 2000));
+    await w.open(forKindle());
     expect(w.builds()).toBe(1);
     await w.answer('export', builtKfx);
+    await w.answerCheck(checked('kfx', true, 2000));
+  });
+
+  test('a check that answers after the page is hidden starts nothing', async () => {
+    const w = await world(undefined, null);
+    await w.open(forKindle());
+    w.send.hide();
+    await w.answerCheck(checked('kfx', false));
+    expect(w.builds()).toBe(0);
+  });
+
+  test('a list that answers after the page is hidden starts nothing either', async () => {
+    // The check came first, so the build waited for the list to say whether
+    // a Kindle is in play; the page was left before it did.
+    const w = await world(undefined, checked('kfx', false));
+    w.send.hide();
+    await w.open(forKindle());
+    expect(w.builds()).toBe(0);
+  });
+
+  test('a Kobo session never starts Kindle Previewer; a Kindle plugged in meanwhile does', async () => {
+    const w = await world(undefined, checked('kfx', false));
+    await w.open(listed([kobo], 'device:kobo'));
+    expect(w.builds()).toBe(0);
+    expect(w.build()).toBe(null);
+    w.poll();
+    await w.answer('routes', listed([kobo, kindle], 'device:kobo'));
+    expect(w.builds()).toBe(1);
+    expect(w.build()).toBe(HALF_A_MINUTE);
+    await w.answer('export', builtKfx);
     await w.answerCheck(checked('kfx', true));
-    await w.open(listed([]));
+  });
+
+  test('back on the page, a press before the check answers puts the bar up, even after a press that found the file current', async () => {
+    // The review's probe: a send found the file current; the book was then
+    // rebuilt on the Settings page; back on Send, the press came before the
+    // check could say so, and a whole KFX build ran with no line at all.
+    const w = await world(undefined, checked('kfx', true));
+    await w.open(listed([kindle], 'device:kindle'));
+    w.button('Copy to Kindle').click();
+    await settle();
+    expect(w.build()).toBe(null); // current: a lookup
+    expect(w.status().textContent).toBe('Getting the book ready for Kindle…');
+    await w.answer('export', builtKfx);
+    await w.answer('send', { ok: true, destination: '/Volumes/Kindle/documents/Field Station.kfx' });
+    await w.answer('routes', listed([kindle], 'device:kindle'));
+    w.send.hide();
+    w.send.show();
+    if (w.asked().includes('kfx-status')) await w.answer('kfx-status', { ok: false });
+    await w.open(listed([kindle], 'device:kindle'));
+    // The rows still name the file while the check is out.
+    expect(w.titles()).toContain('Kindle (.kfx)');
+    w.button('Copy to Kindle').click();
+    await settle();
+    expect(w.build()).toBe(HALF_A_MINUTE);
+    expect(w.status().textContent).toBe('');
+    // The check lands mid-press: busy, so it starts nothing of its own.
+    await w.answerCheck(checked('kfx', false, 2000));
+    expect(w.builds()).toBe(1);
+    await w.answer('export', builtKfx);
+    expect(w.build()).toBe(null);
+    await w.answer('send', { ok: true, destination: '/Volumes/Kindle/documents/Field Station.kfx' });
+    await w.answer('routes', listed([kindle], 'device:kindle'));
+  });
+
+  test('the same for Save a Kindle file', async () => {
+    const w = await world(undefined, checked('kfx', true));
+    await w.open(forKindle());
+    w.button('Save a Kindle file…').click();
+    await settle();
+    expect(w.build()).toBe(null);
+    await w.answer('export', builtKfx);
+    await w.choose(null);
+    w.send.hide();
+    w.send.show();
+    if (w.asked().includes('kfx-status')) await w.answer('kfx-status', { ok: false });
+    await w.open(forKindle());
+    w.button('Save a Kindle file…').click();
+    await settle();
+    expect(w.build()).toBe(HALF_A_MINUTE);
+    await w.answerCheck(checked('kfx', false, 2000));
+    await w.answer('export', builtKfx);
+    expect(w.build()).toBe(null);
+    await w.choose(null);
   });
 
   test('Save a Kindle file pressed mid-build waits for that build, and the line stays up until it is done', async () => {
     const w = await world(undefined, checked('kfx', false));
-    await w.open(listed([]));
+    await w.open(forKindle());
     w.button('Save a Kindle file…').click();
     await settle();
     // No second build: the press waits behind the one running.
@@ -1534,7 +1700,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('Save the EPUB during a background build starts at once: both only read the book', async () => {
     const w = await world(undefined, checked('kfx', false));
-    await w.open(listed([]));
+    await w.open(forKindle());
     w.button('Save the EPUB…').click();
     await w.choose('/Users/me/Desktop/Field Station.epub');
     expect(w.status().textContent).toBe('Saving…');
@@ -1550,7 +1716,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('a copy to a Kobo during a background build starts at once too', async () => {
     const w = await world(undefined, checked('kfx', false));
-    await w.open(listed([kobo]));
+    await w.open(listed([kobo], 'save-kindle'));
     w.button('Copy to KOBOeReader').click();
     await settle();
     expect(w.status().textContent).toBe('Getting the book ready for KOBOeReader…');
@@ -1569,7 +1735,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
   test('a Settings save during a background build waits for it: the build reads the book, the save rewrites it', async () => {
     const { inTurn, holders } = await import(join(UI, 'book-queue.js'));
     const w = await world(undefined, checked('kfx', false));
-    await w.open(listed([]));
+    await w.open(forKindle());
     expect(holders(EPUB)).toEqual(['kindle']);
     let saved = false;
     const saving = inTurn(EPUB, 'save', () => { saved = true; });
@@ -1613,7 +1779,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
 
   test('a build that fails says nothing (nobody asked), and the press builds again with the line up', async () => {
     const w = await world(undefined, checked('kfx', false));
-    await w.open(listed([]));
+    await w.open(forKindle());
     await w.answer('export', { ok: false, error: { code: 'export-failed', message: 'Kindle Previewer quit.' } });
     expect(w.build()).toBe(null);
     expect(w.status().textContent).toBe('');
@@ -1631,7 +1797,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
       ...kfxSetup({ calibre: true, previewer: true, pluginInstalled: false, ready: false }, 'darwin'),
     };
     const w = await world(notReady, checked('azw3', false));
-    await w.open(listed([]));
+    await w.open(forKindle());
     const install = () => w.pane.all()
       .find((n) => n.tagName === 'BUTTON' && n.getAttribute('data-step') === 'plugin')!;
     expect(install().disabled).toBe(true);
@@ -1646,7 +1812,7 @@ describe('the Send page, drawn from the route list and performed row by row', ()
     // it for half a minute with nothing on screen.
     const { inTurn } = await import(join(UI, 'book-queue.js'));
     const w = await world(undefined, checked('kfx', false));
-    await w.open(listed([]));
+    await w.open(forKindle());
     let free: () => void = () => {};
     const saving = inTurn(EPUB, 'save', () => new Promise<void>((resolve) => { free = resolve; }));
     await w.answer('export', builtKfx);

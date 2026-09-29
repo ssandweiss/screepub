@@ -8,6 +8,14 @@ function modifiedAt(path: string, ifUnknown: number): number {
   }
 }
 
+/** When `path` was last written, in ms since the epoch, or null when it
+ * cannot be read. The window tells one version of a book from the next by
+ * it: `export --check` hands it the EPUB's. */
+export function modifiedDate(path: string): number | null {
+  const at = modifiedAt(path, Number.NaN);
+  return Number.isNaN(at) ? null : at;
+}
+
 /** True when `artifact` is missing, or no newer than the EPUB it derives
  * from. What it catches is a run that rewrote the EPUB but produced no new
  * artifact beside it.

@@ -3,7 +3,7 @@ import { basename, dirname, join } from 'node:path';
 import { convertFountain } from '../convert';
 import type { FormatOptions } from '../options';
 import { azw3Sibling, toAzw3 } from './calibre';
-import { needsRegeneration } from './freshness';
+import { modifiedDate, needsRegeneration } from './freshness';
 import type { ExportFormat, ToolchainState } from './formats';
 import { kfxSibling, toKfx } from './kfx';
 
@@ -48,6 +48,9 @@ export interface KindleArtifactPlan {
   /** 'calibre' for KFX and AZW3 (ebook-convert, with Kindle Previewer behind
    * it for KFX), 'screepub' for the engine's own MOBI. */
   builtBy: 'calibre' | 'screepub';
+  /** When the EPUB was last written (ms), or null when it cannot be read:
+   * which version of the book this plan is about. A Settings save moves it. */
+  bookDate: number | null;
 }
 
 /** The rung freshKindleArtifact takes, and whether it would reuse or build.
@@ -56,7 +59,7 @@ export interface KindleArtifactPlan {
 export function kindleArtifactPlan(epub: string, state: ToolchainState): KindleArtifactPlan {
   const path = state.kfxReady ? kfxSibling(epub) : state.calibreAvailable ? azw3Sibling(epub) : mobiSibling(epub);
   const builtBy = state.kfxReady || state.calibreAvailable ? 'calibre' : 'screepub';
-  return { path, fresh: !needsRegeneration(path, epub), builtBy };
+  return { path, fresh: !needsRegeneration(path, epub), builtBy, bookDate: modifiedDate(epub) };
 }
 
 export interface FreshKindleArtifactOptions {
