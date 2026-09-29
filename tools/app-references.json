@@ -122,9 +122,9 @@
       "breaks": "The decision record for the 171 kit-check assertions that have no bun test counterpart. It cites Swift sources and kit-check sections by name throughout, because naming what is lost is its whole job. The 52nd reference, added 2026-09-14, is UpdateInstall.swift in the note recording that the owner chose a FULL ported self-update: that moved self-update-installer's 26 checks from accept-loss to port, so the file now names the Swift source those checks have to be reproduced FROM rather than merely mourned. The 53rd and 54th, added 2026-09-20, are in the kfx-install-plugin row: it now names app/Packages/KFXKit's vendored zip and its PROVENANCE.md in order to say that we STOPPED shipping them, which is a reference that exists to record a removal. It OUTLIVES app/: at F3 its rows stop describing code that exists and start describing what was given up, which is the record a later maintainer needs. Do not delete it with the directory."
     },
     "site/index.html": {
-      "refs": 4,
+      "refs": 6,
       "category": "artifact",
-      "breaks": "Three DOWNLOAD FOR MACOS buttons pointing at Screepub-macOS.dmg plus the supported-download paragraph. The count of three is itself pinned by tests/release-artifacts.test.ts."
+      "breaks": "Three DOWNLOAD FOR MACOS buttons pointing at Screepub-macOS.dmg plus the supported-download paragraph. The count of three buttons is itself pinned by tests/release-artifacts.test.ts. The 5th and 6th, added 2026-09-29, are the Mac row of the Every download table: its link and its file name. At the identifier release the buttons and that row move to the window's DMG together."
     },
     "src/cli-devices.ts": {
       "refs": 1,
@@ -249,7 +249,7 @@
     "tests/release-artifacts.test.ts": {
       "refs": 14,
       "category": "test",
-      "breaks": "READS app/release.sh and asserts it still produces the two tarballs and the DMG, that release.yml uploads app/dist/*, and that site/index.html carries exactly three DMG links. Roughly eight tests fail at F3; several must change at F2 instead."
+      "breaks": "READS app/release.sh and asserts it still produces the two tarballs and the DMG, that release.yml uploads app/dist/*, and that site/index.html carries exactly three DMG buttons. Roughly eight tests fail at F3; several must change at F2 instead."
     },
     "tests/sidecar-targets.test.ts": {
       "refs": 1,
@@ -260,6 +260,11 @@
       "refs": 1,
       "category": "note",
       "breaks": "A comment saying the assertion was ported verbatim from kit-check."
+    },
+    "tests/site.test.ts": {
+      "refs": 1,
+      "category": "test",
+      "breaks": "Expects the site's Every download table to offer Screepub-macOS.dmg, with a status, beside the window's bundles. At the identifier release that row and the buttons move to the window's DMG, and this expectation moves with them."
     },
     "tests/smoke-bundle.test.ts": {
       "refs": 3,

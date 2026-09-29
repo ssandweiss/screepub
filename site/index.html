@@ -13,14 +13,14 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Screepub">
 <meta property="og:url" content="https://screepub.com/">
-<meta property="og:title" content="Screepub — screenplay PDFs, readable on your e-reader">
+<meta property="og:title" content="Screepub: screenplay PDFs, readable on your e-reader">
 <meta property="og:description" content="Drag a screenplay PDF on the window and get an e-book that reflows at any text size with the script's shape intact. Free, open source, macOS. Your script never leaves your machine.">
 <meta property="og:image" content="https://screepub.com/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Screepub: reading scripts on an e-reader shouldn't be difficult.">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Screepub — screenplay PDFs, readable on your e-reader">
+<meta name="twitter:title" content="Screepub: screenplay PDFs, readable on your e-reader">
 <meta name="twitter:description" content="Drag a screenplay PDF on the window and get an e-book that reflows at any text size with the script's shape intact. Free, open source, macOS.">
 <meta name="twitter:image" content="https://screepub.com/og.png">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -242,26 +242,15 @@ h2 .answer{color:var(--ink-muted);display:block}
 
 /* ---------- drag and drop ---------- */
 .drop{padding-top:15vh;padding-bottom:15vh;border-top:1px solid rgba(29,27,22,.08)}
-.drop .cols{display:flex;gap:6%;align-items:center;flex-wrap:wrap}
-.drop .say{flex:1 1 300px;min-width:270px}
-.well{flex:1 1 430px;min-width:300px;max-width:540px;
-  border:2px dashed rgba(29,27,22,.22);border-radius:6px;height:330px;
-  position:relative;overflow:hidden;background:rgba(29,27,22,.025);
-  transition:border-color .3s,background .3s}
-.well.hot{border-color:var(--brass);background:rgba(232,163,61,.10)}
-.well .hint{position:absolute;inset:0;display:flex;align-items:center;
-  justify-content:center;font-family:var(--fs);font-size:12px;
-  letter-spacing:.09em;color:var(--ink-muted);transition:opacity .3s}
-.pdficon{position:absolute;width:66px;height:84px;background:#FFFDF8;
-  border:1px solid rgba(29,27,22,.22);border-radius:3px;
-  box-shadow:0 8px 22px rgba(29,27,22,.3);font-family:var(--fs);font-size:9px;
-  letter-spacing:.08em;color:var(--ink-muted);display:flex;align-items:flex-end;
-  justify-content:center;padding-bottom:8px;opacity:0}
-.result{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.94);
-  opacity:0;transition:opacity .4s,transform .4s;text-align:center;
-  font-family:var(--fs);font-size:12px;letter-spacing:.08em;color:var(--ink)}
-.result.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
-.result em{display:block;font-style:normal;color:var(--ink-muted);font-size:10px;margin-top:7px}
+/* The real window, taken by tools/capture-screens.ts and copied here because
+   Pages deploys site/ alone. Each picture carries its own frame and shadow in
+   a transparent margin, so it sits straight on the paper. The drawing this
+   replaced had a small looping animation; losing it was the accepted cost. */
+.shots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3%;margin-top:6vh}
+.shots figure{margin:0}
+.shots img{display:block;width:100%;height:auto}
+.shots figcaption{font-family:var(--fs);font-size:11px;letter-spacing:.08em;
+  color:var(--ink-muted);text-align:center;margin-top:2px}
 
 /* ---------- audience ---------- */
 .beat{padding-top:15vh;padding-bottom:15vh;border-top:1px solid rgba(29,27,22,.08)}
@@ -281,12 +270,20 @@ h2 .answer{color:var(--ink-muted);display:block}
 /* ---------- every download ---------- */
 .downloads{padding-top:10vh;padding-bottom:12vh;border-top:1px solid rgba(29,27,22,.08)}
 .downloads h2{margin-bottom:10px}
-.downloads p,.downloads li{font-family:var(--fp);color:var(--ink-soft);font-size:15px;
+.downloads p{font-family:var(--fp);color:var(--ink-soft);font-size:15px;
   line-height:1.62;max-width:34em}
-.downloads ul{list-style:none;padding:0;margin:26px 0;border-top:1px solid rgba(29,27,22,.12)}
-.downloads li{padding:12px 0;border-bottom:1px solid rgba(29,27,22,.12);max-width:44em}
-.downloads code{font-family:var(--fs);font-size:12px;letter-spacing:.02em;color:var(--ink)}
+.downloads code{font-family:var(--fs);font-size:12px;letter-spacing:.02em;color:var(--ink);
+  overflow-wrap:anywhere}
 .downloads a{color:var(--ink-soft)}
+.files{border-collapse:collapse;width:100%;margin:26px 0;font-family:var(--fp);
+  font-size:15px;line-height:1.55;color:var(--ink-soft)}
+.files th{font-family:var(--fs);font-weight:700;font-size:11px;letter-spacing:.08em;
+  color:var(--ink-muted);text-align:left;padding:0 20px 10px 0;
+  border-bottom:1px solid rgba(29,27,22,.12)}
+.files td{padding:12px 20px 12px 0;border-bottom:1px solid rgba(29,27,22,.12);vertical-align:top}
+.files td:last-child{padding-right:0}
+/* A file name is one word: broken across two lines it reads as two files. */
+.files td:nth-child(2){white-space:nowrap}
 .trans{font-family:var(--fs);letter-spacing:.07em;color:var(--ink-muted);
   font-size:11px;text-align:right}
 .end{font-family:var(--fs);letter-spacing:.1em;color:var(--ink-muted);font-size:11px;
@@ -307,6 +304,21 @@ footer .right{margin-left:auto}
   .act.two{height:380vh}
   .nav{display:none}
   .phase.col{width:auto;right:var(--gut)}
+  .shots{grid-template-columns:1fr;gap:0}
+}
+@media (max-width:820px){
+  /* Three columns do not fit a phone or a narrow tablet, so each file
+     becomes a block of three lines. The roles on the table's markup keep it
+     a table for a screen reader, which display:block would otherwise take
+     away. */
+  .files thead{position:absolute;width:1px;height:1px;overflow:hidden;
+    clip:rect(0 0 0 0);white-space:nowrap}
+  .files,.files tbody,.files tr,.files td{display:block}
+  .files{border-top:1px solid rgba(29,27,22,.12)}
+  .files tr{padding:12px 0;border-bottom:1px solid rgba(29,27,22,.12)}
+  .files td{border:0;padding:2px 0}
+  .files td:first-child{color:var(--ink)}
+  .files td:nth-child(2){white-space:normal}
 }
 @media (prefers-reduced-motion:reduce){
   .act.two{height:auto}
@@ -419,17 +431,20 @@ footer .right{margin-left:auto}
   </section>
 
   <section class="drop pad">
-    <div class="cols">
-      <div class="say">
-        <div class="slug">INT. THE APP - ONE STEP</div>
-        <h2>Drag and drop.</h2>
-        <p class="lead">It's that simple. Fine tune anything you like afterwards, and see exactly what the device gets.</p>
-      </div>
-      <div class="well" id="well">
-        <div class="hint" id="hint">DROP A SCREENPLAY HERE</div>
-        <div class="pdficon" id="pdficon">PDF</div>
-        <div class="result" id="result">FIELD-STATION.EPUB<em>READY TO SEND</em></div>
-      </div>
+    <div class="slug">INT. THE APP - ONE STEP</div>
+    <h2>Drag and drop.</h2>
+    <p class="lead">It's that simple. Fine tune anything you like afterwards, and see exactly what the device gets.</p>
+    <div class="shots">
+      <figure>
+        <img src="img/drop-light.png" width="972" height="732" loading="lazy" decoding="async"
+          alt="The Screepub window waiting for a script: a dashed area that says Drop a screenplay PDF, with a Choose PDF button.">
+        <figcaption>DROP A SCREENPLAY PDF ON THE WINDOW.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/result-light.png" width="972" height="732" loading="lazy" decoding="async"
+          alt="The same window after converting Field Station, an invented script: its title, its page and scene counts, and a Send to a reader button.">
+        <figcaption>THE BOOK IS READY TO READ OR SEND.</figcaption>
+      </figure>
     </div>
     <div class="trans" style="margin-top:6vh">CUT TO:</div>
   </section>
@@ -462,23 +477,53 @@ footer .right{margin-left:auto}
     <div class="slug">INT. THE DOWNLOAD PAGE - EVERY FILE</div>
     <h2>Every download.</h2>
     <p>
-      <strong>On a Mac, the supported download is <code>Screepub-macOS.dmg</code></strong>
-      &mdash; signed and notarized by Apple, and the one this project has been
+      <strong>On a Mac, the supported download is <code>Screepub-macOS.dmg</code></strong>:
+      signed and notarized by Apple, and the one this project has been
       shipping. The button above is that file.
     </p>
-    <ul>
-      <li>Linux (Debian, Ubuntu): <code>Screepub-linux-amd64.deb</code></li>
-      <li>Linux (Fedora, openSUSE): <code>Screepub-linux-x86_64.rpm</code></li>
-      <li>macOS, the new cross-platform window:
-        <code>Screepub-Desktop-macOS-universal.dmg</code>
-        (Apple Silicon and Intel in one download)</li>
-      <li>Windows: <code>Screepub-windows-x64-setup.exe</code></li>
-      <li>Command line, any platform: see the
-        <a href="https://github.com/ssandweiss/screepub#readme">README</a></li>
-    </ul>
+    <!-- Each link names the file without a version, so /latest/download/
+         always reaches the newest one. The status column follows
+         desktop/README.md's ledger of who has verified what, in the words
+         the README's install table uses; tests/site.test.ts holds both. -->
+    <table class="files" role="table">
+      <thead role="rowgroup">
+        <tr role="row"><th role="columnheader" scope="col">COMPUTER</th><th role="columnheader" scope="col">FILE</th><th role="columnheader" scope="col">STATUS</th></tr>
+      </thead>
+      <tbody role="rowgroup">
+        <tr role="row">
+          <td role="cell">Mac</td>
+          <td role="cell"><a href="https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-macOS.dmg"><code>Screepub-macOS.dmg</code></a></td>
+          <td role="cell">Verified by a person. The supported Mac app.</td>
+        </tr>
+        <tr role="row">
+          <td role="cell">Mac, the new cross-platform window</td>
+          <td role="cell"><a href="https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-Desktop-macOS-universal.dmg"><code>Screepub-Desktop-macOS-universal.dmg</code></a></td>
+          <td role="cell">Verified by a person, on an Apple Silicon Mac. Never run on an Intel Mac yet: <a href="https://github.com/ssandweiss/screepub/issues">reports welcome</a>.</td>
+        </tr>
+        <tr role="row">
+          <td role="cell">Linux: Debian, Ubuntu</td>
+          <td role="cell"><a href="https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-linux-amd64.deb"><code>Screepub-linux-amd64.deb</code></a></td>
+          <td role="cell">Built and checked automatically. Never installed by a person yet: <a href="https://github.com/ssandweiss/screepub/issues">reports welcome</a>.</td>
+        </tr>
+        <tr role="row">
+          <td role="cell">Linux: Fedora, openSUSE</td>
+          <td role="cell"><a href="https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-linux-x86_64.rpm"><code>Screepub-linux-x86_64.rpm</code></a></td>
+          <td role="cell">Built and checked automatically. Never installed by a person yet: <a href="https://github.com/ssandweiss/screepub/issues">reports welcome</a>.</td>
+        </tr>
+        <tr role="row">
+          <td role="cell">Windows, 64-bit</td>
+          <td role="cell"><a href="https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-windows-x64-setup.exe"><code>Screepub-windows-x64-setup.exe</code></a></td>
+          <td role="cell">Built and checked automatically. Never installed by a person yet: <a href="https://github.com/ssandweiss/screepub/issues">reports welcome</a>.</td>
+        </tr>
+      </tbody>
+    </table>
     <p>
-      <strong>Windows will warn you.</strong> Screepub for Windows is unsigned
-      &mdash; it carries no code-signing certificate &mdash; so SmartScreen
+      Command line, any platform: see the
+      <a href="https://github.com/ssandweiss/screepub#readme">README</a>.
+    </p>
+    <p>
+      <strong>Windows will warn you.</strong> Screepub for Windows is unsigned:
+      it carries no code-signing certificate, so SmartScreen
       shows a &ldquo;publisher unknown&rdquo; screen the first time you run
       it. Choose <strong>More info</strong>, then
       <strong>Run anyway</strong>. Certificates cost money this project does
@@ -486,12 +531,6 @@ footer .right{margin-left:auto}
       alarming. The Windows installer also fetches Microsoft&rsquo;s WebView2
       runtime once if your machine has none. Converting never touches the
       network, on any platform.
-    </p>
-    <p>
-      <strong>Nobody has installed the new window yet.</strong> Automation
-      builds each of these, and runs the converter out of all but the Intel Mac
-      one before publishing. No one has run an installer on a real machine, or
-      opened the window on anything but Linux.
     </p>
     <p><a href="https://github.com/ssandweiss/screepub/releases/latest">All files on the latest release &rarr;</a></p>
   </section>
@@ -777,33 +816,6 @@ $('next').addEventListener('click',function(){claim();turn(1)});
 $('pFont').addEventListener('click',function(){fontIx=(fontIx+1)%FONTS.length;claim();repaint()});
 $('pPg').addEventListener('click',function(){showPg=!showPg;claim();repaint()});
 if(!reduce)cycle=setInterval(autoTick,TICK_MS);
-
-/* ----- the drop, looping while in view ----- */
-var well=$('well'),icon=$('pdficon'),hint=$('hint'),result=$('result'),dropTimer=null;
-function runDrop(){
-  if(reduce||!icon)return;
-  icon.style.transition='none';icon.style.opacity='0';
-  icon.style.left='-84px';icon.style.top='30px';
-  result.classList.remove('on');well.classList.remove('hot');hint.style.opacity='1';
-  setTimeout(function(){
-    icon.style.transition='left 1.4s cubic-bezier(.4,0,.2,1),top 1.4s cubic-bezier(.4,0,.2,1),opacity .3s';
-    icon.style.opacity='1';
-    icon.style.left='calc(50% - 33px)';icon.style.top='calc(50% - 42px)';
-  },160);
-  setTimeout(function(){well.classList.add('hot');hint.style.opacity='0'},880);
-  setTimeout(function(){
-    icon.style.transition='opacity .3s';icon.style.opacity='0';result.classList.add('on');
-  },1900);
-  setTimeout(function(){well.classList.remove('hot')},2300);
-}
-if(well&&!reduce){
-  new IntersectionObserver(function(es){
-    es.forEach(function(e){
-      if(e.isIntersecting){runDrop();if(!dropTimer)dropTimer=setInterval(runDrop,4200)}
-      else if(dropTimer){clearInterval(dropTimer);dropTimer=null}
-    });
-  },{threshold:.35}).observe(well);
-}
 
 function onScroll(){
   if(!reduce&&hero){

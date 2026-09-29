@@ -900,8 +900,15 @@ describe('the app downloads are described where a reader meets them', () => {
     expect(site).toContain('Screepub-macOS.dmg');
     expect(site.toLowerCase()).toContain('supported');
     // And the page's own three buttons still point at it, so the new
-    // section cannot have quietly redirected the call to action.
-    expect((site.match(/releases\/latest\/download\/Screepub-macOS\.dmg/g) ?? []).length).toBe(3);
+    // section cannot have quietly redirected the call to action. Counted as
+    // BUTTONS since 2026-09-29: "Every download" now links every file by
+    // name, this one included, and a count of every link would miss a
+    // button moved to the window's DMG with the table's link making up the
+    // number. The buttons switch at the identifier release, with the README.
+    const buttons = [...site.matchAll(/<a class="btn[^"]*" href="([^"]+)"/g)].map((m) => m[1]);
+    expect(buttons).toEqual(
+      Array(3).fill('https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-macOS.dmg'),
+    );
   });
 
   test('nothing anywhere promises an AppImage, a cask, winget or the AUR', () => {
