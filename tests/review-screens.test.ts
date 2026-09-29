@@ -84,6 +84,16 @@ describe('which pictures changed', () => {
     ]);
   });
 
+  test('a staged rename shows the old path going as well as the new one arriving', () => {
+    const dir = scratchRepo();
+    git(dir, 'mv', 'assets/screens/drop-dark.png', 'assets/screens/drop-night.png');
+    const found = changedPictures(dir);
+    expect(found.map((p) => [p.paths, text(p.before), text(p.after)])).toEqual([
+      [['assets/screens/drop-dark.png'], text(png('dark old')), null],
+      [['assets/screens/drop-night.png'], null, text(png('dark old'))],
+    ]);
+  });
+
   test('files that are not pictures, or not in those folders, are not its business', () => {
     const dir = scratchRepo();
     put(dir, 'assets/screens/notes.txt', 'changed');

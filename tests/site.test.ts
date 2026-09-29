@@ -182,8 +182,16 @@ describe('"Every download" links version-free names, each with a status', () => 
       if (os === 'macos') continue;
       expect(row(file)).toContain(NOT_YET);
     }
-    // Gate 1b: installed and used on an Apple Silicon Mac. The Intel half
-    // has never run, and the row says so rather than implying it.
+    // Gate 1b: installed and used on an Apple Silicon Mac. That is the
+    // evidence behind "verified by a person"; if the ledger ever loses it,
+    // the claim goes too. The Intel half has never run, and the row says
+    // so rather than implying it.
+    const person = ledger.slice(
+      ledger.indexOf('**Verified on a real machine, by a person**'),
+      ledger.indexOf('**Verified only by CI'),
+    );
+    expect(person).toContain('Gate 1b, 2026-09-20: the macOS app was installed and used.');
+    expect(person).toMatch(/the machine that ran it\s+is Apple Silicon/);
     const mac = row('Screepub-Desktop-macOS-universal.dmg');
     expect(mac).toContain(VERIFIED);
     expect(mac).toContain('Apple Silicon');

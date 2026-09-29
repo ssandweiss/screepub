@@ -17,8 +17,10 @@
 // and every file's new text is worked out, before anything is written. So
 // notes the window cannot show (a second paragraph before the first
 // heading, say, which is where a pre-lede line on its own line lands) stop
-// it with every file as it was. --check does only that parse, for the
-// draft, and writes nothing.
+// it with every file as it was. A write that fails part-way, or the
+// version gate that runs on the result, puts every file back before the
+// error is reported. --check does only that parse, for the draft, and
+// writes nothing.
 //
 // Exit codes: 0 done (prints each file it wrote). 1 refused, nothing
 // written, and the reason on stderr.
@@ -107,9 +109,30 @@ export function bumpVersion(repoDir: string, version: string, opts: { check?: bo
     ],
     [NOTES_MODULE, notesModule],
   ];
-  for (const [file, text] of next) writeFileSync(join(repoDir, file), text);
-  // The bundler's own gate, run on what was just written.
-  assertBundleVersions(version, repoDir);
+  // Everything is read before anything is written, so a write that fails
+  // part-way (or the gate after it) can put every file back as it was.
+  const original = next.map(([file]) => [file, read(file)] as const);
+  try {
+    for (const [file, text] of next) writeFileSync(join(repoDir, file), text);
+    // The bundler's own gate, run on what was just written.
+    assertBundleVersions(version, repoDir);
+  } catch (e) {
+    const stuck: string[] = [];
+    for (const [file, text] of original) {
+      try {
+        writeFileSync(join(repoDir, file), text);
+      } catch {
+        stuck.push(file);
+      }
+    }
+    if (stuck.length > 0) {
+      throw new Error(
+        `${e instanceof Error ? e.message : String(e)}. Could not put back: ${stuck.join(', ')}. ` +
+          'Restore them with git checkout before trying again.',
+      );
+    }
+    throw e;
+  }
   return next.map(([file]) => file);
 }
 

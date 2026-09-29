@@ -38,15 +38,17 @@ export function changedPictures(repoDir: string): ChangedPicture[] {
   const status = git(repoDir, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...PICTURE_DIRS]);
   if (!status.ok) throw new Error(`git status failed: ${status.err.trim()}`);
   // Records are "XY path"; a rename or copy is followed by its old path as
-  // a record of its own, which is skipped: the new path is what changed.
+  // a record of its own. Both are looked at: after a rename the old path
+  // is gone from disk and shows as removed, and after a copy it is
+  // unchanged and drops out below.
   const records = status.out.toString().split('\0');
   const paths: string[] = [];
   for (let i = 0; i < records.length; i++) {
     const record = records[i]!;
     if (record.length < 4) continue;
-    if (record[0] === 'R' || record[0] === 'C') i++;
-    const path = record.slice(3);
-    if (path.endsWith('.png')) paths.push(path);
+    const found = [record.slice(3)];
+    if (record[0] === 'R' || record[0] === 'C') found.push(records[++i] ?? '');
+    for (const path of found) if (path.endsWith('.png')) paths.push(path);
   }
 
   const groups = new Map<string, ChangedPicture>();

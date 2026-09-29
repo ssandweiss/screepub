@@ -8,7 +8,7 @@
 // first heading. These tests run the tool on scratch copies of the real
 // files, so they check the files it will really meet.
 import { afterAll, describe, expect, test } from 'bun:test';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { cargoPackageVersion } from '../tools/build-app-bundle';
@@ -85,6 +85,10 @@ describe('each file changes on its version line and nowhere else', () => {
 
     const noOwnVersion = '[package]\nname = "x"\n\n[dependencies]\nserde = { version = "1" }\nfoo = "2"\n';
     expect(() => setCargoTomlVersion(noOwnVersion, '9.8.7')).toThrow('[package]');
+
+    // A version line ABOVE [package] (a workspace table, say) stays put.
+    const workspaceFirst = '[workspace.package]\nversion = "0.0.1"\n\n[package]\nname = "x"\nversion = "1.0.0"\n';
+    expect(setCargoTomlVersion(workspaceFirst, '9.8.7')).toBe(workspaceFirst.replace('"1.0.0"', '"9.8.7"'));
   });
 
   test('Cargo.lock: the screepub-desktop entry, one line of hundreds', () => {
@@ -127,6 +131,30 @@ describe('bumpVersion', () => {
     const dir = scratchRepo(GOOD_NOTES.replace('\n\n**One line', '\n\n**A pre-lede line.**\n\n**One line'));
     const before = snapshot(dir);
     expect(() => bumpVersion(dir, '9.8.7')).toThrow('second paragraph');
+    expect(snapshot(dir)).toEqual(before);
+  });
+
+  test('a Cargo.lock it cannot bump stops it before package.json is touched', () => {
+    const dir = scratchRepo();
+    const lock = join(dir, 'desktop/src-tauri/Cargo.lock');
+    writeFileSync(lock, readFileSync(lock, 'utf8').replace('name = "screepub-desktop"', 'name = "renamed"'));
+    const before = snapshot(dir);
+    expect(() => bumpVersion(dir, '9.8.7')).toThrow('screepub-desktop');
+    expect(snapshot(dir)).toEqual(before);
+  });
+
+  test('a write that fails part-way is undone, so every file is as it was', () => {
+    // tauri.conf.json is written fourth: read-only, it fails after three
+    // files already hold the new version.
+    const dir = scratchRepo();
+    const before = snapshot(dir);
+    const conf = join(dir, 'desktop/src-tauri/tauri.conf.json');
+    chmodSync(conf, 0o444);
+    try {
+      expect(() => bumpVersion(dir, '9.8.7')).toThrow();
+    } finally {
+      chmodSync(conf, 0o644);
+    }
     expect(snapshot(dir)).toEqual(before);
   });
 
