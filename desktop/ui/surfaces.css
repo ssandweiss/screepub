@@ -412,7 +412,11 @@
   background: var(--paper);
   /* The hairline reads as the edge of the binding the panel came out of. */
   border-right: 1px solid var(--hole);
-  padding: 0 var(--space-4) var(--space-3) var(--space-3);
+  /* The same room at the top as at the bottom: with none, the count sat
+   * hard against the panel's top edge (QA, 0.7.3). The bottom's is kept
+   * when scrolled to the end, in WebKit as in Chrome (measured 2026-09-28
+   * in a WKWebView: 13px of padding left 13px below the last entry). */
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-3);
   /* Shut. Opacity is what actually hides it; the translate is only the
    * motion. A translate alone cannot be trusted to clear the window, because
    * the margin GROWS with the window: on a wide display a panel shifted by

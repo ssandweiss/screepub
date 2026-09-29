@@ -7515,6 +7515,17 @@ describe('the scene index is a drawer in the binding margin', () => {
     expect(block).toMatch(/position:\s*(relative|absolute|fixed|sticky)/);
   });
 
+  test('the list stands clear of the drawer’s top and bottom edges', () => {
+    // QA, 0.7.3: the count ("93 SCENES") sat right against the drawer's top
+    // edge, even scrolled to the top. The top gets the same room the bottom
+    // already had, in the window's own spacing, so the list reads as set
+    // inside the panel at both ends rather than cut off at one.
+    const block = ruleBlock(read('surfaces.css'), '.scene-rail');
+    const [top, , bottom] = block.match(/\bpadding:\s*([^;]+);/)?.[1]?.trim().split(/\s+/) ?? [];
+    expect(top).toBe('var(--space-3)');
+    expect(bottom).toBe('var(--space-3)');
+  });
+
   test('hiding it does not rely on moving it', () => {
     // A translate alone cannot be trusted to clear the window: the margin
     // GROWS with the window, so on a wide display a panel shifted by its own
