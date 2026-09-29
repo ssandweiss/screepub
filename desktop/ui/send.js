@@ -611,21 +611,30 @@ export function sameRoutes(a, b) {
  *  unproven caveat and, for a reader that mounts, the volume the file lands
  *  on. A docked reMarkable never mounts and gets no such line: the engine's
  *  detail already says how it is reached, and whereLine()'s stand-in beside
- *  it said the same thing twice.
- *
- *  `file` is kindleCheckFrom()'s answer, or null. A row that hands over the
- *  Kindle file names its type after the title, "Save a Kindle file (.kfx)",
- *  because which file that is depends on this computer; with no answer the
- *  title stands alone rather than guessing. */
-export function routeLines(route, platform, file = null) {
+ *  it said the same thing twice. The title is the route's own, and a
+ *  reader's is the name it mounts as: the Kindle file's type goes on the
+ *  button (buttonLabel()), which is what hands the file over. */
+export function routeLines(route, platform) {
   const device = route?.device ?? null;
-  const named = file !== null && file !== undefined && handsOverKindleFile(route);
   return {
-    title: named ? `${route.title} (.${file.extension})` : route?.title,
+    title: route?.title,
     detail: route?.detail,
     where: device !== null && isText(device.volume) ? whereLine(device) : null,
     caveat: device === null ? null : caveatFor(device, platform),
   };
+}
+
+/** What a row's button says: the engine's words, and on a button that hands
+ *  over the Kindle file, its type, because which file that is depends on
+ *  this computer: "Copy to Kindle (.kfx)", "Save a Kindle file (.kfx)…".
+ *  Before the ellipsis a button that opens a Save box ends with. `file` is
+ *  kindleCheckFrom()'s answer; with none the words stand alone rather than
+ *  guessing. */
+export function buttonLabel(route, file = null) {
+  const words = route?.button;
+  if (file === null || file === undefined || !handsOverKindleFile(route)) return words;
+  const type = `(.${file.extension})`;
+  return words.endsWith('…') ? `${words.slice(0, -1)} ${type}…` : `${words} ${type}`;
 }
 
 /** Stand-in when the export says it built the Kindle file but not what kind
@@ -700,9 +709,9 @@ let fullOut = 0;
  *  not lose their file type for the moment the check takes to answer again. */
 let kindle = null;
 let kindleBook = null;
-/** The extension the rows on screen were titled with, so a check that
+/** The extension the buttons on screen were labelled with, so a check that
  *  changes it redraws them and one that does not leaves them alone. */
-let titledWith = null;
+let labelledWith = null;
 /** Kindle file exports of one book, one at a time: the tail of each book's
  *  line. Two at once would run Kindle Previewer twice over the same scratch
  *  file. This is a rule about the Kindle FILE, not the book, so it is kept
@@ -811,7 +820,7 @@ export function show() {
   clearInterval(poll);
   poll = setInterval(tick, POLL_MS);
   kfxShown();
-  // What the last visit learnt is kept (the rows keep naming the file), but
+  // What the last visit learnt is kept (the buttons keep naming the file), but
   // not whether the file is current: a Settings save may have rewritten the
   // book since, and a press before the check answers must put the build
   // line up rather than trust a send from before. Unknown, not stale, so
@@ -822,7 +831,7 @@ export function show() {
 }
 
 /** Back from somewhere else, perhaps from installing Kindle Previewer: the
- *  Kindle file may be a different kind now, so the rows are named again.
+ *  Kindle file may be a different kind now, so the buttons are named again.
  *  Only named: focus comes back after every Save box and every switch of
  *  app, and it never starts a build. kfx.js re-asks its checklist on the
  *  same event. */
@@ -960,7 +969,7 @@ async function refresh({ quick = false } = {}) {
   ctx.state.devices = connectedDevices(shown);
   // Nothing changed, so nothing is redrawn: a rebuild every two seconds
   // would take the focus off a button someone had just tabbed to.
-  if (sameRoutes(drawn, shown) && titledWith === (kindle?.extension ?? null)) return;
+  if (sameRoutes(drawn, shown) && labelledWith === (kindle?.extension ?? null)) return;
   drawn = shown;
   fillRows();
   // After the rows, not before: a KFX block that hides now while it held
@@ -974,7 +983,7 @@ async function refresh({ quick = false } = {}) {
 /** The rows, from the list on screen and what the check said about the
  *  Kindle file. */
 function fillRows() {
-  titledWith = kindle?.extension ?? null;
+  labelledWith = kindle?.extension ?? null;
   rebuild(() => {
     for (const route of drawn.routes) list.append(routeRow(route, drawn.chosen));
   });
@@ -984,8 +993,8 @@ function fillRows() {
  *  file this computer makes, and whether the one beside the book is current.
  *  It takes its turn on the book (book-queue.js), so a save still settling
  *  on the Settings page lands first and the answer is about the book as it
- *  will be. A check that fails names nothing: the rows keep their plain
- *  titles, and a press still builds and says what went wrong in its own
+ *  will be. A check that fails names nothing: the buttons keep their plain
+ *  words, and a press still builds and says what went wrong in its own
  *  words. `ahead` false names the file and nothing more: the check on a
  *  focus return and the one after a build never start a build. */
 async function checkKindle({ ahead = true } = {}) {
@@ -1028,12 +1037,12 @@ function maybeBuildAhead() {
   buildInBackground(script);
 }
 
-/** What is known about this book's Kindle file, onto the rows. */
+/** What is known about this book's Kindle file, onto the buttons. */
 function useKindle(book, file) {
   kindle = file;
   kindleBook = book;
   // Rows are never rebuilt under a send; the poll after it catches up.
-  if (drawn !== null && !sending && titledWith !== (kindle?.extension ?? null)) fillRows();
+  if (drawn !== null && !sending && labelledWith !== (kindle?.extension ?? null)) fillRows();
 }
 
 /** Build the Kindle file now, on the book's turn, so a press finds it built
@@ -1180,7 +1189,7 @@ function readerRow(reader, platform) {
  *  Each button carries its route's id as data-route, which is how a rebuild
  *  finds the same route's button again. */
 function routeRow(route, chosen) {
-  const lines = routeLines(route, navigator.platform, kindle);
+  const lines = routeLines(route, navigator.platform);
   const hint = emailSetupHint(route);
   const style = buttonClassFor(route, chosen);
   // The poll keeps running through a KFX install (it stops only for a send),
@@ -1189,7 +1198,7 @@ function routeRow(route, chosen) {
   const button = style === null ? null : el('button', {
     type: 'button', class: style, 'data-route': route.id, disabled: kfxInstalling(),
     onclick: () => choose(route),
-  }, route.button);
+  }, buttonLabel(route, kindle));
   return el('div', { class: route.available ? 'device-row' : 'device-row route-unavailable' },
     el('div', { class: 'device-what' },
       el('p', { class: 'device-name' }, lines.title),

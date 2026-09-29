@@ -36,7 +36,9 @@ const WRITE = 'write';
 
 /** Every turn a page asks for, and what it does to the book: the one place
  *  a call site's label says whether it reads the library EPUB or writes it.
- *  A label with no row here is refused, never guessed at. */
+ *  A label with no row here is refused, never guessed at. holders() lists
+ *  the labels running on a book; the Settings page names the one it waits
+ *  for from them. */
 export const TURNS = {
   // tune.js: a moved knob's settings stored, then the EPUB rebuilt in place.
   save: WRITE,
@@ -50,6 +52,17 @@ export const TURNS = {
   // send.js: a Kindle file Calibre builds from the EPUB, beside it (KFX,
   // AZW3): the build the page starts as it opens, Save a Kindle file, Copy
   // to a Kindle, and the save of it.
+  //
+  // Which of these two a Kindle export takes is read off the page's last
+  // `export --check` (send.js's kindleTurn()), not the engine's run itself,
+  // so it can be out of date. Only one change turns a `kindle` reader into
+  // a writer: Calibre's ebook-convert disappearing between that check and
+  // the press (the window checks again on every focus return). A broken
+  // KFX plugin or a missing Kindle Previewer only drops the ladder to AZW3,
+  // which is still Calibre and still a reader. And were it ever to reach
+  // the MOBI rung, that rung writes the EPUB write-then-rename, from the
+  // same .fountain and the same options it was built from, overlapping only
+  // readers: the worst case is a reader copying an equivalent EPUB.
   kindle: READ,
   // send.js: a reader that takes the EPUB as it is (the export that finds
   // it, and the copy to a Kobo, a tolino or a reMarkable), and the copy of

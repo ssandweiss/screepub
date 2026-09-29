@@ -5518,8 +5518,9 @@ describe('the Send page performs every route: shape', () => {
     const refresh = body('async function refresh(');
     expect(refresh).toContain('const shown = routesFrom(answer);');
     expect(refresh).toContain('ctx.state.devices = connectedDevices(shown);');
-    // The same list, titled with the same Kindle file type, is left alone.
-    expect(refresh).toContain('if (sameRoutes(drawn, shown) && titledWith === (kindle?.extension ?? null)) return;');
+    // The same list, its buttons labelled with the same Kindle file type, is
+    // left alone.
+    expect(refresh).toContain('if (sameRoutes(drawn, shown) && labelledWith === (kindle?.extension ?? null)) return;');
     expect(refresh).toContain('fault(routesFailure(answer))');
   });
 
@@ -8466,7 +8467,6 @@ describe('the Send page’s KFX block: wiring, second pass', () => {
     expect(told).toBeGreaterThan(rows);
     expect(body(send, 'function fillRows(')).toContain('list.append(routeRow(route, drawn.chosen))');
     expect(send).toContain('devices: () => connectedDevices(drawn)');
-    expect(send).toContain('isSending: () => sending');
     // The busy hook takes every button out of reach, and back.
     const busy = send.slice(send.indexOf('onBusy: (on) => {'));
     expect(busy.slice(0, busy.indexOf('\n    },'))).toContain('for (const button of buttons()) button.disabled = on;');
