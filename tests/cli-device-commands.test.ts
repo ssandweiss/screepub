@@ -422,6 +422,10 @@ describe('flag before verb', () => {
     expect(result.error.code).toBe('unsupported-type');
     expect(result.error.message).toContain('screepub devices');
     expect(result.error.message).toContain('verb must come first');
+    expect(result.error.message).toBe(
+      'unsupported input type "": expected .pdf, .fountain, or .txt. '
+        + 'Did you mean `screepub devices`? The verb must come first',
+    );
   });
 
   test('--json send gets the hint naming send, not devices', async () => {

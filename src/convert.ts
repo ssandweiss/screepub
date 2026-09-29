@@ -19,7 +19,7 @@ export class ScannedPdfError extends Error {
   constructor(pages: number, lines: number) {
     super(
       `No usable text layer (${lines} text lines across ${pages} pages). ` +
-        `This looks like a scanned/image-only PDF — run OCR on it first.`,
+        `This looks like a scanned/image-only PDF. Run OCR on it first.`,
     );
     this.name = 'ScannedPdfError';
   }
@@ -28,7 +28,7 @@ export class ScannedPdfError extends Error {
 export class NotAScreenplayError extends Error {
   constructor() {
     super(
-      'No scene headings and no dialogue found — this does not look like a ' +
+      'No scene headings and no dialogue found: this does not look like a ' +
         'screenplay. Pass --force to convert it anyway.',
     );
     this.name = 'NotAScreenplayError';
@@ -127,7 +127,7 @@ export async function convertPdf(
     throw new NotAScreenplayError();
   }
   if (sceneCount === 0) {
-    warnings.push('No scene headings detected — the EPUB will have no scene navigation.');
+    warnings.push('No scene headings detected: the EPUB will have no scene navigation.');
   }
 
   const format = resolveFormatOptions(opts.format);

@@ -61,7 +61,7 @@ export const READERS = [
     // engine's MOBI. Listing it any other way would read as a preference the
     // engine does not hold.
     route: 'Over USB. Kindles never index a sideloaded EPUB, so Screepub builds a KFX, '
-      + 'an AZW3 or its own MOBI — whichever is the best this computer can make — and copies '
+      + 'an AZW3 or its own MOBI, whichever is the best this computer can make, and copies '
       + 'that across instead.',
   },
   {
@@ -112,7 +112,7 @@ export function provenNote(platform) {
   const where = platformOf(platform);
   if (where === PROVEN.platform) {
     return 'A Kindle over USB, on a Mac, is the one route anyone has actually run. The others '
-      + 'are built and code-tested, and that is all — they are listed because Screepub will '
+      + 'are built and code-tested, and that is all. They are listed because Screepub will '
       + 'try, not because anyone can promise.';
   }
   // Named only when it is known. An absent navigator.platform must not be
@@ -120,7 +120,7 @@ export function provenNote(platform) {
   const named = where === 'windows' ? 'from Windows'
     : where === 'linux' ? 'from Linux'
       : 'on this computer’s platform';
-  return `Sending has ${UNPROVEN} ${named} — the one route anyone has run was a Kindle `
+  return `Sending has ${UNPROVEN} ${named}. The one route anyone has run was a Kindle `
     + 'over USB, on a Mac. The code is the same on all three platforms; the confidence is not.';
 }
 
@@ -146,7 +146,7 @@ export function caveatFor(device, platform) {
     : 'this reader';
   if (device?.kind === PROVEN.kind) {
     if (where === PROVEN.platform) return null;
-    return `Sending to a Kindle has ${UNPROVEN} on this computer’s platform — only on a Mac.`;
+    return `Sending to a Kindle has ${UNPROVEN} on this computer’s platform. It has only been run on a Mac.`;
   }
   return `Sending to a ${name} has ${UNPROVEN}. It is built and code-tested; nobody has `
     + 'plugged one in.';
@@ -213,7 +213,7 @@ export function sentLine(device, answer) {
   if (answer?.uploaded === true || destination === '') {
     return `${SENT_LABEL} ${device.name}.`;
   }
-  return `${SENT_LABEL} ${device.name} — ${destination}. Eject the volume before you unplug it.`;
+  return `${SENT_LABEL} ${device.name}: ${destination}. Eject the volume before you unplug it.`;
 }
 
 /** What actually went across, in the engine's own words. `label` is
@@ -1349,8 +1349,8 @@ async function sendTo(device) {
     artifactNote.hidden = what === '';
   } catch (err) {
     // The engine's own sentence, verbatim. Every one of them is already
-    // written for a person — "no reader is connected — plug one in over USB
-    // and try again", "reMarkable accepts PDF and EPUB, not .mobi." — and
+    // written for a person ("no reader is connected: plug one in over USB
+    // and try again", "reMarkable accepts PDF and EPUB, not .mobi.") and
     // this window is not better placed to say it.
     if (!stale()) say(statusFor('failed', { device, detail: err.message }));
   } finally {

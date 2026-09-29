@@ -95,7 +95,7 @@ export function selectDevice(devices: ConnectedDevice[], requestedId?: string): 
   const ids = devices.map(deviceId);
 
   if (devices.length === 0) {
-    throw new CliError('no-devices', 'no reader is connected — plug one in over USB and try again');
+    throw new CliError('no-devices', 'no reader is connected: plug one in over USB and try again');
   }
 
   if (requestedId !== undefined) {
@@ -103,7 +103,7 @@ export function selectDevice(devices: ConnectedDevice[], requestedId?: string): 
     if (index === -1) {
       throw new CliError(
         'unknown-device',
-        `no connected reader has the id "${requestedId}" — connected: ${ids.join(', ')}`,
+        `no connected reader has the id "${requestedId}". Connected: ${ids.join(', ')}`,
       );
     }
     return devices[index];
@@ -113,7 +113,7 @@ export function selectDevice(devices: ConnectedDevice[], requestedId?: string): 
 
   throw new CliError(
     'ambiguous-device',
-    `several readers are connected — pick one with --device: ${ids.join(', ')}`,
+    `several readers are connected. Pick one with --device: ${ids.join(', ')}`,
   );
 }
 

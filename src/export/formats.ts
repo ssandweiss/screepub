@@ -19,8 +19,8 @@ export function fileExtension(format: ExportFormat, state: ToolchainState): stri
 }
 
 export function formatLabel(format: ExportFormat, state: ToolchainState): string {
-  if (format === 'epub') return 'EPUB — for emailing to Kindle, and most e-readers';
+  if (format === 'epub') return 'EPUB: for emailing to Kindle, and most e-readers';
   const ext = fileExtension(format, state).toUpperCase();
   const hint = state.kfxReady ? ' (best quality)' : '';
-  return `${ext} — for USB sideload to Kindle${hint}`;
+  return `${ext}: for USB sideload to Kindle${hint}`;
 }

@@ -992,7 +992,7 @@ describe('what the Convert surface decides', () => {
       // The engine's sentence is written for a terminal and is right there.
       // In the window it lands directly above a Convert anyway button that
       // does exactly what it asks for.
-      const said = 'No scene headings and no dialogue found — this does not look like a '
+      const said = 'No scene headings and no dialogue found: this does not look like a '
         + 'screenplay. Pass --force to convert it anyway.';
       const shown = convert.failureFor({ code: 'not-screenplay', message: said });
       // Asserted against the value it CHANGED FROM, so a function that did
@@ -1000,7 +1000,7 @@ describe('what the Convert surface decides', () => {
       // does not, and what is left is the diagnosis, whole and unedited.
       expect(said).toContain('Pass --force');
       expect(shown.message).toBe(
-        'No scene headings and no dialogue found — this does not look like a screenplay.',
+        'No scene headings and no dialogue found: this does not look like a screenplay.',
       );
       expect(shown.canForce).toBe(true);
       // And the button is still there: the remedy did not go away, it moved.
@@ -2079,9 +2079,9 @@ describe('what runEngine does with the answer it is handed', () => {
   });
 
   test('the engine’s own words come back unedited', async () => {
-    // The refusal a reader sees is the engine's sentence, em dash and all.
+    // The refusal a reader sees is the engine's sentence, accents and all.
     // runEngine must hand it over exactly, not normalise or re-encode it.
-    const message = 'No scene headings — this does not look like a screenplay. é 日本語';
+    const message = 'No scene headings: this does not look like a screenplay. é 日本語 ’';
     const json = JSON.stringify({ ok: false, error: { code: 'not-screenplay', message } });
     const parsed = await answering(json);
     expect((parsed as { error: { message: string } }).error.message).toBe(message);
@@ -3603,8 +3603,11 @@ describe('the Tune surface', () => {
     const spacing = tune.knobFor('elementSpacingEm');
     expect(tune.displayValue(spacing, 1)).toBe('1.0 em');
     expect(tune.displayValue(spacing, 1.25)).toBe('1.3 em');
-    expect(tune.displayValue(spacing, undefined)).toBe('—');
-    expect(tune.displayValue(spacing, null)).toBe('—');
+    // Said in words: a dash standing in for a value is the one mark the
+    // owner keeps out of every line the window shows.
+    expect(tune.displayValue(spacing, undefined)).toBe('not set');
+    expect(tune.displayValue(spacing, null)).toBe('not set');
+    expect(tune.NOT_SET).toBe('not set');
   });
 
   test('two settings objects are compared by the eighteen, not by identity', () => {
@@ -5786,6 +5789,7 @@ describe('what the Send surface decides', () => {
     // Neither field: still sent — the engine said ok — but no invented path.
     expect(send.sentLine(kobo, { ok: true })).toBe('Sent to Kobo.');
     expect(send.sentLine(kobo, { ok: true })).not.toContain('—');
+    expect(copied).toBe('Sent to Kindle: /m/Kindle/x.azw3. Eject the volume before you unplug it.');
   });
 
   test('the status line alarms on failure and on nothing else', () => {
@@ -5817,7 +5821,7 @@ describe('what the Send surface decides', () => {
     // "no destination" is also the shape a reMarkable upload takes — so it
     // would render a refusal as "Sent to Kindle." with no alarm. Both answers
     // are checked here, and both are checked in the failing direction.
-    const good = { ok: true, label: 'AZW3 — for USB sideload to Kindle', path: '/x.azw3' };
+    const good = { ok: true, label: 'AZW3: for USB sideload to Kindle', path: '/x.azw3' };
     const refusedExport = {
       ok: false,
       error: { code: 'export-failed', message: "Can't rebuild the Kindle file." },
@@ -5879,8 +5883,8 @@ describe('what the Send surface decides', () => {
   });
 
   test('what went across is named in the engine’s words, not guessed at', () => {
-    expect(send.artifactLine({ label: 'AZW3 — for USB sideload to Kindle', path: '/x.azw3' }))
-      .toBe('AZW3 — for USB sideload to Kindle');
+    expect(send.artifactLine({ label: 'AZW3: for USB sideload to Kindle', path: '/x.azw3' }))
+      .toBe('AZW3: for USB sideload to Kindle');
     expect(send.artifactLine({ path: '/x.azw3' })).toBe('/x.azw3');
     expect(send.artifactLine({})).toBe('');
     expect(send.artifactLine(null)).toBe('');

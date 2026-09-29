@@ -16,7 +16,7 @@ export class RegenerationFailedError extends Error {
 
 export class CannotRegenerateError extends Error {
   constructor() {
-    super("Can't rebuild the Kindle file — the script's .fountain is missing.");
+    super("Can't rebuild the Kindle file: the script's .fountain is missing.");
     this.name = 'CannotRegenerateError';
   }
 }

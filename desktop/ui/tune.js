@@ -152,7 +152,7 @@ export const GROUPS = [
     effect: 'reconvert',
     note: 'These four are decided while the PDF is being read. Everything else re-renders '
       + 'from the script Screepub already read, so changing one here saves it for the next '
-      + 'time you convert this PDF — it will not change what you see now.',
+      + 'time you convert this PDF. It will not change what you see now.',
     knobs: [
       {
         key: 'rejoinSplitDialogue', label: 'Rejoin speeches split across pages', kind: 'toggle',
@@ -228,15 +228,19 @@ export function canExplain(knob) {
   return Boolean(knob?.needs) || typeof knob?.help === 'string';
 }
 
+/** A read-out with no value to show: said in words, not stood in for by a
+ *  dash. */
+export const NOT_SET = 'not set';
+
 /** What a control's read-out says. Tabular and unit-carrying: "20%" is an
  *  answer, "20" is a number. A value the engine never sends still has to
  *  render as something rather than as NaN. */
 export function displayValue(knob, value) {
   // Number(null) is 0 and Number('') is 0: a missing value must read as
   // missing, not as a knob sitting at zero.
-  if (value === null || value === undefined || value === '') return '—';
+  if (value === null || value === undefined || value === '') return NOT_SET;
   const number = Number(value);
-  if (!Number.isFinite(number)) return '—';
+  if (!Number.isFinite(number)) return NOT_SET;
   const decimals = knob.step < 1 ? 1 : 0;
   return `${number.toFixed(decimals)}${knob.unit ?? ''}`;
 }
