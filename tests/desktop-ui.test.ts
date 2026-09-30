@@ -7797,13 +7797,15 @@ describe('the dead-engine line does not crowd the update label', () => {
     expect(rule).toContain('bottom: var(--space-9)');
   });
 
-  test('it stays aligned with the foot below 720px, like the foot itself', () => {
+  test('it stays aligned with the foot at every width, like the foot itself', () => {
+    // Both sit on the sheet's right edge (right: 0) since the layout pass
+    // moved the side margins from the sheet to the page, so neither needs a
+    // narrow-window override any more. An override on one alone would pull
+    // the two apart.
     const css = read('style.css');
-    const start = css.indexOf('@media (max-width: 720px)');
-    expect(start).toBeGreaterThan(-1);
-    const nextMedia = css.indexOf('@media', start + 1);
-    const block = css.slice(start, nextMedia === -1 ? undefined : nextMedia);
-    expect(block).toContain('.engine-fault { right: var(--space-4); }');
+    expect(css.match(/\.engine-fault\s*\{[^}]*\}/)?.[0] ?? '').toMatch(/right:\s*0;/);
+    expect(css.match(/\.rev-foot\s*\{[^}]*\}/)?.[0] ?? '').toMatch(/right:\s*0;/);
+    expect(css).not.toMatch(/\.engine-fault\s*\{\s*right:\s*var\(--space-4\)/);
   });
 });
 

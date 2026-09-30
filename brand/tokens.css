@@ -68,10 +68,15 @@
   --space-9: 3rem;
   --space-10: 3.5rem;
 
-  --page-max: 1000px;
-  --binding-margin: 17.6%;
-  --page-right: 11.8%;
-  --hole-center: 5.9%;
+  /* The frame, in pixels of the WINDOW (layout pass, 2026-09-29). They were
+     percentages of a page capped at 1000px and centred, which pulled the
+     brads toward the middle of a wide window. Now the brads sit 44px from
+     the window's left edge, content starts at 100px, the right margin is
+     48px, and the content between is one block capped at 1180px. */
+  --block-max: 1180px;
+  --binding-margin: 100px;
+  --page-right: 48px;
+  --hole-center: 44px;
   --brad-size: clamp(20px, 3.4%, 36px);
   --measure: 66ch;
   --page-shadow: 0 3px 34px rgba(0,0,0,0.5);

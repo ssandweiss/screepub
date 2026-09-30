@@ -52,7 +52,7 @@ describe('desktop/ui/tokens.css is generated, not typed', () => {
       '--radius-mark', '--radius', '--radius-well',
       '--motion-press', '--motion-state', '--ease',
       '--space-1', '--space-10', '--measure', '--brad-size', '--page-shadow',
-      '--page-max', '--binding-margin', '--page-right', '--hole-center',
+      '--block-max', '--binding-margin', '--page-right', '--hole-center',
       '--hole', '--ink-soft', '--brass-highlight', '--brass-rim',
     ]) {
       expect(GENERATED.includes(`${token}:`), `tokens.css is missing ${token}`).toBe(true);

@@ -71,11 +71,10 @@
 html, body { height: 100%; }
 body {
   margin: 0;
-  /* The paper, not the desk. The sheet's own width is still capped at
-   * --page-max so the measure, the binding margin and the brads keep the
-   * proportions they were drawn at — but the colour behind it runs to the
-   * window edge, because a desk wide enough to swallow the page reads as a
-   * background that failed to load rather than as furniture. */
+  /* The paper, edge to edge. Since the layout pass (2026-09-29) nothing
+   * caps the page's width: the content block inside it is capped instead
+   * (--block-max), so a wide window gets thin margins rather than a narrow
+   * page floating in the middle. */
   background: var(--paper);
   color: var(--ink-soft);
   font-family: var(--font-prose);
@@ -88,30 +87,34 @@ body {
 .page {
   display: flex;
   flex-direction: column;
-  max-width: var(--page-max);
-  margin: 0 auto;
+  /* The page's two side margins: the binding on the left, measured from the
+   * window's edge where the brads are, and a thin margin on the right. */
+  padding: 0 var(--page-right) 0 var(--binding-margin);
   /* 100vh, not 100%: #app is an auto-height block, so a percentage here
    * resolves against nothing and the paper stops where the text does. */
   min-height: 100vh;
   box-sizing: border-box;
 }
-/* flex: 1, not min-height: 100vh — the sheet runs to the bottom of the
- * window and no further, so the stamp at its foot is on screen instead of
- * one tab-height below the fold. */
+/* One block between the margins, capped and centred, so the extra room on a
+ * big display splits evenly on both sides instead of stretching every line.
+ * flex: 1, not min-height: 100vh: the sheet runs to the bottom of the window
+ * and no further, so the stamp at its foot is on screen. */
 .sheet {
   position: relative;
   flex: 1;
+  width: 100%;
+  max-width: var(--block-max);
+  margin: 0 auto;
   background: var(--paper);
   box-sizing: border-box;
-  padding: var(--space-7) var(--page-right) var(--space-10) var(--binding-margin);
+  padding: var(--space-7) 0 var(--space-10);
 }
 
 /* Fixed to the window, so the paper moves under the binding the way it does
  * when you thumb a script on a desk (brand/components/page-frame.html). */
 .rail {
-  position: fixed; top: 0; bottom: 0; left: 50%;
-  width: 100%; max-width: var(--page-max);
-  transform: translateX(-50%); pointer-events: none;
+  position: fixed; top: 0; bottom: 0; left: 0; right: 0;
+  pointer-events: none;
 }
 .rail svg {
   position: absolute;
@@ -193,7 +196,7 @@ body {
  * width. */
 .rev-foot {
   position: absolute;
-  right: var(--page-right);
+  right: 0;
   bottom: var(--space-5);
   display: flex;
   align-items: baseline;
@@ -247,7 +250,7 @@ body {
  * missing, not less: this is exactly the moment someone files a report. */
 .engine-fault {
   position: absolute;
-  right: var(--page-right);
+  right: 0;
   bottom: var(--space-9);
   margin: 0;
   max-width: var(--measure);
@@ -301,11 +304,9 @@ body {
 }
 /* Narrow: the binding margin would eat the page, so it narrows with it. */
 @media (max-width: 720px) {
-  .sheet { padding-left: 11%; padding-right: var(--space-4); }
+  .page { padding-left: 11%; padding-right: var(--space-4); }
   .rail svg { width: 20px; height: 20px; }
   .tabs { gap: var(--space-3); }
-  .rev-foot { right: var(--space-4); }
-  .engine-fault { right: var(--space-4); }
 }
 @media (prefers-reduced-motion: reduce) {
   .tab { transition: none; }
