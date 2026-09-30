@@ -102,8 +102,9 @@ The owner's QA notes on 0.7.3, at a window about 1280 wide:
     reaches the window through the generator like every colour after the
     core seven. Each setting's explanation stays under it.
 15. **Unchanged:** the intro sentence and the preset buttons at the top,
-    and the single column under 900 wide with the preview above the
-    settings, unpinned.
+    and the single column under 900 wide, with the preview unpinned below
+    the settings. (The approval conversation said "above"; the window has
+    always put it below, and this pass does not move it.)
 
 ### The brand
 
