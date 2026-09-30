@@ -577,12 +577,14 @@
    * follow the reader down the page and sit on top of the knobs. */
   .tune-preview { position: static; }
   .tune-preview-frame { height: 44vh; }
+  .knob-group, .tune-foot { max-width: var(--measure); }
 }
 
 /* The foot of the Settings page: which defaults a new script starts from,
- * and the two quiet buttons that change it. Two small rules only, the foot's
- * own top margin and the row's gap between its buttons: everything else
- * rides on .caption and .btn-quiet, already declared above. */
+ * and the two quiet buttons that change it. Two small rules only, clearing
+ * the block's own margin (the foot's spacing lives on .tune-foot) and the
+ * row's gap between its buttons: everything else rides on .caption and
+ * .btn-quiet, already declared above. */
 .tune-defaults { margin: 0; }
 .tune-defaults-row { display: flex; flex-wrap: wrap; gap: var(--space-4); margin: var(--space-2) 0 0; }
 

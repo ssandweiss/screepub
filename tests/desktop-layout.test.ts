@@ -15,11 +15,16 @@ function css(path: string): string {
 }
 const windowCss = (name: string) => css(join(UI, name));
 
-/** The first declaration block for a selector. Base rules come before the
- *  @media blocks in these files, so the first one is the base rule. */
+/** The declaration block for a selector's own (unindented, top-level) rule,
+ *  never a same-named rule nested inside an @media block: those are always
+ *  indented in these files, so anchoring the match to a line start finds
+ *  the base rule even when a media block using the same selector sits
+ *  earlier in the file. */
 function ruleBlock(sheet: string, selector: string): string {
-  const at = sheet.indexOf(`${selector} {`);
-  expect(at, `${selector} is missing`).toBeGreaterThan(-1);
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`^${escaped} \\{`, 'm').exec(sheet);
+  expect(match, `${selector} is missing`).not.toBeNull();
+  const at = match!.index;
   return sheet.slice(at, sheet.indexOf('}', at) + 1);
 }
 
@@ -219,6 +224,11 @@ describe('each Settings section is a box', () => {
   test('the foot is one element, so it can be one box', () => {
     const tune = readFileSync(join(UI, 'tune.js'), 'utf8');
     expect(tune).toMatch(/el\('div', \{ class: 'tune-foot' \},\s*drawDefaultsFoot\(\),\s*drawKeepChoice\(\)\)/);
+  });
+
+  test('under 900 wide the boxes stay a measure wide, not the whole column', () => {
+    const narrow = mediaBlocks(surfaces, '(max-width: 900px)');
+    expect(narrow).toContain('.knob-group, .tune-foot { max-width: var(--measure); }');
   });
 
   test('the panel is a colour token in both modes, and every text on it still reads', () => {
