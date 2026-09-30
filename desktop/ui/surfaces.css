@@ -337,8 +337,8 @@
 
 /* Read — the script and its rail. Everything INSIDE the frame belongs to the
  * engine's own stylesheet; this file owns only the box it sits in and the
- * margin beside it. There is deliberately no rule here for a slugline, a cue
- * or a line of dialogue: the one in the frame is the book's. */
+ * index slot beside it. There is deliberately no rule here for a slugline,
+ * a cue or a line of dialogue: the one in the frame is the book's. */
 .read-head {
   border-bottom: 1px solid var(--hole);
   padding-bottom: var(--space-3);
@@ -488,6 +488,11 @@
 }
 @media (max-height: 560px) {
   .script-frame { height: 62vh; }
+}
+/* Only above 900px wide, where the rail sits beside the script: below that
+ * the 900px block already caps it at a short strip above the script, and a
+ * short window must not grow it back into a tall one there. */
+@media (max-height: 560px) and (min-width: 901px) {
   .scene-rail { max-height: 62vh; }
 }
 @media (prefers-reduced-motion: reduce) {

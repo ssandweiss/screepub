@@ -7665,15 +7665,15 @@ describe('the scene index', () => {
     // A regression guard on an existing coupling rather than new behaviour:
     // read.js keeps the marked scene in view by its button's offsetTop, and
     // an unpositioned rail would hand it an offset measured from the page
-    // instead. The drawer changes `position` from relative to absolute, which
-    // is still positioned — this is here so the NEXT change cannot quietly
-    // make it static.
+    // instead. The panel has been `relative` since the layout pass gave it
+    // its own slot: this is here so the NEXT change cannot quietly make it
+    // static.
     const block = ruleBlock(read('surfaces.css'), '.scene-rail');
     expect(block).toMatch(/position:\s*(relative|absolute|fixed|sticky)/);
   });
 
-  test('the list stands clear of the drawer’s top and bottom edges', () => {
-    // QA, 0.7.3: the count ("93 SCENES") sat right against the drawer's top
+  test('the list stands clear of the panel’s top and bottom edges', () => {
+    // QA, 0.7.3: the count ("93 SCENES") sat right against the panel's top
     // edge, even scrolled to the top. The top gets the same room the bottom
     // already had, in the window's own spacing, so the list reads as set
     // inside the panel at both ends rather than cut off at one.
@@ -7684,9 +7684,9 @@ describe('the scene index', () => {
   });
 
   test('hiding it does not rely on moving it', () => {
-    // A translate alone cannot be trusted to clear the window: the margin
-    // GROWS with the window, so on a wide display a panel shifted by its own
-    // width is still sitting on the paper in plain sight.
+    // The panel keeps its column whether it is open or shut: opacity and
+    // visibility are what actually hide it, and the small translate is only
+    // the motion, not what clears it from view.
     const block = ruleBlock(read('surfaces.css'), '.scene-rail');
     expect(block).toMatch(/opacity:\s*0\b/);
     expect(block).toMatch(/visibility:\s*hidden/);

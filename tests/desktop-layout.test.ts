@@ -157,4 +157,12 @@ describe('Read gives the scene index a slot of its own', () => {
     expect(narrow).toContain('.reader:not(.index-open) .scene-rail { display: none; }');
     expect(narrow).toContain('.script-stage { grid-column: 1; grid-row: 2; }');
   });
+
+  test('a short window only grows the rail when it is still beside the script, not stacked above it', () => {
+    // Below 900px wide the rail is already a short strip (the 900px block
+    // above caps it at 6.5rem); a short-window override meant for the
+    // two-column layout must not also apply there.
+    const short = mediaBlocks(surfaces, '(max-height: 560px) and (min-width: 901px)');
+    expect(short).toContain('.scene-rail { max-height: 62vh; }');
+  });
 });
