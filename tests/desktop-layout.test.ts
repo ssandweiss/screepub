@@ -186,6 +186,11 @@ describe('Settings gives the preview the room', () => {
     expect(narrow).toContain('.tune-split { grid-template-columns: 1fr; }');
     expect(narrow).toContain('.tune-preview { position: static; }');
   });
+
+  test('the preview frame’s border sits inside its column', () => {
+    // width: 100% plus a 1px border overhung the block by 2px (measured live, 2026-09-29).
+    expect(ruleBlock(surfaces, '.tune-preview-frame')).toContain('box-sizing: border-box');
+  });
 });
 
 describe('each Settings section is a box', () => {

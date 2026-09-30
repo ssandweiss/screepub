@@ -561,6 +561,7 @@
 .tune-preview-frame {
   display: block;
   width: 100%;
+  box-sizing: border-box;
   /* The window's height, less the pinned top (space-5), the "Preview" label
    * above the frame (space-7 covers it) and a bottom margin (space-9), so
    * the whole frame is on screen once the page has scrolled to pin it. */
