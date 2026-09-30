@@ -166,3 +166,24 @@ describe('Read gives the scene index a slot of its own', () => {
     expect(short).toContain('.scene-rail { max-height: 62vh; }');
   });
 });
+
+describe('Settings gives the preview the room', () => {
+  const surfaces = windowCss('surfaces.css');
+
+  test('the settings take a fixed 420 and the preview everything else', () => {
+    expect(ruleBlock(surfaces, '.tune-split')).toContain('grid-template-columns: 420px minmax(0, 1fr)');
+  });
+
+  test('the preview stays pinned and runs the window’s height', () => {
+    expect(ruleBlock(surfaces, '.tune-preview')).toContain('position: sticky');
+    const frame = ruleBlock(surfaces, '.tune-preview-frame');
+    expect(frame).toContain('height: calc(100vh - var(--space-5) - var(--space-7) - var(--space-9))');
+    expect(frame).not.toContain('62vh');
+  });
+
+  test('under 900 wide it is still one column, with the preview unpinned', () => {
+    const narrow = mediaBlocks(surfaces, '(max-width: 900px)');
+    expect(narrow).toContain('.tune-split { grid-template-columns: 1fr; }');
+    expect(narrow).toContain('.tune-preview { position: static; }');
+  });
+});

@@ -540,12 +540,19 @@
  * It sticks, because the knob you are reaching for may be four groups down
  * and the point is to watch the page while you move it.
  *
+ * The settings take a fixed 420 and the preview the rest of the block
+ * (layout pass, 2026-09-29): about 670 wide in a 1280 window, twice what it
+ * had, and it runs the window's height once the page scrolls to pin it.
+ * The text stays the size it always was, so lines run longer than on a
+ * 6-inch Kindle: the preview shows formatting, not the device's line
+ * breaks, which a reader's own font size changes anyway.
+ *
  * One column below 900px. Two columns on a narrow window would give the
  * script a measure narrower than the thing it is previewing, which is worse
  * than no preview: it would misrepresent the book. */
 .tune-split {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
+  grid-template-columns: 420px minmax(0, 1fr);
   gap: var(--space-7);
   align-items: start;
 }
@@ -554,7 +561,10 @@
 .tune-preview-frame {
   display: block;
   width: 100%;
-  height: 62vh;
+  /* The window's height, less the pinned top (space-5), the "Preview" label
+   * above the frame (space-7 covers it) and a bottom margin (space-9), so
+   * the whole frame is on screen once the page has scrolled to pin it. */
+  height: calc(100vh - var(--space-5) - var(--space-7) - var(--space-9));
   min-height: 260px;
   border: 1px solid var(--hole);
   border-radius: var(--radius-well);
