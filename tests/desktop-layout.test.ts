@@ -187,3 +187,44 @@ describe('Settings gives the preview the room', () => {
     expect(narrow).toContain('.tune-preview { position: static; }');
   });
 });
+
+describe('each Settings section is a box', () => {
+  const surfaces = windowCss('surfaces.css');
+  const colors = JSON.parse(readFileSync(join(REPO, 'brand', 'tokens.json'), 'utf8')).colors;
+
+  /** WCAG 2 relative luminance of a #RRGGBB colour. */
+  function luminance(hex: string): number {
+    const [r, g, b] = [1, 3, 5]
+      .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+      .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  function contrast(a: string, b: string): number {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  test('each group and the foot share one box: a hairline, round corners, the panel fill', () => {
+    const box = ruleBlock(surfaces, '.knob-group, .tune-foot');
+    expect(box).toContain('border: 1px solid var(--hole)');
+    expect(box).toContain('border-radius: var(--radius-well)');
+    expect(box).toContain('background: var(--panel)');
+  });
+
+  test('the foot is one element, so it can be one box', () => {
+    const tune = readFileSync(join(UI, 'tune.js'), 'utf8');
+    expect(tune).toMatch(/el\('div', \{ class: 'tune-foot' \},\s*drawDefaultsFoot\(\),\s*drawKeepChoice\(\)\)/);
+  });
+
+  test('the panel is a colour token in both modes, and every text on it still reads', () => {
+    expect(colors.panel?.light).toMatch(/^#[0-9A-F]{6}$/);
+    expect(colors.panel?.dark).toMatch(/^#[0-9A-F]{6}$/);
+    for (const mode of ['light', 'dark'] as const) {
+      for (const ink of ['ink', 'ink-soft', 'ink-muted']) {
+        expect(
+          `${ink} on panel (${mode}): ${contrast(colors[ink][mode], colors.panel[mode]) >= 4.5}`,
+        ).toBe(`${ink} on panel (${mode}): true`);
+      }
+    }
+  });
+});

@@ -4,6 +4,7 @@
 
 :root {
   --paper: #F7F2E6;
+  --panel: #FBF8F0;
   --ink: #1D1B16;
   --ink-soft: #4A453A;
   --ink-muted: #6D6960;
@@ -85,6 +86,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --paper: #1E1C19;
+    --panel: #22201C;
     --ink: #E8E2D3;
     --ink-soft: #C4BDAC;
     --ink-muted: #8F887C;

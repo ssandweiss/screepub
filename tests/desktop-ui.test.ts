@@ -4282,9 +4282,12 @@ describe('the Tune surface: app defaults for new scripts', () => {
     const foot = pane.find('tune-defaults');
     expect(foot).not.toBeNull();
     expect(foot!.textContent).toContain('New scripts start from your own defaults.');
-    // Placed at the foot: after the knob groups, inside the knobs column.
+    // Placed at the foot: after the knob groups, inside the knobs column,
+    // in the foot's own box (layout pass, 2026-09-29).
     const knobs = pane.find('tune-knobs')!;
-    expect(knobs.kids.indexOf(foot!)).toBeGreaterThan(knobs.kids.findIndex((k) => k.tagName === 'DETAILS'));
+    const box = pane.find('tune-foot')!;
+    expect(box.kids.includes(foot!)).toBe(true);
+    expect(knobs.kids.indexOf(box)).toBeGreaterThan(knobs.kids.findIndex((k) => k.tagName === 'DETAILS'));
   });
 
   test('a load that fails (a throw from the engine call) shows the fault screen, not the reading caption', async () => {
@@ -4860,9 +4863,11 @@ describe('the Tune surface: app defaults for new scripts', () => {
     }
     expect(keep!.checked).toBe(true);
     expect(follow!.checked).toBe(false);
-    // Beside the defaults foot, in the knobs column.
-    const knobs = pane.find('tune-knobs')!;
-    expect(knobs.kids.indexOf(box!)).toBeGreaterThan(knobs.kids.indexOf(pane.find('tune-defaults')!));
+    // After the defaults foot, in the same box (layout pass, 2026-09-29).
+    const foot = pane.find('tune-foot')!;
+    const defaults = pane.find('tune-defaults')!;
+    expect(foot.kids.indexOf(defaults)).toBeGreaterThan(-1);
+    expect(foot.kids.indexOf(box!)).toBeGreaterThan(foot.kids.indexOf(defaults));
   });
 
   test('it opens on what the engine says is stored, and an answer without it draws no choice at all', async () => {

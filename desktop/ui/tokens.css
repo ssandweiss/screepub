@@ -6,6 +6,7 @@
  */
 
 :root {
+  --panel: #FBF8F0;
   --hole: rgba(29,27,22,0.10);
   --ink-soft: #4A453A;
   --brass-specular: #FDF1CE;
@@ -54,6 +55,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    --panel: #22201C;
     --hole: rgba(0,0,0,0.45);
     --ink-soft: #C4BDAC;
   }

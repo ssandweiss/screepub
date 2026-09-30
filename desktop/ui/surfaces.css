@@ -582,7 +582,7 @@
  * and the two quiet buttons that change it. Two small rules only, the foot's
  * own top margin and the row's gap between its buttons: everything else
  * rides on .caption and .btn-quiet, already declared above. */
-.tune-defaults { margin: var(--space-8) 0 0; }
+.tune-defaults { margin: 0; }
 .tune-defaults-row { display: flex; flex-wrap: wrap; gap: var(--space-4); margin: var(--space-2) 0 0; }
 
 /* "When a PDF is converted", under the foot: a native radio group. The
@@ -619,7 +619,19 @@
 
 /* Each group folds. Same disclosure vocabulary as the reach table on Send,
  * so the window has one way of saying "there is more here" rather than two. */
-.knob-group { margin: 0 0 var(--space-6); max-width: var(--measure); }
+/* Each group is a box since the layout pass (2026-09-29): the owner found
+ * the sections ran together. A hairline, the well's corners and a fill a
+ * shade off the paper. The foot (which defaults new scripts start from, and
+ * what a conversion keeps) is the same box. Folded, a box is its title. */
+.knob-group, .tune-foot {
+  margin: 0 0 var(--space-5);
+  padding: var(--space-4) var(--space-5) var(--space-2);
+  border: 1px solid var(--hole);
+  border-radius: var(--radius-well);
+  background: var(--panel);
+}
+.tune-foot { margin-top: var(--space-6); }
+.knob-group > .knob:last-child { border-bottom: none; }
 .knob-group-title {
   margin-top: 0;
   cursor: pointer;
