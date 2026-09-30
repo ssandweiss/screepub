@@ -11,8 +11,8 @@
     "windows": [
       {
         "title": "Screepub",
-        "width": 860,
-        "height": 620,
+        "width": 1280,
+        "height": 800,
         "resizable": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true

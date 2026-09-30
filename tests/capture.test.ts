@@ -208,7 +208,7 @@ describe('the shot list', () => {
   });
 
   test('the window pictures are the window’s own size', () => {
-    // tauri.conf.json's window is 860 by 620.
+    // tauri.conf.json's window is 1280 by 800.
     const conf = JSON.parse(readFileSync(join(ROOT, 'desktop', 'src-tauri', 'tauri.conf.json'), 'utf8'));
     const w = conf.app.windows[0];
     for (const s of SHOTS.filter((x) => x.kind === 'window')) {
@@ -709,7 +709,7 @@ describe('the pieces that must agree with each other', () => {
     const [top, sides, bottom] = m!.slice(1).map(Number);
     expect({ top, right: sides, bottom, left: sides }).toEqual({ ...FRAME_PAD });
     const drop = SHOTS.find((x) => x.name === 'drop')!;
-    expect(framedSize(drop)).toEqual({ width: 860 + 56 + 56, height: 620 + 44 + 68 });
+    expect(framedSize(drop)).toEqual({ width: 1280 + 56 + 56, height: 800 + 44 + 68 });
   });
 
   test('the step runner has a step for every window shot, and nothing else', () => {

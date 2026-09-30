@@ -23,9 +23,9 @@ export interface Shot {
 
 export const SHOTS: Shot[] = [
   { name: 'hero', kind: 'site', width: 1200, height: 760, themes: ['light'], site: false },
-  { name: 'drop', kind: 'window', width: 860, height: 620, themes: ['light', 'dark'], site: true },
-  { name: 'result', kind: 'window', width: 860, height: 620, themes: ['light', 'dark'], site: true },
-  { name: 'read', kind: 'window', width: 860, height: 620, themes: ['light', 'dark'], site: false },
+  { name: 'drop', kind: 'window', width: 1280, height: 800, themes: ['light', 'dark'], site: true },
+  { name: 'result', kind: 'window', width: 1280, height: 800, themes: ['light', 'dark'], site: true },
+  { name: 'read', kind: 'window', width: 1280, height: 800, themes: ['light', 'dark'], site: false },
 ];
 
 /** The margin pass two draws around a window picture, in CSS pixels: room
