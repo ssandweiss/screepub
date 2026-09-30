@@ -125,3 +125,36 @@ describe('Convert keeps a column of its own inside the wide block', () => {
     expect(rule).toContain('margin-right: auto');
   });
 });
+
+describe('Read gives the scene index a slot of its own', () => {
+  const surfaces = windowCss('surfaces.css');
+
+  test('the reader is two columns: the index slot, then the script at today’s width', () => {
+    const reader = ruleBlock(surfaces, '.reader');
+    expect(reader).toContain('display: grid');
+    expect(reader).toContain('grid-template-columns: 218px minmax(0, 706px)');
+  });
+
+  test('the index keeps its slot open or shut, so the script never moves', () => {
+    const rail = ruleBlock(surfaces, '.scene-rail');
+    expect(rail).toContain('grid-column: 1');
+    expect(rail).not.toContain('position: absolute');
+    expect(rail).not.toContain('width: min(');
+    expect(ruleBlock(surfaces, '.script-stage')).toContain('grid-column: 2');
+  });
+
+  test('open, it is simply shown: no slide out of the margin, no shadow over the page', () => {
+    const open = ruleBlock(surfaces, '.reader.index-open .scene-rail');
+    expect(open).toContain('opacity: 1');
+    expect(open).toContain('visibility: visible');
+    expect(open).not.toContain('translateX(-100%)');
+    expect(open).not.toContain('box-shadow');
+  });
+
+  test('under 900 wide the index goes above the script, and a shut one takes no room', () => {
+    const narrow = mediaBlocks(surfaces, '(max-width: 900px)');
+    expect(narrow).toContain('.reader { grid-template-columns: minmax(0, 1fr); }');
+    expect(narrow).toContain('.reader:not(.index-open) .scene-rail { display: none; }');
+    expect(narrow).toContain('.script-stage { grid-column: 1; grid-row: 2; }');
+  });
+});

@@ -452,8 +452,8 @@ function draw() {
   readerBox = el('div', { class: 'reader' }, stage, rail);
   pane.append(readerBox);
   // Open by default: the index is what the maintainer asked to see on the
-  // left, and the drawer costs the script nothing either way — it parks in
-  // the binding margin rather than taking a column from the page.
+  // left, and it costs the script nothing either way: it has its own slot
+  // beside the script (surfaces.css, .reader), so opening it moves nothing.
   setIndexOpen(true);
   render(script.previewHtml);
 }

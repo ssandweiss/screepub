@@ -7637,14 +7637,13 @@ describe('Convert another goes home, not to a file dialog', () => {
   });
 });
 
-describe('the scene index is a drawer in the binding margin', () => {
-  // It sat to the RIGHT of the script and took a grid column from it. Moved
-  // left, per the maintainer, and the constraint turned out to be arithmetic:
-  // the binding margin is 17.6% of the sheet and the brads sit at 5.9%, which
-  // leaves about 96px clear, while the rail wants 150-218px. It cannot sit
-  // BESIDE the fasteners, so it parks over them — and over the margin, never
-  // over the page, which is what a plain overlay got wrong. See the
-  // interface-pass design, decision 16.
+describe('the scene index', () => {
+  // It sat to the RIGHT of the script, then became a drawer over the
+  // binding margin (interface-pass design, decision 16). Since the layout
+  // pass (2026-09-29) the margin is 100px and the index 218, so it has a
+  // slot of its own beside the script instead: see
+  // tests/desktop-layout.test.ts for the slot. What these keep is what the
+  // index needs in any layout.
 
   /** The first declaration block for a selector, so a test can read one rule
    *  instead of the whole stylesheet. */
@@ -7660,16 +7659,6 @@ describe('the scene index is a drawer in the binding margin', () => {
     };
     expect(reader.indexToggle?.(true)).toEqual({ label: 'Hide scenes', expanded: 'true' });
     expect(reader.indexToggle?.(false)).toEqual({ label: 'Show scenes', expanded: 'false' });
-  });
-
-  test('the panel is capped so it cannot hang off the window', () => {
-    // Its own 218px is wider than the margin it parks in on a narrow window,
-    // and the margin is a PERCENTAGE, so a fixed width is wrong at some size
-    // no matter which size you pick. Measured against the content box: the
-    // sheet gives the margin 17.6% and the content 70.6%, so the margin is
-    // 17.6/70.6 = 24.9% of the box this element is positioned inside.
-    const block = ruleBlock(read('surfaces.css'), '.scene-rail');
-    expect(block).toMatch(/width:\s*min\(/);
   });
 
   test('the panel stays positioned, because read.js measures against it', () => {
