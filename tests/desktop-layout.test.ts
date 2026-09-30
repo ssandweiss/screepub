@@ -116,3 +116,12 @@ describe('the brand draws the same frame the window uses', () => {
       .toContain('max-width: calc(var(--block-max) + var(--binding-margin) + var(--page-right))');
   });
 });
+
+describe('Convert keeps a column of its own inside the wide block', () => {
+  test('the drop area, the progress, the result and a refusal stop at 820 wide, centred', () => {
+    const rule = ruleBlock(windowCss('surfaces.css'), '#surface-convert');
+    expect(rule).toContain('max-width: 820px');
+    expect(rule).toContain('margin-left: auto');
+    expect(rule).toContain('margin-right: auto');
+  });
+});
