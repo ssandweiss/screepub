@@ -1,16 +1,12 @@
 <!-- @dsCard group="Brand" -->
 <link rel="stylesheet" href="_preview.css">
 <style>
-  /* .rail matches .page's own centering: left 50% + translateX(-50%) of
-     the rail's OWN (post-max-width) box centers it exactly the way
-     .page's margin: 0 auto does, so both columns share one x-axis. The
-     -50%/-50% transform on .rail svg below still resolves against the
-     svg's own box, not the rail's, so nesting a transform on the parent
-     does not change how the child's percentage transform resolves. */
+  /* The rail spans the window, so the brads are placed from the window's
+     own left edge (--hole-center), the way the window places them since
+     the layout pass (2026-09-29). */
   .rail {
-    position: fixed; top: 0; bottom: 0; left: 50%;
-    width: 100%; max-width: var(--page-max);
-    transform: translateX(-50%); pointer-events: none;
+    position: fixed; top: 0; bottom: 0; left: 0; right: 0;
+    pointer-events: none;
   }
   .rail svg {
     position: absolute;
@@ -31,7 +27,7 @@
   }
   @media (max-width: 720px) {
     .sheet { padding-left: 11%; }
-    .rail svg { width: 20px; height: 20px; }
+    .rail svg { left: 5.5%; width: 20px; height: 20px; }
   }
 </style>
 <!-- Cross-file <use href="brad.html#brad"> did not resolve for this preview
@@ -85,7 +81,9 @@
   </p>
   <p class="caption">
     Holes sit at 30.7%, 50% and 69.3% of viewport height: the true proportions
-    of a three-hole punch on an 11 inch page. Brads fill the first and third.
+    of a three-hole punch on an 11 inch page. Brads fill the first and third,
+    44px in from the window's left edge at every width, the way the holes sit
+    about half an inch in on a letter page.
     Below 560px of viewport height the rail drops to one brad, because three
     fasteners in a short window reads as a zipper.
   </p>

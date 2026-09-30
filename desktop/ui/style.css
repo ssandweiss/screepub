@@ -305,7 +305,7 @@ body {
 /* Narrow: the binding margin would eat the page, so it narrows with it. */
 @media (max-width: 720px) {
   .page { padding-left: 11%; padding-right: var(--space-4); }
-  .rail svg { width: 20px; height: 20px; }
+  .rail svg { left: 5.5%; width: 20px; height: 20px; }
   .tabs { gap: var(--space-3); }
 }
 @media (prefers-reduced-motion: reduce) {

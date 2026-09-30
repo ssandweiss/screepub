@@ -92,4 +92,27 @@ describe('the page fills the window (frame B)', () => {
     expect(narrow).toContain('.page { padding-left: 11%; padding-right: var(--space-4); }');
     expect(narrow).not.toContain('.sheet {');
   });
+
+  test('on a narrow window the brads sit in the middle of the narrow binding', () => {
+    // Under 720 the binding is 11% of the width; a fixed 44px would put the
+    // 20px brads on the text below about 490px wide.
+    expect(mediaBlocks(style, '(max-width: 720px)')).toContain('.rail svg { left: 5.5%; width: 20px; height: 20px; }');
+  });
+});
+
+describe('the brand draws the same frame the window uses', () => {
+  const frame = readFileSync(join(REPO, 'brand', 'components', 'page-frame.html'), 'utf8');
+  const preview = css(join(REPO, 'brand', 'components', '_preview.css'));
+
+  test('the frame card’s rail spans the window and is not centred on a capped page', () => {
+    expect(frame).not.toContain('--page-max');
+    expect(frame).not.toContain('translateX(-50%)');
+    expect(frame).toMatch(/\.rail \{\s*position: fixed; top: 0; bottom: 0; left: 0; right: 0;/);
+  });
+
+  test('the component previews keep a page-sized card made of the new tokens', () => {
+    expect(preview).not.toContain('--page-max');
+    expect(ruleBlock(preview, '.page'))
+      .toContain('max-width: calc(var(--block-max) + var(--binding-margin) + var(--page-right))');
+  });
 });
