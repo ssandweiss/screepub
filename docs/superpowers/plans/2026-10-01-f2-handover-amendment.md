@@ -82,9 +82,10 @@ four one-time costs, all measured or read rather than guessed:
   the Dock say "Screepub Desktop".
 - **Anyone with BOTH apps ends up with two copies of the same app**, one
   named `Screepub.app` (the Swift install, swapped by its updater) and one
-  named `Screepub Desktop.app`, both `com.darkwell.screepub`. The owner has
-  run both apps on one Mac (the 2026-09-21 refusal test), so he is probably
-  in this group.
+  named `Screepub Desktop.app`, both `com.darkwell.screepub`. The owner is in
+  this group: checked 2026-10-01, `/Applications/Screepub.app` is the Swift
+  app at 0.7.3 and `/Applications/Screepub Desktop.app` is the window at
+  0.7.2.
 
 Making it fully seamless would mean moving the four update values into the
 engine's settings file in a release BEFORE F2 (so they survive), and having
@@ -195,6 +196,14 @@ Mach-O). The `release` job then imports the certificate, builds the CLI,
 creates the release and uploads; the Swift build, Rosetta and
 `app/release.sh` leave the workflow. `tests/release-app-step.test.ts` and
 the build-cli tests follow. The formula's URLs and names do not change.
+
+The CLI is signed today with `app/screepub-engine.entitlements` (allow-jit,
+allow-unsigned-executable-memory, disable-library-validation), so that file
+moves out of `app/` with the build. Observed 2026-10-01: the window's
+shipped engine (`Screepub Desktop.app/Contents/MacOS/screepub-engine`) is
+signed with the hardened runtime and NO entitlements, and converts fine, so
+they may not be needed. Keep them anyway: the move should change where the
+CLI is built, not how it is signed.
 
 ## F3 (release N+3): the deletion
 
