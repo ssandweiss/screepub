@@ -3,6 +3,10 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { kfxSetup } from '../src/export/kfx-setup';
+import {
+  fakePage, HOLD, settle, type EngineCall, type FakeNode, type FakePage,
+} from './helpers/fake-dom';
+import { bootWindow, type BootedWindow } from './helpers/boot-window';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-desktop-ui-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
@@ -126,6 +130,26 @@ describe('the window respects the quality floor', () => {
     }
     const css = cssFiles().map(read).join('\n');
     expect(css).toContain(':focus-visible');
+  });
+
+  test('no script sets an inline style, which this window’s CSP refuses', () => {
+    // Kept as a source rule: the CSP is enforced only by the real webview,
+    // and with `default-src 'self'` an inline style fails SILENTLY (measured
+    // in piece C). The bar's width goes through an adopted stylesheet
+    // instead, which "the bar follows the engine's own lines" drives.
+    for (const name of jsFiles()) {
+      expect(`${name} sets .style: ${/\.style\b/.test(read(name))}`).toBe(
+        `${name} sets .style: false`,
+      );
+      // The key may be unquoted, and here it usually IS: dom.js falls
+      // through to setAttribute for any key it does not special-case, so
+      // `{ style: '…' }` is a real inline style in the house spelling. The
+      // lookbehind keeps `font-style:` in read.js's @font-face from counting.
+      const styleKey = /(?<![\w-])['"`]?style['"`]?\s*:/;
+      expect(`${name} sets a style attribute: ${styleKey.test(read(name))}`).toBe(
+        `${name} sets a style attribute: false`,
+      );
+    }
   });
 
   test('the surface switcher is a real tablist, reachable by keyboard', async () => {
@@ -384,408 +408,543 @@ describe('the engine contract lives in exactly one file', () => {
   });
 });
 
-describe('the five surfaces are wired to the frame', () => {
-  const SURFACES = ['convert', 'read', 'tune', 'send', 'notes-surface'];
+describe('the window, booted whole', () => {
+  // main.js imported the way index.html loads it, on the fake page: the real
+  // frame, the four surfaces mounted in it, the window's own shortcut and the
+  // drop. What used to be read off main.js's text is driven here instead.
+  let w: BootedWindow | null = null;
+  afterEach(async () => { await w?.close(); w = null; });
 
-  test('main.js mounts every surface module, and each one can be mounted', async () => {
-    const main = read('main.js');
-    for (const name of SURFACES) {
-      expect(main).toContain(`./${name}.js`);
-      const surface = await import(join(UI, `${name}.js`));
-      expect(typeof surface.mount, `${name}.js exports no mount()`).toBe('function');
+  const blankBook = (pdf: string) => {
+    const name = pdf.replace(/^.*\//, '').replace(/\.pdf$/, '');
+    return {
+      ok: true, title: name, pages: 18, scenes: 12, characters: 6, warnings: [],
+      epubPath: `/lib/${name}/${name}.epub`, fountainPath: `/lib/${name}/${name}.fountain`,
+      // No pages: Read shows its "Convert it again" notice rather than a frame.
+      previewHtml: '',
+    };
+  };
+  /** The engine: --version and the library probe answered, a PDF converted,
+   *  anything else (Settings' read, Send's poll) held. */
+  const engine = (args: string[]) => {
+    if (args[0] === '--version') return { ok: true, version: '0.0.0' };
+    if (args[0] === 'app-settings') return { ok: false, error: { code: 'internal', message: 'no' } };
+    if (args[0].endsWith('.pdf')) return blankBook(args[0]);
+    return HOLD;
+  };
+  const conversions = (win: BootedWindow) => win.tauri.calls.filter((c) => c.args[0].endsWith('.pdf'));
+  /** Picks `pdf` through the shortcut and waits for its result screen. */
+  async function open(win: BootedWindow, pdf: string) {
+    win.press('o', { metaKey: true });
+    await settle();
+    win.tauri.dialogs.shift()!.resolve(pdf);
+    await settle();
+    expect(win.surface('convert').dataset.state).toBe('done');
+  }
+
+  test('the four surfaces are mounted as the bar’s panels, and the release notes as a sheet off the stamp', async () => {
+    w = await bootWindow({ respond: engine });
+    const { RELEASE } = await import(join(UI, 'notes.js'));
+    for (const id of ['convert', 'read', 'tune', 'send']) {
+      const pane = w.surface(id);
+      expect(pane.getAttribute('role')).toBe('tabpanel');
+      expect(pane.getAttribute('aria-labelledby')).toBe(`tab-${id}`);
+      expect(w.tab(id).getAttribute('aria-controls')).toBe(`surface-${id}`);
     }
+    expect(w.showing()).toBe('convert');
+    expect(w.surface('convert').querySelector('.well')).not.toBeNull();
+    // The stamp names the release the notes describe, from the same module.
+    const stamp = w.doc.querySelector('.rev-stamp')!;
+    expect(stamp.textContent).toBe(`rev ${RELEASE.version}`);
+    const sheet = w.doc.querySelector('dialog.sheet-over')!;
+    expect(sheet.open).toBe(false);
+    stamp.click();
+    expect(sheet.open).toBe(true);
+    expect(sheet.querySelector('h2')!.textContent).toBe(`Screepub ${RELEASE.version}`);
+    sheet.button('Close').click();
+    expect(sheet.open).toBe(false);
   });
 
-  test('the shortcut main.js fires actually exists on the convert surface', async () => {
-    // main.js calls convert.choose() from its Ctrl/Cmd-O handler. If the
-    // surface ever stops exporting it, the shortcut throws in a window where
-    // nobody sees the console.
-    const main = read('main.js');
-    const called = [...main.matchAll(/\bconvert\.([a-zA-Z]+)\(/g)].map((m) => m[1]);
-    expect(called.length).toBeGreaterThan(0);
-    const surface = await import(join(UI, 'convert.js'));
-    for (const name of called) {
-      expect(typeof (surface as Record<string, unknown>)[name], `convert.js has no ${name}()`)
-        .toBe('function');
-    }
+  test('Read, Settings and Send are off the bar until a script converts', async () => {
+    w = await bootWindow({ respond: engine });
+    const onBar = () => ['convert', 'read', 'tune', 'send'].filter((id) => !w!.tab(id).hidden);
+    expect(onBar()).toEqual(['convert']);
+    await open(w, '/s/Field Station.pdf');
+    expect(onBar()).toEqual(['convert', 'read', 'tune', 'send']);
   });
 
-  test('the surfaces that need a script start out of reach', () => {
-    // Read, Tune and Send have nothing to show before a conversion. A window
-    // that offered them anyway would answer a click with an empty page.
-    const main = read('main.js');
-    expect(main).toMatch(/\['read',\s*'tune',\s*'send'\]/);
-    expect(main).toContain('scriptChanged');
-    expect(main).toContain("frame.setSurface('convert')");
+  test('Ctrl or Cmd O asks for a file from any surface, and a cancel leaves the reader where they were', async () => {
+    w = await bootWindow({ respond: engine, platform: 'Win32' });
+    expect(w.press('o').defaultPrevented).toBe(false);
+    expect(w.tauri.dialogs).toEqual([]);
+    await open(w, '/s/Field Station.pdf');
+
+    w.tab('read').click();
+    expect(w.showing()).toBe('read');
+    const asked = w.press('O', { ctrlKey: true });
+    expect(asked.defaultPrevented).toBe(true);
+    await settle();
+    expect(w.tauri.dialogs.map((d) => d.kind)).toEqual(['pick_file']);
+    // Asking for a file is not converting one: the reader stays put.
+    expect(w.showing()).toBe('read');
+    w.doc.activeElement = null;
+    w.tauri.dialogs.shift()!.resolve(null);
+    await settle();
+    expect(w.showing()).toBe('read');
+    // And the keyboard is put back on the surface that is showing.
+    expect(w.surface('read').button('Convert it again')).toBe(w.doc.activeElement!);
+    expect(conversions(w).length).toBe(1);
+  });
+
+  test('cancelling a file dialog over a result hands the keyboard to the result, not to nobody', async () => {
+    w = await bootWindow({ respond: engine });
+    // Over the idle well: Choose PDF.
+    w.press('o', { metaKey: true });
+    await settle();
+    w.doc.activeElement = null;
+    w.tauri.dialogs.shift()!.resolve(null);
+    await settle();
+    expect(w.doc.activeElement as unknown).toBe(w.surface('convert').querySelector('.well button'));
+
+    await open(w, '/s/Field Station.pdf');
+    w.press('o', { metaKey: true });
+    await settle();
+    w.doc.activeElement = null;
+    w.tauri.dialogs.shift()!.resolve(null);
+    await settle();
+    expect(w.doc.activeElement as unknown).toBe(w.surface('convert').button('Send to a reader'));
+  });
+
+  test('a file dragged over the window marks the well, and a drop converts the first real path, from any surface', async () => {
+    w = await bootWindow({ respond: engine });
+    const well = w.surface('convert').querySelector('.well')!;
+    w.tauri.emit('tauri://drag-enter', { paths: ['/s/A.pdf'], position: { x: 1, y: 1 } });
+    expect(well.classList.contains('well-targeted')).toBe(true);
+    w.tauri.emit('tauri://drag-leave', null);
+    expect(well.classList.contains('well-targeted')).toBe(false);
+
+    await open(w, '/s/Field Station.pdf');
+    w.tab('read').click();
+    expect(w.showing()).toBe('read');
+    w.tauri.emit('tauri://drag-drop', { paths: ['', '   ', '/s/Second.pdf', '/s/Third.pdf'], position: { x: 1, y: 1 } });
+    await settle();
+    // The conversion moves the reader to Convert; the drop alone did not ask.
+    expect(w.showing()).toBe('convert');
+    expect(conversions(w).map((c) => c.args[0])).toEqual(['/s/Field Station.pdf', '/s/Second.pdf']);
+  });
+
+  test('"Convert it again" on Read converts the open script’s own source and shows it on Convert', async () => {
+    w = await bootWindow({ respond: engine });
+    await open(w, '/s/Field Station.pdf');
+    w.tab('read').click();
+    w.surface('read').button('Convert it again').click();
+    await settle();
+    expect(w.showing()).toBe('convert');
+    expect(conversions(w).map((c) => c.args[0])).toEqual(['/s/Field Station.pdf', '/s/Field Station.pdf']);
   });
 });
 
 describe('the Convert surface', () => {
-  const convert = read('convert.js');
-
-  test('it tells you what the engine cannot take, before you drop', () => {
-    // brand/components/drop-well.html's own argument: a scanned PDF with no
-    // text layer is a property a reader can check at a glance, so saying it
-    // here moves it from after the wait to before the drop.
-    //
-    // It named a second guard, a password-locked file, until 2026-09-20. See
-    // WELL in convert.js for why that half went and what it cost.
-    expect(convert).toContain('Needs selectable text, not a scan.');
+  // The real convert.js, mounted on the fake page (tests/helpers/fake-dom.ts)
+  // and driven the way a reader drives it: a file goes in, the engine answers,
+  // buttons are clicked. Each test imports its own copy of the module, so the
+  // drawing state one test leaves (a book it converted, a stylesheet it
+  // adopted) cannot leak into the next.
+  const FOLDER = '/home/ann/Books';
+  const library = (overrides: Record<string, unknown> = {}) => ({
+    ok: true,
+    library: { path: FOLDER, chosen: null, platformDefault: FOLDER, fromEnv: false, ...overrides },
+    home: '/home/ann',
   });
+  const converted = (pdf: string) => {
+    const name = pdf.replace(/^.*\//, '').replace(/\.pdf$/, '');
+    return {
+      ok: true, title: name, author: 'A. Writer', pages: 18, scenes: 12, characters: 6, warnings: [],
+      epubPath: `/lib/${name}/${name}.epub`, fountainPath: `/lib/${name}/${name}.fountain`, previewHtml: '',
+    };
+  };
+  const refused = (code: string, message: string) => ({ ok: false, error: { code, message } });
 
-  test('it offers "Convert anyway" only for the one guard a reader can overrule', () => {
-    // not-screenplay is overridable by --force; scanned, password and
-    // unreadable describe a file the engine genuinely cannot read, and
-    // offering an override there would be a lie.
-    expect(convert).toContain("'not-screenplay'");
-    const forced = convert.slice(convert.indexOf("'not-screenplay'"));
-    expect(forced).toContain('force');
-    for (const code of ['scanned', 'password']) {
-      expect(
-        new RegExp(`'${code}'[^\\n]*force`).test(convert),
-        `convert.js offers a force override for ${code}`,
-      ).toBe(false);
+  let page: FakePage | null = null;
+  let copies = 0;
+  afterEach(async () => { await page?.close(); page = null; });
+
+  /** Mounts a fresh convert.js. `engine` answers by verb (a PDF path is a
+   *  conversion); anything it leaves out is held for the test to answer. */
+  async function mountConvert(options: {
+    engine?: (args: string[]) => unknown;
+    platform?: string;
+    script?: Record<string, unknown> | null;
+    ask?: { should: () => boolean; answer: (on: boolean) => void };
+  } = {}) {
+    page = fakePage({ respond: options.engine ?? (() => HOLD), platform: options.platform });
+    copies += 1;
+    const convert = await import(`${join(UI, 'convert.js')}?mounted-${copies}`);
+    const pane = page.pane();
+    pane.id = 'surface-convert';
+    const went: string[] = [];
+    let restored = 0;
+    const ctx = {
+      state: { script: options.script ?? null, reducedMotion: true },
+      goTo: (id: string) => went.push(id),
+      restoreFocus: () => { restored += 1; },
+      scriptChanged: () => {},
+      updates: options.ask === undefined
+        ? undefined
+        : { shouldAsk: options.ask.should, answer: options.ask.answer },
+    };
+    convert.mount(pane, ctx);
+    await settle();
+    return { convert, pane, ctx, went, restored: () => restored, tauri: page.tauri, doc: page.doc };
+  }
+  const slot = (pane: FakeNode) => pane.querySelectorAll('.well-library');
+
+  test('the idle well names the app, says what the engine needs, and spells the shortcut the platform’s way', async () => {
+    for (const platform of ['MacIntel', 'Win32', 'Linux x86_64']) {
+      const { convert, pane } = await mountConvert({ platform });
+      expect(pane.dataset.state).toBe('idle');
+      expect(pane.querySelector('h1.wordmark')!.textContent).toBe(convert.WORDMARK);
+      // Before the drop, not after the wait: a scan is the one guard a
+      // reader can check at a glance.
+      expect(pane.querySelector('.well .well-limits')!.textContent).toBe(convert.WELL.limits);
+      const choose = pane.querySelector('.well button')!;
+      expect(choose.textContent).toContain(convert.shortcutLabel(platform));
+      await page!.close();
+      page = null;
     }
   });
 
-  test('it renders the engine’s own message rather than a sentence of its own', () => {
-    expect(convert).toContain('error.message');
-    expect(convert).toContain('error.code');
-    for (const invented of ['Something went wrong', 'An error occurred', 'Oops', 'Sorry']) {
-      expect(`convert.js says "${invented}": ${convert.includes(invented)}`).toBe(
-        `convert.js says "${invented}": false`,
-      );
+  test('a refusal shows the engine’s own sentence under a heading that names the cause, and keeps the open script', async () => {
+    const open = { title: 'Field Station', path: '/s/Field Station.pdf' };
+    const said = 'This PDF is <locked> & "sealed" by its owner.';
+    const { convert, pane, ctx } = await mountConvert({
+      engine: (args) => (args[0].endsWith('.pdf') ? refused('password', said) : HOLD),
+      script: open,
+    });
+    await convert.convertPath('/s/Locked.pdf');
+    expect(pane.dataset.state).toBe('failed');
+    expect(pane.querySelector('h2.fault')!.textContent).toBe(convert.HEADINGS.password);
+    // Verbatim, markup-looking characters and all: it is text, not HTML.
+    expect(pane.querySelector('.fault-body')!.textContent).toBe(said);
+    // The code is a labelled handle, on the screen and on the pane.
+    expect(pane.querySelector('.code-note .code-note-label')!.textContent).toBe('Error code');
+    expect(pane.querySelector('.code-note .code-chip')!.textContent).toBe('password');
+    expect(pane.dataset.errorCode).toBe('password');
+    // The book that was already open is still the open book, and the
+    // refusal says so.
+    expect(ctx.state.script).toBe(open);
+    expect(pane.querySelector('.kept-note')!.textContent).toBe(convert.stillOpenNote(open));
+    // A locked file cannot be overruled, so no override is offered.
+    expect(pane.buttons('Convert anyway')).toEqual([]);
+    expect(pane.buttons('Back to one').length).toBe(1);
+  });
+
+  test('a refusal with no script open says nothing about one, and never prints a stray "null"', async () => {
+    const { convert, pane } = await mountConvert({
+      engine: (args) => (args[0].endsWith('.pdf') ? refused('scanned', 'No text layer.') : HOLD),
+    });
+    await convert.convertPath('/s/Scan.pdf');
+    expect(pane.querySelector('.kept-note')).toBeNull();
+    expect(pane.textContent).not.toContain('null');
+    expect(pane.textContent).not.toContain('undefined');
+  });
+
+  test('only a not-screenplay refusal offers Convert anyway, and it converts the same file with the override', async () => {
+    for (const code of ['scanned', 'password', 'unreadable', 'unsupported-type', 'internal']) {
+      const { convert, pane } = await mountConvert({
+        engine: (args) => (args[0].endsWith('.pdf') ? refused(code, 'No.') : HOLD),
+      });
+      await convert.convertPath(`/s/${code}.pdf`);
+      expect(`${code}: ${pane.buttons('Convert anyway').length}`).toBe(`${code}: 0`);
+      await page!.close();
+      page = null;
+    }
+    const { convert, pane, tauri } = await mountConvert({
+      engine: (args) => {
+        if (!args[0].endsWith('.pdf')) return HOLD;
+        return args.includes('--force')
+          ? converted(args[0])
+          : refused('not-screenplay', 'No scene headings found. Pass --force to convert it anyway.');
+      },
+    });
+    await convert.convertPath('/s/Treatment.pdf');
+    // The sentence telling a CLI user to type the flag comes out, because
+    // the button below it already does that; the diagnosis stays.
+    expect(pane.querySelector('.fault-body')!.textContent).toBe('No scene headings found.');
+    await pane.button('Convert anyway').click();
+    await settle();
+    const conversions = tauri.calls.filter((c) => c.args[0] === '/s/Treatment.pdf');
+    expect(conversions.map((c) => c.args.includes('--force'))).toEqual([false, true]);
+    expect(pane.dataset.state).toBe('done');
+  });
+
+  test('the bar follows the engine’s own lines, several to a chunk, ignores noise and never walks back', async () => {
+    const { convert, pane, tauri, doc } = await mountConvert();
+    const done = convert.convertPath('/s/Field Station.pdf');
+    await settle();
+    const readOut = () => pane.querySelector('.read-out')!.textContent;
+    // The bar's width goes through an adopted stylesheet, because the
+    // window's CSP refuses an inline style.
+    const fill = () => (doc.adoptedStyleSheets.at(-1) as { text: string }).text;
+    expect(readOut()).toBe(convert.PROGRESS_START.label);
+    expect(fill()).toBe('.fill { width: 0%; }');
+    // One chunk from the OS: a stray warning, a whole line, and the start
+    // of the next. Nothing throws, and the whole line is drawn.
+    tauri.emit('engine-line', 'warning: a font fell back\n{"progress":{"stage":"parse","percent":40}}\n{"progress":');
+    expect(readOut()).toBe('reading the pages (40%)');
+    expect(fill()).toBe('.fill { width: 40%; }');
+    // A late line from earlier in the run does not move the bar back.
+    tauri.emit('engine-line', '{"progress":{"stage":"parse","percent":20}}');
+    expect(readOut()).toBe('reading the pages (40%)');
+    tauri.emit('engine-line', '{"progress":{"stage":"render","percent":85}}');
+    expect(readOut()).toBe('building the book (85%)');
+    expect(fill()).toBe('.fill { width: 85%; }');
+    tauri.calls.find((c) => c.args[0] === '/s/Field Station.pdf')!.answer(converted('/s/Field Station.pdf'));
+    await done;
+    await settle();
+    // And it stops listening once the conversion is over.
+    expect(tauri.listening('engine-line')).toBe(0);
+  });
+
+  test('Show in Finder asks the engine to show this book, and says only what went wrong', async () => {
+    const { convert, pane, tauri } = await mountConvert({
+      engine: (args) => (args[0].endsWith('.pdf') ? converted(args[0]) : HOLD),
+    });
+    await convert.convertPath('/s/Field Station.pdf');
+    const show = pane.button(convert.revealLabel('MacIntel'));
+    const note = () => pane.querySelectorAll('p.caption').at(-1)!;
+
+    show.click();
+    const reveal = tauri.callsTo('reveal');
+    expect(reveal.map((c) => c.args)).toEqual([['reveal', '/lib/Field Station/Field Station.epub', '--json']]);
+    reveal[0].answer({ ok: true });
+    await settle();
+    expect(note().hidden).toBe(true);
+
+    show.click();
+    tauri.callsTo('reveal')[1].answer(refused('internal', 'No file manager answered.'));
+    await settle();
+    expect(note().hidden).toBe(false);
+    expect(note().textContent).toBe('No file manager answered.');
+
+    show.click();
+    tauri.callsTo('reveal')[2].fail('the engine could not be started');
+    await settle();
+    expect(note().textContent).toBe('the engine could not be started');
+  });
+
+  test('a reveal answer that arrives after the screen moved on lands nowhere', async () => {
+    const { convert, pane, tauri } = await mountConvert({
+      engine: (args) => (args[0].endsWith('.pdf') ? converted(args[0]) : HOLD),
+    });
+    await convert.convertPath('/s/First.pdf');
+    pane.button(convert.revealLabel('MacIntel')).click();
+    // Another script converts while the first reveal is still out.
+    await convert.convertPath('/s/Second.pdf');
+    expect(pane.querySelector('.book-title')!.textContent).toBe('Second');
+    tauri.callsTo('reveal')[0].answer(refused('internal', 'Could not show First.'));
+    await settle();
+    expect(pane.visibleText).not.toContain('Could not show First.');
+  });
+
+  test('Convert another goes back to the drop well and keeps the open script', async () => {
+    const { convert, pane, ctx, tauri } = await mountConvert({
+      engine: (args) => (args[0].endsWith('.pdf') ? converted(args[0]) : HOLD),
+    });
+    await convert.convertPath('/s/Field Station.pdf');
+    const open = ctx.state.script;
+    expect(open).not.toBeNull();
+    pane.button('Convert another').click();
+    await settle();
+    expect(pane.dataset.state).toBe('idle');
+    // Home, not a file dialog.
+    expect(tauri.dialogs).toEqual([]);
+    expect(ctx.state.script).toBe(open);
+  });
+
+  test('a refusal’s Report a bug opens an issue carrying the code, with the home folder the probe learned folded away', async () => {
+    const { convert, pane, tauri } = await mountConvert({
+      engine: (args) => {
+        if (args[0] === 'app-settings') return { ...library({ path: '/srv/people/ann/Books' }), home: '/srv/people/ann' };
+        if (args[0].endsWith('.pdf')) return refused('library', 'Cannot write under /srv/people/ann');
+        return HOLD;
+      },
+    });
+    await convert.convertPath('/s/Field Station.pdf');
+    await pane.button('Report a bug').click();
+    expect(tauri.opened.length).toBe(1);
+    const body = new URL(tauri.opened[0]).searchParams.get('body') ?? '';
+    expect(body).toContain('library: Cannot write under ~');
+    expect(body).not.toContain('people');
+  });
+
+  test('the update question sits after the well, only when asked for, and an answer takes it down', async () => {
+    const answers: boolean[] = [];
+    let should = false;
+    const quiet = await mountConvert({ ask: { should: () => should, answer: (on) => answers.push(on) } });
+    expect(quiet.pane.querySelector('.well-ask-question')).toBeNull();
+    await page!.close();
+
+    should = true;
+    const { convert, pane, restored } = await mountConvert({
+      ask: { should: () => should, answer: (on) => answers.push(on) },
+      engine: (args) => (args[0] === 'app-settings' ? library() : HOLD),
+    });
+    const order = pane.children.map((n) => n.className);
+    expect(order.slice(0, 3)).toEqual(['wordmark', 'well', 'well-ask']);
+    // So Choose PDF, not the question, is the page's first focus stop.
+    const { stopAfterDialog } = await import(join(UI, 'focus.js'));
+    expect(stopAfterDialog('convert', (s: string) => page!.doc.querySelectorAll(s)))
+      .toBe(pane.querySelector('.well button'));
+    const before = restored();
+    pane.button(convert.ASK.yes).click();
+    expect(answers).toEqual([true]);
+    expect(pane.querySelector('.well-ask-question')).toBeNull();
+    // The button that had the keyboard is gone, so it is handed back.
+    expect(restored()).toBe(before + 1);
+  });
+
+  test('a stale answer to the question does not overwrite one given in the release notes meanwhile', async () => {
+    const answers: boolean[] = [];
+    let should = true;
+    const { convert, pane } = await mountConvert({ ask: { should: () => should, answer: (on) => answers.push(on) } });
+    // The switch in the release notes answered while this line was up.
+    should = false;
+    pane.button(convert.ASK.no).click();
+    expect(answers).toEqual([]);
+    expect(pane.querySelector('.well-ask-question')).toBeNull();
+  });
+
+  test('the library line is one slot after the question, filled by a probe that only reads', async () => {
+    const { convert, pane, tauri, restored } = await mountConvert({
+      ask: { should: () => true, answer: () => {} },
+      engine: (args) => (args[0] === 'app-settings' ? library() : HOLD),
+    });
+    // Read-only: a probe that sent a --set would move the reader's folder
+    // every time the well was redrawn.
+    expect(tauri.callsTo('app-settings').map((c) => c.args)).toEqual([['app-settings', '--json']]);
+    const [line, secondary] = slot(pane);
+    expect(pane.children.indexOf(line)).toBe(pane.children.indexOf(pane.querySelector('.well-ask')!) + 1);
+    // It reuses the question's look (well-ask) and has no rule of its own:
+    // the capture tool hides the slot by its well-library name.
+    expect(line.className).toBe('well-ask well-library');
+    expect(cssFiles().map(read).join('\n')).not.toContain('.well-library');
+    expect(line.hidden).toBe(false);
+    expect(line.textContent).toBe(`${convert.libraryLine({ path: FOLDER, home: '/home/ann', fromEnv: false })}Change…`);
+    expect(secondary.hidden).toBe(true);
+    // Coming back to the page does not ask again; it hands the keyboard back.
+    const before = restored();
+    convert.show();
+    await settle();
+    expect(tauri.callsTo('app-settings').length).toBe(1);
+    expect(restored()).toBe(before + 1);
+  });
+
+  test('a probe that fails, refuses or answers malformed leaves the slot empty', async () => {
+    const answers: Array<(call: EngineCall) => void> = [
+      (call) => call.fail('engine missing'),
+      (call) => call.answer({ ok: false, error: { code: 'internal', message: 'no' } }),
+      (call) => call.answer({ ok: true, library: { path: FOLDER }, home: '/home/ann' }),
+      (call) => call.answer('not json'),
+    ];
+    for (const settleProbe of answers) {
+      const { pane, tauri } = await mountConvert();
+      settleProbe(tauri.callsTo('app-settings')[0]);
+      await settle();
+      expect(slot(pane).map((p) => [p.hidden, p.textContent])).toEqual([[true, ''], [true, '']]);
+      await page!.close();
+      page = null;
     }
   });
 
-  test('the failure heading names the cause, for every code the engine can return', () => {
-    // Every JsonError code the conversion path can produce must have a
-    // heading, or a real failure renders with a blank title.
-    for (const code of ['scanned', 'not-screenplay', 'password', 'unreadable',
-      'unsupported-type', 'bad-options', 'internal']) {
-      expect(convert.includes(`'${code}'`), `convert.js has no heading for ${code}`).toBe(true);
-    }
+  test('a probe that answers after the well was redrawn is dropped', async () => {
+    const { convert, pane, tauri } = await mountConvert();
+    convert.reset();
+    await settle();
+    const [first, second] = tauri.callsTo('app-settings');
+    first.answer(library({ path: '/home/ann/Old Books' }));
+    await settle();
+    expect(pane.textContent).not.toContain('Old Books');
+    second.answer(library());
+    await settle();
+    expect(slot(pane)[0].textContent).toContain('~/Books');
   });
 
-  test('the progress bar is determinate and never walks backwards', () => {
-    // The engine emits a percent per stage; a bar that took each stage's
-    // percent literally would jump 85 -> 0 at the parse/render boundary.
-    expect(convert).toContain('Math.max');
-    expect(convert).toContain('percent');
+  test('Change… quiets both buttons while the folder dialog is up, starts it at the library, and a cancel or the same folder sends nothing', async () => {
+    const { convert, pane, tauri } = await mountConvert({
+      engine: (args) => (args[0] === 'app-settings' && !args.includes('--set') ? library({ chosen: FOLDER }) : HOLD),
+    });
+    const both = () => slot(pane)[0].buttons().map((b) => `${b.textContent}:${b.disabled ? 'off' : 'on'}`);
+    expect(both()).toEqual(['Change…:on', 'Reset:on']);
+    const writes = () => tauri.callsTo('app-settings').filter((c) => c.args.includes('--set'));
+
+    pane.button('Change…').click();
+    await settle();
+    expect(tauri.dialogs.map((d) => [d.kind, d.options])).toEqual([['open', { directory: true, defaultPath: FOLDER }]]);
+    expect(both()).toEqual(['Change…:off', 'Reset:off']);
+    tauri.dialogs.shift()!.resolve(null);
+    await settle();
+    expect(both()).toEqual(['Change…:on', 'Reset:on']);
+
+    pane.button('Change…').click();
+    await settle();
+    tauri.dialogs.shift()!.resolve(FOLDER);
+    await settle();
+    expect(writes()).toEqual([]);
+
+    pane.button('Change…').click();
+    await settle();
+    tauri.dialogs.shift()!.resolve('/home/ann/Scripts');
+    await settle();
+    expect(writes().map((c) => c.args)).toEqual([
+      ['app-settings', '--json', '--set', '{"libraryPath":"/home/ann/Scripts"}'],
+    ]);
+    writes()[0].answer(library({ path: '/home/ann/Scripts', chosen: '/home/ann/Scripts' }));
+    await settle();
+    const [line, secondary] = slot(pane);
+    expect(line.textContent).toContain('~/Scripts');
+    expect(secondary.hidden).toBe(false);
+    expect(secondary.textContent).toBe(convert.movedLine);
   });
 
-  test('the shortcut label is the platform’s, not the Mac’s everywhere', () => {
-    // brand/components/drop-well.html draws the Mac spelling. This window
-    // runs on three platforms.
-    expect(convert).toContain('navigator');
-    expect(convert).toContain('Ctrl');
+  test('a refusal or a crash from Change replaces only the line under it', async () => {
+    const { pane, tauri } = await mountConvert({
+      engine: (args) => (args[0] === 'app-settings' && !args.includes('--set') ? library() : HOLD),
+    });
+    const change = async (finish: (call: EngineCall) => void) => {
+      pane.button('Change…').click();
+      await settle();
+      tauri.dialogs.shift()!.resolve('/home/ann/Elsewhere');
+      await settle();
+      finish(tauri.callsTo('app-settings').filter((c) => c.args.includes('--set')).at(-1)!);
+      await settle();
+    };
+    const [line, secondary] = slot(pane);
+    const before = line.textContent;
+
+    await change((call) => call.answer({ ok: false, error: { code: 'library', message: 'That folder is read-only.' } }));
+    expect(line.textContent).toBe(before);
+    expect(pane.button('Change…').disabled).toBe(false);
+    expect([secondary.hidden, secondary.textContent]).toEqual([false, 'That folder is read-only.']);
+
+    await change((call) => call.fail('the engine stopped'));
+    expect(line.textContent).toBe(before);
+    expect(secondary.textContent).toBe('the engine stopped');
   });
 
-  test('the surface does not place the focus after a dialog itself', () => {
-    // It used to, and it got it wrong: it re-focused the drop well's button,
-    // which exists on ONE of this surface's four states, so cancelling a
-    // dialog over a result or a refusal left the page with NO focused
-    // element and a keyboard that could not move. Where the focus goes is a
-    // decision now (focus.js) and it is placed once, for every surface and
-    // every dialog, by main.js. A surface asks; it does not choose.
-    expect(`convert.js focuses the picker's button: ${/chooseButton\??\.focus\(\)/.test(convert)}`)
-      .toBe("convert.js focuses the picker's button: false");
-    expect(convert).toContain('ctx.restoreFocus()');
-  });
-
-  test('a refusal does not close the script that was already open', () => {
-    // Dropping a file the engine will not read used to take Read, Tune and
-    // Send away from a book still sitting in the library.
-    expect(`convert.js clears the open script: ${/state\.script\s*=\s*null/.test(convert)}`)
-      .toBe('convert.js clears the open script: false');
-    expect(convert).toContain('stillOpenNote');
-  });
-
-  test('the error code is a labelled handle, not the last line of the sentence', () => {
-    // It is genuinely useful in a bug report, so it stays; it just stops
-    // being presented as prose under the buttons.
-    expect(convert).toContain('code-chip');
-    expect(convert).toContain('Error code');
-    expect(convert).toContain('dataset.errorCode');
-    const css = read('surfaces.css');
-    expect(css).toContain('.code-chip');
-    expect(css).toContain('.code-note-label');
-  });
-
-  test('NO surface sets an inline style, which this window’s CSP refuses', () => {
-    // Measured in piece C: with `default-src 'self'` an appended <style>, a
-    // style= attribute and a <style> inside srcdoc all fail silently. The
-    // bar's width is the one computed value on this surface, so this is the
-    // rule most easily broken here — but naming only convert.js left read.js,
-    // tune.js, send.js and frame.js free to break it silently. The CSP is the
-    // whole window's, so the guard is too.
-    for (const name of jsFiles()) {
-      expect(`${name} sets .style: ${/\.style\b/.test(read(name))}`).toBe(
-        `${name} sets .style: false`,
-      );
-      // The key may be unquoted, and here it usually IS: every el() call in
-      // this window writes `{ class: 'prose' }`, and dom.js falls through to
-      // setAttribute for any key it does not special-case, so `{ style: '…' }`
-      // is a real inline style written in the house spelling. The lookbehind
-      // is what keeps `font-style:` in read.js's @font-face block from
-      // reading as a violation.
-      const styleKey = /(?<![\w-])['"`]?style['"`]?\s*:/;
-      expect(`${name} sets a style attribute: ${styleKey.test(read(name))}`).toBe(
-        `${name} sets a style attribute: false`,
-      );
-    }
-    // ...and the route convert.js uses instead, which piece C measured as
-    // working.
-    expect(convert).toContain('adoptedStyleSheets');
-  });
-
-  test('only app.js listens for the drop, and it hands over every path', () => {
-    // The drop is an IPC event like any other: tests above already forbid a
-    // surface from touching Tauri, and this is the rule's other half — the
-    // boundary must not decide WHICH file gets converted, or that decision
-    // ends up somewhere no test can reach it.
-    const app = read('app.js');
-    expect(app).toContain("'tauri://drag-drop'");
-    expect(app).toContain("'tauri://drag-enter'");
-    expect(app).toContain("'tauri://drag-leave'");
-    expect(app).toContain('paths');
-    // The path is not picked here: app.js forwards the array.
-    expect(`app.js picks a path: ${/paths\s*\[\s*0\s*\]/.test(app)}`).toBe(
-      'app.js picks a path: false',
-    );
-    const main = read('main.js');
-    expect(main).toContain('onFileDrag');
-    expect(main).toContain('convert.dragOver');
-    expect(main).toContain('convert.dropPaths');
-  });
-
-  test('Show in Finder goes through the engine, not a Tauri door the window no longer has', () => {
-    // Owner decision, 2026-09-23: the window's old reveal permission was
-    // fixed to the library's old path, and a library that can move needs a
-    // door that moves with it. The engine's own reveal verb does the
-    // showing now, through revealNote.
-    expect(convert).toContain('revealNote(runEngine,');
-    // Gone from every file in this directory, not just renamed here.
-    for (const name of jsFiles()) {
-      expect(`${name} mentions revealItem: ${/revealItem/.test(read(name))}`).toBe(
-        `${name} mentions revealItem: false`,
-      );
-    }
-  });
-
-  test('the reveal note is built into the result the moment it is drawn, not appended once the engine answers', () => {
-    // A note appended only after the engine answers lands wherever the
-    // shared pane happens to be showing BY THEN: a reader who converts
-    // another script, or opens a different book, while a reveal is still in
-    // flight would see the answer land on the wrong screen, and a stale
-    // refusal would survive a later success. Building it into this result's
-    // own DOM at draw time, and only ever updating that same element, is
-    // what keeps a late answer on the book it was actually about.
-    const drawResult = convert.slice(convert.indexOf('function drawResult'));
-    const note = drawResult.slice(0, drawResult.indexOf('async function showInFinder'));
-    expect(note).toContain("hidden: true");
-    const handler = drawResult.slice(
-      drawResult.indexOf('async function showInFinder'),
-      drawResult.indexOf('pane.append('),
-    );
-    expect(handler).toContain('note.hidden');
-    expect(handler).not.toContain('pane.append');
-  });
-
-  test('CW1 review pin: Show in Finder hands the engine the open script’s own epub path', () => {
-    // A stray script.fountainPath, or a path captured before the answer
-    // arrived, would compile and even run: it would only show up the day
-    // the two paths actually differ.
-    expect(convert).toContain('revealNote(runEngine, script.epubPath)');
-  });
-
-  test('CW1 review pin: the reveal note is one of drawResult’s own appended children', () => {
-    // The note built at the top of drawResult (asserted above) has to
-    // actually reach the page, in the SAME pane.append call that draws the
-    // rest of the result, not left sitting in a variable nobody appends.
-    const drawResult = convert.slice(convert.indexOf('function drawResult'));
-    const build = drawResult.slice(
-      drawResult.indexOf('pane.append('),
-      drawResult.indexOf('ctx.scriptChanged()'),
-    );
-    expect(build).toContain('note,');
-  });
-
-  test('D2: the library line lives in one slot, built empty by drawWell after the question', () => {
-    const drawWellSrc = convert.slice(
-      convert.indexOf('function drawWell'),
-      convert.indexOf('async function pickFileThenConvert'),
-    );
-    const askIdx = drawWellSrc.indexOf('askLine()');
-    const slotIdx = drawWellSrc.indexOf('buildLibrarySlot()');
-    const appendIdx = drawWellSrc.indexOf('pane.append(slot.line, slot.secondary)');
-    expect(askIdx).toBeGreaterThan(-1);
-    expect(slotIdx).toBeGreaterThan(askIdx);
-    expect(appendIdx).toBeGreaterThan(slotIdx);
-    // drawWell starts its own probe. show() and reset() no longer probe on
-    // their own: drawWell already runs everywhere the well is actually
-    // (re)drawn (mount, "Convert another", a refusal's "Back to one"), and a
-    // plain tab return to an idle well that is still on screen has nothing
-    // to re-probe.
-    expect(drawWellSrc).toContain('probeLibrary(');
-    const showFn = convert.slice(
-      convert.indexOf('export function show'), convert.indexOf('export function choose'),
-    );
-    expect(showFn).not.toContain('probeLibrary');
-    const resetFn = convert.slice(
-      convert.indexOf('export function reset'), convert.indexOf('function askLine'),
-    );
-    expect(resetFn).not.toContain('probeLibrary');
-  });
-
-  test('P7: a stale probe is dropped by a generation counter drawWell bumps on every redraw', () => {
-    const drawWellSrc = convert.slice(
-      convert.indexOf('function drawWell'),
-      convert.indexOf('async function pickFileThenConvert'),
-    );
-    expect(drawWellSrc).toContain('libraryGeneration += 1');
-    const probe = convert.slice(
-      convert.indexOf('async function probeLibrary'),
-      convert.indexOf('function drawWell'),
-    );
-    expect(probe).toContain('gen !== libraryGeneration');
-  });
-
-  test('P1: the probe only ever reads the library, never writes it', () => {
-    // A probe that sent a --set (even a bare "reset to default") would
-    // silently move whatever folder the reader chose, every time the well
-    // is redrawn: mount, "Convert another", every "Back to one".
-    const probe = convert.slice(
-      convert.indexOf('async function probeLibrary'),
-      convert.indexOf('function drawWell'),
-    );
-    const calls = [...probe.matchAll(/argv\.appSettings\(([^)]*)\)/g)];
-    expect(calls.length).toBe(1);
-    expect(calls[0][1].trim()).toBe('');
-  });
-
-  test('P5/P6: a failed or malformed probe leaves the slot exactly as drawWell built it', () => {
-    const probe = convert.slice(
-      convert.indexOf('async function probeLibrary'),
-      convert.indexOf('function drawWell'),
-    );
-    // Never a second line: the only way this feature reaches the page is
-    // the one slot drawWell already appended.
-    expect(probe).not.toContain('pane.append');
-    // A dead engine returns from the catch, and a malformed answer returns
-    // from the null-library check, BEFORE slot.showLibrary is ever reached.
-    const catchIdx = probe.indexOf('catch');
-    const nullCheckIdx = probe.indexOf('library === null');
-    const showIdx = probe.indexOf('slot.showLibrary(');
-    expect(catchIdx).toBeGreaterThan(-1);
-    expect(nullCheckIdx).toBeGreaterThan(catchIdx);
-    expect(showIdx).toBeGreaterThan(nullCheckIdx);
-  });
-
-  test('B1: setBusy actually disables (and re-enables) every button it knows about', () => {
-    // Proving where setBusy(true)/setBusy(false) are CALLED (below) says
-    // nothing about what the function itself does; a setBusy that had been
-    // hollowed out to a no-op would still pass that half.
-    const slot = convert.slice(
-      convert.indexOf('function buildLibrarySlot'),
-      convert.indexOf('async function probeLibrary'),
-    );
-    const setBusyFn = slot.slice(
-      slot.indexOf('function setBusy('),
-      slot.indexOf('async function run('),
-    );
-    expect(setBusyFn).toContain('for (const button of buttons)');
-    expect(setBusyFn).toContain('button.disabled = on');
-  });
-
-  test('B1/C2/C4/6: the picker opens with both buttons already quiet, at the current folder, and a cancel or a no-op pick sends nothing', () => {
-    const slot = convert.slice(
-      convert.indexOf('function buildLibrarySlot'),
-      convert.indexOf('async function probeLibrary'),
-    );
-    const run = slot.slice(slot.indexOf('async function run('));
-    const busyIdx = run.indexOf('setBusy(true)');
-    const pickIdx = run.indexOf('pickFolder(');
-    const engineIdx = run.indexOf('runEngine(argv.appSettings(');
-    expect(busyIdx).toBeGreaterThan(-1);
-    // B1: quiet before the picker opens, not just around the engine call.
-    expect(pickIdx).toBeGreaterThan(busyIdx);
-    // B1: and back on again in a finally, so a thrown pickFolder cannot
-    // leave both buttons disabled forever.
-    expect(run).toMatch(/finally\s*\{[^]*setBusy\(false\)/);
-    // C2: the picker starts where the library already is.
-    expect(run).toContain('pickFolder({ defaultPath: library.path })');
-    // C4 + minor #6: a cancelled picker (null), or picking the folder
-    // already in use, returns before the engine is ever asked to do
-    // anything.
-    const guard = run.slice(pickIdx, engineIdx);
-    expect(guard).toContain('path === null');
-    expect(guard).toContain('path === library.path');
-    expect(guard).toMatch(/return;/);
-  });
-
-  test('E1/E2: a refusal or a thrown error replaces only the secondary line, never the buttons', () => {
-    const slot = convert.slice(
-      convert.indexOf('function buildLibrarySlot'),
-      convert.indexOf('async function probeLibrary'),
-    );
-    const run = slot.slice(slot.indexOf('async function run('));
-    const success = run.slice(run.indexOf('if (result.ok)'), run.indexOf('} else {'));
-    const refusal = run.slice(run.indexOf('} else {'), run.indexOf('} catch'));
-    const crash = run.slice(run.indexOf('} catch'), run.indexOf('} finally'));
-    expect(success).toContain('showLibrary(result.library)');
-    // E1: a JSON refusal only ever touches the secondary line.
-    expect(refusal).not.toContain('showLibrary(');
-    expect(refusal).toContain('showSecondary(result.message)');
-    // E2: a thrown error (a crashed engine, or a thrown picker) does too.
-    expect(crash).not.toContain('showLibrary(');
-    expect(crash).toContain('showSecondary(err.message)');
-  });
-
-  test('R2: Reset goes through the very same run() as Change, so it cannot send anything else', () => {
-    const slot = convert.slice(
-      convert.indexOf('function buildLibrarySlot'),
-      convert.indexOf('async function probeLibrary'),
-    );
-    // One shared handler read off the actions map, not a second copy of the
-    // logic for Reset that a change here could let drift.
-    expect(slot).toContain('onclick: () => run(action, library)');
-    const run = slot.slice(slot.indexOf('async function run('));
-    expect(run).toContain('let path = null;');
-    // The only place `path` is ever REASSIGNED (not merely declared or
-    // compared) is the one branch Change alone takes; Reset's path is that
-    // initial null, straight into libraryChangeArgs (pinned separately as a
-    // pure decision: libraryChangeArgs(null) is the literal
-    // libraryPath: null).
-    const afterDeclaration = run.slice(run.indexOf('let path = null;') + 'let path = null;'.length);
-    const reassignments = afterDeclaration.match(/path = /g) ?? [];
-    expect(reassignments.length).toBe(1);
-    expect(afterDeclaration.indexOf('path = ')).toBeGreaterThan(
-      afterDeclaration.indexOf("action === 'change'"),
-    );
-  });
-
-  test('the slot reuses well-ask (centred, gapped) rather than new CSS', () => {
-    const slot = convert.slice(
-      convert.indexOf('function buildLibrarySlot'),
-      convert.indexOf('async function probeLibrary'),
-    );
-    // well-library is a name for the slot, with no rule of its own: the
-    // capture tool hides the slot by it (tools/capture/steps.js).
-    expect(slot).toContain("class: 'well-ask well-library'");
-    expect(slot).not.toMatch(/class:\s*'library/);
-    const css = cssFiles().map(read).join('\n');
-    expect(css).not.toContain('.library');
-    expect(css).not.toContain('.well-library');
-  });
-
-  test('a hidden well-ask line takes no space: .well-ask is flex, which beats the UA [hidden] rule', () => {
-    // .well-ask { display: flex } outranks the browser's own
-    // [hidden] { display: none }, so a pending or a failed probe used to
-    // leave a blank ~52px gap where the line would go. style.css's global
-    // [hidden] rule, important, now covers it and every other class.
-    expect(read('surfaces.css')).toMatch(/\.well-ask \{[^}]*display: flex/);
-    expect(read('style.css')).toMatch(/^\[hidden\] \{ display: none !important; \}/m);
+  test('Reset sends the default back without asking for a folder, and claims no move', async () => {
+    const { pane, tauri } = await mountConvert({
+      engine: (args) => (args[0] === 'app-settings' && !args.includes('--set') ? library({ chosen: '/home/ann/Picked' }) : HOLD),
+    });
+    pane.button('Reset').click();
+    await settle();
+    expect(tauri.dialogs).toEqual([]);
+    const write = tauri.callsTo('app-settings').filter((c) => c.args.includes('--set'));
+    expect(write.map((c) => c.args)).toEqual([['app-settings', '--json', '--set', '{"libraryPath":null}']]);
+    write[0].answer(library());
+    await settle();
+    expect(slot(pane)[0].buttons().map((b) => b.textContent)).toEqual(['Change…']);
+    expect(slot(pane)[1].hidden).toBe(true);
   });
 });
 
@@ -1111,10 +1270,6 @@ describe('"Convert it again" converts the script again', () => {
     send.mount(pane, ctx);
     againButton(pane)!.click();
     expect(again()).toBe(1);
-  });
-
-  test('main.js hands every surface the Convert surface’s own convertAgain', () => {
-    expect(read('main.js')).toMatch(/convertAgain: \(\) => convert\.convertAgain\(\)/);
   });
 });
 
@@ -1797,46 +1952,6 @@ describe('where the keyboard stands when a dialog closes', () => {
     // And it really does use the surface it was given: the same page, asked
     // for a different surface, finds nothing.
     expect(focus.stopAfterDialog('send', page({ [plan[0]]: convertButtons }))).toBeNull();
-  });
-
-  test('main.js is the one place that places it, and it places it for every dialog', () => {
-    const main = read('main.js');
-    // The binding is thin on purpose, so what is checked here is that it is
-    // WIRED: the decision is imported rather than reimplemented, the dialog
-    // boundary calls it, and the surfaces are given it to call after a redraw.
-    expect(main).toContain("from './focus.js'");
-    expect(main).toContain('stopAfterDialog');
-    expect(main).toContain('onDialogClosed(restoreFocus)');
-    expect(main).toContain('restoreFocus,');
-    // It follows the surface that is showing, not a remembered one.
-    expect(main).toMatch(/showing = id/);
-    // No other surface may place the focus after a dialog behind its back.
-    for (const name of jsFiles()) {
-      if (name === 'main.js' || name === 'focus.js') continue;
-      expect(`${name} plans focus: ${/focusPlan|stopAfterDialog/.test(read(name))}`)
-        .toBe(`${name} plans focus: false`);
-    }
-  });
-
-  test('asking for a file does not move the reader off the surface they are on', () => {
-    // The shortcut used to switch to Convert before it opened the picker, so
-    // hitting it on Tune and then cancelling left someone on a surface they
-    // had not asked for, with their work off screen — and it made the focus
-    // rule above untestable as a general one, because the surface showing
-    // when a dialog closed was always Convert. Converting still moves there;
-    // asking does not.
-    const main = read('main.js');
-    const from = main.indexOf('metaKey');
-    const shortcut = main.slice(from, main.indexOf('});', from));
-    expect(shortcut).toContain('convert.choose()');
-    expect(`the shortcut switches surface: ${/setSurface\('convert'\)/.test(shortcut)}`)
-      .toBe('the shortcut switches surface: false');
-    // The drop does not switch either — the surface does it, on the file.
-    const drop = main.slice(main.indexOf('onFileDrag'), main.indexOf('metaKey'));
-    expect(drop).toContain('convert.dropPaths');
-    expect(`the drop handler switches surface: ${/setSurface\('convert'\)/.test(drop)}`)
-      .toBe('the drop handler switches surface: false');
-    expect(read('convert.js')).toContain("ctx.goTo('convert')");
   });
 
   test('the reader’s Tab stop is one that can show the focus', () => {
@@ -9145,7 +9260,7 @@ describe('the Send page’s KFX block: what a reader sees across redraws', () =>
     w.regainFocus();
     await w.answer('kfx-status', status(true, false, false));
     expect(get.isConnected).toBe(true);
-    expect(w.doc.activeElement).toBe(get);
+    expect(w.doc.activeElement as unknown).toBe(get);
   });
 
   test('when the rows do change, the keyboard goes back to the same step', async () => {
