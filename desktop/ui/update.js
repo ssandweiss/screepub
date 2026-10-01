@@ -12,7 +12,10 @@
 //   * check() REJECTS on any failure — a 404 manifest, no network, a platform
 //     the manifest does not list. A rejection is a MESSAGE. It is never "you
 //     are up to date", and treating it as one would tell somebody they were
-//     current at the exact moment nobody could reach the server.
+//     current at the exact moment nobody could reach the server. One
+//     unlisted platform is expected rather than broken: an Intel Mac, once
+//     the manifest lists Apple silicon only, and that one is told so in
+//     plain words (INTEL_MAC_RETIRED) instead of the plugin's own text.
 //   * The day-stamp is written BEFORE the request. README promises at most
 //     one request a day; stamping afterwards would turn a persistent failure
 //     into a request on every launch, which is the opposite of the promise.
@@ -51,6 +54,32 @@ const FOUND = 'updateFound';
  *  than kill it (desktop/src-tauri/src/sidecar.rs), so this window does not
  *  kill it either. */
 export const RESTART_WAIT_CAP_MS = 120_000;
+
+/** What a copy running as Intel is told when it checks. This build, the
+ *  identifier release, is the last universal one; the release after it is
+ *  Apple silicon only (plan 2026-10-01-f2-handover-amendment.md), so from
+ *  then on latest.json has no darwin-x86_64 row and an Intel copy's check()
+ *  rejects with the plugin's TargetsNotFound, which reads as Rust debug
+ *  output. It ships HERE, not later, because this is the last build an
+ *  Intel Mac can run: a later build carrying it would never be seen there.
+ *  "This copy", not "this Mac": an Apple silicon Mac running this universal
+ *  window under Rosetta runs the x86_64 slice too, and its hardware is not
+ *  the problem. */
+export const INTEL_MAC_RETIRED =
+  'New versions of Screepub run only on Macs with Apple silicon, so this copy will not be '
+  + 'offered updates. The version you have keeps working.';
+
+/** Whether a check() rejection is the manifest having nothing for an Intel
+ *  Mac. Read off the plugin's own text (tauri-plugin-updater 2.12.0,
+ *  error.rs: TargetNotFound and TargetsNotFound both end "in the response
+ *  `platforms` object" and name the keys looked for), because those keys
+ *  are `darwin-<arch of the RUNNING binary>`: an Intel Mac running a
+ *  universal build runs its x86_64 slice. navigator.platform cannot tell,
+ *  since it says "MacIntel" on every Mac. */
+export function isIntelMacRetired(message) {
+  const text = String(message ?? '');
+  return /`platforms` object/.test(text) && /\bdarwin-x86_64\b/.test(text);
+}
 
 /** Whether this build can be updated at all where it is running.
  *
@@ -239,7 +268,15 @@ export async function runCheck({ manual, storage, now, check }) {
   try {
     update = await check();
   } catch (err) {
-    return { outcome: 'error', message: String(err?.message ?? err) };
+    const message = String(err?.message ?? err);
+    if (isIntelMacRetired(message)) {
+      // A request made and answered, definitively, unlike a failed one: a
+      // version remembered from an earlier check can never be installed
+      // here, so the label must stop offering it.
+      forgetFound(storage);
+      return { outcome: 'error', message: INTEL_MAC_RETIRED };
+    }
+    return { outcome: 'error', message };
   }
 
   const decision = pickUpdate(update

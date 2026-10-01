@@ -6491,6 +6491,69 @@ describe('the update check asks once, stamps first, and never guesses', () => {
     expect(result.message).toContain('Could not fetch');
   });
 
+  test('an Intel Mac the manifest no longer lists is told why, in plain words', async () => {
+    // From the release after the identifier release, latest.json lists
+    // darwin-aarch64 only (Intel Macs are not supported; plan
+    // 2026-10-01-f2-handover-amendment.md). An Intel Mac running this
+    // universal build asks for darwin-x86_64, and tauri-plugin-updater
+    // 2.12.0 rejects with TargetsNotFound (or TargetNotFound), whose text
+    // is Rust debug output. Recognised by the plugin's own report of the
+    // key it looked for, which is the RUNNING binary's arch, and never by
+    // navigator.platform, which says "MacIntel" on every Mac. It ships in
+    // the identifier release because that is the last build an Intel Mac
+    // runs; and it says "this copy", because an Apple silicon Mac running
+    // this window under Rosetta asks for darwin-x86_64 too.
+    for (const raw of [
+      'None of the fallback platforms `["darwin-x86_64-app", "darwin-x86_64"]` were found in the response `platforms` object',
+      'None of the fallback platforms `["darwin-x86_64"]` were found in the response `platforms` object',
+      'the platform `darwin-x86_64` was not found in the response `platforms` object',
+    ]) {
+      const s = store({ updateFound: '0.8.0' });
+      const result = await update.runCheck({
+        manual: true, storage: s, now: 1, check: async () => { throw raw; },
+      });
+      // Still an error, never "up to date": this Mac is not current, it is
+      // past the end of the line.
+      expect(result.outcome).toBe('error');
+      expect(result.message).toBe(update.INTEL_MAC_RETIRED);
+      expect(result.message).toBe(
+        'New versions of Screepub run only on Macs with Apple silicon, so this copy will not be '
+        + 'offered updates. The version you have keeps working.',
+      );
+      expect(result.message).not.toContain('this Mac');
+      expect(result.message).not.toMatch(/darwin|platforms|`|—/);
+      // The server answered, definitively. A version remembered from before
+      // (the identifier release, say, found but not installed) can never be
+      // installed here, so the label must not keep offering it.
+      expect(s.dump().updateFound).toBe('');
+    }
+    // An Error object, as well as the bare string Tauri's invoke rejects with.
+    const fromError = await update.runCheck({
+      manual: true, storage: store(), now: 1,
+      check: async () => { throw new Error('the platform `darwin-x86_64` was not found in the response `platforms` object'); },
+    });
+    expect(fromError.message).toBe(update.INTEL_MAC_RETIRED);
+  });
+
+  test('every other failure keeps its own text and forgets nothing', async () => {
+    // Offline is this app's normal case: a failed request must not erase a
+    // remembered offer. And an Apple silicon Mac missing from the manifest
+    // is a broken release, whose own text is the useful report.
+    for (const raw of [
+      'Could not fetch a valid release JSON from the remote',
+      'None of the fallback platforms `["darwin-aarch64-app", "darwin-aarch64"]` were found in the response `platforms` object',
+      'error sending request for url (https://github.com/darwin-x86_64)',
+    ]) {
+      const s = store({ updateFound: '0.8.0' });
+      const result = await update.runCheck({
+        manual: true, storage: s, now: 1, check: async () => { throw raw; },
+      });
+      expect(result.outcome).toBe('error');
+      expect(result.message).toBe(raw);
+      expect(s.dump().updateFound).toBe('0.8.0');
+    }
+  });
+
   test('null means current, and says so with the engine\'s reason', async () => {
     const result = await update.runCheck({
       manual: true, storage: store(), now: 1, check: async () => null,
