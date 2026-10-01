@@ -1170,12 +1170,11 @@ describe('what sidecar.rs says about a quit mid-call is true of the engine', () 
       // temp-then-rename: the writeFileAtomic helpers and their like
       'src/cli.ts': 2, // writeFileAtomic, and the --debug dump written in place
       'src/cli-export.ts': 1,
-      'src/export/artifact.ts': 1,
+      // writeFileAtomicSync and copyFileAtomicSync, shared by the settings
+      // files, the Kindle artifacts and the library's source.json marker and
+      // adopted sidecar
+      'src/atomic-write.ts': 2,
       'src/replace-file.ts': 1,
-      'src/settings/app.ts': 1,
-      'src/settings/sidecar.ts': 1,
-      // in place: the folder's source.json marker, and an adopted sidecar
-      'src/library.ts': 2,
     });
     const sidecar = rustSources.find((f) => basename(f.name) === 'sidecar.rs')!.text;
     const comment = sidecar.slice(sidecar.indexOf('pub async fn run('), sidecar.indexOf('let (mut rx'));
