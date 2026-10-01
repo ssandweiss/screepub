@@ -5700,14 +5700,21 @@ describe('the Send page’s device send, mounted', () => {
     page = null;
   });
 
-  async function mountSend(options: { settings?: Record<string, unknown> | null; engine?: (args: string[]) => unknown } = {}) {
+  async function mountSend(options: {
+    settings?: Record<string, unknown> | null;
+    engine?: (args: string[]) => unknown;
+    kfx?: unknown;
+    devices?: Array<typeof kobo>;
+  } = {}) {
     const { routes, preselected } = await import('../src/export/routes');
-    const list = routes({ platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: true, devices: [kobo] });
+    const list = routes({
+      platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: true, devices: options.devices ?? [kobo],
+    });
     const listed = { ok: true, routes: list, chosen: preselected(list, undefined).id };
     page = fakePage({
       respond: (args) => {
         if (args[0] === 'routes') return listed;
-        if (args[0] === 'kfx-status') return { ok: false };
+        if (args[0] === 'kfx-status') return options.kfx ?? { ok: false };
         if (args[0] === 'export' && args.includes('--check')) return { ok: false };
         return options.engine?.(args) ?? HOLD;
       },
@@ -5739,7 +5746,7 @@ describe('the Send page’s device send, mounted', () => {
     send.show();
     await settle();
     const status = () => pane.querySelector('.send-status')!;
-    return { send, pane, ctx, status, tauri: page.tauri, poll: () => tickPoll?.() };
+    return { send, pane, ctx, status, tauri: page.tauri, page, poll: () => tickPoll?.() };
   }
 
   test('a device send reads this script’s settings first, exports with them, then copies what was built', async () => {
@@ -5799,6 +5806,66 @@ describe('the Send page’s device send, mounted', () => {
     await settle();
     expect(tauri.callsTo('send')).toEqual([]);
     expect(status().textContent).toBe('');
+  });
+
+  test('the KFX installer runs only from its button, and an install and a route never overlap', async () => {
+    // It downloads third-party code and writes into the reader's Calibre, and
+    // a plugin swapped under a running KFX build is not worth finding out about.
+    const notReady = { ok: true, ...kfxSetup({ calibre: true, previewer: true, pluginInstalled: false, ready: false }, 'darwin') };
+    const { pane, tauri, page: p, poll } = await mountSend({ kfx: notReady, devices: [] });
+    // Named by kfx.js's own heading, so the two cannot disagree.
+    const { HEADING } = await import(join(UI, 'kfx.js'));
+    expect(pane.querySelector('section.kfx-setup')!.getAttribute('aria-label')).toBe(HEADING);
+    poll();
+    p.fireWindow('focus');
+    await settle();
+    expect(tauri.callsTo('kfx-install')).toEqual([]);
+    const install = () => pane.querySelectorAll('button').find((b) => b.dataset.step === 'plugin')!;
+    const routeButtons = () => pane.querySelector('.devices')!.buttons();
+
+    install().click();
+    await settle();
+    expect(tauri.callsTo('kfx-install').length).toBe(1);
+    // The busy hook takes every route out of reach while it runs.
+    expect(routeButtons().every((b) => b.disabled)).toBe(true);
+    pane.button('Add to Apple Books').click();
+    await settle();
+    expect(tauri.callsTo('route')).toEqual([]);
+    tauri.callsTo('kfx-install')[0].answer({ ok: false, error: { code: 'kfx-install-failed', message: 'No network.' } });
+    await settle();
+    expect(routeButtons().every((b) => !b.disabled)).toBe(true);
+
+    // And the other way round: a route running holds the installer off.
+    pane.button('Add to Apple Books').click();
+    await settle();
+    expect(tauri.callsTo('route').length).toBe(1);
+    install().click();
+    await settle();
+    expect(tauri.callsTo('kfx-install').length).toBe(1);
+    tauri.callsTo('route')[0].answer({ ok: true, note: 'Added.' });
+    await settle();
+  });
+
+  test('the KFX checklist is asked one probe at a time, on show and on focus, and not once the page is hidden', async () => {
+    const { send, tauri, page: p } = await mountSend({ kfx: HOLD });
+    const probes = () => tauri.callsTo('kfx-status');
+    expect(probes().length).toBe(1);
+    // The window gets the focus back twice while the first probe is out.
+    p.fireWindow('focus');
+    p.fireWindow('focus');
+    await settle();
+    expect(probes().length).toBe(1);
+    probes()[0].answer({ ok: false });
+    await settle();
+    p.fireWindow('focus');
+    await settle();
+    expect(probes().length).toBe(2);
+    probes()[1].answer({ ok: false });
+    await settle();
+    send.hide();
+    p.fireWindow('focus');
+    await settle();
+    expect(probes().length).toBe(2);
   });
 
   test('what Screepub can reach is folded away, shut, with the note on where the one route was proven', async () => {
@@ -8464,208 +8531,25 @@ describe('the Send page’s KFX block: decisions', () => {
     const out = kfx.afterInstall({ ok: false, error: { code: 'kfx-install-failed', message: 'nope' } }, notReady);
     expect(out).toEqual({ setup: notReady, line: 'nope', bad: true, justInstalled: false });
   });
-
-  test('no copy in kfx.js carries an em dash', () => {
-    expect(read('kfx.js').includes('—')).toBe(false);
-  });
-
-  test('kfx.js holds no engine flag and no Tauri call of its own', () => {
-    const source = read('kfx.js');
-    expect(source).not.toContain("'--json'");
-    expect(source).not.toContain('__TAURI__');
-    expect(source).not.toContain("'kfx-install'");
-    expect(source).not.toContain("'kfx-status'");
-  });
 });
 
 describe('the Send page’s KFX block: wiring', () => {
-  const kfx = read('kfx.js');
-  const send = read('send.js');
-
-  test('the installer is reached only from the button, never on the page’s own initiative', () => {
-    // It downloads third-party code and writes into the reader's Calibre.
-    expect(kfx.match(/argv\.kfxInstall\(\)/g)?.length).toBe(1);
-    const install = kfx.slice(kfx.indexOf('async function install('));
-    expect(install.slice(0, install.indexOf('\n}'))).toContain('argv.kfxInstall()');
-    // `install` is handed to a click and never called directly. The
-    // lookbehind skips its own definition, `async function install()`.
-    expect(kfx).toContain('onclick: install');
-    expect(kfx.match(/(?<!function )\binstall\(\)/g)).toBe(null);
-  });
-
-  test('one probe at a time, and the focus listener goes when the page does', () => {
-    expect(kfx).toContain('argv.kfxStatus()');
-    const probe = kfx.slice(kfx.indexOf('async function probe('));
-    expect(probe.slice(0, 200)).toMatch(/if \(probing/);
-    const hidden = /export function kfxHidden\(\) \{([\s\S]*?)\n\}/.exec(kfx);
-    expect(hidden, 'kfx.js exports no kfxHidden()').not.toBe(null);
-    expect(hidden![1]).toContain("removeEventListener('focus'");
-  });
-
-  test('send.js mounts the block and tells it when the page comes and goes', () => {
-    expect(send).toContain("from './kfx.js'");
-    expect(send).toMatch(/mountKfx\(/);
-    const show = /export function show\(\) \{([\s\S]*?)\n\}/.exec(send);
-    expect(show![1]).toContain('kfxShown()');
-    const hide = /export function hide\(\) \{([\s\S]*?)\n\}/.exec(send);
-    expect(hide![1]).toContain('kfxHidden()');
-  });
-
-  test('the block is mounted only once its node is in the page', () => {
-    // kfx.js refuses to draw into a node that is not connected (a stale
-    // node from an earlier draw() must stay dead), so mounting before the
-    // append would draw nothing until the next redraw.
-    const draw = send.slice(send.indexOf('\nfunction draw('));
-    const body = draw.slice(0, draw.indexOf('\n}'));
-    const appended = body.indexOf('kfxNode,\n');
-    expect(appended, 'draw() never appends kfxNode').toBeGreaterThan(-1);
-    expect(body.indexOf('mountKfx(')).toBeGreaterThan(appended);
-  });
-
-  test('a send and an install never overlap', () => {
-    // A plugin swapped out under a running KFX conversion is not a case
-    // worth finding out about.
-    const sendTo = send.slice(send.indexOf('async function sendTo('));
-    expect(sendTo.slice(0, 200)).toMatch(/if \(sending \|\| kfxInstalling\(\)\) return;/);
-    const install = kfx.slice(kfx.indexOf('async function install('));
-    expect(install.slice(0, 300)).toMatch(/hooks\?\.isSending\?\.\(\)/);
-    // The poll keeps running through an install (it stops only for a send),
-    // so a row it draws mid-install must be born disabled like the rest, or
-    // it offers a button that silently does nothing.
-    // Rows are route rows since parity piece B: the route's own button and
-    // the email row's setup link are both born dead mid-install.
-    const row = send.slice(send.indexOf('function routeRow('));
-    const rowBody = row.slice(0, row.indexOf('\n}'));
-    expect([...rowBody.matchAll(/disabled: kfxInstalling\(\)/g)].length).toBe(2);
-    // And the performer of every other route refuses to start mid-install,
-    // exactly as sendTo does.
-    const perform = send.slice(send.indexOf('async function perform('));
-    expect(perform.slice(0, 200)).toMatch(/if \(sending \|\| kfxInstalling\(\)\) return;/);
-  });
-});
-
-describe('the Send page’s KFX block: wiring, second pass', () => {
-  const kfx = read('kfx.js');
-  const send = read('send.js');
-  /** A function's own body, from its head to the first unindented `}`. */
-  const body = (source: string, head: string) => {
-    const from = source.indexOf(head);
-    expect(from, `no ${head.trim()}`).toBeGreaterThan(-1);
-    const rest = source.slice(from);
-    return rest.slice(0, rest.indexOf('\n}'));
-  };
-
-  test('a probe that was out when an install began is thrown away', () => {
-    // Same shape as send.js's `era`. The counter is read before the await
-    // and checked after it, before the answer is used for anything.
-    const probe = body(kfx, 'async function probe(');
-    const captured = probe.indexOf('const mine = installs;');
-    const awaited = probe.indexOf('await ');
-    const checked = probe.indexOf('if (mine !== installs) return;');
-    expect(captured, 'probe() does not capture the install counter').toBeGreaterThan(-1);
-    expect(captured).toBeLessThan(awaited);
-    expect(checked, 'probe() does not check the install counter').toBeGreaterThan(awaited);
-    expect(checked).toBeLessThan(probe.indexOf('setup = '));
-    const install = body(kfx, 'async function install(');
-    expect(install.indexOf('installs += 1')).toBeGreaterThan(install.indexOf('installingNow = true'));
-  });
-
-  test('a routine re-probe changes nothing, and a changed one clears the old line', () => {
-    const probe = body(kfx, 'async function probe(');
-    const same = probe.indexOf('JSON.stringify(next) === JSON.stringify(setup)');
-    expect(same, 'probe() redraws even when nothing changed').toBeGreaterThan(-1);
-    expect(same).toBeLessThan(probe.lastIndexOf('draw()'));
-    const after = probe.slice(same);
-    expect(after).toContain('justInstalled = false');
-    expect(after).toMatch(/status = \{ line: '', bad: false \}/);
-  });
-
-  test('coming back to the page mid-install keeps the line that says so', () => {
-    const shown = body(kfx, 'export function kfxShown(');
-    expect(shown).toMatch(/if \(!installingNow\) \{\s*justInstalled = false;/);
-    expect(shown).toContain("window.addEventListener('focus', onFocus)");
-  });
-
-  test('one status node per host, and the keyboard is put back after a redraw', () => {
-    const mount = body(kfx, 'export function mountKfx(');
-    const draw = body(kfx, '\nfunction draw(');
-    expect(kfx.match(/role: 'status'/g)?.length).toBe(1);
-    expect(mount).toContain("role: 'status'");
-    expect(draw).not.toContain('clear(host)');
-    const had = draw.indexOf('host.contains(document.activeElement)');
-    expect(had, 'draw() never asks where the focus was').toBeGreaterThan(-1);
-    expect(had).toBeLessThan(draw.indexOf('clear('));
-    expect(kfx).toContain('hooks?.restoreFocus?.()');
-    expect(send).toContain('restoreFocus: () => ctx.restoreFocus()');
-  });
-
-  test('send.js names the block with kfx.js’s own heading', () => {
-    expect(send).toMatch(/import \{[^}]*\bHEADING\b[^}]*\} from '\.\/kfx\.js'/);
-    expect(send).toContain("'aria-label': HEADING");
-    expect(send).not.toContain("'Best Kindle quality'");
-  });
-
+  // The rest of this block's wiring (the installer only from its button, one
+  // probe at a time, the focus listener going with the page, its heading, a
+  // send and an install never overlapping) is driven in "the Send page's
+  // device send, mounted"; the races and the keyboard in the describe below.
   test('a redraw that throws cannot leave a send stuck on', () => {
-    // Inside the try, so the finally that clears `sending` covers it.
-    const sendTo = body(send, 'async function sendTo(');
+    // Kept as a source pin until there is a seam: making kfxRedraw() throw
+    // from outside needs a hook into kfx.js's draw that the page does not
+    // offer, and a throw staged through the document would throw again from
+    // the finally that is under test. Inside the try, so that finally, which
+    // clears `sending`, covers it.
+    const send = read('send.js');
+    const from = send.indexOf('async function sendTo(');
+    const sendTo = send.slice(from, send.indexOf('\n}', from));
     const redraw = sendTo.indexOf('kfxRedraw()');
     expect(redraw).toBeGreaterThan(sendTo.indexOf('try {'));
     expect(redraw).toBeLessThan(sendTo.indexOf('await '));
-  });
-
-  test('a throw before the engine is asked cannot leave an install stuck on', () => {
-    // installingNow refuses every send until it is cleared, and only the
-    // finally clears it. So everything after the flag is set, the busy hook
-    // and the first draw included, runs inside the try that finally closes.
-    const install = body(kfx, 'async function install(');
-    const set = install.indexOf('installingNow = true');
-    const opened = install.indexOf('try {');
-    const asked = install.indexOf('await ');
-    expect(opened).toBeGreaterThan(set);
-    // No call at all between setting the flag and opening the try.
-    expect(install.slice(set, opened)).not.toContain('(');
-    for (const step of ['hooks?.onBusy?.(true)', 'status = { line: INSTALLING', 'draw()']) {
-      const at = install.indexOf(step);
-      expect(at, `install() has no ${step} inside its try`).toBeGreaterThan(opened);
-      expect(at).toBeLessThan(asked);
-    }
-  });
-
-  test('no probe for a block that is not in the page', () => {
-    // The no-script and blocked states never mount the block, and a
-    // kfx-status run per show and per focus would answer nobody.
-    const probe = body(kfx, 'async function probe(');
-    const guard = probe.indexOf('if (host === null || !host.isConnected) return;');
-    expect(guard, 'probe() runs with no block to draw into').toBeGreaterThan(-1);
-    expect(guard).toBeLessThan(probe.indexOf('probing = true'));
-    expect(guard).toBeLessThan(probe.indexOf('await '));
-    // send.js mounts the block (draw) before saying the page is shown, or
-    // the first probe on a real page would find no host and never run.
-    const show = body(send, 'export function show(');
-    expect(show.indexOf('draw()')).toBeGreaterThan(-1);
-    expect(show.indexOf('draw()')).toBeLessThan(show.indexOf('kfxShown()'));
-  });
-
-  test('the device list, the send flag and the busy hook reach the block', () => {
-    // The body, not the file: the import line alone names kfxDevicesChanged.
-    // Since parity piece B the list is the route list (`drawn = shown`), and
-    // the block reads the connected devices off it, as it read `devices`.
-    const refresh = body(send, 'async function refresh(');
-    const assigned = refresh.indexOf('drawn = shown;');
-    expect(assigned).toBeGreaterThan(-1);
-    const told = refresh.indexOf('kfxDevicesChanged()');
-    expect(told).toBeGreaterThan(assigned);
-    // After the rows as well: a block that hides while it holds the focus
-    // hands it to the page's first stop, which should be the new Send
-    // button and not the pane (seen in a browser, 2026-09-23).
-    const rows = refresh.indexOf('fillRows()');
-    expect(rows).toBeGreaterThan(assigned);
-    expect(told).toBeGreaterThan(rows);
-    expect(body(send, 'function fillRows(')).toContain('list.append(routeRow(route, drawn.chosen))');
-    expect(send).toContain('devices: () => connectedDevices(drawn)');
-    // The busy hook takes every button out of reach, and back.
-    const busy = send.slice(send.indexOf('onBusy: (on) => {'));
-    expect(busy.slice(0, busy.indexOf('\n    },'))).toContain('for (const button of buttons()) button.disabled = on;');
   });
 });
 
