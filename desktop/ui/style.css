@@ -114,6 +114,10 @@ body {
   background: var(--paper);
   box-sizing: border-box;
   padding: var(--space-7) 0 var(--space-10);
+  /* The query container Read and Settings fold their two columns on
+   * (surfaces.css). The block is the window less its 148px of margins, so
+   * a breakpoint on the window folded at the wrong width. */
+  container-type: inline-size;
 }
 
 /* Fixed to the window, so the paper moves under the binding the way it does

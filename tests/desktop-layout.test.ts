@@ -29,9 +29,9 @@ function ruleBlock(sheet: string, selector: string): string {
 }
 
 /** Every @media block for one query, joined, braces balanced. */
-function mediaBlocks(sheet: string, query: string): string {
+function mediaBlocks(sheet: string, query: string, rule = '@media'): string {
   const out: string[] = [];
-  const head = `@media ${query} {`;
+  const head = `${rule} ${query} {`;
   let at = sheet.indexOf(head);
   while (at !== -1) {
     let i = sheet.indexOf('{', at);
@@ -47,6 +47,38 @@ function mediaBlocks(sheet: string, query: string): string {
   expect(out.length, `no ${head} block`).toBeGreaterThan(0);
   return out.join('\n');
 }
+
+/** The content block width below which Read and Settings fold to one
+ *  column. A container query on the sheet, not a media query on the window:
+ *  the block is the window less 148px of side margins, so a window-width
+ *  breakpoint left Settings two-column with a ~300px preview between 900 and
+ *  about 1050 wide. 880 = 420 (settings) + 32 (gap, --space-7) + 428, so the
+ *  preview is never under 420 while it sits beside the settings. */
+const FOLD = 880;
+const NARROW = `(max-width: ${FOLD - 1}px)`;
+const containerBlocks = (sheet: string, query: string) => mediaBlocks(sheet, query, '@container');
+
+describe('the two-column surfaces fold on the block, not the window', () => {
+  const style = windowCss('style.css');
+  const surfaces = windowCss('surfaces.css');
+
+  test('the sheet is the query container', () => {
+    expect(ruleBlock(style, '.sheet')).toContain('container-type: inline-size');
+  });
+
+  test('no surface folds on the window width any more', () => {
+    expect(surfaces).not.toMatch(/@media[^{]*\((max|min)-width: 90[01]px\)/);
+  });
+
+  test('two-column Settings never gives the preview less than 420', () => {
+    const settings = 420;
+    const gap = 32; // --space-7, 2rem
+    expect(ruleBlock(surfaces, '.tune-split')).toContain(`grid-template-columns: ${settings}px minmax(0, 1fr)`);
+    expect(ruleBlock(surfaces, '.tune-split')).toContain('gap: var(--space-7)');
+    expect(FOLD - settings - gap).toBeGreaterThanOrEqual(420);
+    expect(containerBlocks(surfaces, NARROW)).toContain('.tune-split { grid-template-columns: 1fr; }');
+  });
+});
 
 describe('the page fills the window (frame B)', () => {
   const brand = css(join(REPO, 'brand', 'tokens.css'));
@@ -156,19 +188,20 @@ describe('Read gives the scene index a slot of its own', () => {
     expect(open).not.toContain('box-shadow');
   });
 
-  test('under 900 wide the index goes above the script, and a shut one takes no room', () => {
-    const narrow = mediaBlocks(surfaces, '(max-width: 900px)');
+  test('in a narrow block the index goes above the script, and a shut one takes no room', () => {
+    const narrow = containerBlocks(surfaces, NARROW);
     expect(narrow).toContain('.reader { grid-template-columns: minmax(0, 1fr); }');
     expect(narrow).toContain('.reader:not(.index-open) .scene-rail { display: none; }');
     expect(narrow).toContain('.script-stage { grid-column: 1; grid-row: 2; }');
   });
 
   test('a short window only grows the rail when it is still beside the script, not stacked above it', () => {
-    // Below 900px wide the rail is already a short strip (the 900px block
-    // above caps it at 6.5rem); a short-window override meant for the
-    // two-column layout must not also apply there.
-    const short = mediaBlocks(surfaces, '(max-height: 560px) and (min-width: 901px)');
-    expect(short).toContain('.scene-rail { max-height: 62vh; }');
+    // In a narrow block the rail is already a short strip (the narrow
+    // container block caps it at 6.5rem); a short-window override meant for
+    // the two-column layout must not also apply there.
+    const short = mediaBlocks(surfaces, '(max-height: 560px)');
+    expect(short).toContain(`@container (min-width: ${FOLD}px) {`);
+    expect(containerBlocks(short, `(min-width: ${FOLD}px)`)).toContain('.scene-rail { max-height: 62vh; }');
   });
 });
 
@@ -186,8 +219,8 @@ describe('Settings gives the preview the room', () => {
     expect(frame).not.toContain('62vh');
   });
 
-  test('under 900 wide it is still one column, with the preview unpinned', () => {
-    const narrow = mediaBlocks(surfaces, '(max-width: 900px)');
+  test('in a narrow block it is still one column, with the preview unpinned', () => {
+    const narrow = containerBlocks(surfaces, NARROW);
     expect(narrow).toContain('.tune-split { grid-template-columns: 1fr; }');
     expect(narrow).toContain('.tune-preview { position: static; }');
   });
@@ -226,8 +259,8 @@ describe('each Settings section is a box', () => {
     expect(tune).toMatch(/el\('div', \{ class: 'tune-foot' \},\s*drawDefaultsFoot\(\),\s*drawKeepChoice\(\)\)/);
   });
 
-  test('under 900 wide the boxes stay a measure wide, not the whole column', () => {
-    const narrow = mediaBlocks(surfaces, '(max-width: 900px)');
+  test('in a narrow block the boxes stay a measure wide, not the whole column', () => {
+    const narrow = containerBlocks(surfaces, NARROW);
     expect(narrow).toContain('.knob-group, .tune-foot { max-width: var(--measure); }');
   });
 

@@ -474,11 +474,14 @@
 .scene-link-on { color: var(--ink); background: var(--hole); }
 .scene-link:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 
-/* Under 900 the slot and the script no longer both fit, so the index goes
- * above the script as a short strip and the script takes the block: the
- * same line Settings folds its two columns at. A shut index takes no room
- * here, because a strip above the script cannot move it sideways. */
-@media (max-width: 900px) {
+/* In a block under 880 wide the slot and the script no longer both fit, so
+ * the index goes above the script as a short strip and the script takes the
+ * block: the same line Settings folds its two columns at. A container
+ * query on the sheet, not a media query: the block is the window less its
+ * 148px of margins, so this folds at a 1028px window. Two columns at 880
+ * leave the script 630 of its 706. A shut index takes no room here,
+ * because a strip above the script cannot move it sideways. */
+@container (max-width: 879px) {
   .reader { grid-template-columns: minmax(0, 1fr); }
   .scene-rail {
     grid-column: 1; grid-row: 1;
@@ -496,11 +499,13 @@
 @media (max-height: 560px) {
   .script-frame { height: 62vh; }
 }
-/* Only above 900px wide, where the rail sits beside the script: below that
- * the 900px block already caps it at a short strip above the script, and a
- * short window must not grow it back into a tall one there. */
-@media (max-height: 560px) and (min-width: 901px) {
-  .scene-rail { max-height: 62vh; }
+/* Only while the rail sits beside the script (a block 880 or wider): in a
+ * narrower one the container block above already caps it at a short strip
+ * above the script, and a short window must not grow it back there. */
+@media (max-height: 560px) {
+  @container (min-width: 880px) {
+    .scene-rail { max-height: 62vh; }
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .scene-link { transition: none; }
@@ -554,9 +559,11 @@
  * 6-inch Kindle: the preview shows formatting, not the device's line
  * breaks, which a reader's own font size changes anyway.
  *
- * One column below 900px. Two columns on a narrow window would give the
- * script a measure narrower than the thing it is previewing, which is worse
- * than no preview: it would misrepresent the book. */
+ * One column in a block under 880 wide (a container query on the sheet,
+ * so a 1028px window): 880 is 420 + the 32px gap + 428, so the preview
+ * beside the settings is never under 420. Two columns any narrower would
+ * give the script a measure narrower than the thing it is previewing,
+ * which is worse than no preview: it would misrepresent the book. */
 .tune-split {
   display: grid;
   grid-template-columns: 420px minmax(0, 1fr);
@@ -578,7 +585,7 @@
   border-radius: var(--radius-well);
   background: var(--paper);
 }
-@media (max-width: 900px) {
+@container (max-width: 879px) {
   .tune-split { grid-template-columns: 1fr; }
   /* Unstuck as well as unsplit: a sticky panel in a single column would
    * follow the reader down the page and sit on top of the knobs. */
