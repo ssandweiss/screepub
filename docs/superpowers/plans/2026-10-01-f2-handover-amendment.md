@@ -116,6 +116,20 @@ release notes**, with one line telling people who had both apps to delete
 4. **Version and go-ahead** for each release: asked at the time, in the
    owner's own chat, never relayed.
 
+## Status, 2026-10-01 evening
+
+The owner answered every decision below: accept the four window-user
+costs; the image is `Screepub-macOS.dmg`; the cask is RETIRED (his direct
+choice, over "keep"); keep the F3 wait. Built, none of it pushed:
+
+- **F2** on `worktree-f2-identifier`: identity, image name, one `.dmg`,
+  cask retirement in the tap scripts, the QA section. The other session's
+  `f2-docs` branch sits on top with the README, site and doc lines.
+- **The CLI move** on `cli-move`, stacked on F2.
+- **F3** not started: it waits for the other session's second batch
+  (which edits retired-coverage, app-references and weekly-toolchain) to
+  land, to avoid rebasing a 66-file sweep across it.
+
 ## Order of work
 
 Four releases from here, each changing one kind of thing, because each is
