@@ -161,7 +161,7 @@ describe("release.yml's bundle step, executed as bash", () => {
     expect(lines('bun')[0]).not.toContain('--updater');
   });
 
-  test('the macOS leg asks for a universal bundle AND the transition overlay', () => {
+  test('the macOS leg asks for a universal bundle, the updater, and no overlay', () => {
     // --arch universal and no --target. build-app-bundle.ts derives
     // universal-apple-darwin from the arch precisely so the two cannot
     // disagree: a universal arch with a per-arch target would produce a
@@ -173,9 +173,10 @@ describe("release.yml's bundle step, executed as bash", () => {
     // archive and its signature, and the tool refuses to start without
     // TAURI_SIGNING_PRIVATE_KEY, so a release without the secret fails in
     // seconds rather than after a full universal build.
+    // No --config: the transition overlay was deleted at the identifier
+    // release, when the window became the Mac app under the same name.
     expect(lines('bun')).toEqual([
-      'tools/build-app-bundle.ts\t--version\t0.6.0\t--out\tbundles\t--arch\tuniversal' +
-        '\t--config\ttauri.transition.conf.json\t--updater',
+      'tools/build-app-bundle.ts\t--version\t0.6.0\t--out\tbundles\t--arch\tuniversal\t--updater',
     ]);
     expect(lines('bun')[0]).not.toContain('--target');
   });

@@ -116,7 +116,11 @@ const PATTERNS: { name: string; re: RegExp; what: string }[] = [
   { name: 'swift-symbol', re: /ScreepubKit|ScreepubApp|KitCheck|kit-check|KFXKit/g, what: 'a Swift module or the kit-check executable' },
   { name: 'swift-file', re: /\b[A-Za-z][A-Za-z0-9-]*\.swift\b/g, what: 'a Swift source file that lives in app/' },
   { name: 'swift-build', re: /swift (?:build|run)|build-app\.sh|build-lib\.sh/g, what: 'a command that builds the Swift app' },
-  { name: 'swift-artifact', re: /Screepub-macOS|Screepub\.app/g, what: 'a release artifact only the Swift app produces' },
+  // `Screepub.app` left this pattern at the identifier release: with the
+  // transition overlay gone, the window's own bundle is Screepub.app, so the
+  // name no longer says "the Swift app". Paths into app/dist/ still do, and
+  // the path pattern above catches those.
+  { name: 'swift-artifact', re: /Screepub-macOS/g, what: 'a release artifact only the Swift app produces' },
 ];
 
 type Row = { refs: number; category: string; breaks: string };

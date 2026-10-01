@@ -52,7 +52,7 @@ function arrivals(tag: string, opts: { sig?: boolean | string; tar?: boolean; ex
   }
   if (opts.tar !== false) writeFileSync(join(dir, TAR), 'gzip bytes');
   if (opts.sig === undefined || opts.sig === true) {
-    writeFileSync(join(dir, `${TAR}.sig`), fakeSignatureBox('Screepub Desktop.app.tar.gz'));
+    writeFileSync(join(dir, `${TAR}.sig`), fakeSignatureBox('Screepub.app.tar.gz'));
   } else if (typeof opts.sig === 'string') {
     writeFileSync(join(dir, `${TAR}.sig`), opts.sig);
   }
@@ -90,7 +90,7 @@ describe('collecting what arrived', () => {
     expect(found).toEqual([
       {
         name: TAR,
-        signature: fakeSignatureBox('Screepub Desktop.app.tar.gz'),
+        signature: fakeSignatureBox('Screepub.app.tar.gz'),
         platforms: ['darwin-x86_64', 'darwin-aarch64'],
       },
     ]);
@@ -131,7 +131,7 @@ describe('collecting what arrived', () => {
 describe('rendering the manifest', () => {
   const one: SignedArtifact = {
     name: TAR,
-    signature: fakeSignatureBox('Screepub Desktop.app.tar.gz'),
+    signature: fakeSignatureBox('Screepub.app.tar.gz'),
     platforms: ['darwin-x86_64', 'darwin-aarch64'],
   };
   const when = new Date('2026-09-21T18:00:00Z');
@@ -229,7 +229,7 @@ describe('end to end, through the real tool', () => {
     expect(m.version).toBe('0.6.1');
     expect(Object.keys(m.platforms).sort()).toEqual(['darwin-aarch64', 'darwin-x86_64']);
     expect(m.platforms['darwin-aarch64'].signature).toBe(
-      fakeSignatureBox('Screepub Desktop.app.tar.gz'),
+      fakeSignatureBox('Screepub.app.tar.gz'),
     );
     expect(m.platforms['darwin-aarch64'].url).toBe(
       `https://github.com/ssandweiss/screepub/releases/download/v0.6.1/${TAR}`,

@@ -228,11 +228,11 @@ describe('finding the file the bundler wrote', () => {
   test('it returns the one artifact with the right extension', () => {
     const dir = join(OUT, 'find-one');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'Screepub Desktop_0.6.0_aarch64.dmg'), 'x');
+    writeFileSync(join(dir, 'Screepub_0.6.0_aarch64.dmg'), 'x');
     // Other formats beside it are not candidates.
-    writeFileSync(join(dir, 'Screepub Desktop_0.6.0_aarch64.dmg.sig'), 'x');
+    writeFileSync(join(dir, 'Screepub_0.6.0_aarch64.dmg.sig'), 'x');
     expect(discoverArtifact(dir, kind('dmg'))).toBe(
-      join(dir, 'Screepub Desktop_0.6.0_aarch64.dmg'),
+      join(dir, 'Screepub_0.6.0_aarch64.dmg'),
     );
   });
 
@@ -243,9 +243,9 @@ describe('finding the file the bundler wrote', () => {
     // artifact, and the build fails for the wrong reason.
     const dir = join(OUT, 'find-rw');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'rw.4711.Screepub Desktop_0.6.0_x64.dmg'), 'x');
-    writeFileSync(join(dir, 'Screepub Desktop_0.6.0_x64.dmg'), 'x');
-    expect(discoverArtifact(dir, kind('dmg'))).toBe(join(dir, 'Screepub Desktop_0.6.0_x64.dmg'));
+    writeFileSync(join(dir, 'rw.4711.Screepub_0.6.0_x64.dmg'), 'x');
+    writeFileSync(join(dir, 'Screepub_0.6.0_x64.dmg'), 'x');
+    expect(discoverArtifact(dir, kind('dmg'))).toBe(join(dir, 'Screepub_0.6.0_x64.dmg'));
   });
 
   test('a directory holding only the leftover temporary image is still a failure', () => {
@@ -253,7 +253,7 @@ describe('finding the file the bundler wrote', () => {
     // must not turn "nothing was built" into a silent success.
     const dir = join(OUT, 'find-only-rw');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'rw.4711.Screepub Desktop_0.6.0_x64.dmg'), 'x');
+    writeFileSync(join(dir, 'rw.4711.Screepub_0.6.0_x64.dmg'), 'x');
     expect(() => discoverArtifact(dir, kind('dmg'))).toThrow(/find-only-rw/);
   });
 
@@ -697,7 +697,7 @@ describe('a whole run, against a fake cargo', () => {
 
   /** A fake cargo for macOS that writes the DMG AND, when asked, the
    *  updater archive and its signature under the bundler's own names,
-   *  which the transition overlay makes "Screepub Desktop". */
+   *  which follow productName ("Screepub"). */
   const fakeMacCargo = (
     desktopDir: string,
     write: { tar?: boolean; sig?: boolean | string } = { tar: true, sig: true },
@@ -709,14 +709,14 @@ describe('a whole run, against a fake cargo', () => {
       for (const k of kindsForOs('macos')) {
         const dir = bundleDirFor(k, target, desktopDir);
         mkdirSync(dir, { recursive: true });
-        plausible(join(dir, `Screepub Desktop${k.ext}`), k);
+        plausible(join(dir, `Screepub${k.ext}`), k);
       }
       const macos = bundleDirFor(appTar(), target, desktopDir);
       mkdirSync(macos, { recursive: true });
-      const tar = join(macos, 'Screepub Desktop.app.tar.gz');
+      const tar = join(macos, 'Screepub.app.tar.gz');
       if (write.tar) plausible(tar, appTar() as unknown as BundleKind);
       if (write.sig === true) {
-        writeFileSync(`${tar}${SIGNATURE_EXT}`, fakeSignatureBox('Screepub Desktop.app.tar.gz'));
+        writeFileSync(`${tar}${SIGNATURE_EXT}`, fakeSignatureBox('Screepub.app.tar.gz'));
       } else if (typeof write.sig === 'string') {
         writeFileSync(`${tar}${SIGNATURE_EXT}`, write.sig);
       }
@@ -829,7 +829,7 @@ describe('a whole run, against a fake cargo', () => {
     // and latest.json carries its CONTENT. A copy that changed one byte
     // would make every install fail with "signature could not be decoded".
     expect(readFileSync(join(out, 'Screepub-Desktop-macOS-universal.app.tar.gz.sig'), 'utf8')).toBe(
-      fakeSignatureBox('Screepub Desktop.app.tar.gz'),
+      fakeSignatureBox('Screepub.app.tar.gz'),
     );
     // SHA256SUMS-app keeps naming installers only: the archive is proven by
     // its signature, and app-upload rebuilds the checksums file over

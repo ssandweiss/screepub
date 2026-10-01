@@ -42,8 +42,9 @@ export function mountDmgApp(
     run(['hdiutil', 'detach', mount, '-force']);
   };
   try {
-    // Found by suffix, not by name: the transition overlay ships "Screepub
-    // Desktop.app" and the handover renames it to "Screepub.app".
+    // Found by suffix, not by name: the bundle was "Screepub Desktop.app"
+    // until the identifier release and is "Screepub.app" since, and an
+    // image from either side of that must still be readable.
     // Sorted so a two-.app error names them in a stable order.
     const apps = readdirSync(mount)
       .filter((n) => n.endsWith('.app'))

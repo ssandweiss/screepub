@@ -21,9 +21,9 @@ afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 describe('a .sig file', () => {
   test('a well-formed box is read, and reports the key that made it', () => {
-    const parsed = parseSignatureBox(fakeSignatureBox('Screepub Desktop.app.tar.gz'));
+    const parsed = parseSignatureBox(fakeSignatureBox('Screepub.app.tar.gz'));
     expect(parsed.keyId).toBe(keyIdHex(FAKE_KEY_ID));
-    expect(parsed.fileName).toBe('Screepub Desktop.app.tar.gz');
+    expect(parsed.fileName).toBe('Screepub.app.tar.gz');
   });
 
   test('a trailing newline or none makes no difference', () => {

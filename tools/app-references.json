@@ -66,11 +66,6 @@
       "category": "test",
       "breaks": "`\"from\": \"Theme.swift\"` on seven tokens is now provenance, not a pin: this file is the source of truth and tests/brand-tokens.test.ts checks the frozen Swift copy against it, skipping once app/Sources/ScreepubApp/Theme.swift is gone. F3 criterion 12 is already satisfied and needs no further change here."
     },
-    "desktop/README.md": {
-      "refs": 1,
-      "category": "artifact",
-      "breaks": "Names Screepub.app — the bundle name the Tauri app takes over at F2."
-    },
     "desktop/ui/feedback.js": {
       "refs": 4,
       "category": "note",
@@ -261,11 +256,6 @@
       "category": "test",
       "breaks": "Expects the site's Every download table to offer Screepub-macOS.dmg, with a status, beside the window's bundles. At the identifier release that row and the buttons move to the window's DMG, and this expectation moves with them."
     },
-    "tests/smoke-bundle.test.ts": {
-      "refs": 3,
-      "category": "artifact",
-      "breaks": "Builds a fake DMG whose bundle is named Screepub.app. Harmless today; it collides in meaning once the Tauri bundle takes that name at F2."
-    },
     "tests/theme-colors.ts": {
       "refs": 5,
       "category": "test",
@@ -305,11 +295,6 @@
       "refs": 1,
       "category": "artifact",
       "breaks": "Verifies the published cask still serves Screepub-macOS.dmg. TAP MACHINERY, gate 3. It is run weekly by .github/workflows/tap-freshness.yml, which carries no textual reference of its own and is therefore INVISIBLE to this sweep — the second-order reference this row exists to record."
-    },
-    "tools/dmg.ts": {
-      "refs": 1,
-      "category": "artifact",
-      "breaks": "A comment saying the handover renames \"Screepub Desktop.app\" to \"Screepub.app\". Moved here from smoke-bundle.ts when the two DMG tools began sharing this module."
     },
     "tools/frozen-app-manifest.json": {
       "refs": 67,

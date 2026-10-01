@@ -699,7 +699,11 @@ jobs:
             # full universal build. There is no degrade path on purpose:
             # ADR 2026-09-21 makes the updater the precondition for v0.6.1,
             # and a release that cannot sign one is the thing it forbids.
-            ARGS+=(--arch universal --config tauri.transition.conf.json --updater)
+            #
+            # No config overlay: the transition one that renamed this build
+            # "Screepub Desktop" was deleted at the identifier release, when
+            # the window became the Mac app (same identifier, same name).
+            ARGS+=(--arch universal --updater)
           fi
           bun tools/build-app-bundle.ts ${ARGS[@]+"${ARGS[@]}"}
       # tauri-bundler notarizes the .app and NEVER the image. app.rs

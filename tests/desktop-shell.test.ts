@@ -503,11 +503,15 @@ describe('the window is granted no more than it needs', () => {
     }
   });
 
-  test('the identifier does not collide with the Swift app’s', () => {
-    // app/Sources/KitCheck/main.swift pins com.darkwell.screepub to the
-    // Swift app's code signature, and both apps exist at once until piece F.
-    expect(CONFIG.identifier).toBe('com.darkwell.screepub.desktop');
-    expect(CONFIG.identifier).not.toBe('com.darkwell.screepub');
+  test('the identifier IS the Swift app’s, on purpose: that is the handover', () => {
+    // This test used to assert the opposite, and was the tripwire that kept
+    // the two apps from colliding while both shipped. It was inverted
+    // deliberately at the identifier release (ADR 2026-09-20, plan
+    // 2026-10-01-f2-handover-amendment.md): the installed Swift app's
+    // updater pins com.darkwell.screepub, so sharing it is what lets that
+    // updater install this app in its place. Do not change it back without
+    // reading both.
+    expect(CONFIG.identifier).toBe('com.darkwell.screepub');
   });
 
   test('the frontend is static files, not a dev server', () => {
@@ -764,8 +768,10 @@ describe('the icon set the bundlers need', () => {
 describe('what the Linux package tells a user about itself', () => {
   test('the publisher is the company, not a slice of the bundle identifier', () => {
     // Absent this, tauri-bundler derives Maintainer: from the SECOND segment
-    // of com.darkwell.screepub.desktop and the .deb says "Maintainer:
-    // darkwell". Observed, before this change, in a real build's control file.
+    // of the bundle identifier (then com.darkwell.screepub.desktop, now
+    // com.darkwell.screepub; "darkwell" either way) and the .deb says
+    // "Maintainer: darkwell". Observed, before this change, in a real build's
+    // control file.
     expect(CONFIG.bundle.publisher).toBe('Darkwell Entertainment LLC');
   });
 
@@ -849,89 +855,49 @@ describe('the window has a floor', () => {
   });
 });
 
-describe('the macOS transition overlay', () => {
-  const overlayPath = join(REPO, 'desktop', 'src-tauri', 'tauri.transition.conf.json');
+describe('one name on every platform: the transition overlay is gone', () => {
+  // Until the identifier release the macOS build carried an overlay,
+  // tauri.transition.conf.json, that renamed the app "Screepub Desktop" so it
+  // could be installed beside the Swift app's Screepub.app. At the handover
+  // the window BECOMES that app (same identifier, same name), so the overlay
+  // was deleted, not edited. Plan 2026-10-01-f2-handover-amendment.md.
+  const srcTauri = join(REPO, 'desktop', 'src-tauri');
 
-  test('it exists, and it is passed to cargo tauri build by the macOS job only', () => {
-    expect(existsSync(overlayPath)).toBe(true);
+  test('the overlay file does not exist', () => {
+    expect(existsSync(join(srcTauri, 'tauri.transition.conf.json'))).toBe(false);
   });
 
-  test('it overrides the product NAME and nothing else', () => {
-    // A config overlay is merged into tauri.conf.json wholesale. Every
-    // extra key here is a setting that silently differs between the macOS
-    // build and the other two, on a platform nobody here can inspect. One
-    // key is auditable; three are not.
-    //
-    // An earlier draft carried a leading-underscore "_why" key, on the
-    // theory that Tauri ignores unrecognized top-level keys the way a `_`
-    // prefix is ignored elsewhere in this codebase's own conventions. It
-    // does not: tauri-cli 2.11.4's own config.schema.json (the version
-    // desktop.yml pins, in $CARGO_HOME/registry/.../tauri-cli-2.11.4/
-    // config.schema.json) sets `"additionalProperties": false` at the top
-    // level, with no exception for `_`-prefixed names, and RFC 7396 merge
-    // patch carries a brand-new key straight into the merged object.
-    // Confirmed by running the actual command Task 10 will run:
-    // `cargo tauri build --config tauri.transition.conf.json --bundles deb`
-    // failed outright with `Additional properties are not allowed ('_why'
-    // was unexpected)` while the "_why" key was present, and succeeded
-    // (`Bundling Screepub Desktop_0.6.0_arm64.deb`) once it was removed —
-    // see desktop/README.md. So there is no second key here at all, ever:
-    // an overlay this schema accepts can only ever be exactly the one key
-    // it exists to set.
-    const overlay = JSON.parse(readFileSync(overlayPath, 'utf8')) as Record<string, unknown>;
-    expect(Object.keys(overlay)).toEqual(['productName']);
-    expect(overlay.productName).toBe('Screepub Desktop');
-  });
-
-  test('it does not collide with the SwiftUI app’s bundle name', () => {
-    const overlay = JSON.parse(readFileSync(overlayPath, 'utf8')) as { productName: string };
-    // app/build-app.sh produces Screepub.app and app/release.sh ships it
-    // inside Screepub-macOS.dmg, which tools/bump-tap.sh hardcodes. Both
-    // apps must be installable at once until piece F.
-    expect(overlay.productName).not.toBe('Screepub');
-    expect(overlay.productName).not.toBe(CONFIG.productName);
-  });
-
-  test('it does not touch the identifier, which already differs', () => {
-    // If the overlay ever set an identifier, the two apps could collide in
-    // LaunchServices in a way the filename difference would hide.
-    const overlay = JSON.parse(readFileSync(overlayPath, 'utf8')) as Record<string, unknown>;
-    expect(overlay.identifier).toBeUndefined();
-    expect(CONFIG.identifier).toBe('com.darkwell.screepub.desktop');
-  });
-
-  test('it does not touch the window title', () => {
-    // productName names the .app; app.windows[0].title names the window. A
-    // user who opens the app should see "Screepub", not the transition
-    // spelling, on every platform.
-    const overlay = JSON.parse(readFileSync(overlayPath, 'utf8')) as Record<string, unknown>;
-    expect(overlay.app).toBeUndefined();
-    expect(CONFIG.app.windows[0].title).toBe('Screepub');
-  });
-
-  test('merging it into tauri.conf.json actually changes productName and nothing else', () => {
-    // The tests above only inspect the overlay file in isolation — a file
-    // that says the right thing but is never truly merged (a typo'd key,
-    // a value of the wrong type) would still pass every one of them. This
-    // applies the exact merge Tauri's own docs describe for `--config` (a
-    // shallow JSON Merge Patch: RFC 7396) against the real tauri.conf.json,
-    // so the effect — not just the file's existence — is what is pinned.
-    // https://v2.tauri.app/reference/config/
-    //
-    // This mirrors, at the JS level, what was independently confirmed by
-    // actually invoking `cargo tauri build --config tauri.transition.conf.json`
-    // on this machine (see desktop/README.md and the test above) — this
-    // suite cannot spawn cargo itself, so this is the closest an automated
-    // check gets, and the manual run is what proves the two agree.
-    const overlay = JSON.parse(readFileSync(overlayPath, 'utf8')) as Record<string, unknown>;
-    const merged: Record<string, unknown> = { ...CONFIG, ...overlay };
-    expect(merged.productName).toBe('Screepub Desktop');
-    // Every other top-level key is byte-for-byte what tauri.conf.json alone
-    // says — the overlay altered exactly one thing.
-    for (const key of Object.keys(CONFIG)) {
-      if (key === 'productName') continue;
-      expect(merged[key]).toEqual(CONFIG[key]);
+  test('no workflow passes it, and no tool names it', () => {
+    // A leftover `--config tauri.transition.conf.json` would fail the
+    // release's macOS leg outright (the file is gone), which is at least
+    // loud; this catches it before a tag does.
+    const offenders: string[] = [];
+    for (const dir of [join(REPO, '.github', 'workflows'), join(REPO, 'tools')]) {
+      for (const f of readdirSync(dir)) {
+        if (!/\.(ya?ml|ts|sh)$/.test(f)) continue;
+        if (readFileSync(join(dir, f), 'utf8').includes('tauri.transition.conf.json')) offenders.push(f);
+      }
     }
+    expect(offenders).toEqual([]);
+  });
+
+  test('the only overlay left renames nothing and re-identifies nothing', () => {
+    // tauri.updater.conf.json exists for its own reason (the updater flag
+    // needs the signing key, so it cannot live in tauri.conf.json). It must
+    // never become a second way to give the Mac build a different name.
+    const overlays = readdirSync(srcTauri).filter((f) => /^tauri\..+\.conf\.json$/.test(f));
+    expect(overlays).toEqual(['tauri.updater.conf.json']);
+    const updater = JSON.parse(readFileSync(join(srcTauri, 'tauri.updater.conf.json'), 'utf8')) as Record<string, unknown>;
+    expect(updater.productName).toBeUndefined();
+    expect(updater.identifier).toBeUndefined();
+  });
+
+  test('the bundle and the window are both "Screepub"', () => {
+    // The .app inside the Mac image is now Screepub.app, the same name the
+    // Swift app's updater swaps into place (it takes the first .app it finds
+    // in the image, whatever its name, and installs it at its own path).
+    expect(CONFIG.productName).toBe('Screepub');
+    expect(CONFIG.app.windows[0].title).toBe('Screepub');
   });
 });
 

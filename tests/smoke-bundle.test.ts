@@ -197,7 +197,7 @@ describe('opening a .deb without installing it', () => {
 });
 
 describe('opening a .dmg', () => {
-  const app = 'Screepub Desktop.app';
+  const app = 'Screepub.app';
 
   /** Stands in for hdiutil: `attach` creates the mount tree the real one
    *  would have created, `detach` records that it was called. */

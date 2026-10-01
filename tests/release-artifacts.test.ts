@@ -329,12 +329,13 @@ describe('release.yml ships the cross-platform artifacts', () => {
     expect(steps[rustup]!.run).not.toContain('rustup target add universal-apple-darwin');
   });
 
-  test('the macOS leg passes the transition overlay, and only the macOS leg', () => {
+  test('no leg passes a config overlay that renames the product', () => {
+    // Until the identifier release the macOS leg passed
+    // tauri.transition.conf.json, which named the build "Screepub Desktop".
+    // That file is gone: the Mac app is "Screepub" now, like the other two.
     const text = runText(rel.jobs['app-bundles']!);
-    expect(text).toContain('tauri.transition.conf.json');
-    // It must not reach the Linux or Windows legs, whose $ARCH is x64:
-    // the overlay renames the product for macOS only.
-    expect(text).toMatch(/if \[ "\$ARCH" = universal \][\s\S]*tauri\.transition\.conf\.json/);
+    expect(text).not.toContain('tauri.transition.conf.json');
+    expect(text).not.toMatch(/--config\b/);
   });
 
   test('the macOS leg signs and notarizes from secrets the repo already has', () => {

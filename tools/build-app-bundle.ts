@@ -2,9 +2,9 @@
 //
 //   bun tools/build-app-bundle.ts --version 0.6.0 --out dist/
 //   bun tools/build-app-bundle.ts --version 0.6.0 --out dist/ \
-//     --target aarch64-apple-darwin --config tauri.transition.conf.json
+//     --target aarch64-apple-darwin
 //   bun tools/build-app-bundle.ts --version 0.6.0 --out dist/ \
-//     --arch universal --config tauri.transition.conf.json --updater
+//     --arch universal --updater
 //       # the release's macOS leg: ALSO the updater archive and its
 //       # signature. Needs TAURI_SIGNING_PRIVATE_KEY (a path or the key
 //       # text) and TAURI_SIGNING_PRIVATE_KEY_PASSWORD (set, and "" for a
@@ -65,8 +65,9 @@ export interface BundleKind extends ArtifactShape {
   /** The directory under `target/[<triple>/]release/bundle/`. */
   dir: string;
   /** The stable published filename. Deliberately ours, not the bundler's:
-   *  tauri names the DMG after productName, which the macOS transition
-   *  overlay changes to "Screepub Desktop" (with a space). */
+   *  tauri names the DMG after productName and the version
+   *  (`Screepub_0.8.0_universal.dmg`), and a page linking to
+   *  releases/latest/download/<name> needs a name that never changes. */
   releasedName(version: string, arch: BundleArch): string;
 }
 
@@ -247,7 +248,8 @@ export function bundleDirFor(
  *
  *  Reconstructing tauri's own filename would mean two places agreeing about
  *  a third party's format string -- and productName, which is half of it,
- *  is exactly what the macOS transition overlay changes. So: glob for the
+ *  is exactly what a config overlay can change (the macOS build carried one
+ *  until the identifier release). So: glob for the
  *  extension and insist on EXACTLY ONE match, which is what turns a glob
  *  into a fact. `rw.` is excluded by name because bundle_dmg leaves
  *  `rw.$$.<name>.dmg` behind when it dies partway. */

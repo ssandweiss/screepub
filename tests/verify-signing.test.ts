@@ -159,7 +159,7 @@ describe('reading the identifier back off codesign', () => {
   // codesign -dv writes to STDERR, which is the detail that makes a naive
   // implementation report "no identifier" on a perfectly signed bundle.
   const SAMPLE = [
-    'Executable=/Volumes/Screepub/Screepub Desktop.app/Contents/MacOS/Screepub',
+    'Executable=/Volumes/Screepub/Screepub.app/Contents/MacOS/Screepub',
     'Identifier=com.darkwell.screepub.desktop',
     'Format=app bundle with Mach-O universal (x86_64 arm64)',
     'TeamIdentifier=XSRB3D643J',
@@ -260,7 +260,7 @@ describe('the verdict: what the frozen updater would do with this artifact', () 
   const v060 = () =>
     judgeSigning(
       '/tmp/Screepub-Desktop-macOS-universal.dmg',
-      '/V/Screepub Desktop.app',
+      '/V/Screepub.app',
       artifact({ dmgSigned: true, appSigned: true, identifier: 'com.darkwell.screepub.desktop' }),
     );
 
@@ -312,7 +312,7 @@ describe('the verdict: what the frozen updater would do with this artifact', () 
     // Those are two different questions and the verdict answers both.
     const v = judgeSigning(
       '/tmp/Screepub-Desktop-macOS-universal.dmg',
-      '/V/Screepub Desktop.app',
+      '/V/Screepub.app',
       artifact({
         dmgSigned: true,
         appSigned: true,

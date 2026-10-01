@@ -17,7 +17,7 @@ import { FAKE_KEY_ID, fakePublicKeyBox, fakeSignatureBox } from './signature-box
 const REPO = 'ssandweiss/screepub';
 const TAR = 'Screepub-Desktop-macOS-universal.app.tar.gz';
 const url = (v: string, name: string) => `https://github.com/${REPO}/releases/download/v${v}/${name}`;
-const SIG = fakeSignatureBox('Screepub Desktop.app.tar.gz');
+const SIG = fakeSignatureBox('Screepub.app.tar.gz');
 const PUBKEY = fakePublicKeyBox();
 
 const release = (v: string, assets: string[] = [TAR, `${TAR}.sig`, 'latest.json', 'Screepub-Desktop-macOS-universal.dmg']): Release => ({
@@ -73,7 +73,7 @@ describe('judging a manifest against a release', () => {
     // The plugin verifies the download against the manifest's signature.
     // If that text drifted from the .sig beside the archive, every install
     // fails, and only a user would find out.
-    const other = fakeSignatureBox('Screepub Desktop.app.tar.gz', Buffer.from('1112131415161718', 'hex'));
+    const other = fakeSignatureBox('Screepub.app.tar.gz', Buffer.from('1112131415161718', 'hex'));
     const v = judgeManifest(manifest('0.6.1'), release('0.6.1'), { [`${TAR}.sig`]: other }, PUBKEY);
     expect(v.ok).toBe(false);
     if (!v.ok) expect(v.problems.join('\n')).toMatch(/signature/i);
@@ -90,7 +90,7 @@ describe('judging a manifest against a release', () => {
     // key differ. A release signed with a rotated or wrong key would
     // publish fine and fail every install.
     const otherKey = Buffer.from('1112131415161718', 'hex');
-    const foreign = fakeSignatureBox('Screepub Desktop.app.tar.gz', otherKey);
+    const foreign = fakeSignatureBox('Screepub.app.tar.gz', otherKey);
     const v = judgeManifest(manifest('0.6.1', {
       'darwin-x86_64': { url: url('0.6.1', TAR), signature: foreign },
       'darwin-aarch64': { url: url('0.6.1', TAR), signature: foreign },
