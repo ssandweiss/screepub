@@ -49,9 +49,9 @@ Where a decision is `port`, the ADR's rule holds: **the port lands in
 **AS BUILT, 2026-10-01.** `Decision` is what was SETTLED on 2026-09-14;
 `Built?` is what exists in `src/` and the window, with its tests. On
 2026-09-21 a parity audit found every `port` row at zero lines; the send
-routes, Apple Books and the feedback link have been built since.
-`update-error-descriptions` is still marked **no** here; whether the
-window's update messages now cover it has not been re-audited. See [the parity audit](https://github.com/ssandweiss/screepub/blob/7eb40e5/docs/parity-audit.md) (since emptied and deleted), which also
+routes, Apple Books and the feedback link have been built since, and
+`update-error-descriptions` was re-audited on 2026-10-01 and is built in
+kind (its row says what carried over and what the plugin replaced). See [the parity audit](https://github.com/ssandweiss/screepub/blob/7eb40e5/docs/parity-audit.md) (since emptied and deleted), which also
 names four features this table does not: the feedback and Report-a-Bug
 links, Show in Finder, the KFX plugin installer, and the gear's three
 settings. The installer was written but unreachable until 2026-09-23, when
@@ -66,7 +66,7 @@ piece D gave it a CLI verb and a button (see its row below).
 | `updater-version-compare` | 17 | `port` | **yes**, 2026-09-21 | `src/update/compare.ts` and its generated twin in `desktop/ui/update-compare.js`; the downgrade defence found the hard way is `isDescribeSuffix`. |
 | `update-selection` | 17 | **`replaced`** (was `port`), 2026-09-21 | n/a | The plugin selects: one manifest, one platform key. Which release and which asset is decided at PUBLISH time by `tools/build-update-manifest.ts` and re-checked by `tools/check-latest.ts`, both tested. |
 | `update-decoding` | 14 | **`replaced`** (was `port`), 2026-09-21 | n/a | The plugin decodes `latest.json`; a malformed one is a `check()` error the window shows as a message, and the manifest is validated when published and weekly. |
-| `update-error-descriptions` | 11 | `port` | **no** | The window side, per the contract sent to the interface-pass session 2026-09-21: a rejection from `check()` is a message, never "up to date". |
+| `update-error-descriptions` | 11 | `port` | **yes, in kind**, 2026-09-21 (re-audited 2026-10-01) | What carries over is the behaviour: a rejection from `check()` is a message carrying the failure's own text, never "up to date". `runCheck` in `desktop/ui/update.js`; `tests/desktop-ui.test.ts`, "a failed check is an error, never \"you are up to date\"" (behaviour), plus a source-text pin that the notes surface shows `result.message`. The Swift checks on Foundation's placeholder text and on GitHub-JSON decode detail have no counterpart because the plugin, not our code, fetches and decodes (`update-decoding`, `replaced`). |
 | `self-update-installer` | 26 | **`replaced`** (was `port`), 2026-09-21 | n/a | Tauri's updater plugin does the swap and verifies its own signature. Install-time codesign pinning is the accepted loss: see below. |
 | `release-notes-parsing` | 21 | `accept-loss` | yes, in kind | Of the Swift assertions only. The feature is replaced in kind and nothing is lost. |
 | `kfx-install-plugin` | not a kit-check section | **`replaced`** (was `accept-loss`) | **yes**, 2026-09-23 | Calibre's own plugin index and installer replace the vendored zip; `screepub kfx-install` and the Send page's Install button reach it (piece D). |
