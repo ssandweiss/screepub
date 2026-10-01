@@ -7779,28 +7779,42 @@ describe('a refused file is no longer a dead end', () => {
     expect(body).toContain('C++ crashed on page 3+4');
   });
 
-  test('the report carries no home folder and no file name, whatever the engine said', () => {
-    // The engine's sentence can quote a path, and a path names the person
-    // (their home folder) and the script (its file name). The report goes to
-    // a public URL, so both are taken out before it is built.
+  test('the report carries no path at all, only its extension, whatever the engine said', () => {
+    // The engine's sentence can quote a path, and every part of one can name
+    // the person (their home folder) or the script: its file name, and the
+    // library folder the book sits in, which is named after the script too.
+    // The report goes to a public URL, so each whole path becomes <path>,
+    // keeping only the extension, which tells a bug report what kind of file.
     const bodyOf = (context: string, home?: string) => parse(feedback.newIssueUrl({
       appVersion: '0.6.0', osVersion: 'x', context, home,
     })).searchParams.get('body') ?? '';
 
+    const library = bodyOf('could not write /Users/someone/Documents/Screepub/field-station/field-station.epub');
+    expect(library).not.toContain('field-station');
+    expect(library).not.toContain('someone');
+    expect(library).toContain('could not write <path>.epub');
+
+    const windows = bodyOf('cannot read C:\\Users\\someone\\Documents\\Screepub\\field-station\\field-station.epub, so stopped');
+    expect(windows).not.toContain('field-station');
+    expect(windows).not.toContain('someone');
+    expect(windows).toContain('cannot read <path>.epub, so stopped');
+
     const mac = bodyOf("internal: ENOENT: no such file or directory, open '/Users/jdoe/Scripts/Night Shift v2.pdf'");
     expect(mac).not.toContain('jdoe');
     expect(mac).not.toContain('Night Shift');
-    expect(mac).toContain("open '~/Scripts/<file>'");
+    expect(mac).toContain("open '<path>.pdf'");
 
     const told = bodyOf('could not write /srv/people/jdoe/Library/Screepub/night/Night Shift.epub because the disk is full', '/srv/people/jdoe');
-    expect(told).toContain('could not write ~/Library/Screepub/night/<file> because the disk is full');
+    expect(told).toContain('could not write <path>.epub because the disk is full');
+
+    const tilde = bodyOf('cannot read ~/field-station/notes and gave up');
+    expect(tilde).toContain('cannot read <path> and gave up');
 
     const linux = bodyOf('cannot read /home/jdoe/x.pdf.');
-    expect(linux).toContain('cannot read ~/<file>.');
+    expect(linux).toContain('cannot read <path>.pdf.');
 
-    const windows = bodyOf('cannot read C:\\Users\\jdoe\\Desktop\\Night Shift.pdf');
-    expect(windows).not.toContain('jdoe');
-    expect(windows).toContain('cannot read ~\\Desktop\\<file>');
+    // A bare home folder, with nothing after it, is still not the user's name.
+    expect(bodyOf('home is /Users/jdoe')).not.toContain('jdoe');
 
     // Prose with a slash in it is not a path, and a link is not mangled.
     const prose = bodyOf('scanned and/or locked; see https://example.com/help');

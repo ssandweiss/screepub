@@ -63,11 +63,13 @@ function nameLength(rest) {
   return word[0].length;
 }
 
-/** The engine's sentence, safe to put in a public URL: the home folder
- *  (`home` when the window knows it, else any /Users/name, /home/name or
- *  C:\Users\name) becomes ~, and every absolute path's file name becomes
- *  <file>, since a file name is usually the script's title. The folders in
- *  between are kept: they are what says where it went wrong. */
+/** The engine's sentence, safe to put in a public URL. Every absolute path
+ *  (POSIX, ~/... or Windows) becomes <path>, keeping only its last
+ *  segment's extension (<path>.epub), which says what kind of file without
+ *  saying which: a file name is usually the script's title, and so is the
+ *  library folder the book sits in. The home folder (`home` when the window
+ *  knows it, else any /Users/name, /home/name or C:\Users\name) becomes ~
+ *  first, which is all that is left of it when it stands alone. */
 export function redact(message, home = null) {
   let out = String(message ?? '');
   if (typeof home === 'string' && home.trim().length > 1) {
@@ -81,7 +83,8 @@ export function redact(message, home = null) {
     const at = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
     const rest = path.slice(at + 1);
     const n = nameLength(rest);
-    return n === 0 ? path : `${path.slice(0, at + 1)}<file>${rest.slice(n)}`;
+    const ext = /\.[A-Za-z0-9]{1,8}$/.exec(rest.slice(0, n))?.[0] ?? '';
+    return `<path>${ext}${rest.slice(n)}`;
   });
 }
 
