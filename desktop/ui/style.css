@@ -265,6 +265,8 @@ body {
   font-size: var(--text-note);
   line-height: 1.5;
   color: var(--alarm);
+  /* The engine's sentence can quote a long path with nowhere to break. */
+  overflow-wrap: anywhere;
 }
 
 /* Notes, as a sheet laid over the page. A real <dialog>, so Esc, the focus

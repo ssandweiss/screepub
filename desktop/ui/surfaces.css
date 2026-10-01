@@ -58,11 +58,15 @@
   max-width: var(--measure);
   margin: 0;
 }
+/* overflow-wrap: anywhere on every box below that can print a path, a title
+ * or an engine sentence: one long unbroken run (a library folder, a title
+ * with no spaces) would otherwise run straight out of its box. */
 .caption {
   font-size: var(--text-caption);
   color: var(--ink-muted);
   margin: var(--space-2) 0 0;
   max-width: var(--measure);
+  overflow-wrap: anywhere;
 }
 .code {
   font-family: var(--font-structure);
@@ -231,7 +235,11 @@
   font-family: var(--font-structure);
   font-size: var(--text-note);
   color: var(--ink-muted);
+  overflow-wrap: anywhere;
 }
+/* A flex item will not shrink below its longest word unless told it may, so
+ * a long library path would push the row wider than the page. */
+.well-ask > * { min-width: 0; }
 
 .work-line {
   font-family: var(--font-structure); font-size: var(--text-ui);
@@ -271,6 +279,7 @@
 .book-title {
   font-family: var(--font-structure); font-weight: 700; font-size: var(--text-code);
   letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink); margin: 0;
+  overflow-wrap: anywhere;
 }
 .book-by { font-family: var(--font-structure); font-size: var(--text-label); color: var(--ink-muted); margin: 0; }
 .book-count {
@@ -298,6 +307,7 @@
 .fault-body {
   font-family: var(--font-structure); font-size: var(--text-ui); line-height: 1.6;
   color: var(--ink); margin: 0 0 var(--space-6); max-width: 52ch;
+  overflow-wrap: anywhere;
 }
 .ways { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 
@@ -343,6 +353,7 @@
 .read-title {
   font-family: var(--font-structure); font-weight: 700; font-size: var(--text-ui);
   letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink); margin: 0;
+  overflow-wrap: anywhere;
 }
 .read-by {
   font-family: var(--font-structure); font-size: var(--text-note);

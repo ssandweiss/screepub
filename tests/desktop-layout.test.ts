@@ -244,6 +244,29 @@ describe('each Settings section is a box', () => {
   });
 });
 
+describe('a long unbroken line wraps inside its box', () => {
+  // A library path, a script title with no spaces, or an engine sentence
+  // quoting a long file path ran straight out of its box: nothing let the
+  // line break inside a word.
+  const style = windowCss('style.css');
+  const surfaces = windowCss('surfaces.css');
+
+  test('every box that prints a path, a title or an engine sentence may break anywhere', () => {
+    for (const [sheet, selector] of [
+      [surfaces, '.caption'], [surfaces, '.well-ask'], [surfaces, '.book-title'],
+      [surfaces, '.fault-body'], [surfaces, '.read-title'], [style, '.engine-fault'],
+    ] as const) {
+      expect(`${selector}: ${ruleBlock(sheet, selector).includes('overflow-wrap: anywhere')}`)
+        .toBe(`${selector}: true`);
+    }
+  });
+
+  test('the library line’s words may shrink inside the flex row they sit in', () => {
+    // A flex item will not go narrower than its longest word unless told it may.
+    expect(ruleBlock(surfaces, '.well-ask > *')).toContain('min-width: 0');
+  });
+});
+
 describe('a hidden element is hidden, whatever its class says about display', () => {
   // .btn { display: inline-block } outranked the browser's own
   // [hidden] { display: none }, so the release notes' hidden Install button
