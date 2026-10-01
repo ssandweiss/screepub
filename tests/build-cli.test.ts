@@ -26,6 +26,13 @@ import {
   writeChecksums,
   parseChecksums,
   buildAll,
+  MAC_TARGETS,
+  MAC_ENTITLEMENTS,
+  macTargetIdForHost,
+  signArgv,
+  signTarget,
+  notaryCredentials,
+  notarizeTarget,
   type TargetId,
   type Target,
   type Floors,
@@ -293,7 +300,13 @@ describe('parseBuildArgs', () => {
   });
 
   test('rejects an unknown flag rather than ignoring it', () => {
-    expect(() => parseBuildArgs(['--version', '0.6.0', '--out', '/tmp/x', '--sign'])).toThrow();
+    // --sign is a real flag now (see the --mac block), so the unknown one is
+    // spelled the way a hurried hand would spell it.
+    expect(() => parseBuildArgs(['--version', '0.6.0', '--out', '/tmp/x', '--sing', 'x'])).toThrow();
+  });
+
+  test('a plain build has no macOS half', () => {
+    expect(parseBuildArgs(['--version', '0.6.0', '--out', '/tmp/x']).mac).toBeUndefined();
   });
 });
 
@@ -899,5 +912,282 @@ describe('the tool runs from a command line', () => {
     // Nothing was created: the refusal happens during argument parsing, so
     // a mistyped target never costs a 100 MB write.
     expect(existsSync(NEVER)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The macOS half. Built only with --mac, on a Mac, and signed (or explicitly
+// --unsigned) before it is packaged: the cross job never passes --mac, so it
+// still cannot produce an unsigned Mach-O by accident. This is the build the
+// Homebrew formula serves, moved here so it can outlive the Swift app.
+// ---------------------------------------------------------------------------
+
+describe('the macOS target table', () => {
+  test('is exactly two per-arch rows, in the formula\'s own names', () => {
+    expect(MAC_TARGETS.map((t) => t.id)).toEqual(['macos-arm64', 'macos-x64']);
+    expect(MAC_TARGETS.map((t) => t.bunTarget)).toEqual(['bun-darwin-arm64', 'bun-darwin-x64']);
+    expect(MAC_TARGETS.map((t) => t.format)).toEqual(['macho-arm64', 'macho-x86-64']);
+    expect(MAC_TARGETS.map((t) => t.packaging)).toEqual(['tar.gz', 'tar.gz']);
+    expect(MAC_TARGETS.map((t) => t.binaryName)).toEqual(['screepub', 'screepub']);
+    expect(MAC_TARGETS.map((t) => t.archiveName)).toEqual([
+      'screepub-cli-macos-arm64.tar.gz',
+      'screepub-cli-macos-x64.tar.gz',
+    ]);
+    // The names are not ours to choose: the tap's bump script hardcodes
+    // them, and a rename here would leave the formula pointing at nothing.
+    const bump = readFileSync('tools/bump-tap.sh', 'utf8');
+    for (const t of MAC_TARGETS) expect(bump).toContain(t.archiveName);
+  });
+
+  test('shares no id, directory or archive with the cross targets', () => {
+    const cross = new Set(TARGETS.flatMap((t) => [t.id, t.archiveName, buildDir(t, '/o')]));
+    for (const t of MAC_TARGETS) {
+      expect(cross.has(t.id)).toBe(false);
+      expect(cross.has(t.archiveName)).toBe(false);
+      expect(cross.has(buildDir(t, '/o'))).toBe(false);
+    }
+  });
+
+  test('macTargetIdForHost names the Mac this is, and nothing else', () => {
+    expect(macTargetIdForHost('darwin', 'arm64')).toBe('macos-arm64');
+    expect(macTargetIdForHost('darwin', 'x64')).toBe('macos-x64');
+    expect(macTargetIdForHost('linux', 'arm64')).toBeUndefined();
+    expect(macTargetIdForHost('win32', 'x64')).toBeUndefined();
+    // The cross mapping is untouched: a Mac is still no host of THAT table.
+    expect(targetIdForHost('darwin', 'arm64')).toBeUndefined();
+  });
+});
+
+describe('parseBuildArgs with --mac', () => {
+  const BASE = ['--version', '0.6.0', '--out', '/tmp/x'];
+  const ID = 'Developer ID Application: Darkwell Entertainment LLC (XSRB3D643J)';
+
+  test('--mac --sign builds both Mac targets, signed, not notarized', () => {
+    const args = parseBuildArgs([...BASE, '--mac', '--sign', ID]);
+    expect(args.only).toEqual(['macos-arm64', 'macos-x64']);
+    expect(args.mac).toEqual({ sign: ID, notarize: false });
+  });
+
+  test('--notarize rides on --sign', () => {
+    expect(parseBuildArgs([...BASE, '--mac', '--sign', ID, '--notarize']).mac)
+      .toEqual({ sign: ID, notarize: true });
+  });
+
+  test('--mac --unsigned is allowed, and says so in the args', () => {
+    expect(parseBuildArgs([...BASE, '--mac', '--unsigned']).mac).toEqual({ sign: null, notarize: false });
+  });
+
+  test('--mac must say how it is signed: neither, or both, is refused', () => {
+    // An unsigned Mach-O is a Gatekeeper warning for every person who
+    // downloads it, so "unsigned" has to be asked for by name.
+    expect(() => parseBuildArgs([...BASE, '--mac'])).toThrow(/--sign/);
+    expect(() => parseBuildArgs([...BASE, '--mac'])).toThrow(/--unsigned/);
+    expect(() => parseBuildArgs([...BASE, '--mac', '--sign', ID, '--unsigned'])).toThrow(/both/);
+  });
+
+  test('an unsigned binary cannot be notarized, so the pair is refused', () => {
+    expect(() => parseBuildArgs([...BASE, '--mac', '--unsigned', '--notarize'])).toThrow(/notariz/);
+  });
+
+  test('the signing flags mean nothing without --mac, and are refused', () => {
+    expect(() => parseBuildArgs([...BASE, '--sign', ID])).toThrow(/--mac/);
+    expect(() => parseBuildArgs([...BASE, '--unsigned'])).toThrow(/--mac/);
+    expect(() => parseBuildArgs([...BASE, '--notarize'])).toThrow(/--mac/);
+  });
+
+  test('--only stays inside its own table, in both directions', () => {
+    expect(parseBuildArgs([...BASE, '--mac', '--unsigned', '--only', 'macos-x64']).only)
+      .toEqual(['macos-x64']);
+    // A Mac id without --mac is the cross job being handed a Mac target:
+    // refused, and the message says what would make it legal.
+    expect(() => parseBuildArgs([...BASE, '--only', 'macos-arm64'])).toThrow(/--mac/);
+    expect(() => parseBuildArgs([...BASE, '--mac', '--unsigned', '--only', 'linux-x64']))
+      .toThrow(/macos-arm64, macos-x64/);
+  });
+});
+
+describe('the entitlements the CLI is signed with', () => {
+  test('are exactly the three the shipped CLI has always carried', () => {
+    // bun's runtime JITs; under the hardened runtime that needs these. The
+    // move out of the Swift app's folder changes where the CLI is built,
+    // not how it is signed, so the set is pinned whole.
+    const text = readFileSync(MAC_ENTITLEMENTS, 'utf8');
+    const keys = [...text.matchAll(/<key>([^<]+)<\/key>\s*<true\/>/g)].map((m) => m[1]);
+    expect(keys.sort()).toEqual([
+      'com.apple.security.cs.allow-jit',
+      'com.apple.security.cs.allow-unsigned-executable-memory',
+      'com.apple.security.cs.disable-library-validation',
+    ]);
+    expect(text).not.toContain('<false/>');
+  });
+});
+
+describe('signing a Mac binary', () => {
+  const ARM = MAC_TARGETS.find((t) => t.id === 'macos-arm64')!;
+  const ID = 'Developer ID Application: Darkwell Entertainment LLC (XSRB3D643J)';
+  const GOOD_DESCRIBE =
+    'Executable=/tmp/out/macos-arm64/screepub\nIdentifier=screepub\n' +
+    'CodeDirectory v=20500 size=1 flags=0x10000(runtime) hashes=1+2 location=embedded\n' +
+    'TeamIdentifier=XSRB3D643J\n';
+
+  function recorder(answers: Record<string, { exitCode: number; stderr: string }>) {
+    const seen: string[][] = [];
+    const spawn = (argv: string[]) => {
+      seen.push(argv);
+      const key = argv.slice(0, 2).join(' ');
+      return answers[key] ?? { exitCode: 0, stderr: key === 'codesign -dv' ? GOOD_DESCRIBE : '' };
+    };
+    return { seen, spawn };
+  }
+
+  test('signArgv is the exact codesign invocation the shipped CLI was signed with', () => {
+    expect(signArgv(ARM, '/tmp/out', ID)).toEqual([
+      'codesign', '--force', '--options', 'runtime', '--timestamp',
+      '--entitlements', MAC_ENTITLEMENTS,
+      '--sign', ID,
+      '/tmp/out/macos-arm64/screepub',
+    ]);
+  });
+
+  test('signs, then verifies, then reads back the flags, in that order', () => {
+    const { seen, spawn } = recorder({});
+    signTarget(ARM, '/tmp/out', ID, spawn);
+    expect(seen.length).toBe(3);
+    expect(seen[0]).toEqual(signArgv(ARM, '/tmp/out', ID));
+    expect(seen[1]).toEqual(['codesign', '--verify', '--strict', '--verbose=2', '/tmp/out/macos-arm64/screepub']);
+    expect(seen[2]).toEqual(['codesign', '-dv', '/tmp/out/macos-arm64/screepub']);
+  });
+
+  test('a failed sign throws, naming the target and codesign\'s words', () => {
+    const { spawn } = recorder({ 'codesign --force': { exitCode: 1, stderr: 'no identity found\n' } });
+    expect(() => signTarget(ARM, '/tmp/out', ID, spawn)).toThrow(/macos-arm64/);
+    expect(() => signTarget(ARM, '/tmp/out', ID, spawn)).toThrow(/no identity found/);
+  });
+
+  test('a signature that does not verify throws', () => {
+    const { spawn } = recorder({ 'codesign --verify': { exitCode: 3, stderr: 'invalid signature\n' } });
+    expect(() => signTarget(ARM, '/tmp/out', ID, spawn)).toThrow(/invalid signature/);
+  });
+
+  test('a signature WITHOUT the hardened runtime is refused: notarization would reject it', () => {
+    const { spawn } = recorder({
+      'codesign -dv': { exitCode: 0, stderr: GOOD_DESCRIBE.replace('0x10000(runtime)', '0x0(none)') },
+    });
+    expect(() => signTarget(ARM, '/tmp/out', ID, spawn)).toThrow(/hardened runtime/);
+  });
+
+  test('a real identity must leave a team on the binary; ad-hoc may not', () => {
+    // codesign answers "TeamIdentifier=not set" for an ad-hoc signature. A
+    // release asked for a Developer ID and got that: refuse. A local `-`
+    // asked for ad-hoc and got it: fine.
+    const adhoc = GOOD_DESCRIBE.replace('TeamIdentifier=XSRB3D643J', 'TeamIdentifier=not set');
+    const { spawn } = recorder({ 'codesign -dv': { exitCode: 0, stderr: adhoc } });
+    expect(() => signTarget(ARM, '/tmp/out', ID, spawn)).toThrow(/team/i);
+    expect(() => signTarget(ARM, '/tmp/out', '-', spawn)).not.toThrow();
+  });
+
+  test('refuses to sign anything that is not a Mac target', () => {
+    const { seen, spawn } = recorder({});
+    expect(() => signTarget(TARGETS[0]!, '/tmp/out', ID, spawn)).toThrow(/linux-x64/);
+    expect(seen.length).toBe(0);
+  });
+});
+
+describe('notarizing a Mac binary', () => {
+  const X64 = MAC_TARGETS.find((t) => t.id === 'macos-x64')!;
+  const CREDS = { keyPath: '/k/ac.p8', keyId: 'KEYID', issuer: 'ISSUER' };
+
+  test('notaryCredentials reads the three variables the release job sets', () => {
+    expect(notaryCredentials({
+      AC_API_KEY_PATH: '/k/ac.p8', AC_API_KEY_ID: 'KEYID', AC_API_ISSUER_ID: 'ISSUER',
+    })).toEqual(CREDS);
+  });
+
+  test('and names exactly the ones that are missing', () => {
+    let message = '';
+    try {
+      notaryCredentials({ AC_API_KEY_ID: 'KEYID' });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain('AC_API_KEY_PATH');
+    expect(message).toContain('AC_API_ISSUER_ID');
+    expect(message).not.toContain('AC_API_KEY_ID');
+    expect(() => notaryCredentials({ AC_API_KEY_PATH: '', AC_API_KEY_ID: 'a', AC_API_ISSUER_ID: 'b' }))
+      .toThrow(/AC_API_KEY_PATH/);
+  });
+
+  test('zips the binary, submits the zip and waits, then removes the zip', () => {
+    const dir = mkdtempSync(join(SCRATCH, 'notary-'));
+    try {
+      const seen: string[][] = [];
+      const spawn = (argv: string[]) => {
+        seen.push(argv);
+        // Stand in for ditto: make the zip it would have made.
+        if (argv[0] === 'ditto') writeFileSync(argv[argv.length - 1]!, 'zip');
+        return { exitCode: 0, stderr: '' };
+      };
+      mkdirSync(buildDir(X64, dir), { recursive: true });
+      notarizeTarget(X64, dir, CREDS, spawn);
+      const zip = join(dir, 'macos-x64', 'screepub-notarize.zip');
+      expect(seen).toEqual([
+        ['ditto', '-c', '-k', binaryPath(X64, dir), zip],
+        ['xcrun', 'notarytool', 'submit', zip, '--key', '/k/ac.p8', '--key-id', 'KEYID',
+          '--issuer', 'ISSUER', '--wait'],
+      ]);
+      expect(existsSync(zip)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a rejected submission throws, names the target, and still removes the zip', () => {
+    const dir = mkdtempSync(join(SCRATCH, 'notary-'));
+    try {
+      const spawn = (argv: string[]) => {
+        if (argv[0] === 'ditto') {
+          writeFileSync(argv[argv.length - 1]!, 'zip');
+          return { exitCode: 0, stderr: '' };
+        }
+        return { exitCode: 1, stderr: 'status: Invalid\n' };
+      };
+      mkdirSync(buildDir(X64, dir), { recursive: true });
+      expect(() => notarizeTarget(X64, dir, CREDS, spawn)).toThrow(/macos-x64/);
+      expect(() => notarizeTarget(X64, dir, CREDS, spawn)).toThrow(/Invalid/);
+      expect(existsSync(join(dir, 'macos-x64', 'screepub-notarize.zip'))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('buildAll with --mac', () => {
+  test('a notarizing build checks its credentials before compiling anything', async () => {
+    const dir = mkdtempSync(join(SCRATCH, 'all-mac-'));
+    const saved = process.env.AC_API_KEY_PATH;
+    delete process.env.AC_API_KEY_PATH;
+    try {
+      const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string };
+      await expect(buildAll({
+        version: pkg.version, outDir: dir, only: ['macos-arm64'],
+        mac: { sign: 'Developer ID Application: X (T)', notarize: true },
+      })).rejects.toThrow(/AC_API_KEY_PATH/);
+      // Refused before the first 60 MB compile, not after it.
+      expect(existsSync(buildDir(MAC_TARGETS[0]!, dir))).toBe(false);
+    } finally {
+      if (saved !== undefined) process.env.AC_API_KEY_PATH = saved;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a Mac id handed to buildAll without --mac is refused, not silently skipped', async () => {
+    const dir = mkdtempSync(join(SCRATCH, 'all-mac-'));
+    try {
+      const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string };
+      await expect(buildAll({ version: pkg.version, outDir: dir, only: ['macos-arm64'] }))
+        .rejects.toThrow(/--mac/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

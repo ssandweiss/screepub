@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
   TARGETS,
+  MAC_TARGETS,
+  macTargetIdForHost,
   RELEASE_FLOORS,
   archiveEntries,
   archivePath,
@@ -80,6 +82,37 @@ describe('a real cross-compile', () => {
       // there is no host target for this tool and this self-skips; CI's
       // Ubuntu jobs cover it there.
       smokeCli(binaryPath(LINUX, OUT), 'tests/fixtures/screenplay.pdf', OUT, VERSION);
+    },
+    300000,
+  );
+
+  const MAC_HOST = MAC_TARGETS.find((t) => t.id === macTargetIdForHost(process.platform, process.arch));
+  test.skipIf(!MAC_HOST)(
+    'on a Mac: --mac compiles, SIGNS with the release flags, packages the signed bytes, and converts',
+    async () => {
+      // Ad-hoc (`-`) because no Developer ID is on a test machine, but
+      // through the same codesign call, flags and entitlements a release
+      // uses. Notarization is the one step only a release can exercise.
+      const out = join(OUT, 'mac');
+      const made = await buildAll({
+        version: VERSION, outDir: out, only: [MAC_HOST!.id], mac: { sign: '-', notarize: false },
+      });
+      expect(made.map((p) => basename(p))).toEqual([MAC_HOST!.archiveName]);
+
+      const bin = binaryPath(MAC_HOST!, out);
+      expect(readBinaryFormat(bin)).toBe(MAC_HOST!.format);
+      const described = Bun.spawnSync(['codesign', '-dv', bin], { stderr: 'pipe' }).stderr.toString();
+      expect(described).toMatch(/flags=0x[0-9a-f]+\([^)]*runtime[^)]*\)/);
+      const ents = Bun.spawnSync(['codesign', '-d', '--entitlements', '-', '--xml', bin], { stdout: 'pipe' })
+        .stdout.toString();
+      expect(ents).toContain('com.apple.security.cs.allow-jit');
+
+      // The archive holds the SIGNED bytes: packaging came after signing.
+      const [member] = await archiveEntries(archivePath(MAC_HOST!, out));
+      const digest = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
+      expect(digest(member!.data)).toBe(digest(readFileSync(bin)));
+
+      smokeCli(bin, 'tests/fixtures/screenplay.pdf', out, VERSION);
     },
     300000,
   );

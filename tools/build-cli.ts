@@ -1,16 +1,27 @@
-// Cross-compile, package and VERIFY the Linux and Windows CLI artifacts.
+// Compile, package and VERIFY the CLI artifacts.
 //
 // A Bun script and not shell, because a build matrix in bash is exactly the
 // platform-locked tooling the cross-platform ADR is retiring, and because a
 // release tool nobody can run locally is a release tool nobody can debug.
 //
-// It never produces a macOS artifact. Those are built, signed and notarized
-// by app/release.sh on a macOS runner, and tools/bump-tap.sh hardcodes their
-// names; a cross-compiled Mach-O could not be notarized from here, so moving
-// that build would trade a clean download for a Gatekeeper warning.
+// Two tables, never mixed. TARGETS is the cross-compiled Linux and Windows
+// set the cross job builds on Ubuntu. MAC_TARGETS is the two per-arch macOS
+// tarballs the Homebrew formula serves, and it is reachable ONLY with --mac,
+// which also demands --sign <identity> or an explicit --unsigned: an unsigned
+// Mach-O is a Gatekeeper warning for everyone who downloads it, so the cross
+// job (which never passes --mac) still cannot produce one by accident. The
+// Mac build signs each binary BEFORE packaging it, so the tarball holds the
+// signed bytes, and can notarize it (--notarize; a bare Mach-O cannot be
+// stapled, so notarization is recorded with Apple and checked online). This
+// is the build the Swift app's release script used to do, moved here so it
+// outlives the Swift app; plan 2026-10-01-f2-handover-amendment.md.
 //
 //   bun tools/build-cli.ts --version 0.6.0 --out dist/
 //   bun tools/build-cli.ts --version 0.6.0 --out dist/ --only windows-x64
+//   bun tools/build-cli.ts --version 0.6.0 --out dist/ --mac --unsigned
+//   bun tools/build-cli.ts --version 0.6.0 --out dist/ --mac \
+//     --sign "Developer ID Application: ... (TEAMID)" --notarize
+//       # --notarize reads AC_API_KEY_PATH, AC_API_KEY_ID, AC_API_ISSUER_ID
 
 import {
   closeSync,
@@ -127,7 +138,8 @@ export function readBinaryFormat(path: string): BinaryFormat {
   }
 }
 
-export type TargetId = 'linux-x64' | 'linux-arm64' | 'windows-x64';
+export type MacTargetId = 'macos-arm64' | 'macos-x64';
+export type TargetId = 'linux-x64' | 'linux-arm64' | 'windows-x64' | MacTargetId;
 
 export interface Target {
   id: TargetId;
@@ -143,7 +155,8 @@ export interface Target {
   archiveName: string;
 }
 
-/** No darwin row, ever. See the file header. */
+/** The cross set. No darwin row, ever: those live in MAC_TARGETS, behind
+ *  --mac. See the file header. */
 export const TARGETS: readonly Target[] = [
   {
     id: 'linux-x64',
@@ -172,6 +185,33 @@ export const TARGETS: readonly Target[] = [
     archiveName: 'screepub-cli-windows-x64.zip',
   },
 ];
+
+/** The Homebrew formula's two downloads. Per-arch, not universal: bun embeds
+ *  its whole runtime in every slice, so a lipo'd CLI is two ~65 MB binaries
+ *  of which any machine runs half, and brew can pick the arch where a
+ *  browser cannot. The archive names are tools/bump-tap.sh's, unchanged. */
+export const MAC_TARGETS: readonly Target[] = [
+  {
+    id: 'macos-arm64',
+    bunTarget: 'bun-darwin-arm64',
+    format: 'macho-arm64',
+    packaging: 'tar.gz',
+    binaryName: 'screepub',
+    archiveName: 'screepub-cli-macos-arm64.tar.gz',
+  },
+  {
+    id: 'macos-x64',
+    bunTarget: 'bun-darwin-x64',
+    format: 'macho-x86-64',
+    packaging: 'tar.gz',
+    binaryName: 'screepub',
+    archiveName: 'screepub-cli-macos-x64.tar.gz',
+  },
+];
+
+function isMacTarget(target: Target): boolean {
+  return MAC_TARGETS.some((t) => t.id === target.id);
+}
 
 /** Per-target build directory: all three would otherwise compile to the
  *  same `screepub` and overwrite each other. */
@@ -212,6 +252,14 @@ export function hostTarget(): Target | undefined {
   return id ? TARGETS.find((t) => t.id === id) : undefined;
 }
 
+/** The Mac table's own host mapping, kept apart from targetIdForHost so that
+ *  one still answers "nothing" on a Mac: the cross set has no Mac host. */
+export function macTargetIdForHost(platform: string, arch: string): MacTargetId | undefined {
+  if (platform === 'darwin' && arch === 'arm64') return 'macos-arm64';
+  if (platform === 'darwin' && arch === 'x64') return 'macos-x64';
+  return undefined;
+}
+
 /** The repo root, from this file's location: the tool is run from anywhere
  *  and must still find package.json and src/cli.ts. */
 export const REPO_DIR = join(import.meta.dir, '..');
@@ -220,10 +268,19 @@ export const REPO_DIR = join(import.meta.dir, '..');
  *  one rule every release tool checks its --version against. */
 export const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
 
+/** How a --mac build is signed. `sign` is the codesign identity, `-` for
+ *  ad-hoc, or null for an explicit --unsigned. */
+export interface MacSigning {
+  sign: string | null;
+  notarize: boolean;
+}
+
 export interface BuildArgs {
   version: string;
   outDir: string;
   only: TargetId[];
+  /** Present only for a --mac build. */
+  mac?: MacSigning;
 }
 
 export function parseBuildArgs(argv: string[]): BuildArgs {
@@ -233,6 +290,10 @@ export function parseBuildArgs(argv: string[]): BuildArgs {
       version: { type: 'string' },
       out: { type: 'string' },
       only: { type: 'string', multiple: true },
+      mac: { type: 'boolean' },
+      sign: { type: 'string' },
+      unsigned: { type: 'boolean' },
+      notarize: { type: 'boolean' },
     },
     strict: true,
     allowPositionals: false,
@@ -252,12 +313,35 @@ export function parseBuildArgs(argv: string[]): BuildArgs {
     );
   }
 
-  const known = TARGETS.map((t) => t.id);
+  let mac: MacSigning | undefined;
+  if (values.mac) {
+    if (values.sign !== undefined && values.unsigned) {
+      throw new Error('build-cli: --sign and --unsigned were both given; a binary is one or the other');
+    }
+    if (values.sign === undefined && !values.unsigned) {
+      throw new Error(
+        'build-cli: --mac needs --sign <identity> (or `-` for ad-hoc) or an explicit --unsigned. ' +
+          'An unsigned Mach-O is a Gatekeeper warning for everyone who downloads it, so it has ' +
+          'to be asked for by name.',
+      );
+    }
+    if (values.notarize && values.unsigned) {
+      throw new Error('build-cli: --notarize needs a signed binary; Apple will not notarize an unsigned one');
+    }
+    mac = { sign: values.sign ?? null, notarize: values.notarize ?? false };
+  } else if (values.sign !== undefined || values.unsigned || values.notarize) {
+    throw new Error('build-cli: --sign, --unsigned and --notarize only apply to a --mac build');
+  }
+
+  const known = (mac ? MAC_TARGETS : TARGETS).map((t) => t.id);
   const requested = (values.only ?? [])
     .flatMap((s) => s.split(','))
     .map((s) => s.trim())
     .filter(Boolean);
   for (const id of requested) {
+    if (!mac && MAC_TARGETS.some((t) => t.id === id)) {
+      throw new Error(`build-cli: "${id}" is a macOS target; those build only with --mac`);
+    }
     if (!known.includes(id as TargetId)) {
       throw new Error(`build-cli: unknown target "${id}"; known targets are ${known.join(', ')}`);
     }
@@ -267,6 +351,7 @@ export function parseBuildArgs(argv: string[]): BuildArgs {
     version,
     outDir: isAbsolute(values.out) ? values.out : resolve(values.out),
     only: (requested.length ? requested : known) as TargetId[],
+    ...(mac ? { mac } : {}),
   };
 }
 
@@ -295,8 +380,14 @@ export interface SpawnResult {
 export type Spawn = (argv: string[], cwd: string) => SpawnResult;
 
 const realSpawn: Spawn = (argv, cwd) => {
-  const proc = Bun.spawnSync(argv, { cwd, stdout: 'pipe', stderr: 'pipe' });
-  return { exitCode: proc.exitCode ?? 1, stderr: proc.stderr.toString() };
+  // A missing program (codesign on Linux, say) throws rather than exiting;
+  // answered as a failed run so the caller's message names the target.
+  try {
+    const proc = Bun.spawnSync(argv, { cwd, stdout: 'pipe', stderr: 'pipe' });
+    return { exitCode: proc.exitCode ?? 1, stderr: proc.stderr.toString() };
+  } catch (err) {
+    return { exitCode: 127, stderr: `${argv[0]}: ${(err as Error).message}` };
+  }
 };
 
 /** The one invocation, as data, so it can be asserted element by element
@@ -329,6 +420,113 @@ export function compileTarget(
     );
   }
   return binaryPath(target, outDir);
+}
+
+/** The entitlements the CLI has always been signed with: bun's runtime JITs,
+ *  and under the hardened runtime that needs allow-jit and its two
+ *  companions. Moved, not changed, from the Swift app's folder. */
+export const MAC_ENTITLEMENTS = join(REPO_DIR, 'tools', 'macos', 'screepub-cli.entitlements');
+
+/** The exact codesign call the shipped CLI is signed with today:
+ *  hardened runtime and a secure timestamp, both of which notarization
+ *  requires. `identity` may be `-` for an ad-hoc signature (local runs and
+ *  the e2e test); `--timestamp` is accepted and ignored there. */
+export function signArgv(
+  target: Target,
+  outDir: string,
+  identity: string,
+  entitlements: string = MAC_ENTITLEMENTS,
+): string[] {
+  return [
+    'codesign', '--force', '--options', 'runtime', '--timestamp',
+    '--entitlements', entitlements,
+    '--sign', identity,
+    binaryPath(target, outDir),
+  ];
+}
+
+/** Sign, then check what the signature actually says rather than trusting
+ *  codesign's exit code: it must verify strictly, carry the hardened runtime
+ *  (notarization rejects a binary without it, and only after the upload), and
+ *  for any identity but ad-hoc, name a team. */
+export function signTarget(
+  target: Target,
+  outDir: string,
+  identity: string,
+  spawn: Spawn = realSpawn,
+  repoDir: string = REPO_DIR,
+): void {
+  if (!isMacTarget(target)) {
+    throw new Error(`build-cli: ${target.id} is not a macOS target and is never codesigned`);
+  }
+  const bin = binaryPath(target, outDir);
+  const run = (argv: string[], what: string): string => {
+    const { exitCode, stderr } = spawn(argv, repoDir);
+    if (exitCode !== 0) {
+      throw new Error(`build-cli: ${target.id}: ${what} failed (exit ${exitCode})\n${stderr.trim()}`);
+    }
+    return stderr;
+  };
+  run(signArgv(target, outDir, identity), 'codesign');
+  run(['codesign', '--verify', '--strict', '--verbose=2', bin], 'codesign --verify');
+  // codesign -dv writes its description to stderr.
+  const described = run(['codesign', '-dv', bin], 'codesign -dv');
+  if (!/flags=0x[0-9a-f]+\([^)]*\bruntime\b[^)]*\)/.test(described)) {
+    throw new Error(
+      `build-cli: ${target.id}: signed WITHOUT the hardened runtime; notarization would reject it\n${described.trim()}`,
+    );
+  }
+  if (identity !== '-' && !/^TeamIdentifier=(?!not set)\S+/m.test(described)) {
+    throw new Error(
+      `build-cli: ${target.id}: signed with "${identity}" but the binary names no team ` +
+        `(an ad-hoc signature?)\n${described.trim()}`,
+    );
+  }
+}
+
+export interface NotaryCredentials {
+  keyPath: string;
+  keyId: string;
+  issuer: string;
+}
+
+/** The App Store Connect API key the release job already writes for
+ *  notarization. Read up front so a missing one fails before any compile. */
+export function notaryCredentials(env: Record<string, string | undefined> = process.env): NotaryCredentials {
+  const names = ['AC_API_KEY_PATH', 'AC_API_KEY_ID', 'AC_API_ISSUER_ID'] as const;
+  const missing = names.filter((n) => !env[n]);
+  if (missing.length) {
+    throw new Error(`build-cli: --notarize needs ${missing.join(' and ')} in the environment`);
+  }
+  return { keyPath: env.AC_API_KEY_PATH!, keyId: env.AC_API_KEY_ID!, issuer: env.AC_API_ISSUER_ID! };
+}
+
+/** notarytool takes an archive, not a bare Mach-O, so the signed binary
+ *  rides in a zip that exists only for the submission. A bare Mach-O cannot
+ *  be stapled; notarization is recorded with Apple and Gatekeeper checks it
+ *  online. The zip is removed whatever happens. */
+export function notarizeTarget(
+  target: Target,
+  outDir: string,
+  creds: NotaryCredentials,
+  spawn: Spawn = realSpawn,
+  repoDir: string = REPO_DIR,
+): void {
+  const zip = join(buildDir(target, outDir), 'screepub-notarize.zip');
+  try {
+    for (const [argv, what] of [
+      [['ditto', '-c', '-k', binaryPath(target, outDir), zip], 'ditto'],
+      [['xcrun', 'notarytool', 'submit', zip, '--key', creds.keyPath, '--key-id', creds.keyId,
+        '--issuer', creds.issuer, '--wait'], 'notarytool submit'],
+    ] as const) {
+      const { exitCode, stderr } = spawn([...argv], repoDir);
+      if (exitCode !== 0) {
+        throw new Error(`build-cli: ${target.id}: ${what} failed (exit ${exitCode})\n${stderr.trim()}`);
+      }
+    }
+  } finally {
+    rmSync(zip, { force: true });
+  }
 }
 
 export interface ArchiveEntry {
@@ -580,13 +778,29 @@ export function parseChecksums(text: string): Map<string, string> {
  *  a checksum three minutes later. */
 export async function buildAll(args: BuildArgs, floors: Floors = RELEASE_FLOORS): Promise<string[]> {
   assertPackageVersion(args.version);
+  const stray = args.mac ? [] : args.only.filter((id) => MAC_TARGETS.some((t) => t.id === id));
+  if (stray.length) {
+    throw new Error(`build-cli: ${stray.join(', ')} build only with --mac`);
+  }
+  // Before any compile: a missing notary key found after two 60 MB builds is
+  // a release that died late for a reason it could have named first.
+  const creds = args.mac?.notarize ? notaryCredentials() : undefined;
   mkdirSync(args.outDir, { recursive: true });
 
-  const targets = TARGETS.filter((t) => args.only.includes(t.id));
+  const targets = (args.mac ? MAC_TARGETS : TARGETS).filter((t) => args.only.includes(t.id));
   const names: string[] = [];
   for (const target of targets) {
     console.log(`── ${target.id} (${target.bunTarget})`);
     compileTarget(target, args.outDir);
+    if (args.mac) {
+      // Signed BEFORE packaging, so the tarball holds the signed bytes.
+      if (args.mac.sign !== null) {
+        signTarget(target, args.outDir, args.mac.sign);
+        if (creds) notarizeTarget(target, args.outDir, creds);
+      } else {
+        console.warn(`   ${target.id}: UNSIGNED, as asked; Gatekeeper will refuse a downloaded copy`);
+      }
+    }
     await packageTarget(target, args.outDir);
     await verifyArtifact(target, args.outDir, floors);
     const bytes = statSync(archivePath(target, args.outDir)).size;
