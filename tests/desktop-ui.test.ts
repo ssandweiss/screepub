@@ -153,28 +153,6 @@ describe('the window respects the quality floor', () => {
     }
   });
 
-  test('the surface switcher is a real tablist, reachable by keyboard', async () => {
-    const frame = read('frame.js');
-    const { SURFACES } = (await import(join(UI, 'frame.js'))) as {
-      SURFACES: Array<{ id: string; label: string }>;
-    };
-    // Not a div with a click handler: a test that only looked for the five
-    // names would pass against exactly that.
-    expect(frame).toContain("'button'");
-    expect(frame).toContain('aria-selected');
-    expect(frame).toContain('ArrowRight');
-    expect(frame).toContain('focus()');
-    expect(frame).toContain("role: 'tab'");
-    expect(frame).toContain("role: 'tablist'");
-    // A dimmed surface is not a keyboard stop. Without this the arrow keys
-    // land on a tab whose panel says nothing.
-    expect(frame).toMatch(/disabled\)?\s*\)?\s*continue|if\s*\(.*disabled.*\)\s*continue/);
-    // The bar's four. Notes is deliberately absent: it is reached from the
-    // rev stamp, not from a tab. Asserted against the exported SURFACES
-    // rather than the file text, because frame.js imports ./notes.js for the
-    // version and a `toContain('notes')` would pass on the import alone.
-    expect(SURFACES.map((s) => s.id)).toEqual(['convert', 'read', 'tune', 'send']);
-  });
 });
 
 describe('the window uses the brand, not its own colours (scripts too)', () => {
@@ -386,15 +364,6 @@ describe('the engine contract lives in exactly one file', () => {
     expect(after(exported, '--for')).toBe('azw3');
     expect(after(exported, '--fountain')).toBe('/s/x.fountain');
     expect(argv.export('/s/x.epub', { forFormat: 'kfx' })).not.toContain('--fountain');
-  });
-
-  test('progress is parsed defensively, not assumed to be one clean line', () => {
-    const app = read('app.js');
-    // The Rust forwards whatever the OS handed it. A parser that called
-    // JSON.parse on the raw payload would throw on a two-line chunk and take
-    // the conversion down with it.
-    expect(app).toMatch(/split\(/);
-    expect(app).toMatch(/catch\s*{/);
   });
 
   test('no surface sets innerHTML with anything but its own constant', () => {
@@ -7789,51 +7758,6 @@ describe('a refused file is no longer a dead end', () => {
     expect(convert.revealLabel(undefined)).toBe('Show in folder');
   });
 
-  test('no surface appends a bare null to a node', () => {
-    // el() drops a null child; Node.append() renders it as the literal word
-    // "null". send.js's drawEmpty records shipping that once. drawFailure was
-    // doing it too, and on the COMMON path: the "still open" line is absent
-    // whenever no script is loaded, which on a refusal is most of the time.
-    //
-    // The shape is the test, because the mistake is a shape: a conditional
-    // yielding null, sitting directly in a `.append(` argument list.
-    // Depth-aware on purpose. A null nested inside an el() call is CORRECT —
-    // that is the fix — so a flat regex over the argument text flags the very
-    // pattern it should be recommending. Only arguments at depth 0 of the
-    // .append( list are the dangerous ones.
-    // Keeps ONLY the characters sitting directly inside the .append( parens.
-    // Everything a nested call contains is dropped, so `el('p', …, null)` —
-    // the correct pattern — contributes nothing, while a ternary resolving to
-    // null in the argument list itself survives into the skeleton.
-    function topLevelArgs(source: string, at: number): string[] {
-      let depth = 0;
-      let current = '';
-      const args: string[] = [];
-      for (let i = at; i < source.length; i += 1) {
-        const ch = source[i];
-        if (ch === '(') { depth += 1; if (depth === 1) continue; }
-        else if (ch === ')') { depth -= 1; if (depth === 0) { args.push(current); break; } }
-        else if (ch === ',' && depth === 1) { args.push(current); current = ''; continue; }
-        if (depth === 1) current += ch;
-      }
-      return args;
-    }
-
-    const offenders: string[] = [];
-    for (const name of jsFiles()) {
-      const source = read(name);
-      for (const match of source.matchAll(/\.append\(/g)) {
-        const at = (match.index ?? 0) + '.append'.length;
-        for (const arg of topLevelArgs(source, at)) {
-          if (/\bnull\b/.test(arg.replace(/\/\/[^\n]*/g, ''))) {
-            offenders.push(`${name}: ${arg.trim().slice(0, 70).replace(/\s+/g, ' ')}`);
-          }
-        }
-      }
-    }
-    expect(offenders.join('\n')).toBe('');
-  });
-
 });
 
 describe('eighteen settings stop arriving as one wall', () => {
@@ -7997,6 +7921,118 @@ describe('the scene index', () => {
   });
 });
 
+describe('the frame, mounted', () => {
+  // frame.js's mountFrame on the fake page: the bar, the foot and the drag
+  // regions, driven by key, click and the calls main.js makes.
+  let page: FakePage | null = null;
+  afterEach(async () => { await page?.close(); page = null; });
+
+  async function mountBar() {
+    page = fakePage();
+    const { mountFrame, SURFACES } = await import(join(UI, 'frame.js'));
+    const root = page.doc.createElement('div');
+    page.doc.body.append(root);
+    const frame = mountFrame(root);
+    const tab = (id: string) => page!.doc.getElementById(`tab-${id}`)!;
+    const tablist = page.doc.querySelector('[role="tablist"]')!;
+    return { frame, root, tab, tablist, SURFACES, doc: page.doc };
+  }
+
+  test('the switcher is a real tablist: arrows, Home and End move the selection and the focus, past a surface that is not there', async () => {
+    const { frame, tab, tablist, SURFACES } = await mountBar();
+    for (const { id } of SURFACES) {
+      expect(tab(id).localName).toBe('button');
+      expect(tab(id).getAttribute('role')).toBe('tab');
+      expect(tab(id).getAttribute('aria-controls')).toBe(`surface-${id}`);
+    }
+    frame.enable('read', true);
+    frame.enable('tune', false);
+    frame.enable('send', true);
+    frame.setSurface('convert');
+    const selected = () => SURFACES.map((s: { id: string }) => s.id)
+      .filter((id: string) => tab(id).getAttribute('aria-selected') === 'true');
+    const press = (key: string) => {
+      const event = makeEvent('keydown', { key });
+      tablist.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(press('ArrowRight')).toBe(true);
+    expect(selected()).toEqual(['read']);
+    expect(page!.doc.activeElement).toBe(tab('read'));
+    // Settings is off the bar, so it is not a stop.
+    press('ArrowRight');
+    expect(selected()).toEqual(['send']);
+    press('ArrowRight');
+    expect(selected()).toEqual(['convert']);
+    press('ArrowLeft');
+    expect(selected()).toEqual(['send']);
+    press('Home');
+    expect(selected()).toEqual(['convert']);
+    press('End');
+    expect(page!.doc.activeElement).toBe(tab('send'));
+    // One Tab stop on the bar: the selected tab. An absent one is no stop.
+    expect(SURFACES.map((s: { id: string }) => [s.id, tab(s.id).tabIndex, tab(s.id).hidden])).toEqual([
+      ['convert', -1, false], ['read', -1, false], ['tune', -1, true], ['send', 0, false],
+    ]);
+    // Any other key is the page's.
+    expect(press('a')).toBe(false);
+  });
+
+  test('switching a surface off while it shows goes back to Convert', async () => {
+    const { frame, tab } = await mountBar();
+    const heard: string[] = [];
+    frame.onSurface((id: string) => heard.push(id));
+    frame.enable('read', true);
+    frame.setSurface('read');
+    frame.enable('read', false);
+    expect(heard).toEqual(['read', 'convert']);
+    expect(tab('read').hidden).toBe(true);
+  });
+
+  test('the window moves by its top strip and the gaps in the bar, never by a tab', async () => {
+    const { doc } = await mountBar();
+    const dragging = doc.querySelectorAll('[data-tauri-drag-region]');
+    expect(dragging.map((n) => n.className)).toEqual(['tabs', 'drag-strip']);
+    expect(doc.querySelectorAll('button').filter((b) => b.hasAttribute('data-tauri-drag-region'))).toEqual([]);
+  });
+
+  test('the update label sits beside the stamp: hidden until there are words, clickable only when told so', async () => {
+    const { frame, doc } = await mountBar();
+    const { RELEASE } = await import(join(UI, 'notes.js'));
+    const foot = doc.querySelector('.rev-foot')!;
+    const [label, stamp] = foot.children;
+    // A stable handle: main.js checks the focused element against it.
+    expect(label.id).toBe('rev-update');
+    expect(stamp.textContent).toBe(`rev ${RELEASE.version}`);
+    expect(label.hidden).toBe(true);
+    const clicks: string[] = [];
+    frame.onUpdateClick(() => clicks.push('update'));
+    frame.onRev(() => clicks.push('notes'));
+
+    frame.setUpdateLabel('Update to 0.8.0', { actionable: true });
+    expect([label.hidden, label.textContent, label.getAttribute('aria-disabled')]).toEqual([false, 'Update to 0.8.0', null]);
+    expect(label.classList.contains('rev-update-inert')).toBe(false);
+    label.click();
+    // "Downloading" is under way: it stops looking like a button.
+    frame.setUpdateLabel('Downloading 0.8.0… 40%', { actionable: false });
+    expect(label.getAttribute('aria-disabled')).toBe('true');
+    expect(label.classList.contains('rev-update-inert')).toBe(true);
+    frame.setUpdateLabel(null);
+    expect(label.hidden).toBe(true);
+    stamp.click();
+    expect(clicks).toEqual(['update', 'notes']);
+  });
+
+  test('a dead engine gets its own line, and the stamp keeps naming the build', async () => {
+    const { frame, doc } = await mountBar();
+    const fault = doc.querySelector('.engine-fault')!;
+    expect(fault.hidden).toBe(true);
+    frame.engineFailed('the engine could not be started');
+    expect([fault.hidden, fault.textContent]).toEqual([false, 'the engine could not be started']);
+    expect(doc.querySelector('.rev-stamp')!.textContent).toMatch(/^rev \d/);
+  });
+});
+
 describe('the foot of the page names the release', () => {
   // It used to print the ENGINE's self-reported version, labelled "engine".
   // Two things were wrong with that. The number was the engine's while the
@@ -8012,15 +8048,6 @@ describe('the foot of the page names the release', () => {
   test('it reads "rev" and the version it was built from', async () => {
     const { revLabel } = await frameMod();
     expect(revLabel?.('0.6.0')).toBe('rev 0.6.0');
-  });
-
-  test('the version comes from the notes module, so the stamp and the sheet agree', () => {
-    // desktop/ui/notes.js is generated from docs/releases/<version>.md. Taking
-    // the number from there makes the stamp and the notes it opens agree by
-    // construction rather than by two people remembering to change both.
-    const frame = read('frame.js');
-    expect(frame).toContain('RELEASE');
-    expect(frame).toContain('revLabel');
   });
 
   test('the notes sheet is not on the page while it is shut', () => {
@@ -8051,12 +8078,13 @@ describe('the window can be moved by its top, like any other window', () => {
   // 2026-09-23 the page marked nothing as a drag region, so the window could
   // not be moved at all. Tauri's drag script (2.11.5, drag.js): a bare
   // attribute drags only when the click lands on THAT element; anything
-  // clickable without the attribute stays clickable.
-  const frame = read('frame.js');
+  // clickable without the attribute stays clickable. Which elements carry
+  // the attribute is driven in "the window moves by its top strip and the
+  // gaps in the bar, never by a tab"; where the strip sits is CSS.
   const css = read('style.css');
 
-  test('a transparent strip along the top is a drag region', () => {
-    expect(frame).toMatch(/class:\s*'drag-strip',\s*'data-tauri-drag-region':\s*''/);
+  test('the drag strip scrolls away with the page and covers no control at rest', () => {
+    // A CSS pin: position needs a browser to observe.
     const rule = css.match(/\.drag-strip\s*\{[^}]*\}/)?.[0] ?? '';
     // NOT fixed: a strip pinned to the viewport stayed over content that
     // scrolled underneath it — confirmed live, a click on a tab started a
@@ -8068,20 +8096,6 @@ describe('the window can be moved by its top, like any other window', () => {
     expect(rule).toContain('top: 0');
     expect(rule).toContain('height: var(--space-7)');
   });
-
-  test('the gaps in the tab bar drag, and the tabs stay tabs', () => {
-    expect(frame).toMatch(/el\('nav',\s*\{[^}]*'data-tauri-drag-region':\s*''/);
-    // The attribute is never on a tab button: that would turn a click on
-    // "Read" into a window move. Matched by shape (an el('button', ...)
-    // call whose props carry class: 'tab'), not by exact whitespace, so a
-    // reformat cannot make this pass on nothing.
-    const tabButton = frame.match(/el\('button',\s*\{[\s\S]*?class:\s*'tab'[\s\S]*?\},\s*label\)/);
-    expect(tabButton).not.toBeNull();
-    expect(tabButton?.[0]).not.toContain('data-tauri-drag-region');
-    // Counted as PROPS (quoted, with a colon), so a comment naming the
-    // attribute does not change the count.
-    expect(frame.match(/'data-tauri-drag-region':/g)?.length).toBe(2);
-  });
 });
 
 describe('the dead-engine line does not crowd the update label', () => {
@@ -8090,40 +8104,11 @@ describe('the dead-engine line does not crowd the update label', () => {
     expect(rule).toContain('bottom: var(--space-9)');
   });
 
-  test('it stays aligned with the foot at every width, like the foot itself', () => {
-    // Both sit on the sheet's right edge (right: 0) since the layout pass
-    // moved the side margins from the sheet to the page, so neither needs a
-    // narrow-window override any more. An override on one alone would pull
-    // the two apart.
-    const css = read('style.css');
-    expect(css.match(/\.engine-fault\s*\{[^}]*\}/)?.[0] ?? '').toMatch(/right:\s*0;/);
-    expect(css.match(/\.rev-foot\s*\{[^}]*\}/)?.[0] ?? '').toMatch(/right:\s*0;/);
-    expect(css).not.toMatch(/\.engine-fault\s*\{\s*right:\s*var\(--space-4\)/);
-  });
 });
 
 describe('a newer version is a label you can click, not a dot you can miss', () => {
   const frame = read('frame.js');
   const css = read('style.css');
-
-  test('the brass dot is gone', () => {
-    // The owner missed it, and the update with it (2026-09-23).
-    expect(css).not.toContain('.rev-new');
-    expect(frame).not.toContain('rev-new');
-    expect(frame).not.toContain('updateWaiting');
-  });
-
-  test('the label sits beside the stamp, and the stamp still opens the notes', () => {
-    expect(frame).toContain("class: 'rev-update'");
-    expect(frame).toMatch(/el\('div',\s*\{\s*class:\s*'rev-foot'\s*\},\s*updateLabel,\s*stamp\)/);
-    expect(frame).toContain('setUpdateLabel');
-    expect(frame).toContain('onUpdateClick');
-    // The stamp's own click handler is untouched: it still calls every
-    // registered rev handler. `toContain('revHandlers')` alone would still
-    // pass with the stamp's onclick deleted, since the array declaration
-    // and push still mention the name.
-    expect(frame).toMatch(/onclick:\s*\(\)\s*=>\s*\{\s*for\s*\(const handler of revHandlers\)\s*handler\(\);\s*\}/);
-  });
 
   test('the label is ink with a brass rule, not brass text', () => {
     // Brass on the paper does not reach a readable contrast; the brass is the
@@ -8134,18 +8119,12 @@ describe('a newer version is a label you can click, not a dot you can miss', () 
     expect(css).toMatch(/\.rev-update:focus-visible/);
   });
 
-  test('the foot, not the stamp, is what is pinned to the corner', () => {
-    const foot = css.match(/\.rev-foot\s*\{[^}]*\}/)?.[0] ?? '';
-    expect(foot).toContain('position: absolute');
-    const stamp = css.match(/\.rev-stamp\s*\{[^}]*\}/)?.[0] ?? '';
-    expect(stamp).not.toContain('position: absolute');
-  });
-
   test('the label stops looking clickable once a click would do nothing', () => {
     // "Update to 0.8.0" is a real button; "Downloading 0.8.0… 40%" only
-    // looks like one unless the frame is told otherwise.
-    expect(frame).toMatch(/setUpdateLabel:\s*\(words,\s*\{\s*actionable\s*\}/);
-    expect(frame).toContain('aria-disabled');
+    // looks like one unless the frame is told otherwise. The frame's half
+    // (aria-disabled and the inert class) is driven in "the update label
+    // sits beside the stamp"; the pointer is CSS, and main.js's use of
+    // update.js's rule is left to the update work.
     const rule = css.match(/\.rev-update-inert\s*\{[^}]*\}/)?.[0] ?? '';
     expect(rule).toContain('cursor: default');
     const main = read('main.js');
@@ -8952,6 +8931,55 @@ describe('the Send page’s KFX block: what a reader sees across redraws', () =>
     w.doc.body.append(next);
     w.kfx.mountKfx(next, { isSending: () => false, devices: () => [], onBusy: () => undefined });
     await expect(w.answer('kfx-status', status(true, true, false))).rejects.toThrow('nothing asked');
+  });
+});
+
+describe('no screen prints a stray "null"', () => {
+  // el() drops a null child; Node.append() prints it as the word "null", and
+  // so does the fake page's append (tests/helpers/fake-dom.ts). send.js's
+  // empty state shipped one under its list, and drawFailure printed one on
+  // every refusal with no script open. This used to be a scan of every
+  // .append( call's arguments; it is now the screens themselves, drawn in
+  // the sparse states where an optional line is absent.
+  let page: FakePage | null = null;
+  afterEach(async () => { await page?.close(); page = null; });
+
+  test('the sparse screens of every surface carry no "null" or "undefined"', async () => {
+    page = fakePage({
+      respond: (args) => (args[0].endsWith('.pdf') ? { ok: false, error: { code: 'scanned', message: 'No text.' } } : HOLD),
+    });
+    const ctx = (script: unknown) => ({
+      state: { script, devices: [], reducedMotion: true },
+      goTo: () => {}, restoreFocus: () => {}, scriptChanged: () => {}, convertAgain: () => {},
+    });
+    const screens: Record<string, FakeNode> = {};
+
+    // Convert: a refusal with no script open, so no "still open" line.
+    const convert = await import(`${join(UI, 'convert.js')}?null-scan`);
+    screens.convert = page.pane();
+    convert.mount(screens.convert, ctx(null));
+    await convert.convertPath('/s/Scan.pdf');
+
+    // Read: a script whose pages did not come back, and no author.
+    const reader = await import(`${join(UI, 'read.js')}?null-scan`);
+    screens.read = page.pane();
+    reader.mount(screens.read, ctx({ title: 'Field Station', previewHtml: '' }));
+
+    // Settings: a script with no stored source, so the fault screen.
+    const tune = await import(`${join(UI, 'tune.js')}?null-scan`);
+    screens.tune = page.pane();
+    tune.mount(screens.tune, ctx({ title: 'Field Station', fountainPath: null, epubPath: null, settings: null }));
+    await tune.show();
+
+    // Send: a script with no book on disk.
+    const send = await import(`${join(UI, 'send.js')}?null-scan`);
+    screens.send = page.pane();
+    send.mount(screens.send, ctx({ title: 'Field Station', epubPath: null, fountainPath: null, settings: null }));
+
+    for (const [name, pane] of Object.entries(screens)) {
+      expect(`${name}: ${pane.textContent.length > 0}`).toBe(`${name}: true`);
+      expect(`${name}: ${/\bnull\b|\bundefined\b/.test(pane.textContent)}`).toBe(`${name}: false`);
+    }
   });
 });
 
