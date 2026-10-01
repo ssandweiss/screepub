@@ -76,6 +76,17 @@ describe('every verb refuses every flag that is not its own', () => {
     expect(declared.sort()).toEqual(Object.keys(FLAGS).sort());
   });
 
+  /** The whole refusal, owners and all. The owners come from VERB_SHAPE in
+   *  VERBS order, so a refusal that names the wrong owner, or leaves one
+   *  out, fails here and not only in a per-verb file. This is what let the
+   *  per-verb refusal tables (cli-app-settings, cli-reveal, cli-routes,
+   *  cli-kfx, cli-export, cli-device-commands) fold into this one. */
+  function refusal(verb: Verb, flag: string): string {
+    const owners = VERBS.filter((v) => VERB_SHAPE[v].own.includes(flag)).join(' and ');
+    const aside = verb === 'devices' && flag === '--device' ? ': it lists every reader' : '';
+    return `${verb} takes no ${flag}${aside} (${flag} belongs to ${owners})`;
+  }
+
   for (const verb of VERBS) {
     const { own, positionals } = VERB_SHAPE[verb];
     const foreign = Object.keys(FLAGS).filter((flag) => !own.includes(flag));
@@ -83,9 +94,9 @@ describe('every verb refuses every flag that is not its own', () => {
       const answers = await Promise.all(foreign.map(async (flag) => {
         const { stdout, exitCode } = await runCli([verb, ...positionals, ...FLAGS[flag], '--json']);
         const answer = JSON.parse(stdout);
-        return `${flag}: ${exitCode} ${answer.error?.code} ${String(answer.error?.message).startsWith(`${verb} takes no ${flag}`)}`;
+        return `${flag}: ${exitCode} ${answer.error?.code} ${answer.error?.message}`;
       }));
-      expect(answers).toEqual(foreign.map((flag) => `${flag}: 1 usage true`));
+      expect(answers).toEqual(foreign.map((flag) => `${flag}: 1 usage ${refusal(verb, flag)}`));
     }, 60000);
   }
 });

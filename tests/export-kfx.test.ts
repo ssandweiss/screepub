@@ -20,6 +20,7 @@ import {
   PLUGIN_INSTALL_TIMEOUT_MS,
 } from '../src/export/kfx';
 import { calibreTool, CALIBRE_FORMAT_GUARDS, CalibreTimedOutError } from '../src/export/calibre';
+import { snippetStubs, systemPython, type SnippetScenario } from './kfx-snippet-stubs';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-export-kfx-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
@@ -626,110 +627,118 @@ describe('installKfxPlugin', () => {
     );
     expect(r.reason).not.toContain('urlopen');
   });
+});
 
-  // Pinning the PYTHON shape: nothing here runs the snippet (it needs a real
-  // calibre-debug), so the only way to catch an except clause ordered wrong
-  // is to read the source. Python tries except clauses top to bottom, and
-  // Unreachable IS an Exception, so if the generic `except Exception as e:`
-  // came first it would swallow every offline failure silently and 'offline'
-  // would never reach installKfxPlugin's parsing above.
-  test('INSTALL_SNIPPET catches Unreachable before the generic exception', async () => {
-    const src = await Bun.file(join(import.meta.dir, '..', 'src', 'export', 'kfx.ts')).text();
-    const unreachableCatch = src.indexOf('except Unreachable as e:');
-    // The LAST `except Exception as e:` is the outer, catch-all clause; the
-    // two earlier ones belong to the fetches themselves, which re-raise as
-    // Unreachable rather than print.
-    const genericCatch = src.lastIndexOf('except Exception as e:');
-    expect(unreachableCatch).toBeGreaterThan(-1);
-    expect(genericCatch).toBeGreaterThan(-1);
-    expect(unreachableCatch).toBeLessThan(genericCatch);
-    expect(src).toContain("'offline': True");
-  });
+// The install snippet is Python inside a TypeScript string, and nothing
+// above runs it: every installKfxPlugin test hands back a canned
+// SCREEPUB_RESULT line. These used to check the snippet's TEXT instead
+// (which except clause came first, which line sat above which), and a text
+// check passes on a snippet that fails the moment Python reads it. So these
+// RUN it, under the system python3, against stand-ins for the few calibre
+// names it imports (tests/kfx-snippet-stubs.ts), and go through
+// installKfxPlugin's own runner seam so our parsing of its answer runs too.
+// The real Calibre is never touched. Without python3 they skip.
+const PYTHON = systemPython();
 
-  async function installSnippetText(): Promise<string> {
-    const src = await Bun.file(join(import.meta.dir, '..', 'src', 'export', 'kfx.ts')).text();
-    const start = src.indexOf('const INSTALL_SNIPPET');
-    const end = src.indexOf('`;', start) + '`;'.length;
-    return src.slice(start, end);
+describe.skipIf(PYTHON === null)('the install snippet, run under python3 against stub calibre modules', () => {
+  const TOOL = '/nowhere/calibre-debug';
+  // The Swift app's vendored fork: same package, different NAME, so it
+  // collides with the real plugin for the .kfx slot and has to go.
+  const FORK = { name: 'KFX Output (Fix Traditional Chinese)', output: true };
+  // Ships in the same zip as KFX Output but is a metadata writer, not an
+  // output plugin. A name-only test once deleted it.
+  const COMPANION = { name: 'Set KFX metadata (from KFX Output)', output: false };
+  const REAL = { name: 'KFX Output', output: true };
+  const installed = [REAL, FORK, COMPANION];
+  const kinds = (events: string[]) => events.map((e) => e.split(' ')[0]);
+
+  async function install(scenario: SnippetScenario) {
+    const stubs = snippetStubs(mkdtempSync(join(SCRATCH, 'kfx-snippet-')), PYTHON!, scenario);
+    const result = await installKfxPlugin(stubs.run, TOOL);
+    const { stdout, stderr } = stubs.last();
+    // Every run, failure or not, must end in the JSON line: a traceback
+    // with no SCREEPUB_RESULT is the contract broken.
+    expect(stdout, `no result line; stderr was:\n${stderr}`).toContain('SCREEPUB_RESULT ');
+    return { result, events: stubs.events() };
   }
 
-  // `class Unreachable` has to be defined OUTSIDE the try, before it, not as
-  // the first thing inside it (the first cut's mistake). If anything raises
-  // before that line would have run -- one of the `from calibre...` imports,
-  // say, on some future calibre that moves INDEX_URL -- Python evaluates
-  // `except Unreachable as e:` against a name that was never bound: a
-  // NameError while handling the original exception, no SCREEPUB_RESULT
-  // line at all, and a raw traceback instead of the JSON contract every
-  // caller of installKfxPlugin relies on. Defining it at module level, ahead
-  // of the try, means it exists no matter what fails or when.
-  test('class Unreachable is defined before the snippet’s first try:, not inside it', async () => {
-    const snippet = await installSnippetText();
-    const classIdx = snippet.indexOf('class Unreachable');
-    const tryIdx = snippet.indexOf('try:');
-    expect(classIdx).toBeGreaterThan(-1);
-    expect(tryIdx).toBeGreaterThan(-1);
-    expect(classIdx).toBeLessThan(tryIdx);
+  test('installs, reports the version, and clears only the fork', async () => {
+    const { result, events } = await install({ index: 'ok', zip: 'ok', plugins: installed });
+    expect(result).toEqual({ ok: true, version: '2.20.1', removed: [FORK.name] });
+    // The order is the point: fetch the index, download and check the zip,
+    // and only then clear the fork and add the new copy.
+    expect(kinds(events)).toEqual(['index', 'zip', 'remove', 'add']);
+    expect(events).toContain(`remove ${FORK.name}`);
+    expect(events).toContain('add zip-present');
+    expect(events[1]).toBe('zip https://plugins.calibre-ebook.com/kfx_output.zip');
   });
 
-  // The fork-clearing block used to run BEFORE the network fetches. Offline,
-  // that meant a user upgrading from the Swift app's vendored fork got their
-  // working fork removed with nothing installed in its place: KFX conversion
-  // breaks outright, worse than doing nothing. So every fetch and every
-  // check on what it returned (the index, `meta is None`, the zip, the size
-  // check, the `__init__.py` check) has to pass before `remove_plugin` runs,
-  // and that has to happen before `add_plugin` installs the replacement.
-  test('forks are cleared only after the download and its checks pass, not before', async () => {
-    const snippet = await installSnippetText();
-    const urlopenIdx = snippet.indexOf('urlopen(');
-    const initCheckIdx = snippet.indexOf("'__init__.py' not in");
-    const removeIdx = snippet.indexOf('remove_plugin(p)');
-    const addPluginIdx = snippet.indexOf('add_plugin(path)');
-    expect(urlopenIdx).toBeGreaterThan(-1);
-    expect(initCheckIdx).toBeGreaterThan(-1);
-    expect(removeIdx).toBeGreaterThan(-1);
-    expect(addPluginIdx).toBeGreaterThan(-1);
-    expect(removeIdx).toBeGreaterThan(urlopenIdx);
-    expect(removeIdx).toBeGreaterThan(initCheckIdx);
-    expect(removeIdx).toBeLessThan(addPluginIdx);
+  test('an unreachable index reports offline and leaves every plugin in place', async () => {
+    const { result, events } = await install({ index: 'offline', zip: 'ok', plugins: installed });
+    expect(result).toEqual({
+      ok: false,
+      reason: "Calibre's plugin site could not be reached. Check the internet connection, then try again.",
+      removed: [],
+    });
+    expect(kinds(events)).toEqual(['index']);
   });
 
-  // Only the network call may sit inside the try that turns a failure into
-  // 'offline'. The zip's URL is built from the index entry, and an entry
-  // with no 'file' raises a KeyError: built inside that try, it was
-  // reported as "could not be reached", which sends the reader to check a
+  test('an unreachable zip download reports offline and leaves every plugin in place', async () => {
+    const { result, events } = await install({ index: 'ok', zip: 'offline', plugins: installed });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('could not be reached');
+    expect(result.removed).toEqual([]);
+    expect(kinds(events)).toEqual(['index', 'zip']);
+  });
+
+  // The fork-clearing used to run before the fetches, so an offline user
+  // lost a working fork with nothing in its place. A download whose size
+  // disagrees with the index, or that is not a plugin, must leave it too.
+  test('a size mismatch is refused before any fork is cleared', async () => {
+    const { result, events } = await install({ index: 'ok', zip: 'ok', sizeDelta: 7, plugins: installed });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/^downloaded \d+ bytes, index says \d+$/);
+    expect(result.removed).toEqual([]);
+    expect(kinds(events)).toEqual(['index', 'zip']);
+  });
+
+  test('a download that is not a calibre plugin is refused before any fork is cleared', async () => {
+    const { result, events } = await install({ index: 'ok', zip: 'not-plugin', plugins: installed });
+    expect(result).toEqual({ ok: false, reason: 'downloaded file is not a calibre plugin', removed: [] });
+    expect(kinds(events)).toEqual(['index', 'zip']);
+  });
+
+  // The one failure that changes the reader's Calibre: the fork is already
+  // gone when add_plugin fails, so the result has to say so.
+  test('an add_plugin failure reports what was already removed', async () => {
+    const { result, events } = await install({
+      index: 'ok', zip: 'ok', plugins: installed, addFails: 'plugin rejected by calibre',
+    });
+    expect(result).toEqual({ ok: false, reason: 'plugin rejected by calibre', removed: [FORK.name] });
+    expect(kinds(events)).toEqual(['index', 'zip', 'remove', 'add']);
+  });
+
+  // An index entry with no 'file' is a broken index, not a lost
+  // connection: reporting it as offline sends the reader to check a
   // connection that is fine.
-  test('the zip URL is built before the try that marks a failed download as offline', async () => {
-    const snippet = await installSnippetText();
-    const urlopenIdx = snippet.indexOf('urlopen(');
-    const innerTry = snippet.lastIndexOf('try:', urlopenIdx);
-    const built = snippet.indexOf("'https://plugins.calibre-ebook.com/' + meta['file']");
-    expect(built, 'the zip URL is not built from the index entry').toBeGreaterThan(-1);
-    expect(innerTry).toBeGreaterThan(-1);
-    expect(built).toBeLessThan(innerTry);
-    // Nothing but the fetch between that try and its except.
-    const guarded = snippet.slice(innerTry, snippet.indexOf('except', innerTry));
-    expect(guarded).not.toContain('meta[');
+  test('an index entry with no file is a plain failure, not offline', async () => {
+    const { result, events } = await install({ index: 'no-file', zip: 'ok', plugins: installed });
+    expect(result.ok).toBe(false);
+    expect(result.reason).not.toContain('could not be reached');
+    expect(result.removed).toEqual([]);
+    expect(kinds(events)).toEqual(['index']);
   });
 
-  // `removed` exists before anything can fail, so BOTH failure lines can
-  // carry it: an add_plugin that fails after the fork-clearing loop has
-  // already taken an older copy out, and the caller must be told which.
-  // At module level, before the try, for the same reason as
-  // `class Unreachable`: a name first bound inside the try is unbound in an
-  // except clause reached before that line ran.
-  test('removed = [] is bound once, before the snippet’s first try:, and both failures report it', async () => {
-    const snippet = await installSnippetText();
-    expect(snippet.match(/removed = \[\]/g)?.length).toBe(1);
-    const bound = snippet.indexOf('removed = []');
-    expect(bound).toBeLessThan(snippet.indexOf('try:'));
-    for (const clause of ['except Unreachable as e:', 'except Exception as e:\n    print(']) {
-      const at = snippet.lastIndexOf(clause);
-      expect(at, `no ${clause}`).toBeGreaterThan(bound);
-      const next = snippet.indexOf('\nexcept', at + 1);
-      const handler = snippet.slice(at, next === -1 ? undefined : next);
-      expect(handler).toContain('SCREEPUB_RESULT');
-      expect(handler, `${clause} does not report removed`).toContain("'removed': removed");
-    }
+  // A calibre that moves one of the names the snippet imports fails before
+  // any line inside the try has done anything. The snippet still has to
+  // answer with its JSON line rather than a NameError traceback, which is
+  // why `class Unreachable` and `removed` are bound above the try.
+  test('a failed calibre import still ends in a result line', async () => {
+    const { result, events } = await install({ index: 'ok', zip: 'ok', plugins: installed, noIndexUrl: true });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('INDEX_URL');
+    expect(result.removed).toEqual([]);
+    expect(events).toEqual([]);
   });
 });
 

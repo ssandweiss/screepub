@@ -856,27 +856,8 @@ describe('screepub routes (through the CLI)', () => {
     expect(soleJson(stdout).error.code).toBe('unreadable');
   });
 
-  const FOREIGN: [string[], string, string][] = [
-    [['--device', 'x'], '--device', 'send'],
-    [['--set', '{}'], '--set', 'settings and app-settings'],
-    [['--for', 'kindle'], '--for', 'export'],
-    [['--fountain', '/x.fountain'], '--fountain', 'export'],
-    [['--options-json', '{}'], '--options-json', 'export'],
-    [['--out', '/x.epub'], '--out', 'export'],
-    [['--offered', '1.0'], '--offered', 'update-decision'],
-    [['--opted-in'], '--opted-in', 'update-should-check'],
-  ];
-
-  test("refuses every other verb's flags as usage errors, naming the flag's owner", async () => {
-    for (const [flags, name, owner] of FOREIGN) {
-      const { stdout, exitCode } = await runCli(['routes', book(), ...flags, '--json']);
-      const answer = soleJson(stdout);
-      expect(`routes ${name}: ${exitCode} ${answer.ok} ${answer.error?.code}`).toBe(
-        `routes ${name}: 1 false usage`,
-      );
-      expect(answer.error.message).toContain(`routes takes no ${name} (${name} belongs to ${owner}`);
-    }
-  });
+  // Every other verb's flag is refused, naming its owners:
+  // tests/cli-verb-flags.test.ts checks that for every verb and every flag.
 
   test('takes exactly one book', async () => {
     const none = soleJson((await runCli(['routes', '--json'])).stdout);
@@ -969,23 +950,9 @@ describe('screepub route (through the CLI)', () => {
     expect(existsSync(OUT)).toBe(false);
   });
 
-  const FOREIGN_ROUTE: [string[], string, string][] = [
-    [['--device', 'x'], '--device', 'send'],
-    [['--set', '{}'], '--set', 'settings and app-settings'],
-    [['--for', 'kindle'], '--for', 'export'],
-    [['--offered', '1.0'], '--offered', 'update-decision'],
-    [['--opted-in'], '--opted-in', 'update-should-check'],
-  ];
-
-  test("refuses every other verb's flags as usage errors, naming the flag's owner", async () => {
-    for (const [flags, name, owner] of FOREIGN_ROUTE) {
-      const { stdout, exitCode } = await runCli(['route', 'save-epub', book(), '--out', OUT, ...flags, '--json']);
-      const answer = soleJson(stdout);
-      expect(`route ${name}: ${exitCode} ${answer.ok} ${answer.error?.code}`).toBe(`route ${name}: 1 false usage`);
-      expect(answer.error.message).toContain(`route takes no ${name} (${name} belongs to ${owner})`);
-    }
-    expect(existsSync(OUT)).toBe(false);
-  });
+  // Every other verb's flag is refused before the handler runs, naming its
+  // owners: tests/cli-verb-flags.test.ts checks that for every verb and
+  // every flag.
 
   test('a save without --out is usage naming --out', async () => {
     const { stdout, exitCode } = await runCli(['route', 'save-epub', book(), '--json']);

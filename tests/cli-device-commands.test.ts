@@ -454,16 +454,8 @@ describe('flag before verb', () => {
 });
 
 describe('devices rejects flags it cannot act on', () => {
-  test('--device on devices is a usage error, not a silent no-op', async () => {
-    // Same class as `devices extra`, which is already rejected: accepting a
-    // flag the command ignores teaches the user it did something.
-    const { stdout, exitCode } = await runCli(['devices', '--device', 'foo', '--json']);
-    expect(exitCode).toBe(1);
-    const result = soleJson(stdout);
-    expect(result.error.code).toBe('usage');
-    expect(result.error.message).toContain('--device');
-  });
-
+  // The refusals themselves (--device included, with its own aside) are
+  // checked for every verb and every flag in tests/cli-verb-flags.test.ts.
   test('devices without --device still lists, so the guard is not blanket', async () => {
     const { stdout, exitCode } = await runCli(['devices', '--json']);
     expect(exitCode).toBe(0);

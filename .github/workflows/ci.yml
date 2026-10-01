@@ -1,7 +1,10 @@
 # Least privilege by default. Pin third-party actions to SHAs (pinact run).
-# Integration tests self-skip without fixtures/ (private, never committed);
-# kit-check's conversion checks self-skip without Calibre — both stay green
-# on bare runners.
+# The engine's integration tests run here, on the committed invented
+# fixtures in tests/fixtures/; nothing self-skips for want of them (that
+# guard was removed: see tests/fixture-stability.test.ts). The real scripts
+# in root fixtures/ are private and never reach CI. No runner here has
+# Calibre, so the engine's Calibre tests and kit-check's conversion checks
+# skip; .github/workflows/weekly-toolchain.yml runs them with Calibre.
 name: ci
 # site/ and brand/ ship to a browser, not into a converted book, and neither
 # is touched by the engine suite. Skipping them keeps a copy edit off the

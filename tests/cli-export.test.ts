@@ -1,6 +1,7 @@
-import { afterAll, describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { afterAll, beforeAll, describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import {
   chmodSync,
+  cpSync,
   mkdtempSync,
   mkdirSync,
   rmSync,
@@ -16,7 +17,7 @@ import { join } from 'node:path';
 import { exportCommand } from '../src/cli-export';
 import { availableFormats, type FreshKindleArtifactOptions } from '../src/export/artifact';
 import { isCalibreAvailable } from '../src/export/calibre';
-import type { KfxStatus } from '../src/export/kfx';
+import { kfxStatus, type KfxStatus } from '../src/export/kfx';
 import { DEFAULT_FORMAT_OPTIONS, type FormatOptions } from '../src/options';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-cli-export-'));
@@ -25,21 +26,57 @@ afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 const kfxReadyStatus: KfxStatus = { calibre: true, previewer: true, pluginInstalled: true, ready: true };
 const calibreOnlyStatus: KfxStatus = { calibre: true, previewer: false, pluginInstalled: false, ready: false };
 const noToolchainStatus: KfxStatus = { calibre: false, previewer: false, pluginInstalled: false, ready: false };
+// The REAL toolchain's answer on this machine, asked once. It decides
+// whether the one real-conversion test below runs at all.
+const REAL_KFX_READY = (await kfxStatus()).ready;
 
 let dir: string;
 let epub: string;
 let fountain: string;
 
-beforeEach(async () => {
+// A real EPUB, produced by the engine, so the ladder has something honest
+// to work from rather than a stub that every branch would reject. Built
+// ONCE, not before every test: each build is a bun start-up and a full
+// conversion, and every test got the same bytes. Each test still gets its
+// own folder holding a copy, because tests write siblings (.kfx, .azw3,
+// .mobi) and change timestamps beside it.
+//
+// The build is checked here and not trusted: a failed build used to leave
+// no EPUB at all, and every test downstream then failed (or passed) for a
+// reason that had nothing to do with what it was testing.
+const BUILT = mkdtempSync(join(SCRATCH, 'built-'));
+let buildAnswer: { ok?: boolean; epubPath?: string } = {};
+beforeAll(() => {
+  const source = join(BUILT, 'Script.fountain');
+  const built = join(BUILT, 'Script.epub');
+  writeFileSync(source, 'INT. ROOM - DAY\n\nMARGO\nHello.\n');
+  const proc = Bun.spawnSync(['bun', 'src/cli.ts', source, '--json', '-o', built]);
+  const stdout = proc.stdout.toString();
+  if (proc.exitCode !== 0 || !existsSync(built)) {
+    throw new Error(`the engine did not build the test EPUB (exit ${proc.exitCode}):\n${stdout}\n${proc.stderr.toString()}`);
+  }
+  buildAnswer = JSON.parse(stdout);
+});
+
+beforeEach(() => {
   dir = mkdtempSync(join(SCRATCH, 'export-'));
   epub = join(dir, 'Script.epub');
   fountain = join(dir, 'Script.fountain');
-  writeFileSync(fountain, 'INT. ROOM - DAY\n\nMARGO\nHello.\n');
-  // A real EPUB, produced by the engine, so the ladder has something honest
-  // to work from rather than a stub that every branch would reject.
-  Bun.spawnSync(['bun', 'src/cli.ts', fountain, '--json', '-o', epub]);
+  // Timestamps kept, so the copy keeps the order the build left: the EPUB
+  // no older than its .fountain.
+  cpSync(join(BUILT, 'Script.fountain'), fountain, { preserveTimestamps: true });
+  cpSync(join(BUILT, 'Script.epub'), epub, { preserveTimestamps: true });
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+test('the shared EPUB is a real one the engine built', () => {
+  expect(buildAnswer.ok).toBe(true);
+  expect(buildAnswer.epubPath).toBe(join(BUILT, 'Script.epub'));
+  // An EPUB is a zip whose first entry is the uncompressed mimetype.
+  const bytes = readFileSync(epub);
+  expect(bytes.subarray(0, 2).toString('latin1')).toBe('PK');
+  expect(bytes.toString('latin1', 30, 58)).toBe('mimetypeapplication/epub+zip');
+});
 
 describe('exportCommand', () => {
   test('epub is always available and is returned as itself', async () => {
@@ -206,32 +243,30 @@ describe('exportCommand', () => {
     expect(result.stages).toEqual([]);
   });
 
-  // The one test in this file that genuinely cannot be made deterministic:
-  // confirming the REAL, non-injected production path (real
-  // isCalibreAvailable, real kfxStatus, real freshKindleArtifact) produces
-  // a genuine file when a real toolchain is present requires that real
-  // toolchain to actually run and emit bytes — no seam can substitute for
-  // that without testing a fake instead of the real wiring it exists to
-  // exercise. It never SKIPS — there is always an answer, either a real
-  // file or a message naming Calibre/Kindle — it just can't pin which
-  // branch runs, because that is a property of the machine, not the code.
-  test('kindle rung on the real, non-injected toolchain: a real file, or a named reason', async () => {
-    const result = await exportCommand({ epub, for: 'kindle', fountain }).catch((e) => e);
-    if (result instanceof Error) {
-      expect(result.message).toMatch(/Calibre|Kindle/);
-    } else {
-      expect(existsSync(result.path)).toBe(true);
-      expect(['kfx', 'azw3', 'mobi']).toContain(result.extension);
-    }
+  // The one test in this file that cannot be made deterministic: whether
+  // the REAL, non-injected path (real isCalibreAvailable, real kfxStatus,
+  // real freshKindleArtifact) produces a genuine .kfx needs the real
+  // toolchain to run and emit bytes. No seam can stand in for that without
+  // testing a fake instead of the wiring.
+  //
+  // So it runs only where the KFX toolchain reports ready, and there it
+  // demands a real .kfx. It used to run everywhere and pass on ANY error
+  // that mentioned Calibre or Kindle, which a broken toolchain produces
+  // too: on the one machine able to check the KFX rung, a KFX failure
+  // passed. Where the toolchain is absent it skips, and the injected tests
+  // above cover every rung.
+  test.skipIf(!REAL_KFX_READY)('kindle rung on the real, ready KFX toolchain: a real .kfx file', async () => {
+    const result = await exportCommand({ epub, for: 'kindle', fountain });
+    expect(result.extension).toBe('kfx');
+    expect(result.path).toBe(join(dir, 'Script.kfx'));
+    expect(existsSync(result.path)).toBe(true);
+    expect(statSync(result.path).size).toBeGreaterThan(0);
     // 2 minutes, not bun's default 5 seconds, and the difference is not
-    // slack: where the toolchain is ABSENT this refuses in about a second,
-    // but where it is PRESENT it really converts. Measured 2026-09-14 on an
-    // M-series Mac with Calibre + the KFX plugin + Kindle Previewer: 21s to
-    // a real .kfx, most of it Previewer's cold start, which Amazon ships
-    // x86_64-only so it comes up under Rosetta. CI has no Calibre and takes
-    // the fast refusal, so this budget costs nothing there -- it exists so
-    // the suite is green on a developer machine that has the tools, rather
-    // than punishing the only machines that can exercise this path at all.
+    // slack: it only runs where the toolchain is present, and there it
+    // really converts. Measured 2026-09-14 on an M-series Mac with Calibre,
+    // the KFX plugin and Kindle Previewer: 21s to a real .kfx, most of it
+    // Previewer's cold start, which Amazon ships x86_64-only so it comes up
+    // under Rosetta.
   }, 120_000);
 
   test('a missing EPUB is unreadable, not a ladder failure', async () => {
@@ -972,72 +1007,5 @@ describe('screepub export --out (through the CLI)', () => {
     const answer = JSON.parse(proc.stdout.toString());
     expect(answer.ok).toBe(true);
     expect(answer.usage).toContain('--out');
-  });
-});
-
-// Every OTHER verb must refuse --out, the same way every verb but export
-// already refuses --for and --fountain. Task 6 adds `route`, which also
-// accepts it; until then export is the only owner.
-describe('every other verb refuses --out', () => {
-  test('devices --out is a usage error naming export and route', () => {
-    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'devices', '--out', '/tmp/x.epub', '--json']);
-    const answer = JSON.parse(proc.stdout.toString());
-    expect(answer.ok).toBe(false);
-    expect(answer.error.code).toBe('usage');
-    expect(answer.error.message).toContain('--out belongs to export and route');
-  });
-
-  test('send <file> --out is a usage error naming export and route', () => {
-    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'send', epub, '--out', '/tmp/x.epub', '--json']);
-    const answer = JSON.parse(proc.stdout.toString());
-    expect(answer.ok).toBe(false);
-    expect(answer.error.code).toBe('usage');
-    expect(answer.error.message).toContain('--out belongs to export and route');
-  });
-
-  test('settings <file> --out is a usage error naming export and route', () => {
-    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'settings', fountain, '--out', '/tmp/x.epub', '--json']);
-    const answer = JSON.parse(proc.stdout.toString());
-    expect(answer.ok).toBe(false);
-    expect(answer.error.code).toBe('usage');
-    expect(answer.error.message).toContain('--out belongs to export and route');
-  });
-
-  test('kfx-status --out is a usage error naming export and route', () => {
-    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'kfx-status', '--out', '/tmp/x.epub', '--json']);
-    const answer = JSON.parse(proc.stdout.toString());
-    expect(answer.ok).toBe(false);
-    expect(answer.error.code).toBe('usage');
-    expect(answer.error.message).toContain('--out belongs to export and route');
-  });
-
-  // Safe to spawn: the refusal sits ahead of kfxInstallCommand() in cli.ts
-  // (tests/cli-kfx.test.ts pins that order), so this exits on the usage
-  // error before the installer ever touches the network or Calibre.
-  test('kfx-install --out is a usage error naming export and route, before installing anything', () => {
-    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'kfx-install', '--out', '/tmp/x.epub', '--json']);
-    const answer = JSON.parse(proc.stdout.toString());
-    expect(answer.ok).toBe(false);
-    expect(answer.error.code).toBe('usage');
-    expect(answer.error.message).toContain('--out belongs to export and route');
-  });
-
-  test('update-decision --out is a usage error naming export and route', () => {
-    const proc = Bun.spawnSync([
-      'bun', 'src/cli.ts', 'update-decision',
-      '--offered', '0.7.0', '--current', '0.6.0', '--out', '/tmp/x.epub', '--json',
-    ]);
-    const answer = JSON.parse(proc.stdout.toString());
-    expect(answer.ok).toBe(false);
-    expect(answer.error.code).toBe('usage');
-    expect(answer.error.message).toContain('--out belongs to export and route');
-  });
-
-  test('update-should-check --out is a usage error naming export and route', () => {
-    const proc = Bun.spawnSync(['bun', 'src/cli.ts', 'update-should-check', '--out', '/tmp/x.epub', '--json']);
-    const answer = JSON.parse(proc.stdout.toString());
-    expect(answer.ok).toBe(false);
-    expect(answer.error.code).toBe('usage');
-    expect(answer.error.message).toContain('--out belongs to export and route');
   });
 });
