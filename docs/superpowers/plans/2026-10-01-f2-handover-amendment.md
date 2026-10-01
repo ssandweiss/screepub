@@ -1,0 +1,220 @@
+# Plan amendment: the identifier release (F2) and the deletion (F3), re-mapped after 0.7.4
+
+Date: 2026-10-01. Amends
+[the handover plan](2026-09-20-swift-to-tauri-handover.md) (its steps 6 to 13,
+written as "v0.6.1") and
+[the retirement spec](../specs/2026-09-14-retire-swiftui-design.md) (F2, F3).
+Decision record: [ADR 2026-09-20](../../adr/2026-09-20-swift-app-migrates-itself.md).
+
+The handover plan was written before the window had an updater (0.7.1), app
+settings (piece C), or a second release channel of its own. Its steps are
+still right; three things around them changed, and one of them is a whole
+population of users the ADR does not mention. This file records what was
+measured on 2026-10-01 against main at `7eb40e5` (v0.7.4), what that changes,
+and the order of work. Nothing here has been built yet.
+
+## What was measured
+
+1. **v0.7.4 publishes TWO `.dmg` assets**: `Screepub-macOS.dmg` (the Swift
+   app, from `app/release.sh`) and `Screepub-Desktop-macOS-universal.dmg`
+   (the window). `gh release view v0.7.4` lists both. The frozen Swift
+   updater takes the first `.dmg` in GitHub's name-ordered asset list
+   (`UpdateCheck.swift`; ordering measured 2026-09-21, see the spec), so F2
+   must publish exactly one. ADR consequence 1 already says this; restated
+   because both names are still live.
+2. **The Swift updater takes the first `.app` inside the mounted image**
+   (`UpdateInstall.appInside`: `items.first { $0.pathExtension == "app" }`),
+   verifies it against the pinned requirement including the identifier, and
+   swaps it into the RUNNING bundle's path. The name of the `.app` inside
+   the DMG does not matter to it; the DMG's own `Applications` symlink has
+   no extension and is skipped.
+3. **The window's own updater never looks at the identifier.**
+   `tauri-plugin-updater` 2.12.0, `updater.rs` lines 1294 to 1388 (macOS
+   `install_inner`): it unpacks the archive, dropping the top-level
+   directory name (`.skip(1)`), renames the running bundle aside and
+   renames the new contents into `extract_path`, which is the running
+   bundle's path. Read in `~/.cargo/registry/src/.../tauri-plugin-updater-2.12.0`.
+4. **The window keeps four values in WebKit `localStorage`**
+   (`desktop/ui/update.js`: `STAMP`, `OPT_IN`, `ASKED`, `FOUND`): when it
+   last checked, whether the person opted in to automatic checks, whether
+   the one-time question was asked, and the version it last found. WebKit
+   keys that storage by bundle identifier
+   (`~/Library/WebKit/<identifier>/`). Everything else the window and
+   engine keep lives in the engine's settings file and the library
+   (`~/Library/Application Support/Screepub`, `~/Documents/Screepub`),
+   which no identifier touches.
+5. **The `release` job is three jobs wearing one name.** It builds and
+   notarizes the Swift app, it builds, signs and notarizes the two macOS CLI
+   tarballs the Homebrew FORMULA serves (`app/release.sh` lines 45 to 78 and
+   112 to 117), and it creates the GitHub Release itself (draft, upload,
+   publish). `cross-upload`, `app-upload` and `tap` all `needs: release`.
+   `tools/build-cli.ts` says outright that it never makes a macOS artifact.
+   So "take `app/release.sh` out of `release.yml`" (handover step 8) is not
+   a deletion: the CLI build and the release creation need a new home
+   first.
+6. **The tap's scripts name `Screepub-macOS.dmg` and nothing else.**
+   `tools/bump-tap.sh` (digest, cask stanza), `tools/check-tap.sh`
+   (`check_sha "Screepub-macOS.dmg"`), and the crib sheet in `release.yml`.
+
+## The population the ADR does not cover: people already running the window
+
+ADR 2026-09-20 covers Swift installs (`com.darkwell.screepub`) upgrading to
+the window. Since 0.7.1 there is a second group: people running the window
+itself, installed as `Screepub Desktop.app` with identifier
+`com.darkwell.screepub.desktop`, updating through `latest.json`.
+
+At F2, `latest.json` carries them to the new identifier automatically (3).
+`latest.json` is keyed by platform, not identifier, so there is no way to
+publish an update for one group and not the other; "have them re-download
+instead" is not actually available unless the release also stops publishing
+`latest.json`, which would strand them on a 404. What they get instead is
+four one-time costs, all measured or read rather than guessed:
+
+- **The update question comes back once.** (4) The opt-in answer and the
+  "asked" flag are in identifier-keyed storage. Someone who had opted in is
+  opted out until they answer again.
+- **macOS asks again for removable-volume access** the first time the new
+  identity copies to a Kindle. TCC grants are keyed to the signing identity.
+  (Swift installs probably keep theirs: same team, same identifier, so the
+  same designated requirement. Not verified.)
+- **The bundle keeps its file name**, `Screepub Desktop.app`, because the
+  updater replaces in place (3). The menu bar says "Screepub"; Finder and
+  the Dock say "Screepub Desktop".
+- **Anyone with BOTH apps ends up with two copies of the same app**, one
+  named `Screepub.app` (the Swift install, swapped by its updater) and one
+  named `Screepub Desktop.app`, both `com.darkwell.screepub`. The owner has
+  run both apps on one Mac (the 2026-09-21 refusal test), so he is probably
+  in this group.
+
+Making it fully seamless would mean moving the four update values into the
+engine's settings file in a release BEFORE F2 (so they survive), and having
+something rename the bundle after the swap. The first is a modest window
+change; the second is logic in the shell or a self-rename from the engine,
+against `desktop/README.md`'s rule and fragile when `Screepub.app` already
+exists. **Recommendation: accept the four costs and name them in the F2
+release notes**, with one line telling people who had both apps to delete
+`Screepub Desktop`. This is the owner's call (queued below).
+
+## Decisions queued for the owner
+
+1. **Window users: accept the four one-time costs?** (Recommended: yes.)
+2. **The single Mac download's name.** Recommended: `Screepub-macOS.dmg`.
+   It is the URL the site buttons, the README, the cask and every external
+   link point at today; naming the window's image that way means
+   they all start serving the window with no edit, and `bump-tap.sh` and
+   `check-tap.sh` keep working unchanged (6). The cost: links to
+   `Screepub-Desktop-macOS-universal.dmg` 404 from F2 on. The alternative
+   keeps the Desktop name and edits every Swift-name reference instead.
+   **2b, only if 2 is yes:** the spec settled "retire the cask at F2". With
+   the name kept, the cask needs no change to serve the window: `app
+   "Screepub.app"` matches once the transition overlay is gone. Keep the
+   cask after all, or retire it as decided?
+3. **The F3 wait.** The spec says F3 runs "one release cycle after F2". With
+   the CLI move below there are naturally two releases after F2 anyway.
+   Keep the wait? (Recommended: yes; it is free.)
+4. **Version and go-ahead** for each release: asked at the time, in the
+   owner's own chat, never relayed.
+
+## Order of work
+
+Four releases from here, each changing one kind of thing, because each is
+only provable at a tag.
+
+| Release | Carries | Why separate |
+| --- | --- | --- |
+| N (next) | the housekeeping batch (other session) | already in flight |
+| N+1 | **F2: identity only** | the handover plan's own rule: "Do not bundle other changes into" it |
+| N+2 | **the macOS CLI build moves out of `app/release.sh`**; the Swift job leaves `release.yml` | changes how the formula's binaries are signed, provable only at a tag, and `app/` is still there to fall back on |
+| N+3 | **F3: `git rm -r app/`** and the reference sweep to empty | the last step, one release after F2 at the earliest |
+
+N+2 and N+3 can merge into one release if the owner prefers fewer, at the
+cost of losing the fallback for a broken CLI signing path.
+
+## F2 (release N+1): steps, re-mapped onto today's files
+
+Branch `worktree-f2-identifier`, rebased onto main after the batch lands
+(the batch's window helper also edits `tauri.conf.json` and
+`tests/desktop-shell.test.ts`).
+
+1. **Identifier.** `desktop/src-tauri/tauri.conf.json`:
+   `com.darkwell.screepub.desktop` to `com.darkwell.screepub`.
+2. **Invert the tripwire.** `tests/desktop-shell.test.ts`'s identifier test
+   asserts `.desktop` and NOT the Swift id. Invert it deliberately, comment
+   rewritten to say the apps now share an identity on purpose.
+3. **Drop the transition overlay.** Delete
+   `desktop/src-tauri/tauri.transition.conf.json`; remove `--config
+   tauri.transition.conf.json` from `release.yml`'s universal row; update
+   the pins (`git grep` for `transition.conf` and `Screepub Desktop` found
+   about 20 files on 2026-10-01, most of them tests:
+   `build-app-bundle`, `release-app-step`, `verify-signing`,
+   `build-update-manifest`, `check-latest`, `update-signature`,
+   `smoke-bundle`, `desktop-shell`).
+4. **Name the image** per decision 2: `tools/build-app-bundle.ts`'s DMG row
+   `releasedName`, and the updater archive's row to match
+   (`Screepub-macOS-universal.app.tar.gz`), with the parsers in
+   `tools/build-update-manifest.ts` and `tools/check-latest.ts` that match
+   archive names by regex.
+5. **Publish one `.dmg`.** `release.yml`'s `release` job stops uploading
+   `app/dist/Screepub-macOS.dmg` and stops hashing it into the notes; the
+   job KEEPS running `app/release.sh` for the CLI tarballs until N+2. The
+   install line in the notes and the crib sheet name the window's image.
+   `app-upload`'s count stays at one `.dmg`; add a check that the release
+   as a whole holds exactly one `.dmg` (the Swift job no longer adds one,
+   and nothing should ever again).
+6. **Signing check.** `tools/verify-signing.ts --expect handover` already
+   exists and asserts the Swift updater would INSTALL the image. Run it on
+   the downloaded DMG after the tag, as v0.6.0 ran `--expect coexist`.
+7. **Release notes disclosures** (`docs/releases/<N+1>.md`): Cancel during
+   conversion is gone; Swift-app tuning is lost once (books untouched);
+   the four window-user costs above, plus "if you had both apps, delete
+   Screepub Desktop".
+8. **`docs/mac-qa.md` §4 and §5** become "one app replaces the other": a
+   Swift install updates into the window; a window install updates and
+   keeps its name.
+9. **The README and the site** change only where they name the Desktop
+   image (and not at all for the buttons, if decision 2 is yes). The other
+   session owns both; message it with the final names.
+10. **The tap** per decision 2b. If the cask is retired: deprecate it in
+    `homebrew-tap/` (a separate repo, hidden from `git status`), retire the
+    cask half of `tap-freshness.yml` and `check-tap.sh`, drop the cask digest
+    from `bump-tap.sh`, and verify against the PUBLISHED tap.
+11. **The owner's hands, after the tag**: his Swift install updates itself
+    into the window and relaunches; his window install updates and asks
+    the update question once. This is handover step 13 and the only test
+    that matters.
+
+## The CLI move (release N+2)
+
+The two macOS CLI tarballs need a builder that does not live in `app/`. The
+shape that fits the repo: extend `tools/build-cli.ts` with `macos-arm64` and
+`macos-x64` targets for packaging and verification (it already detects
+Mach-O), and do the signing and notarization in a `release.yml` step on the
+macOS runner, the way `app/release.sh` does now (codesign with hardened
+runtime and timestamp, `notarytool` on a zip, no staple for a bare
+Mach-O). The `release` job then imports the certificate, builds the CLI,
+creates the release and uploads; the Swift build, Rosetta and
+`app/release.sh` leave the workflow. `tests/release-app-step.test.ts` and
+the build-cli tests follow. The formula's URLs and names do not change.
+
+## F3 (release N+3): the deletion
+
+Acceptance criteria 11 to 15 of the spec, re-checked against today:
+
+- **11, coverage and the sweep.** `docs/retired-coverage.md`'s Built column
+  is stale: `send-menu`, `mail-and-books` and `feedback-url` were built by
+  parity pieces B and C (2026-09-24) and still read "no". Update it with
+  the test that now covers each, then shrink `tools/app-references.json` to
+  empty. `tests/frozen-app.test.ts` and `tools/frozen-app-manifest.json`
+  (the F1 freeze guard) go with `app/`.
+- **12, brand tokens.** Done early (`brand/tokens.json`, 2026-09-23).
+- **13, the KFX plugin.** Answered by piece D: `replaced`, the engine
+  installs through Calibre's own index. Check `THIRD-PARTY-NOTICES.md` no
+  longer describes a vendored zip.
+- **14, `CLAUDE.md`'s `format-defaults.json` invariant** loses kit-check
+  and names the pins that remain.
+- **15, one reviewable commit.** `git rm -r app/`; `ci.yml`'s `app` job
+  and `weekly-toolchain.yml` (Swift-only, deleted whole) go; no workflow
+  references a Swift job. Suite green.
+
+The F3 branch can be prepared any time and held; it merges only after
+N+1 has shipped and N+2 has proven the CLI move.
