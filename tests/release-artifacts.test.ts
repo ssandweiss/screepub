@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { TARGETS } from '../tools/build-cli';
 import {
@@ -669,8 +669,21 @@ describe('desktop.yml bundles and smokes on every push', () => {
   });
 });
 
+/** The text of `doc` from the heading `start` up to the next heading of the
+ *  same level (or the end). Fails loudly when the heading is missing, so a
+ *  renamed section cannot make a scoped check pass against an empty string. */
+function sectionOf(doc: string, start: string): string {
+  const at = doc.indexOf(`\n${start}\n`);
+  expect(at, `heading "${start}" is missing`).toBeGreaterThan(-1);
+  const level = start.match(/^#+ /)![0];
+  const rest = doc.slice(at + start.length + 2);
+  const next = rest.search(new RegExp(`^${level}`, 'm'));
+  return next === -1 ? rest : rest.slice(0, next);
+}
+
 describe('the two limits are stated where a reader meets them', () => {
   const readme = read('README.md');
+  const developers = read('docs/developers.md');
 
   test('the README says the Windows download is unsigned', () => {
     const lower = readme.toLowerCase();
@@ -679,22 +692,17 @@ describe('the two limits are stated where a reader meets them', () => {
     expect(/not signed|unsigned/.test(lower)).toBe(true);
   });
 
-  test('the README names each Linux and Windows artifact it tells people to download', () => {
-    for (const t of TARGETS) expect(readme).toContain(t.archiveName);
-  });
-
-  test('the README says which release these downloads start appearing in', () => {
-    // package.json deliberately stays at 0.5.4 through this branch, and
-    // GitHub renders README.md from main the moment it merges. Without a
-    // version qualifier, "latest release" points at v0.5.4, which carries
-    // the DMG and two macOS tarballs and none of the three files the table
-    // above names -- an empty-handed download with no error to explain it.
-    const section = readme.slice(readme.indexOf('### Linux and Windows'));
-    expect(section).toContain('releases/latest');
-    // The qualifier has to sit in the same breath as the link, not in some
-    // other part of the page a downloader never reaches.
-    const around = section.slice(0, section.indexOf('| Machine |'));
-    expect(around).toContain('0.6.0');
+  test('the developer page names every command-line archive, and the README links to it', () => {
+    // The CLI downloads moved out of the README (spec 2026-09-22, part 1):
+    // the README keeps one line and a link. The names are DERIVED from the
+    // builder, so a renamed archive fails here rather than leaving a page
+    // naming a file the release does not carry.
+    for (const t of TARGETS) expect(developers).toContain(t.archiveName);
+    for (const name of MACOS_ASSETS.filter((n) => n.endsWith('.tar.gz'))) {
+      expect(developers).toContain(name);
+    }
+    expect(readme).toContain('docs/developers.md#install-the-command-line-converter');
+    expect(developers).toContain('\n## Install the command-line converter\n');
   });
 
   test('the README says device support off macOS is unproven, and names the tolino case', () => {
@@ -716,18 +724,21 @@ describe('the two limits are stated where a reader meets them', () => {
 
 describe('the app downloads are described where a reader meets them', () => {
   const readme = read('README.md');
+  const developers = read('docs/developers.md');
   const notes = read('docs/releases/0.6.0.md');
   const site = read('site/index.html');
+  const ledger = read('docs/verification-ledger.md');
   const rel = workflow('release.yml');
   const VERSION = '0.6.0';
+  /** The SwiftUI app's DMG: the first of the macOS release assets. */
+  const SWIFT_DMG = MACOS_ASSETS[0]!;
 
   // The names are DERIVED, not restated: release.yml's matrix says which
   // OS/arch legs run, and BUNDLE_KINDS says what each leg is named. So a
   // renamed artifact, a dropped leg or an ADDED leg (an arm64 Linux runner,
-  // say) fails a documentation test rather than leaving these three pages
-  // naming a file the release does not carry -- or silently omitting one it
-  // does. Restating the filenames in the test would catch neither.
-  const published = new Set<string>();
+  // say) fails a documentation test rather than leaving these pages naming
+  // a file the release does not carry, or silently omitting one it does.
+  const published = new Map<string, BundleOs>();
   const unpublished = new Set<string>();
   for (const row of rel.jobs['app-bundles']!.strategy?.matrix?.include ?? []) {
     const os: BundleOs = row.os!.startsWith('ubuntu')
@@ -736,7 +747,7 @@ describe('the app downloads are described where a reader meets them', () => {
         ? 'macos'
         : 'windows';
     for (const kind of kindsForOs(os)) {
-      published.add(kind.releasedName(VERSION, row.arch as BundleArch));
+      published.set(kind.releasedName(VERSION, row.arch as BundleArch), os);
     }
   }
   for (const kind of BUNDLE_KINDS) {
@@ -747,21 +758,26 @@ describe('the app downloads are described where a reader meets them', () => {
   }
 
   const NUMBER_WORD = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+  const install = sectionOf(readme, '## Install');
+
+  /** The README install table's row for `file`. */
+  const row = (file: string): string => {
+    const rows = install.split('\n').filter((l) => l.startsWith('|') && l.includes(`\`${file}\``));
+    expect(rows).toHaveLength(1);
+    return rows[0]!;
+  };
 
   test('the derivation found the four files the release actually uploads', () => {
     // Guards every loop below: a matrix this parse did not understand would
     // make them all vacuously true. Four is what app-upload's own line-count
     // check demands: one .deb, one .rpm, ONE .dmg, one .exe.
-    expect([...published].sort()).toEqual([
+    expect([...published.keys()].sort()).toEqual([
       'Screepub-Desktop-macOS-universal.dmg',
       'Screepub-linux-amd64.deb',
       'Screepub-linux-x86_64.rpm',
       'Screepub-windows-x64-setup.exe',
     ]);
-    // And the ones no leg builds, which no page may offer. The two
-    // per-arch DMGs joined this list on 2026-09-20: a page still naming
-    // one sends a Mac user to a download the release does not carry, and
-    // the point of the universal build is that there is exactly one.
+    // And the ones no leg builds, which no page may offer.
     expect([...unpublished].sort()).toEqual([
       'Screepub-Desktop-macOS-arm64.dmg',
       'Screepub-Desktop-macOS-x64.dmg',
@@ -770,93 +786,77 @@ describe('the app downloads are described where a reader meets them', () => {
     ]);
   });
 
-  test('the README names every file it tells people to download', () => {
-    for (const name of published) expect(readme).toContain(name);
+  test('the README install table has a row for every file the release uploads', () => {
+    for (const name of published.keys()) row(name);
+    row(SWIFT_DMG);
   });
 
   test('no page offers a bundle the release does not carry', () => {
-    // The Linux arm64 .deb and .rpm build by hand and are in no matrix row.
-    // Naming one is an empty-handed download with no error to explain it.
-    for (const text of [readme, notes, site]) {
+    for (const text of [readme, developers, notes, site]) {
       for (const name of unpublished) expect(text).not.toContain(name);
     }
   });
 
   test('the README says how many files the app checksums cover', () => {
-    // Spelled out, so adding a leg without touching this sentence fails
-    // here rather than publishing a checksums file covering more than the
-    // page admits to.
-    expect(readme).toContain(`covers these ${NUMBER_WORD[published.size]} files`);
+    // Spelled out, so adding a leg without touching this sentence fails here
+    // rather than publishing a checksums file covering more than the page
+    // admits to.
+    expect(install).toContain('SHA256SUMS-app');
+    expect(install).toContain(`covers these ${NUMBER_WORD[published.size]} files`);
   });
 
-  test('the README says the Windows installer is unsigned, in the same words as the CLI note', () => {
-    // Scoped to the INSTALLER's own section: E1's CLI paragraph already
-    // puts "SmartScreen" on the page, so an unscoped search would pass with
-    // nothing said about the installer at all.
-    const section = readme.slice(readme.indexOf('### Desktop app')).toLowerCase();
-    expect(section).toContain('smartscreen');
-    expect(/not signed|unsigned/.test(section)).toBe(true);
-    // E1 already wrote this paragraph for the CLI. Two differently-worded
-    // warnings on one page read as two different problems, so both say
-    // More info and Run anyway, and both are still there.
-    const cli = readme
-      .slice(readme.indexOf('### Linux and Windows'), readme.indexOf('### Desktop app'))
-      .toLowerCase();
-    for (const phrase of ['smartscreen', 'more info', 'run anyway']) {
-      expect(cli).toContain(phrase);
-      expect(section).toContain(phrase);
+  test('the Windows warning says what to press, on both pages that offer a Windows download', () => {
+    // One warning in the README's Install section now covers the installer
+    // and the CLI alike; the developer page carries the same words for the
+    // CLI archive. Two differently-worded warnings read as two problems.
+    for (const text of [install, sectionOf(developers, '## Install the command-line converter')]) {
+      // Whitespace-normalised: the pages hard-wrap, and a phrase split
+      // across two lines is still the phrase a reader sees.
+      const lower = text.replace(/\s+/g, ' ').toLowerCase();
+      expect(lower).toContain('smartscreen');
+      expect(/not signed|unsigned/.test(lower)).toBe(true);
+      expect(lower).toContain('more info');
+      expect(lower).toContain('run anyway');
     }
   });
 
   test('the README does not claim the installer works fully offline', () => {
     // NSIS's default webviewInstallMode downloads the WebView2 bootstrapper
-    // when the machine has none. Windows 11 ships it; Windows 10 may not.
-    // The APP still makes no network requests and that claim stands -- but
-    // the INSTALLER sentence has to be precise enough not to be caught out.
-    const section = readme.slice(readme.indexOf('### Desktop app'));
-    expect(section.toLowerCase()).toContain('webview2');
-    // And the standing "works fully offline" promise, which sits in another
-    // section entirely, carries the same qualifier where it is made. A
-    // reader who stops at the privacy section never reaches the other note.
-    const privacy = readme.slice(readme.indexOf('## Your script stays on your machine'));
-    expect(privacy.slice(0, privacy.indexOf('## For developers')).toLowerCase()).toContain(
-      'webview2',
-    );
+    // when the machine has none. The install note says so, and so does the
+    // privacy section's list of network touchpoints, because a reader who
+    // stops there never reaches the other note.
+    expect(install.toLowerCase()).toContain('webview2');
+    expect(sectionOf(readme, '## Your script stays on your machine').toLowerCase()).toContain('webview2');
   });
 
-  test('the README says which of these artifacts CI actually executed', () => {
-    const lower = readme.toLowerCase();
-    // What is unexercised is no longer a whole download but HALF of one.
-    // The Mac DMG is universal, CI runs its ARM slice out of the mounted
-    // image, and the Intel slice ships built, signed and executed nowhere.
-    // Saying so is the difference between a limitation and a surprise.
-    expect(/intel|x86_64|x64/.test(lower)).toBe(true);
-    expect(lower).toContain('slice');
-    // And the bundles nobody has installed are still named as such.
-    expect(lower).toContain('never been installed');
-  });
-
-  test('the README claims macOS for the window, and still withholds Windows', () => {
-    // UPDATED 2026-09-20. This test used to read "does not claim the window
-    // has been run off Linux", and that was right when it was written. Gate
-    // 1b has since passed on a real Mac: the universal DMG was mounted,
-    // dragged to /Applications, launched past Gatekeeper and used to
-    // convert two real feature scripts. Under-claiming is its own kind of
-    // wrong, so the page must now say so.
-    //
-    // Windows is gate 1c and is DEFERRED INDEFINITELY, so the withholding
-    // sentence survives, scoped to the platform that has not earned its
-    // removal. desktop/README.md's ledger is the list this tracks.
-    const section = readme.slice(readme.indexOf('### Desktop app'));
-    expect(section).toContain('Windows');
-    expect(/never been (started|run|opened)|nobody has (started|run|opened)/.test(section)).toBe(
-      true,
+  test('the README install statuses agree with the verification ledger', () => {
+    // The ledger is the one place verification is recorded; the README's
+    // status column may say no more than it. If a ledger line below goes,
+    // somebody did the thing: move the README row (and the site's) up to
+    // match, then update this test.
+    const VERIFIED = 'Verified by a person';
+    const NOT_YET = 'Built and checked automatically. Never installed by a person yet';
+    const person = ledger.slice(
+      ledger.indexOf('**Verified on a real machine, by a person**'),
+      ledger.indexOf('**Verified only by CI'),
     );
-    // The claim macOS earned, stated rather than implied: a person, on a
-    // Mac, with a real script.
-    expect(/\/Applications/.test(section)).toBe(true);
-    // And the superseded sentence is gone rather than merely contradicted.
-    expect(section.toLowerCase()).not.toContain('only ever been started on linux');
+    const nobody = ledger.slice(ledger.indexOf('**Verified by nobody**'));
+    expect(nobody).toContain('Installing the `.deb`, the `.rpm` or the `.exe`');
+    expect(nobody).toContain('The Intel SLICE of the universal macOS `.dmg`');
+    for (const [file, os] of published) {
+      if (os === 'macos') continue;
+      expect(row(file)).toContain(NOT_YET);
+    }
+    // The Mac window: installed by a person on Apple Silicon, never on Intel.
+    expect(person).toContain('/Applications');
+    expect(person).toContain('Apple Silicon');
+    const mac = row('Screepub-Desktop-macOS-universal.dmg');
+    expect(mac).toContain(VERIFIED);
+    expect(mac).toContain('Apple Silicon');
+    expect(mac).toContain('Intel');
+    expect(row(SWIFT_DMG)).toContain(VERIFIED);
+    // And the README sends a reader to the ledger itself.
+    expect(install).toContain('docs/verification-ledger.md');
   });
 
   test('the 0.6.0 notes carry the same three limits', () => {
@@ -864,18 +864,13 @@ describe('the app downloads are described where a reader meets them', () => {
     expect(/not signed|unsigned/.test(lower)).toBe(true);
     expect(lower).toContain('smartscreen');
     expect(lower).toContain('never been installed');
-    // E1's limits are still there and were not overwritten.
     expect(lower).toContain('tolino');
   });
 
   test('the 0.6.0 notes named the app downloads 0.6.0 actually published', () => {
-    // HISTORY, pinned as literals on purpose. This used to derive the names
-    // from BUNDLE_KINDS like the tests above, which was right while 0.6.0
-    // was the release being described. On 2026-09-22 the Linux and Windows
-    // names lost their version, and a derivation would now demand that
-    // notes for an already-published release name files that release never
-    // had. Published notes are never rewritten, so the record is fixed
-    // here: these are the four files 0.6.0 put on its release page.
+    // HISTORY, pinned as literals on purpose: published notes are never
+    // rewritten, and on 2026-09-22 the Linux and Windows names lost their
+    // version. These are the four files 0.6.0 put on its release page.
     for (const name of [
       'Screepub_0.6.0_amd64.deb',
       'Screepub-0.6.0-1.x86_64.rpm',
@@ -887,108 +882,101 @@ describe('the app downloads are described where a reader meets them', () => {
   });
 
   test('the download page carries the unsigned-Windows warning', () => {
-    // site/index.html offered only the macOS DMG before this piece, so this
-    // is a new section rather than an edited one.
     const lower = site.toLowerCase();
     expect(lower).toContain('smartscreen');
     expect(/not signed|unsigned/.test(lower)).toBe(true);
   });
 
-  test('the site still offers the SwiftUI DMG as the supported Mac download', () => {
-    // Two Mac downloads on one page will confuse somebody. The mitigation
-    // is that the page says which one is supported; piece F is the real fix.
-    expect(site).toContain('Screepub-macOS.dmg');
+  test('the site and the README offer the SwiftUI DMG as the Mac download', () => {
+    // Two Mac downloads: the pages say which one most people want. The
+    // site's three buttons, and the README's one, point at the SwiftUI DMG
+    // until the identifier release moves the Screepub name to the window;
+    // the buttons switch then, on both pages together.
+    const LATEST_SWIFT = `https://github.com/ssandweiss/screepub/releases/latest/download/${SWIFT_DMG}`;
+    expect(site).toContain(SWIFT_DMG);
     expect(site.toLowerCase()).toContain('supported');
-    // And the page's own three buttons still point at it, so the new
-    // section cannot have quietly redirected the call to action. Counted as
-    // BUTTONS since 2026-09-29: "Every download" now links every file by
-    // name, this one included, and a count of every link would miss a
-    // button moved to the window's DMG with the table's link making up the
-    // number. The buttons switch at the identifier release, with the README.
     const buttons = [...site.matchAll(/<a class="btn[^"]*" href="([^"]+)"/g)].map((m) => m[1]);
-    expect(buttons).toEqual(
-      Array(3).fill('https://github.com/ssandweiss/screepub/releases/latest/download/Screepub-macOS.dmg'),
-    );
+    expect(buttons).toEqual(Array(3).fill(LATEST_SWIFT));
+    const top = readme.slice(0, readme.indexOf('\n## '));
+    expect(top).toContain(`href="${LATEST_SWIFT}"`);
+    expect(top).not.toContain('Screepub-Desktop-macOS-universal.dmg');
   });
 
-  test('nothing anywhere promises an AppImage, a cask, winget or the AUR', () => {
-    // All four are out of scope, three of them deferred with reasons and
-    // one ruled out on merits. A promise in prose is a promise.
-    for (const text of [readme, notes, site]) {
+  test('nothing anywhere promises an AppImage, winget or the AUR', () => {
+    // All out of scope. A promise in prose is a promise.
+    for (const text of [readme, developers, notes, site]) {
       const lower = text.toLowerCase();
       expect(lower).not.toContain('appimage');
       expect(lower).not.toContain('winget');
       expect(lower).not.toContain('aur ');
     }
-    // The Homebrew tap is still named -- it serves the SwiftUI app and the
-    // macOS CLI, and that is unchanged -- but never beside the Tauri app.
-    const around = readme.slice(readme.indexOf('### Desktop app'));
-    expect(around.toLowerCase()).not.toContain('brew install');
+    // The Homebrew cask installs the SwiftUI app, never the window: no
+    // sentence that names brew may name the window's download.
+    const sentences = readme.replace(/\s+/g, ' ').split(/(?<=[.:])\s/);
+    for (const s of sentences.filter((x) => x.includes('brew install'))) {
+      expect(s).not.toContain('Desktop');
+    }
   });
 });
 
-describe('desktop/README.md keeps the ledger of who verified what', () => {
-  const doc = read('desktop/README.md');
+describe('docs/verification-ledger.md is the one ledger of who verified what', () => {
+  const doc = read('docs/verification-ledger.md');
+  const person = doc.slice(
+    doc.indexOf('**Verified on a real machine, by a person**'),
+    doc.indexOf('**Verified only by CI'),
+  );
+  const ci = doc.slice(doc.indexOf('**Verified only by CI'), doc.indexOf('**Verified by nobody**'));
+  const nobody = doc.slice(doc.indexOf('**Verified by nobody**'));
 
-  test('it has all three headings, in order: a person, CI, nobody', () => {
-    const person = doc.indexOf('Verified on a real machine, by a person');
-    const ci = doc.indexOf('Verified only by CI');
-    const nobody = doc.indexOf('Verified by nobody');
-    expect(person).toBeGreaterThan(0);
-    expect(ci).toBeGreaterThan(person);
-    expect(nobody).toBeGreaterThan(ci);
+  test('it has all three lists, in order: a person, CI, nobody', () => {
+    const p = doc.indexOf('**Verified on a real machine, by a person**');
+    const c = doc.indexOf('**Verified only by CI');
+    const n = doc.indexOf('**Verified by nobody**');
+    expect(p).toBeGreaterThan(0);
+    expect(c).toBeGreaterThan(p);
+    expect(n).toBeGreaterThan(c);
   });
 
-  test('the "by a person" list claims only the architecture that was built here', () => {
-    // The .deb and .rpm a person opened and launched are aarch64. The
-    // release publishes amd64 and x86_64, which nobody has built. Saying
-    // "the Linux bundles" without the architecture is exactly the
-    // overstatement this ledger exists to prevent.
-    const person = doc.slice(
-      doc.indexOf('Verified on a real machine, by a person'),
-      doc.indexOf('Verified only by CI'),
-    );
+  test('the "by a person" list claims only the architecture that was built', () => {
+    // The .deb and .rpm a person opened are aarch64. The release publishes
+    // amd64 and x86_64, which no person has run. Saying "the Linux bundles"
+    // without the architecture is the overstatement this ledger prevents.
     expect(person).toContain('Screepub_0.6.0_arm64.deb');
     expect(person).toContain('Screepub-0.6.0-1.aarch64.rpm');
     expect(person).not.toContain('amd64');
-    // The Mac half of this list is new: gate 1b, a universal DMG built
-    // here, mounted, installed and used to convert real scripts. The
-    // architecture caveat is the same one -- it is the ARM slice that was
-    // executed, so the list may not say "the Mac app" unqualified.
+    // The Mac window: installed by hand, and updated from a release.
     expect(person).toContain('/Applications');
     expect(/universal/i.test(person)).toBe(true);
+    expect(person).toContain('0.7.2 to 0.7.3');
   });
 
-  test('gate 1b moved the Mac DMG off the "nobody" list, and only the Mac DMG', () => {
-    // The ledger's own rule: nothing moves up it without someone doing the
-    // thing. Someone did, on 2026-09-20, and leaving "no .dmg has been
-    // installed on a real machine" in place would make this file lie in
-    // the safe direction -- which is still lying, and would send the next
-    // reader looking for work that is done.
-    const nobody = doc.slice(doc.indexOf('Verified by nobody'));
-    expect(nobody).not.toMatch(/No `\.deb`, `\.rpm`, `\.dmg` or `\.exe` has been\s+installed/);
-    // The Windows installer and the Linux packages have not moved.
+  test('the "nobody" list keeps what nobody has done, and only that', () => {
+    expect(nobody).not.toMatch(/`\.dmg` or `\.exe` has been\s+installed/);
     expect(nobody).toContain('.exe');
-    // And the Intel half of the universal DMG is the thing that now has
-    // nobody's name against it, in place of a whole per-arch download.
     expect(/slice/i.test(nobody)).toBe(true);
     expect(nobody).not.toContain('x86_64-apple-darwin');
   });
 
-  test('the ledger still says release.yml has never run', () => {
-    // Signing has never executed. No tag has ever built a Tauri app, and
-    // every macOS signing claim in this repository is read off
-    // tauri-bundler's source until one does.
-    const ci = doc.slice(doc.indexOf('Verified only by CI'), doc.indexOf('Verified by nobody'));
+  test('the CI list says what release.yml does, and that only the ARM half runs', () => {
+    // release.yml has built, signed and notarized the Mac window on every tag
+    // since 0.7.0; the ledger must not still say it never ran.
     expect(ci).toContain('release.yml');
-    expect(/never run|never been run|has not run|never executed/.test(ci)).toBe(true);
+    expect(ci).toMatch(/notariz/);
+    expect(ci).not.toMatch(/never run|never been run|has not run|never executed/);
+    expect(ci).toMatch(/ARM half/);
   });
 
-  test('nothing in this file still calls bundling future work', () => {
-    // It said "bundling and installers are piece E2" and "once a later
-    // piece wires that job up". Both landed in this piece; a reader who
-    // believes either goes looking for work that is already done.
-    expect(doc).not.toContain('installers are piece E2');
-    expect(doc).not.toContain('once a later piece wires that job up');
+  test('every relative link in the ledger resolves', () => {
+    for (const m of doc.matchAll(/\]\(([^)#]+)(#[^)]*)?\)/g)) {
+      const target = m[1]!;
+      if (/^https?:/.test(target)) continue;
+      expect(existsSync(join('docs', target)), target).toBe(true);
+    }
+  });
+
+  test('desktop/README.md points at this ledger instead of keeping its own', () => {
+    const desktop = read('desktop/README.md');
+    expect(desktop).toContain('docs/verification-ledger.md');
+    expect(desktop).not.toContain('Verified by nobody');
   });
 });

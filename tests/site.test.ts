@@ -11,7 +11,7 @@
 // - "Every download" links each file by its version-free name through
 //   /releases/latest/download/, with a status per file. The names come from
 //   release.yml's matrix and BUNDLE_KINDS, the way release-artifacts.test.ts
-//   derives them, and the statuses follow desktop/README.md's ledger of who
+//   derives them, and the statuses follow docs/verification-ledger.md, the one ledger of who
 //   has verified what.
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
@@ -171,9 +171,10 @@ describe('"Every download" links version-free names, each with a status', () => 
     }
   });
 
-  test('the statuses follow desktop/README.md\'s ledger', () => {
-    const ledger = read('desktop/README.md');
-    const nobody = ledger.slice(ledger.indexOf('**Verified by nobody:**'));
+  test('the statuses follow docs/verification-ledger.md', () => {
+    const ledger = read('docs/verification-ledger.md');
+    const nobody = ledger.slice(ledger.indexOf('**Verified by nobody**'));
+    expect(ledger.indexOf('**Verified by nobody**')).toBeGreaterThan(-1);
     // If one of these ledger lines goes, someone has done the thing: move
     // that file's row on the site up to match, then update this test.
     expect(nobody).toContain('Installing the `.deb`, the `.rpm` or the `.exe`');
@@ -182,16 +183,19 @@ describe('"Every download" links version-free names, each with a status', () => 
       if (os === 'macos') continue;
       expect(row(file)).toContain(NOT_YET);
     }
-    // Gate 1b: installed and used on an Apple Silicon Mac. That is the
-    // evidence behind "verified by a person"; if the ledger ever loses it,
-    // the claim goes too. The Intel half has never run, and the row says
-    // so rather than implying it.
+    // Installed by hand, and updated from a release, on an Apple Silicon
+    // Mac. That is the evidence behind "verified by a person"; if the ledger
+    // ever loses it, the claim goes too. The Intel half has never run, and
+    // the row says so rather than implying it.
     const person = ledger.slice(
       ledger.indexOf('**Verified on a real machine, by a person**'),
       ledger.indexOf('**Verified only by CI'),
     );
-    expect(person).toContain('Gate 1b, 2026-09-20: the macOS app was installed and used.');
-    expect(person).toMatch(/the machine that ran it\s+is Apple Silicon/);
+    expect(person).toContain('dragged to `/Applications`');
+    expect(person).toContain('0.7.2 to 0.7.3');
+    expect(person).toMatch(/Each Mac that ran\s+these is Apple Silicon/);
+    // The page sends a reader to the ledger itself.
+    expect(downloads).toContain('docs/verification-ledger.md');
     const mac = row('Screepub-Desktop-macOS-universal.dmg');
     expect(mac).toContain(VERIFIED);
     expect(mac).toContain('Apple Silicon');
