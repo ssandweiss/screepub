@@ -59,7 +59,7 @@ size and still holds its shape.
 | iPhone, iPad, Mac (Apple Books) | Added to Books on a Mac, then synced through iCloud | Verified |
 | Kobo | EPUB (or KEPUB) over USB | Built and tested in code, never on a real device |
 | tolino | EPUB into the device's `Books` folder | Built and tested in code, never on a real device |
-| reMarkable | The original PDF, over its USB web interface | Built and tested in code, never on a real device |
+| reMarkable | The EPUB over its USB web interface (the older Mac app sends the original PDF) | Built and tested in code, never on a real device |
 
 **How well a Kindle keeps a scene together depends on the file.** A script
 emailed to your Kindle, or copied over USB as KFX, keeps a scene heading and a
