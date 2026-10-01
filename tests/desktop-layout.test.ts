@@ -243,3 +243,29 @@ describe('each Settings section is a box', () => {
     }
   });
 });
+
+describe('a hidden element is hidden, whatever its class says about display', () => {
+  // .btn { display: inline-block } outranked the browser's own
+  // [hidden] { display: none }, so the release notes' hidden Install button
+  // drew as an empty brass pill anyone could click. One global rule, marked
+  // important so no class rule can beat it, replaces the per-class patches.
+  const style = windowCss('style.css');
+  const surfaces = windowCss('surfaces.css');
+
+  test('style.css hides every [hidden] element, and nothing can outrank it', () => {
+    expect(style).toMatch(/^\[hidden\] \{ display: none !important; \}/m);
+  });
+
+  test('no stylesheet keeps a per-class [hidden] patch the global rule covers', () => {
+    for (const [name, sheet] of [['style.css', style], ['surfaces.css', surfaces]]) {
+      const patches = [...sheet.matchAll(/^[^\n{]*\S\[hidden\][^{]*\{/gm)].map((m) => m[0].trim());
+      expect(`${name}: ${patches.join(', ')}`).toBe(`${name}: `);
+    }
+  });
+
+  test('the notes Install button that started this is a .btn built hidden', () => {
+    const notes = readFileSync(join(UI, 'notes-surface.js'), 'utf8');
+    expect(notes).toContain("el('button', { type: 'button', class: 'btn btn-brad btn-small', hidden: true }");
+    expect(ruleBlock(surfaces, '.btn')).toContain('display: inline-block');
+  });
+});

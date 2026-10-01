@@ -781,11 +781,11 @@ describe('the Convert surface', () => {
 
   test('a hidden well-ask line takes no space: .well-ask is flex, which beats the UA [hidden] rule', () => {
     // .well-ask { display: flex } outranks the browser's own
-    // [hidden] { display: none }, and style.css/surfaces.css have no
-    // general [hidden] rule to fall back on, so a pending or a failed
-    // probe used to leave a blank ~52px gap where the line would go.
-    const css = read('surfaces.css');
-    expect(css).toMatch(/\.well-ask\[hidden\]\s*\{\s*display:\s*none;?\s*\}/);
+    // [hidden] { display: none }, so a pending or a failed probe used to
+    // leave a blank ~52px gap where the line would go. style.css's global
+    // [hidden] rule, important, now covers it and every other class.
+    expect(read('surfaces.css')).toMatch(/\.well-ask \{[^}]*display: flex/);
+    expect(read('style.css')).toMatch(/^\[hidden\] \{ display: none !important; \}/m);
   });
 });
 
