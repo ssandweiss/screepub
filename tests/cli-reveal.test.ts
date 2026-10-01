@@ -262,28 +262,8 @@ describe('screepub reveal (spawned CLI): refusals and --help ONLY, never a valid
     expect(answer.error.message).toContain(missing);
   });
 
-  // Table-driven, the same shape tests/cli-app-settings.test.ts:593-609 uses
-  // for its own FOREIGN list. Five rows, not app-settings' four: reveal
-  // shares none of these flags with anything, so it refuses --set too,
-  // where app-settings does not (it shares --set with settings). Each row
-  // pins its OWN flag, so dropping any single refusal in cli.ts fails this
-  // test, not just a lone case that happened to still be covered elsewhere.
-  const FOREIGN: [string[], string][] = [
-    [['--device', 'x'], '--device'],
-    [['--set', '{}'], '--set'],
-    [['--for', 'kindle'], '--for'],
-    [['--fountain', '/x.fountain'], '--fountain'],
-    [['--options-json', '{}'], '--options-json'],
-  ];
-
-  test('refuses every other verb\'s flags as usage errors', async () => {
-    for (const [flags, name] of FOREIGN) {
-      const { stdout, exitCode } = await runCli(['reveal', ...flags, '--json']);
-      const answer = JSON.parse(stdout);
-      expect(`${name}: ${exitCode} ${answer.ok} ${answer.error?.code}`).toBe(`${name}: 1 false usage`);
-      expect(answer.error.message).toContain(name);
-    }
-  });
+  // reveal refuses every flag (it owns none): tests/cli-verb-flags.test.ts
+  // checks that for every verb and every flag, owners and all.
 
   test('the top-level --help usage lists reveal', async () => {
     const { stdout, exitCode } = await runCli(['--help']);

@@ -708,26 +708,8 @@ describe('screepub app-settings (through the CLI)', () => {
     expect(line).toContain('set by SCREEPUB_LIBRARY');
   });
 
-  // Table-driven, the same shape tests/cli-kfx.test.ts uses for its FOREIGN
-  // list: app-settings must refuse every flag that belongs to another verb.
-  // --set is deliberately absent here: app-settings shares it with settings.
-  const FOREIGN: [string[], string][] = [
-    [['--device', 'x'], '--device'],
-    [['--for', 'kindle'], '--for'],
-    [['--fountain', '/x.fountain'], '--fountain'],
-    [['--options-json', '{}'], '--options-json'],
-  ];
-
-  test('refuses every other verb\'s flags as usage errors', async () => {
-    const configDir = scratch('config');
-    for (const [flags, name] of FOREIGN) {
-      const { stdout, exitCode } = await runCli(['app-settings', ...flags, '--json'], { SCREEPUB_CONFIG_DIR: configDir });
-      const answer = JSON.parse(stdout);
-      expect(`${name}: ${exitCode} ${answer.ok} ${answer.error?.code}`).toBe(`${name}: 1 false usage`);
-      expect(answer.error.message).toContain(name);
-    }
-  });
-
+  // Every other verb's flag is refused here too; tests/cli-verb-flags.test.ts
+  // checks that for every verb and every flag, owners and all.
   test('refuses a stray positional', async () => {
     const configDir = scratch('config');
     const { stdout, exitCode } = await runCli(['app-settings', 'extra', '--json'], { SCREEPUB_CONFIG_DIR: configDir });
@@ -763,28 +745,5 @@ describe('screepub app-settings (through the CLI)', () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain('screepub app-settings [--set <json>] [--json]');
     expect(stdout).toContain('where books land, and what new scripts start from');
-  });
-
-  test('every verb that refuses --set names BOTH settings and app-settings as its owners', async () => {
-    // send refuses --set before it ever looks at the positional, so a file
-    // that does not exist is fine here: this is a usage refusal, not a
-    // send attempt. Every refusal is read off cli.ts's one VERB_FLAGS
-    // table, which also supplies the owners it names: pinning four verbs
-    // proves that table names both owners of --set.
-    const devices = await runCli(['devices', '--set', '{}', '--json']);
-    expect(JSON.parse(devices.stdout).error.message)
-      .toBe('devices takes no --set (--set belongs to settings and app-settings)');
-
-    const send = await runCli(['send', 'x.epub', '--set', '{}', '--json']);
-    expect(JSON.parse(send.stdout).error.message)
-      .toBe('send takes no --set (--set belongs to settings and app-settings)');
-
-    const updateDecision = await runCli(['update-decision', '--set', '{}', '--json']);
-    expect(JSON.parse(updateDecision.stdout).error.message)
-      .toBe('update-decision takes no --set (--set belongs to settings and app-settings)');
-
-    const kfxStatus = await runCli(['kfx-status', '--set', '{}', '--json']);
-    expect(JSON.parse(kfxStatus.stdout).error.message)
-      .toBe('kfx-status takes no --set (--set belongs to settings and app-settings)');
   });
 });

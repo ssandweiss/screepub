@@ -361,35 +361,11 @@ describe('the verbs', () => {
     expect(stdout).toContain('screepub kfx-install');
   });
 
-  // Refused BEFORE anything runs. For kfx-install that order is the whole
-  // point: a mistyped command must not reach the network or anyone's Calibre.
-  //
-  // Spawned for kfx-status ONLY. The two verbs share one branch in cli.ts,
-  // refusals and all, which the source tests below pin; so what fires for
-  // kfx-status fires for kfx-install. Spawning kfx-install here would put
-  // the real installer one deleted refusal away from running on whatever
-  // machine runs the suite, and no guard computed from the source can be
-  // trusted to see every way a refusal stops refusing.
-  const FOREIGN: [string[], string][] = [
-    [['--device', 'x'], '--device'],
-    [['--set', '{}'], '--set'],
-    [['--for', 'kindle'], '--for'],
-    [['--fountain', '/x.fountain'], '--fountain'],
-    [['--options-json', '{}'], '--options-json'],
-    [['--offered', '1.0'], '--offered'],
-    [['--opted-in'], '--opted-in'],
-  ];
-
-  test("kfx-status refuses every other verb's flags as usage errors", async () => {
-    for (const [flags, name] of FOREIGN) {
-      const { stdout, exitCode } = await runCli(['kfx-status', ...flags, '--json']);
-      const answer = JSON.parse(stdout);
-      expect(`kfx-status ${name}: ${exitCode} ${answer.ok} ${answer.error?.code}`)
-        .toBe(`kfx-status ${name}: 1 false usage`);
-      expect(answer.error.message).toContain(name);
-    }
-  });
-
+  // Every other verb's flag is refused BEFORE anything runs, for both kfx
+  // verbs: tests/cli-verb-flags.test.ts spawns that for every verb and every
+  // flag. For kfx-install that order is the whole point: a mistyped command
+  // must not reach the network or anyone's Calibre. The source tests below
+  // pin the order without letting the installer run.
   test('kfx-status takes no arguments', async () => {
     const { stdout, exitCode } = await runCli(['kfx-status', 'extra', '--json']);
     expect(exitCode).toBe(1);
@@ -401,9 +377,9 @@ describe('the verbs', () => {
 
 describe('kfx-install refuses before it installs', () => {
   test('in the source, both verbs take the one branch that refuses', async () => {
-    // What makes kfx-status's spawned refusals above speak for kfx-install:
-    // one branch, entered by either verb, holding every refusal, and the
-    // only place in cli.ts that calls either handler.
+    // One branch, entered by either verb, holding every refusal, and the
+    // only place in cli.ts that calls either handler: so what refuses for
+    // kfx-status refuses for kfx-install, and no other path reaches it.
     const source = await Bun.file(`${ROOT}src/cli.ts`).text();
     const branch = kfxBranch(source);
     expect(branch, 'the kfx branch moved').not.toBe(null);
@@ -440,8 +416,8 @@ describe('kfx-install refuses before it installs', () => {
   });
 
   test('in the source, every refusal comes before either handler is called', async () => {
-    // kfx-status's spawned refusals above prove each refusal FIRES. This
-    // proves the ORDER without ever letting the installer run.
+    // tests/cli-verb-flags.test.ts proves each foreign-flag refusal FIRES.
+    // This proves the ORDER without ever letting the installer run.
     // checkKfxRefusalOrder counts refusals on each side of both handler
     // calls, rather than asking only whether SOME refusal precedes the
     // LAST one: a refusal moved below a call, or deleted
