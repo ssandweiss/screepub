@@ -8,7 +8,7 @@
 // movable (a user can point SCREEPUB_LIBRARY, or later a setting, somewhere
 // else), and a file that recorded where to find the library could not
 // itself live inside the thing it locates.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
 
@@ -118,8 +118,19 @@ export function writeAppSettings(
   const folder = dirname(path);
   if (!existsSync(folder)) mkdirSync(folder, { recursive: true });
   const tmp = join(folder, `.${basename(path)}.${process.pid}.tmp`);
-  writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`);
-  renameSync(tmp, path);
+  try {
+    writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`);
+    renameSync(tmp, path);
+  } catch (error) {
+    // A failed write takes its temp file with it; the reason it failed is
+    // the error worth reporting, so a clean-up failure never replaces it.
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // Nothing more to do: the write's own error is reported below.
+    }
+    throw error;
+  }
 
   return merged;
 }

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appSettingsPath, readAppSettings, writeAppSettings } from '../src/settings/app';
@@ -141,6 +141,16 @@ describe('writing app settings', () => {
     const dir = scratchDir('write');
     const path = join(dir, 'settings.json');
     writeAppSettings({ lastRoute: 'kindle' }, path);
+    expect(readdirSync(dir)).toEqual(['settings.json']);
+  });
+
+  test('a write that cannot land leaves no temp file behind, and the error still surfaces', () => {
+    const dir = scratchDir('write');
+    // A DIRECTORY where the settings file should be: the temp file writes
+    // fine, then the rename over a directory fails.
+    const path = join(dir, 'settings.json');
+    mkdirSync(path, { recursive: true });
+    expect(() => writeAppSettings({ lastRoute: 'kindle' }, path)).toThrow();
     expect(readdirSync(dir)).toEqual(['settings.json']);
   });
 

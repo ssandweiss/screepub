@@ -1,6 +1,6 @@
 // Per-script formatting overrides, stored beside the script's .fountain in
 // the library: `<Stem>.screepub.json`. Absent sidecar = the caller's base.
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { resolveFormatOptions, type FormatOptions } from '../options';
 
@@ -69,6 +69,17 @@ export function saveScriptSettings(settings: FormatOptions, fountainPath: string
     Object.entries(settings).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
   );
   const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
-  writeFileSync(tmp, `${JSON.stringify(sorted, null, 2)}\n`);
-  renameSync(tmp, path);
+  try {
+    writeFileSync(tmp, `${JSON.stringify(sorted, null, 2)}\n`);
+    renameSync(tmp, path);
+  } catch (error) {
+    // A failed write takes its temp file with it, and the original error is
+    // what the caller sees.
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // Nothing more to do: the write's own error is reported below.
+    }
+    throw error;
+  }
 }
