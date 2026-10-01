@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto';
-import { copyFileSync, renameSync, rmSync } from 'node:fs';
+import { closeSync, copyFileSync, fsyncSync, openSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { errorMessage } from './cli-errors';
+
+export interface ReplaceFileDeps {
+  /** Flushes an open file to its device. fsyncSync unless a test needs to
+   * see when it is called; the flush itself cannot be observed. */
+  sync?: (fd: number) => void;
+}
 
 /** Copy a file over whatever is at `destination`, which on a USB send is the
  * reader's previous copy of the book. Used by every device transfer path
@@ -25,11 +31,24 @@ import { errorMessage } from './cli-errors';
  *
  * The error that reaches the caller names the book, never the partial: the
  * send's failure line shows it to the reader as it is (cli-devices.ts), and
- * a hidden file they never chose is no help there. See namingTheBook(). */
-export function replaceFile(source: string, destination: string): void {
+ * a hidden file they never chose is no help there. See namingTheBook().
+ *
+ * The partial is flushed to the device (fsync) before the rename. Without
+ * that the rename can reach a USB reader before the copied bytes do, so a
+ * reader unplugged right after "Sent" could hold a truncated book under the
+ * book's own name. fsync flushes the file's data whichever descriptor wrote
+ * it, so reopening the finished copy is enough. */
+export function replaceFile(source: string, destination: string, deps: ReplaceFileDeps = {}): void {
+  const sync = deps.sync ?? fsyncSync;
   const partial = partialPathFor(destination);
   try {
     copyFileSync(source, partial);
+    const fd = openSync(partial, 'r+');
+    try {
+      sync(fd);
+    } finally {
+      closeSync(fd);
+    }
     renameSync(partial, destination);
   } catch (error) {
     try {
