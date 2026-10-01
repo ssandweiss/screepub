@@ -1,8 +1,9 @@
 // Per-script formatting overrides, stored beside the script's .fountain in
 // the library: `<Stem>.screepub.json`. Absent sidecar = the caller's base.
-import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { resolveFormatOptions, type FormatOptions } from '../options';
+import { writeFileAtomicSync } from '../atomic-write';
 
 /** `<Stem>.screepub.json`, beside the file it belongs to.
  *
@@ -68,18 +69,5 @@ export function saveScriptSettings(settings: FormatOptions, fountainPath: string
   const sorted = Object.fromEntries(
     Object.entries(settings).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
   );
-  const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
-  try {
-    writeFileSync(tmp, `${JSON.stringify(sorted, null, 2)}\n`);
-    renameSync(tmp, path);
-  } catch (error) {
-    // A failed write takes its temp file with it, and the original error is
-    // what the caller sees.
-    try {
-      rmSync(tmp, { force: true });
-    } catch {
-      // Nothing more to do: the write's own error is reported below.
-    }
-    throw error;
-  }
+  writeFileAtomicSync(path, `${JSON.stringify(sorted, null, 2)}\n`);
 }

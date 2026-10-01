@@ -8,9 +8,10 @@
 // movable (a user can point SCREEPUB_LIBRARY, or later a setting, somewhere
 // else), and a file that recorded where to find the library could not
 // itself live inside the thing it locates.
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from 'node:path';
+import { dirname, isAbsolute, join, posix, resolve, win32 } from 'node:path';
+import { writeFileAtomicSync } from '../atomic-write';
 
 type Env = Record<string, string | undefined>;
 
@@ -102,8 +103,8 @@ export function readAppSettings(path: string = appSettingsPath()): AppSettings {
 
 /** Reads, shallow-merges `patch` over what is there (unknown keys kept, so a
  * write from one piece can never drop a key that belongs to the other),
- * writes atomically (temp file in the same folder, then rename, the same
- * discipline `src/settings/sidecar.ts` uses), and creates the folder.
+ * writes atomically (temp file in the same folder, then rename: see
+ * src/atomic-write.ts), and creates the folder.
  *
  * A key set to `undefined` in `patch` is removed rather than written as
  * `null`, so callers can delete a key without knowing the rest of the file.
@@ -138,20 +139,7 @@ export function writeAppSettings(
 
   const folder = dirname(path);
   if (!existsSync(folder)) mkdirSync(folder, { recursive: true });
-  const tmp = join(folder, `.${basename(path)}.${process.pid}.tmp`);
-  try {
-    writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`);
-    renameSync(tmp, path);
-  } catch (error) {
-    // A failed write takes its temp file with it; the reason it failed is
-    // the error worth reporting, so a clean-up failure never replaces it.
-    try {
-      rmSync(tmp, { force: true });
-    } catch {
-      // Nothing more to do: the write's own error is reported below.
-    }
-    throw error;
-  }
+  writeFileAtomicSync(path, `${JSON.stringify(merged, null, 2)}\n`);
 
   return merged;
 }

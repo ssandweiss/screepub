@@ -1,5 +1,5 @@
-import { existsSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { writeFileAtomicSync } from '../atomic-write';
 import { convertFountain } from '../convert';
 import type { FormatOptions } from '../options';
 import { azw3Sibling, toAzw3 } from './calibre';
@@ -120,21 +120,8 @@ export async function freshKindleArtifact(opts: FreshKindleArtifactOptions): Pro
   // EPUB's, which needsRegeneration would then trust as fresh forever. Same
   // discipline as cli.ts's writeFileAtomic, settings/sidecar.ts and
   // export/kfx.ts.
-  writeFileAtomic(epub, result.epub);
-  writeFileAtomic(mobi, result.mobi);
+  writeFileAtomicSync(epub, result.epub);
+  writeFileAtomicSync(mobi, result.mobi);
   return mobi;
 }
 
-/** Write-then-rename, so the final path only ever holds a complete file.
- * The temp sibling is hidden and lives in the same directory as its target,
- * so it shares a volume and the promote is a rename, not a copy. */
-function writeFileAtomic(path: string, data: Uint8Array): void {
-  const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
-  try {
-    writeFileSync(tmp, data);
-    renameSync(tmp, path);
-  } catch (error) {
-    rmSync(tmp, { force: true });
-    throw error;
-  }
-}
