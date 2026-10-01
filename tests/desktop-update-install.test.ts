@@ -27,9 +27,16 @@ const store = (seed: Record<string, string> = {}) => {
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** This file's own copy of app.js. bun shares one module instance across
+ *  test files, so the shared app.js carries whatever an earlier file left
+ *  running or held; on Linux CI an earlier file left it busy and every
+ *  whenIdle() here waited out its 5 s timeout (2026-10-01). The query makes
+ *  a fresh instance, shared by the tests in this file only. */
+const APP = `${join(UI, 'app.js')}?desktop-update-install`;
+
 describe('after an install, the window starts no new engine call', () => {
   test('a counted call is refused with words for a reader and never reaches the shell', async () => {
-    const app = await import(join(UI, 'app.js'));
+    const app = await import(APP);
     await app.whenIdle();
     const asked: unknown[] = [];
     g.window = { __TAURI__: { core: { invoke: async (_c: string, a: unknown) => { asked.push(a); return '{"ok":true}'; } } } };
@@ -49,7 +56,7 @@ describe('after an install, the window starts no new engine call', () => {
   });
 
   test('the reads that do not count are refused too: their argv and JSON can change just the same', async () => {
-    const app = await import(join(UI, 'app.js'));
+    const app = await import(APP);
     const asked: unknown[] = [];
     g.window = { __TAURI__: { core: { invoke: async (_c: string, a: unknown) => { asked.push(a); return '{"ok":true}'; } } } };
     try {
@@ -66,7 +73,7 @@ describe('after an install, the window starts no new engine call', () => {
   });
 
   test('a call already running when the install lands finishes, with its own answer', async () => {
-    const app = await import(join(UI, 'app.js'));
+    const app = await import(APP);
     await app.whenIdle();
     let answer: (v: string) => void = () => {};
     g.window = { __TAURI__: { core: { invoke: () => new Promise<string>((r) => { answer = r; }) } } };
@@ -87,7 +94,7 @@ describe('after an install, the window starts no new engine call', () => {
     // the same as a plain flag. It matters because this module is imported
     // once per test process: a retirement from one stubbed shell must not
     // refuse calls in the next.
-    const app = await import(join(UI, 'app.js'));
+    const app = await import(APP);
     g.window = { __TAURI__: { core: { invoke: async () => '{"ok":true}' } } };
     app.retireEngine();
     g.window = { __TAURI__: { core: { invoke: async () => '{"ok":true}' } } };
@@ -274,7 +281,7 @@ describe('the real app.js and a flow, driven together', () => {
   // The flow is built with createUpdateFlow and app.js's OWN runEngine,
   // whenIdle, engineBusy and retireEngine, against a stubbed shell.
   async function wired(waitCap: number) {
-    const app = await import(join(UI, 'app.js'));
+    const app = await import(APP);
     const flowMod = await import(join(UI, 'update-flow.js'));
     await app.whenIdle();
     const asked: string[][] = [];
@@ -385,7 +392,7 @@ describe('a failed cleanup after a good install is not a failed update', () => {
   }
 
   test('updateInstall resolves when only close() throws, and logs the close error', async () => {
-    const app = await import(join(UI, 'app.js'));
+    const app = await import(APP);
     const { update, calls } = fakeUpdate();
     const { logged } = await quietly(() => app.updateInstall(update, () => {}));
     expect(calls).toEqual({ download: 1, close: 1 });
@@ -394,7 +401,7 @@ describe('a failed cleanup after a good install is not a failed update', () => {
   });
 
   test('a download that fails still fails, and still closes', async () => {
-    const app = await import(join(UI, 'app.js'));
+    const app = await import(APP);
     const { update, calls } = fakeUpdate({
       downloadAndInstall: async () => { throw new Error('no network'); },
     });
@@ -405,7 +412,7 @@ describe('a failed cleanup after a good install is not a failed update', () => {
   });
 
   test('through the flow: installed, retired, restarted, and installed once', async () => {
-    const app = await import(join(UI, 'app.js'));
+    const app = await import(APP);
     const flowMod = await import(join(UI, 'update-flow.js'));
     const { update, calls } = fakeUpdate();
     let retired = 0;
