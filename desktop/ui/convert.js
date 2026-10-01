@@ -10,7 +10,8 @@
 import {
   runEngine, pickScreenplay, pickFolder, onProgress, argv, FORCE_FLAG, openUrl,
 } from './app.js';
-import { inTurn } from './book-queue.js';
+import { inTurn, holders } from './book-queue.js';
+import { WAITING } from './tune.js';
 import { el, clear, text } from './dom.js';
 import { newIssueUrl, osLabel } from './feedback.js';
 import { RELEASE } from './notes.js';
@@ -74,6 +75,20 @@ export const NO_MESSAGE = 'The engine refused the file without saying why.';
 
 /** The bar before the engine's first line arrives. */
 export const PROGRESS_START = { percent: 0, stage: null, label: 'starting up' };
+
+/** What the read-out says while a conversion waits its turn on its book
+ *  (book-queue.js), by what holds it: the Settings page's own words for the
+ *  same wait (tune.js's WAITING, longest wait first), so a half-minute
+ *  Kindle build does not read as a conversion stuck "starting up". Null when
+ *  nothing does, and the conversion starts at once. */
+export function waitingLabel(ahead) {
+  const labels = [].concat(ahead ?? []);
+  if (labels.length === 0) return null;
+  const named = Object.keys(WAITING).find((label) => labels.includes(label));
+  if (named !== undefined) return WAITING[named];
+  if (labels.includes('save')) return 'Waiting for the settings to finish saving…';
+  return 'Waiting for the book to be free…';
+}
 
 export function shortcutLabel(platform) {
   return /mac/i.test(String(platform ?? '')) ? '⌘O' : 'Ctrl+O';
@@ -631,11 +646,16 @@ export async function convertPath(path, { force = false } = {}) {
   // drop on the Read surface and Ctrl-O on Tune both end up here. One rule,
   // one place — and it fires on a file, never on the ASK for one.
   ctx.goTo('convert');
-  drawProgress(path);
+  const book = landed.get(path);
+  // Asked before the turn is, so it names what is running now. A conversion
+  // rewrites the book, so it waits for every one of them.
+  const progress = drawProgress(path, waitingLabel(book === undefined ? [] : holders(book)));
   let answer;
   try {
-    const converting = () => runEngine(argv.convert(path, { force }));
-    const book = landed.get(path);
+    const converting = () => {
+      progress.started();
+      return runEngine(argv.convert(path, { force }));
+    };
     answer = await (book === undefined ? converting() : inTurn(book, 'convert', converting));
   } catch (err) {
     // Rust could not start the engine, or the engine printed something that
@@ -657,13 +677,16 @@ export async function convertPath(path, { force = false } = {}) {
   }
 }
 
-function drawProgress(path) {
+/** The progress screen. `waiting` is waitingLabel's line while the
+ *  conversion waits its book's turn, or null; the read-out shows it until
+ *  started() says the engine has been asked. */
+function drawProgress(path, waiting = null) {
   clear(pane);
   pane.dataset.state = 'working';
   paintFill(PROGRESS_START.percent);
   const fill = el('div', { class: 'fill' });
   const readOut = el('span', { class: 'read-out', role: 'status', 'aria-live': 'polite' },
-    PROGRESS_START.label);
+    waiting ?? PROGRESS_START.label);
   let at = PROGRESS_START;
 
   unlistenProgress = onProgress((line) => {
@@ -687,6 +710,11 @@ function drawProgress(path) {
   // control while it works, so the plan lands on the pane itself and Tab
   // still moves from there.
   ctx.restoreFocus();
+  return {
+    started() {
+      if (waiting !== null && at === PROGRESS_START) text(readOut, PROGRESS_START.label);
+    },
+  };
 }
 
 function drawResult(path, answer) {

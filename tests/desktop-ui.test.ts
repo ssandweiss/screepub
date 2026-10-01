@@ -888,6 +888,80 @@ describe('converting a PDF again takes its turn on the book it rewrites', () => 
     await answer('/s/Field Station.pdf', BOOK);
     await again;
   });
+
+  test('while it waits its turn the read-out says what for, then "starting up" once it starts', async () => {
+    // A conversion that waited out a half-minute Kindle build used to sit on
+    // "starting up" the whole time, which reads as a stuck engine.
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const asked: { args: string[]; resolve: (stdout: string) => void }[] = [];
+    g.document = {
+      createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
+      createTextNode: (value: string) => Object.assign(new Node('#text'), { text: value }),
+      adoptedStyleSheets: [],
+    };
+    g.CSSStyleSheet = class { replaceSync() {} };
+    g.window = {
+      __TAURI__: {
+        core: { invoke: (_cmd: string, { args }: { args: string[] }) => new Promise<string>((resolve) => asked.push({ args, resolve })) },
+        event: { listen: async () => () => {} },
+      },
+    };
+    const convert = await import(`${join(UI, 'convert.js')}?waiting`);
+    const { inTurn } = await import(join(UI, 'book-queue.js'));
+    const pane = new Node('section');
+    convert.mount(pane, { state: { script: null as unknown }, goTo: () => {}, restoreFocus: () => {}, scriptChanged: () => {} });
+    const readOut = (): string => {
+      const walk = (n: Node): Node | null => {
+        if (n.className === 'read-out') return n;
+        for (const k of n.kids) { const found = walk(k); if (found) return found; }
+        return null;
+      };
+      return walk(pane)?.textContent ?? '(none)';
+    };
+    const conversion = () => asked.find((c) => c.args[1] === '--json' && c.args[0] === '/s/Night Shift.pdf');
+    const BOOK = '/lib/night-shift/Night Shift.epub';
+    const answer = async () => {
+      const call = conversion()!;
+      asked.splice(asked.indexOf(call), 1);
+      call.resolve(JSON.stringify({ ok: true, title: 'Night Shift', epubPath: BOOK, fountainPath: BOOK.replace(/epub$/, 'fountain'), previewHtml: '' }));
+      await tick();
+      await tick();
+    };
+
+    // Free book: straight to "starting up".
+    const first = convert.convertPath('/s/Night Shift.pdf');
+    await tick();
+    expect(readOut()).toBe(convert.PROGRESS_START.label);
+    await answer();
+    await first;
+
+    // A Kindle build holds the book: the read-out names it until it is done.
+    let free: () => void = () => {};
+    const building = inTurn(BOOK, 'kindle', () => new Promise<void>((resolve) => { free = resolve; }));
+    const again = convert.convertPath('/s/Night Shift.pdf');
+    await tick();
+    expect(conversion()).toBeUndefined();
+    expect(readOut()).toBe('Waiting for the Kindle file to finish building…');
+    free();
+    await building;
+    await tick();
+    expect(conversion()).toBeDefined();
+    expect(readOut()).toBe(convert.PROGRESS_START.label);
+    await answer();
+    await again;
+    for (const call of asked.splice(0)) call.resolve(JSON.stringify({ ok: false }));
+    await tick();
+  });
+
+  test('waitingLabel names the turn a conversion waits for, the longest wait first', async () => {
+    const { waitingLabel } = await import(join(UI, 'convert.js'));
+    expect(waitingLabel([])).toBeNull();
+    expect(waitingLabel(['check', 'kindle'])).toBe('Waiting for the Kindle file to finish building…');
+    expect(waitingLabel(['send'])).toBe('Waiting for the send to finish…');
+    expect(waitingLabel(['save'])).toBe('Waiting for the settings to finish saving…');
+    expect(waitingLabel(['check'])).toBe('Waiting for the book to be free…');
+  });
 });
 
 describe('"Convert it again" converts the script again', () => {
