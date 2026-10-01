@@ -280,6 +280,11 @@ jobs:
           # Without this: the app's updater throws on a release with no
           # DMG, but it has already stamped its "last checked" clock, so a
           # user who checks in that window is told "no update" for 24h.
+          #
+          # And it STAYS a draft here. Since the identifier release the Mac
+          # image is the window's, attached by app-upload long after this
+          # job ends; the `publish` job at the end makes the release public
+          # once every upload job has had its turn.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --draft --title "Screepub $VERSION" --notes-file "$NOTES" ${PRE[@]+"${PRE[@]}"}
           else
@@ -295,8 +300,6 @@ jobs:
             app/dist/screepub-cli-macos-arm64.tar.gz \
             app/dist/screepub-cli-macos-x64.tar.gz \
             --clobber
-
-          gh release edit "$TAG" --draft=false ${PRE[@]+"${PRE[@]}"}
 
       # The fallback for when the `tap` job below cannot run (no TAP_TOKEN)
       # or fails: the two SHAs, somewhere a person can copy from, so the
@@ -322,6 +325,48 @@ jobs:
             printf '```\n'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # The release goes public HERE, last. Since the identifier release the
+  # Mac download (Screepub-macOS.dmg, the window's image) comes from
+  # app-upload, which finishes long after the release job; publishing in
+  # the release job would leave the site's download buttons, the README
+  # link and every Swift app's update check pointing at a public release
+  # with no image for the length of the bundle legs.
+  #
+  # `!cancelled()` and not plain success: a failed bundle or smoke leg must
+  # never strand the release in draft (the command-line downloads still go
+  # out, and a re-run of the failed job attaches the rest). What DOES keep
+  # it in draft is a wrong image list: the frozen Swift updater installs
+  # the FIRST .dmg on the page, so anything but exactly
+  # Screepub-macOS.dmg (or nothing, after a failed leg) stops here.
+  publish:
+    needs: [release, cross-upload, app-upload]
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Exactly one Mac image, then make the release public
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          DMGS="$(gh release view "$TAG" --json assets \
+            -q '[.assets[].name | select(endswith(".dmg"))] | join(" ")')"
+          case "$DMGS" in
+            "Screepub-macOS.dmg") ;;
+            "")
+              echo "::warning::$TAG has no Mac image (did a bundle leg fail?). Publishing anyway so the other downloads go out; re-run app-upload to attach it." ;;
+            *)
+              echo "::error::$TAG must carry exactly one .dmg, Screepub-macOS.dmg. It has: $DMGS. The Swift app's updater installs the first .dmg it finds, so this release stays a draft."
+              exit 1 ;;
+          esac
+          PRE=()
+          [[ "$VERSION" == *-* ]] && PRE=(--prerelease)
+          gh release edit "$TAG" --draft=false ${PRE[@]+"${PRE[@]}"}
+
   # Bump ssandweiss/homebrew-tap to the version just published. Separate
   # job, `needs: release`, so it cannot start before the assets exist —
   # tools/bump-tap.sh reads their digests and refuses to write anything
@@ -333,10 +378,13 @@ jobs:
   # hand. Adding the secret is what turns the manual path automatic; the
   # alarm is what makes either path honest.
   tap:
-    needs: release
+    needs: publish
     # A PRERELEASE must never become what `brew install` hands out. Matches
     # the `PRE` test in the release job: a hyphen in the tag means prerelease.
-    if: ${{ !contains(github.ref_name, '-') }}
+    # The explicit result check, because publish runs even after a failed
+    # bundle leg and an `if` with no status function would add an implicit
+    # success() that looks at every job further up the chain.
+    if: ${{ !cancelled() && needs.publish.result == 'success' && !contains(github.ref_name, '-') }}
     runs-on: macos-15   # `brew style` needs Homebrew, and casks are macOS-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -385,7 +433,7 @@ jobs:
   # honest reading of "this release is not fully out".
   tap-check:
     needs: tap
-    if: ${{ !contains(github.ref_name, '-') }}
+    if: ${{ !cancelled() && needs.tap.result == 'success' && !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -924,8 +972,8 @@ jobs:
   # NEWEST release, which is what the app asks, and is the right question
   # even when an old tag is being re-run.
   latest-check:
-    needs: app-upload
-    if: ${{ !contains(github.ref_name, '-') }}
+    needs: [app-upload, publish]
+    if: ${{ !cancelled() && needs.app-upload.result == 'success' && needs.publish.result == 'success' && !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -938,8 +986,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # `needs: app-upload` already sequences this after the upload; a
-          # few seconds of propagation is the only thing worth absorbing.
+          # `needs` already sequences this after the upload AND the publish
+          # (releases/latest never resolves to a draft); a few seconds of
+          # propagation is the only thing worth absorbing.
           n=1
           while [ "$n" -le 3 ]; do
             if bun tools/check-latest.ts; then exit 0; fi

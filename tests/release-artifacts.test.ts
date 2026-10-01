@@ -81,6 +81,7 @@ describe('every workflow action is pinned to a commit', () => {
 interface Job {
   'runs-on'?: string;
   needs?: string | string[];
+  if?: string;
   strategy?: { matrix?: { include?: Record<string, string>[] } };
   permissions?: Record<string, string>;
   steps?: { name?: string; uses?: string; run?: string; shell?: string; with?: Record<string, unknown> }[];
@@ -150,8 +151,66 @@ describe('release.yml ships the cross-platform artifacts', () => {
     );
     expect(rel.jobs['release']!['runs-on']).toBe('macos-15');
     expect(needs('release')).toEqual(['checks']);
-    expect(needs('tap')).toEqual(['release']);
+    // Since the identifier release the tap waits for the release to be
+    // PUBLIC (bump-tap.sh reads releases/tags/vX, which hides drafts).
+    expect(needs('tap')).toEqual(['publish']);
     expect(needs('tap-check')).toEqual(['tap']);
+  });
+
+  test('the release job leaves the release as a draft; publish makes it public, last', () => {
+    // Before the identifier release the release job attached the Swift
+    // image and un-drafted at once. The Mac image is the window's now,
+    // attached by app-upload much later; un-drafting early would leave the
+    // download buttons and every Swift update check on a release with no
+    // image. (Found by review 2026-10-01.)
+    const release = runText(rel.jobs['release']!);
+    expect(release).toContain('--draft');
+    expect(release).not.toContain('--draft=false');
+    const publish = rel.jobs['publish'];
+    expect(publish).toBeDefined();
+    expect(needs('publish').sort()).toEqual(['app-upload', 'cross-upload', 'release']);
+    expect(runText(publish!)).toContain('gh release edit "$TAG" --draft=false');
+    expect(publish!.permissions?.contents).toBe('write');
+    // The only job that un-drafts.
+    for (const [name, job] of Object.entries(rel.jobs)) {
+      if (name === 'publish') continue;
+      expect(`${name}: ${runText(job).includes('--draft=false')}`).toBe(`${name}: false`);
+    }
+  });
+
+  test('publish runs after a failed upload job, but never after a failed release job', () => {
+    // A failed bundle or smoke leg must not strand the release in draft:
+    // the command-line downloads still go out. A failed RELEASE job means
+    // there is nothing to publish.
+    const cond = String(rel.jobs['publish']!.if ?? '');
+    expect(cond).toContain('!cancelled()');
+    expect(cond).toContain("needs.release.result == 'success'");
+    expect(cond).not.toMatch(/\bsuccess\(\)/);
+  });
+
+  test('publish refuses any image list but exactly Screepub-macOS.dmg, or none', () => {
+    // The frozen Swift updater installs the FIRST .dmg on the page, so two
+    // images (or a wrongly named one) must keep the release in draft. No
+    // image at all, after a failed leg, is published with a warning.
+    const text = runText(rel.jobs['publish']!);
+    expect(text).toContain('select(endswith(".dmg"))');
+    expect(text).toMatch(/"Screepub-macOS\.dmg"\) ;;/);
+    expect(text).toMatch(/""\)\s*\n\s*echo "::warning::/);
+    expect(text).toMatch(/\*\)\s*\n\s*echo "::error::[^\n]*\n\s*exit 1 ;;/);
+  });
+
+  test('every job downstream of publish checks its own needs explicitly', () => {
+    // A job-level `if` with no status function gets an implicit success()
+    // that also looks at jobs further up the chain, so a failed bundle leg
+    // would silently skip the tap. Each says what it waits for instead.
+    expect(String(rel.jobs['tap']!.if)).toContain("needs.publish.result == 'success'");
+    expect(String(rel.jobs['tap-check']!.if)).toContain("needs.tap.result == 'success'");
+    const latest = String(rel.jobs['latest-check']!.if);
+    expect(latest).toContain("needs.app-upload.result == 'success'");
+    expect(latest).toContain("needs.publish.result == 'success'");
+    for (const job of ['tap', 'tap-check', 'latest-check']) {
+      expect(String(rel.jobs[job]!.if)).toContain('!cancelled()');
+    }
   });
 
   test('the macOS release job uploads exactly the two CLI tarballs, and no image', () => {
@@ -473,7 +532,8 @@ describe('release.yml ships the cross-platform artifacts', () => {
     // published and the updater cannot use it.
     const job = rel.jobs['latest-check'];
     expect(job).toBeDefined();
-    expect(needs('latest-check')).toEqual(['app-upload']);
+    // And after publish: releases/latest never resolves to a draft.
+    expect(needs('latest-check').sort()).toEqual(['app-upload', 'publish']);
     expect(runText(job!)).toContain('tools/check-latest.ts');
     // No --version: the question is whether the ENDPOINT serves the newest
     // release, which is what the app asks and is the right question even
@@ -578,11 +638,12 @@ describe('release.yml ships the cross-platform artifacts', () => {
       expect(text).not.toContain('bump-tap');
       for (const name of MACOS_CLI_ASSETS) expect(text).not.toContain(name);
     }
-    expect(needs('tap')).toEqual(['release']);
+    expect(needs('tap')).toEqual(['publish']);
     expect(needs('tap-check')).toEqual(['tap']);
-    // And nothing that already existed learned to wait on the new jobs: a
-    // failing bundle leg must not be able to strand the release in draft.
-    for (const jobName of ['release', 'tap', 'tap-check', 'cross-cli', 'cross-upload']) {
+    // And nothing that builds or uploads learned to wait on the bundle
+    // legs: only publish (which runs after a failed leg, see its own test)
+    // and the checks after it do.
+    for (const jobName of ['release', 'cross-cli', 'cross-upload']) {
       expect(needs(jobName)).not.toContain('app-bundles');
       expect(needs(jobName)).not.toContain('app-upload');
     }

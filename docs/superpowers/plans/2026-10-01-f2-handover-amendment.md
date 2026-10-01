@@ -126,6 +126,21 @@ choice, over "keep"); keep the F3 wait. Built, none of it pushed:
   cask retirement in the tap scripts, the QA section, and (cherry-picked
   from the other session's `f2-docs`) the README, site and doc lines.
 
+**From the whole-branch review (2026-10-01):**
+
+- Fixed on F2: the release used to go public in the release job, before
+  app-upload attached the window's image, so for the length of the bundle
+  legs (estimated 15 to 30 minutes) the site's download buttons 404'd and
+  Swift update checks found no image. The release job now leaves a draft;
+  a final `publish` job un-drafts after every upload job has had its turn
+  (running even after a failed leg), and refuses to publish any image
+  list but exactly `Screepub-macOS.dmg` (or none). Run against a fake `gh`
+  in five cases and its filter against the real v0.7.4 asset list.
+- To do at release time: `tap-freshness.yml` demands the cask's
+  `deprecate!` as soon as F2 is on main, and only the F2 tag's `tap` job
+  adds it. **Merge F2 immediately before tagging it**, or the Monday check
+  goes red in between.
+
 **Release notes for F2** (drafted by the other session, plain reader
 words, for `docs/releases/<version>.md`; whoever cuts F2 uses these):
 
