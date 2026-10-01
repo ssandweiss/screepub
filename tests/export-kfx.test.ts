@@ -20,7 +20,7 @@ import {
   PLUGIN_INSTALL_TIMEOUT_MS,
 } from '../src/export/kfx';
 import { calibreTool, CALIBRE_FORMAT_GUARDS, CalibreTimedOutError } from '../src/export/calibre';
-import { snippetStubs, stubRoot, systemPython, type SnippetScenario } from './kfx-snippet-stubs';
+import { snippetStubs, systemPython, type SnippetScenario } from './kfx-snippet-stubs';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-export-kfx-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
@@ -639,8 +639,6 @@ describe('installKfxPlugin', () => {
 // installKfxPlugin's own runner seam so our parsing of its answer runs too.
 // The real Calibre is never touched. Without python3 they skip.
 const PYTHON = systemPython();
-const SNIPPET_ROOT = stubRoot();
-afterAll(() => rmSync(SNIPPET_ROOT, { recursive: true, force: true }));
 
 describe.skipIf(PYTHON === null)('the install snippet, run under python3 against stub calibre modules', () => {
   const TOOL = '/nowhere/calibre-debug';
@@ -655,7 +653,7 @@ describe.skipIf(PYTHON === null)('the install snippet, run under python3 against
   const kinds = (events: string[]) => events.map((e) => e.split(' ')[0]);
 
   async function install(scenario: SnippetScenario) {
-    const stubs = snippetStubs(SNIPPET_ROOT, PYTHON!, scenario);
+    const stubs = snippetStubs(mkdtempSync(join(SCRATCH, 'kfx-snippet-')), PYTHON!, scenario);
     const result = await installKfxPlugin(stubs.run, TOOL);
     const { stdout, stderr } = stubs.last();
     // Every run, failure or not, must end in the JSON line: a traceback

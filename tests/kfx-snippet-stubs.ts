@@ -4,8 +4,8 @@
 // only reads its text (where an except clause sits, which line comes first)
 // passes on a snippet that fails the moment Python runs it. This runs it.
 //
-// The real Calibre is never involved: the stand-in package lives in a temp
-// folder put FIRST on PYTHONPATH, user site-packages are switched off, and
+// The real Calibre is never involved: the stand-in package lives in a
+// scratch folder put FIRST on PYTHONPATH, user site-packages are switched off, and
 // the two network fetches are answered from a scenario file instead of the
 // network. The snippet reaches the stubs through installKfxPlugin's own
 // runner seam, so the JSON parsing on our side runs too.
@@ -14,8 +14,7 @@
 // call the snippet makes into the stubs is appended to a log, one event per
 // line, so a test can check the ORDER things happened in.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** python3, when the machine has one that runs. Null otherwise, and the
@@ -146,9 +145,10 @@ export interface SnippetRun {
   last: () => { stdout: string; stderr: string };
 }
 
-/** A fresh stub package under `root` for one scenario. */
-export function snippetStubs(root: string, python: string, scenario: SnippetScenario): SnippetRun {
-  const dir = mkdtempSync(join(root, 'kfx-snippet-'));
+/** A stub package for one scenario, written into `dir`: an empty folder
+ *  the caller makes inside its own scratch folder and removes (the rule in
+ *  tests/temp-hygiene.test.ts, which is why this module makes none). */
+export function snippetStubs(dir: string, python: string, scenario: SnippetScenario): SnippetRun {
   const pkg = join(dir, 'calibre');
   for (const sub of ['', 'utils', 'gui2', 'gui2/dialogs', 'customize']) {
     mkdirSync(join(pkg, sub), { recursive: true });
@@ -184,9 +184,4 @@ export function snippetStubs(root: string, python: string, scenario: SnippetScen
       existsSync(logPath) ? readFileSync(logPath, 'utf8').split('\n').filter((l) => l !== '') : [],
     last: () => last,
   };
-}
-
-/** A temp root for a test file's stub packages. */
-export function stubRoot(): string {
-  return mkdtempSync(join(tmpdir(), 'screepub-kfx-snippet-'));
 }
