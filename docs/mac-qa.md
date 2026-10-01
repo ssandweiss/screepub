@@ -50,8 +50,10 @@ before: the old updater reads the real release page.
 
 ### [hands] Homebrew
 
-- [ ] **Do:** `brew info --cask screepub`. **See:** it says the cask is
-  deprecated. `brew install screepub` (the command-line formula) still
+- [ ] **Do:** `brew info --cask ssandweiss/tap/screepub`. **See:** it says
+  the cask is deprecated. `brew install --formula ssandweiss/tap/screepub`
+  (the command-line formula; the cask shares its name, hence `--formula`)
+  still
   installs the new version.
 
 ---

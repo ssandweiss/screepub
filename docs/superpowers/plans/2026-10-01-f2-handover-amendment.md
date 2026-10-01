@@ -123,8 +123,27 @@ costs; the image is `Screepub-macOS.dmg`; the cask is RETIRED (his direct
 choice, over "keep"); keep the F3 wait. Built, none of it pushed:
 
 - **F2** on `worktree-f2-identifier`: identity, image name, one `.dmg`,
-  cask retirement in the tap scripts, the QA section. The other session's
-  `f2-docs` branch sits on top with the README, site and doc lines.
+  cask retirement in the tap scripts, the QA section, and (cherry-picked
+  from the other session's `f2-docs`) the README, site and doc lines.
+
+**Release notes for F2** (drafted by the other session, plain reader
+words, for `docs/releases/<version>.md`; whoever cuts F2 uses these):
+
+1. There is one Screepub for Mac now: Screepub-macOS.dmg, notarized,
+   universal, macOS 13 or later, and it updates itself. The older Mac app
+   is retired; with its update check on, it installs the new app in its
+   place. Books are untouched.
+2. Screepub Desktop users cross over through their own update, with four
+   one-time costs: the update question is asked once more; drive
+   permission is asked again on the first copy to a reader; Finder and the
+   Dock keep the name "Screepub Desktop" (rename it if you like); and if
+   you had both apps, delete Screepub Desktop.
+3. Cancel during a conversion is gone; most scripts finish in seconds.
+4. Per-script settings from the older Mac app reset once. Books are
+   untouched.
+5. The Homebrew cask is retired: download the DMG instead. The
+   command-line converter stays on Homebrew as a formula
+   (`brew install --formula ssandweiss/tap/screepub`).
 - **The CLI move** on `cli-move`, stacked on F2.
 - **F3** not started: it waits for the other session's second batch
   (which edits retired-coverage, app-references and weekly-toolchain) to
