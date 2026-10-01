@@ -2745,7 +2745,7 @@ describe('the window knows when the engine is working, and can restart', () => {
         delete win.window;
       }
     }
-  });
+  }, 20_000); // Seven real quiet periods, 4.4 s measured: too near bun's 5 s default to leave on it.
 
   test('a dialog that fails lets its hold go, and an ask refused by the guard takes none', async () => {
     const app = await import(join(UI, 'app.js'));
