@@ -36,6 +36,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    },
     "publisher": "Darkwell Entertainment LLC",
     "category": "Productivity",
     "shortDescription": "Turn a screenplay PDF into a reflowable e-book.",

@@ -841,6 +841,19 @@ describe('what the Linux package tells a user about itself', () => {
   });
 });
 
+describe('the Mac it claims to run on is the Mac it can run on', () => {
+  test('the bundle asks for macOS 13 or later, the engine’s own floor', () => {
+    // Without this the bundle says 10.13 (Tauri's default) while the engine
+    // inside it is built for 13.0: measured 2026-10-01 with `otool -l` on an
+    // installed window, `LC_BUILD_VERSION ... minos 13.0` on
+    // Contents/MacOS/screepub-engine (bun's floor). On macOS 11 or 12 the
+    // window then opens and every conversion fails. Saying 13.0 makes
+    // Finder refuse up front, with a message naming the version. Raise this
+    // when bun raises its floor; never lower it below the engine's minos.
+    expect(CONFIG.bundle.macOS?.minimumSystemVersion).toBe('13.0');
+  });
+});
+
 describe('the window has a floor', () => {
   test('it cannot be dragged smaller than 640 by 480', () => {
     // With no minimum the window could be squeezed until the drop well, the
