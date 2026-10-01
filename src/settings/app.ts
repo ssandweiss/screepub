@@ -108,6 +108,12 @@ export function readAppSettings(path: string = appSettingsPath()): AppSettings {
  * A key set to `undefined` in `patch` is removed rather than written as
  * `null`, so callers can delete a key without knowing the rest of the file.
  *
+ * A file that is corrupt or unreadable reads as `{}` (readAppSettings), so
+ * saving over it REPLACES it with the patch alone and whatever else it held
+ * is gone. Intended: the owner chose replace over refusing the save on
+ * 2026-10-01, so a damaged file heals on the next save instead of blocking
+ * every save after it. tests/app-settings.test.ts pins this.
+ *
  * The read and the write are not one atomic operation, so two engine calls
  * landing at the same moment (a route saving `lastRoute` while an
  * `app-settings --set` runs) can still interleave: both read the same

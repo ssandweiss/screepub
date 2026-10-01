@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appSettingsPath, readAppSettings, writeAppSettings } from '../src/settings/app';
@@ -168,6 +168,31 @@ describe('writing app settings', () => {
     mkdirSync(path, { recursive: true });
     expect(() => writeAppSettings({ lastRoute: 'kindle' }, path)).toThrow();
     expect(readdirSync(dir)).toEqual(['settings.json']);
+  });
+
+  // The owner's decision, 2026-10-01: saving over a settings file that is
+  // corrupt or unreadable REPLACES it with the new patch rather than
+  // refusing the save. Pinned so a change to that is a deliberate one.
+  test('saving over a corrupt settings file replaces it with the patch alone', () => {
+    const dir = scratchDir('write');
+    const path = join(dir, 'settings.json');
+    mkdirSync(dir, { recursive: true });
+    for (const corrupt of ['{"libraryPath": "/x", trunc', '[1,2]', 'null', '']) {
+      writeFileSync(path, corrupt);
+      expect(writeAppSettings({ lastRoute: 'kindle' }, path)).toEqual({ lastRoute: 'kindle' });
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ lastRoute: 'kindle' });
+    }
+  });
+
+  test('saving over a settings file that cannot be read replaces it too', () => {
+    if (process.platform === 'win32' || process.getuid?.() === 0) return; // chmod 000 does not stop root
+    const dir = scratchDir('write');
+    const path = join(dir, 'settings.json');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path, JSON.stringify({ libraryPath: '/x' }));
+    chmodSync(path, 0o000);
+    expect(writeAppSettings({ lastRoute: 'kindle' }, path)).toEqual({ lastRoute: 'kindle' });
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ lastRoute: 'kindle' });
   });
 
   test('returns exactly what was written', () => {
