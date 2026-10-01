@@ -890,6 +890,160 @@ describe('converting a PDF again takes its turn on the book it rewrites', () => 
   });
 });
 
+describe('"Convert it again" converts the script again', () => {
+  // Read's blank notice, Settings' fault screen and Send's "no book" screen
+  // each offer "Convert it again". It used to call goTo('convert') and
+  // nothing else, which lands on the result screen the reader just left,
+  // with no way to convert anything. Now it converts the open script's own
+  // source, taking its book's turn, and shows the progress on Convert.
+  class Node {
+    kids: Node[] = [];
+    parent: Node | null = null;
+    attrs = new Map<string, string>();
+    handlers = new Map<string, Array<(event: unknown) => unknown>>();
+    dataset: Record<string, string> = {};
+    className = '';
+    hidden = false;
+    disabled = false;
+    text = '';
+    constructor(readonly tag: string) {}
+    append(...nodes: (Node | string | null | undefined)[]) {
+      for (const n of nodes) {
+        if (n == null) continue;
+        const node = typeof n === 'string' ? Object.assign(new Node('#text'), { text: n }) : n;
+        node.parent = this;
+        this.kids.push(node);
+      }
+    }
+    get firstChild() { return this.kids[0] ?? null; }
+    removeChild(node: Node) { this.kids.splice(this.kids.indexOf(node), 1); node.parent = null; return node; }
+    get textContent(): string { return this.tag === '#text' ? this.text : this.kids.map((k) => k.textContent).join(''); }
+    set textContent(value: string) { this.kids = []; this.append(value); }
+    setAttribute(name: string, value: string) { this.attrs.set(name, value); }
+    getAttribute(name: string) { return this.attrs.get(name) ?? null; }
+    addEventListener(type: string, fn: (event: unknown) => unknown) {
+      this.handlers.set(type, [...(this.handlers.get(type) ?? []), fn]);
+    }
+    click() { for (const fn of this.handlers.get('click') ?? []) fn({ target: this, currentTarget: this }); }
+    querySelector() { return null; }
+    get classList() { return { toggle: () => true, contains: () => false, add: () => {}, remove: () => {} }; }
+    buttons(): Node[] {
+      return this.kids.flatMap((k) => (k.tag === 'button' ? [k, ...k.buttons()] : k.buttons()));
+    }
+  }
+  const g = globalThis as unknown as Record<string, unknown>;
+  const asked: string[][] = [];
+  // Every engine call is held, then refused once the test is done: app.js
+  // counts a running call toward "busy" for the whole file, so a call left
+  // hanging here would hold off every later test's idle wait.
+  const pending: Array<(stdout: string) => void> = [];
+  beforeEach(() => {
+    asked.length = 0;
+    g.document = {
+      createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
+      createTextNode: (value: string) => Object.assign(new Node('#text'), { text: value }),
+      adoptedStyleSheets: [],
+    };
+    g.CSSStyleSheet = class { replaceSync() {} };
+    g.window = {
+      __TAURI__: {
+        core: {
+          invoke: (_cmd: string, { args }: { args: string[] }) => {
+            asked.push(args);
+            return new Promise<string>((resolve) => pending.push(resolve));
+          },
+        },
+        event: { listen: async () => () => {} },
+      },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+  });
+  afterEach(async () => {
+    for (const resolve of pending.splice(0)) resolve(JSON.stringify({ ok: false }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    delete g.window; delete g.document; delete g.CSSStyleSheet;
+  });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  /** The surfaces' shared context, recording where it was sent. */
+  function context(script: unknown) {
+    const went: string[] = [];
+    let again = 0;
+    return {
+      went,
+      again: () => again,
+      ctx: {
+        state: { script, reducedMotion: true },
+        goTo: (id: string) => went.push(id),
+        restoreFocus: () => {},
+        scriptChanged: () => {},
+        convertAgain: () => { again += 1; },
+      },
+    };
+  }
+  const againButton = (pane: Node) => pane.buttons().find((b) => b.textContent === 'Convert it again');
+
+  test('convertAgain converts the open script’s own source and goes to Convert to show it', async () => {
+    const convert = await import(`${join(UI, 'convert.js')}?again-source`);
+    const { ctx, went } = context({ path: '/s/Field Station.pdf', title: 'Field Station' });
+    convert.mount(new Node('section'), ctx);
+    went.length = 0;
+    asked.length = 0;
+    convert.convertAgain();
+    await tick();
+    expect(went).toEqual(['convert']);
+    expect(asked.map((args) => args[0])).toEqual(['/s/Field Station.pdf']);
+    expect(asked[0]).toContain('--json');
+  });
+
+  test('a script with no source path known only goes to Convert', async () => {
+    const convert = await import(`${join(UI, 'convert.js')}?again-nopath`);
+    const { ctx, went } = context({ path: null, title: 'Field Station' });
+    convert.mount(new Node('section'), ctx);
+    went.length = 0;
+    asked.length = 0;
+    convert.convertAgain();
+    await tick();
+    expect(went).toEqual(['convert']);
+    expect(asked).toEqual([]);
+  });
+
+  test('Read’s blank notice converts again', async () => {
+    const reader = await import(`${join(UI, 'read.js')}?again`);
+    const { ctx, went, again } = context({ path: '/s/a.pdf', title: 'A', previewHtml: '' });
+    const pane = new Node('section');
+    reader.mount(pane, ctx);
+    againButton(pane)!.click();
+    expect(again()).toBe(1);
+    expect(went).toEqual([]);
+  });
+
+  test('Settings’ fault screen converts again', async () => {
+    const tune = await import(`${join(UI, 'tune.js')}?again`);
+    const { ctx, again } = context({ path: '/s/a.pdf', title: 'A', fountainPath: null, epubPath: null, settings: null });
+    const pane = new Node('section');
+    tune.mount(pane, ctx);
+    await tune.show();
+    againButton(pane)!.click();
+    expect(again()).toBe(1);
+  });
+
+  test('Send’s "no book to send" screen converts again', async () => {
+    const send = await import(`${join(UI, 'send.js')}?again`);
+    const { ctx, again } = context({ path: '/s/a.pdf', title: 'A', epubPath: null });
+    const pane = new Node('section');
+    send.mount(pane, ctx);
+    againButton(pane)!.click();
+    expect(again()).toBe(1);
+  });
+
+  test('main.js hands every surface the Convert surface’s own convertAgain', () => {
+    expect(read('main.js')).toMatch(/convertAgain: \(\) => convert\.convertAgain\(\)/);
+  });
+});
+
 describe('what the Convert surface decides', () => {
   // The decisions, exercised directly. The drawing over them is thin by
   // design; these are the rules a wrong implementation would get wrong.

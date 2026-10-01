@@ -477,7 +477,7 @@ function drawNotice(notice) {
       el('button', {
         type: 'button',
         class: 'btn btn-outline',
-        onclick: () => ctx.goTo('convert'),
+        onclick: () => ctx.convertAgain(),
       }, notice.way)),
   );
 }

@@ -609,6 +609,21 @@ async function pickFileThenConvert() {
   await convertPath(path);
 }
 
+/** "Convert it again", wherever it is offered (Read's blank notice, the
+ *  Settings fault screen, Send's "no book" screen): convert the open
+ *  script's own source again, which takes its book's turn like any other
+ *  conversion of that file, and show the progress here. A script whose
+ *  source this window never knew, or a conversion already under way, has
+ *  nothing new to start, so those only come to this surface. */
+export function convertAgain() {
+  const path = ctx.state.script?.path;
+  if (busy || typeof path !== 'string' || path.trim() === '') {
+    ctx.goTo('convert');
+    return Promise.resolve();
+  }
+  return convertPath(path);
+}
+
 export async function convertPath(path, { force = false } = {}) {
   if (busy) return;
   busy = true;
