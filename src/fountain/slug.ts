@@ -19,7 +19,7 @@ import type { Token } from 'fountain-js';
  *
  * Note the asymmetry this creates for hand-written Fountain: a dot-forced
  * `.BLACK` renders as a mini-slug, not a scene. Screepub owns the dot-force
- * as its mini-slug carrier; the trade is recorded in the README's Fountain
+ * as its mini-slug carrier; the trade is recorded in docs/fountain-input.md's
  * divergence table and registry #5b.
  *
  * `classify.ts` carries the same literal (it must not mint a mini-slug this

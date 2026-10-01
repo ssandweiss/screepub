@@ -40,8 +40,8 @@ Usage:
 PDF is the primary path. .fountain input is PARTIALLY SUPPORTED: contdMode
 and rejoinSplitDialogue are applied when a PDF is read, so they do not take
 effect here (asking to strip (CONT'D) warns rather than failing silently),
-and the scanned-PDF and not-a-screenplay guards are PDF-only. See the
-README's "Fountain input" section.
+and the scanned-PDF and not-a-screenplay guards are PDF-only. See
+docs/fountain-input.md.
 
 A script's saved settings are used by the conversion that finds them: if
 <script>.screepub.json sits beside the input (or in the script's library

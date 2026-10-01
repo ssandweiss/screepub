@@ -101,11 +101,6 @@
       "category": "note",
       "breaks": "The gate-1 QA checklist. It names Screepub.app and the flat ~/Documents/Screepub layout because its whole job is telling a tester how the shipping app and its replacement differ while BOTH are installed. The fifth reference, added 2026-09-14, is UpdateInstall.swift: the checklist now records that the updater refusal is structural rather than predicted, because the identifier pin is an exact match, and points at the ADR that decides what F2 ships because of it. At F2 the coexistence sections stop applying; at F3 the file should go, since the gate it describes will have been passed, and this reference goes with it because the ADR it points to outlives the file."
     },
-    "docs/parity-audit.md": {
-      "refs": 18,
-      "category": "doc",
-      "breaks": "The audit IS an inventory of what only app/ has, so it names ResultActions.swift, ContentView.swift, ReaderRail.swift, ScreepubApp.swift and KitCheck by path and line. Every reference is the point of the file rather than a dependency on it. It is also the file F3 has to be able to answer: this row goes when the audit is empty, which is the same moment app/ can be deleted."
-    },
     "docs/release-notes-template.md": {
       "refs": 5,
       "category": "doc",
