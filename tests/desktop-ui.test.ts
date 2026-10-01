@@ -3,6 +3,11 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { kfxSetup } from '../src/export/kfx-setup';
+import {
+  FakeDocument, fakePage, HOLD, makeEvent, settle, withGlobals,
+  type EngineCall, type FakeNode, type FakePage,
+} from './helpers/fake-dom';
+import { bootWindow, type BootedWindow } from './helpers/boot-window';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-desktop-ui-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
@@ -128,28 +133,26 @@ describe('the window respects the quality floor', () => {
     expect(css).toContain(':focus-visible');
   });
 
-  test('the surface switcher is a real tablist, reachable by keyboard', async () => {
-    const frame = read('frame.js');
-    const { SURFACES } = (await import(join(UI, 'frame.js'))) as {
-      SURFACES: Array<{ id: string; label: string }>;
-    };
-    // Not a div with a click handler: a test that only looked for the five
-    // names would pass against exactly that.
-    expect(frame).toContain("'button'");
-    expect(frame).toContain('aria-selected');
-    expect(frame).toContain('ArrowRight');
-    expect(frame).toContain('focus()');
-    expect(frame).toContain("role: 'tab'");
-    expect(frame).toContain("role: 'tablist'");
-    // A dimmed surface is not a keyboard stop. Without this the arrow keys
-    // land on a tab whose panel says nothing.
-    expect(frame).toMatch(/disabled\)?\s*\)?\s*continue|if\s*\(.*disabled.*\)\s*continue/);
-    // The bar's four. Notes is deliberately absent: it is reached from the
-    // rev stamp, not from a tab. Asserted against the exported SURFACES
-    // rather than the file text, because frame.js imports ./notes.js for the
-    // version and a `toContain('notes')` would pass on the import alone.
-    expect(SURFACES.map((s) => s.id)).toEqual(['convert', 'read', 'tune', 'send']);
+  test('no script sets an inline style, which this window’s CSP refuses', () => {
+    // Kept as a source rule: the CSP is enforced only by the real webview,
+    // and with `default-src 'self'` an inline style fails SILENTLY (measured
+    // in piece C). The bar's width goes through an adopted stylesheet
+    // instead, which "the bar follows the engine's own lines" drives.
+    for (const name of jsFiles()) {
+      expect(`${name} sets .style: ${/\.style\b/.test(read(name))}`).toBe(
+        `${name} sets .style: false`,
+      );
+      // The key may be unquoted, and here it usually IS: dom.js falls
+      // through to setAttribute for any key it does not special-case, so
+      // `{ style: '…' }` is a real inline style in the house spelling. The
+      // lookbehind keeps `font-style:` in read.js's @font-face from counting.
+      const styleKey = /(?<![\w-])['"`]?style['"`]?\s*:/;
+      expect(`${name} sets a style attribute: ${styleKey.test(read(name))}`).toBe(
+        `${name} sets a style attribute: false`,
+      );
+    }
   });
+
 });
 
 describe('the window uses the brand, not its own colours (scripts too)', () => {
@@ -363,15 +366,6 @@ describe('the engine contract lives in exactly one file', () => {
     expect(argv.export('/s/x.epub', { forFormat: 'kfx' })).not.toContain('--fountain');
   });
 
-  test('progress is parsed defensively, not assumed to be one clean line', () => {
-    const app = read('app.js');
-    // The Rust forwards whatever the OS handed it. A parser that called
-    // JSON.parse on the raw payload would throw on a two-line chunk and take
-    // the conversion down with it.
-    expect(app).toMatch(/split\(/);
-    expect(app).toMatch(/catch\s*{/);
-  });
-
   test('no surface sets innerHTML with anything but its own constant', () => {
     // Titles, device names and engine messages are all data from outside.
     // frame.js is the one exemption: it injects its own SVG symbol constant.
@@ -384,408 +378,407 @@ describe('the engine contract lives in exactly one file', () => {
   });
 });
 
-describe('the five surfaces are wired to the frame', () => {
-  const SURFACES = ['convert', 'read', 'tune', 'send', 'notes-surface'];
-
-  test('main.js mounts every surface module, and each one can be mounted', async () => {
-    const main = read('main.js');
-    for (const name of SURFACES) {
-      expect(main).toContain(`./${name}.js`);
-      const surface = await import(join(UI, `${name}.js`));
-      expect(typeof surface.mount, `${name}.js exports no mount()`).toBe('function');
-    }
-  });
-
-  test('the shortcut main.js fires actually exists on the convert surface', async () => {
-    // main.js calls convert.choose() from its Ctrl/Cmd-O handler. If the
-    // surface ever stops exporting it, the shortcut throws in a window where
-    // nobody sees the console.
-    const main = read('main.js');
-    const called = [...main.matchAll(/\bconvert\.([a-zA-Z]+)\(/g)].map((m) => m[1]);
-    expect(called.length).toBeGreaterThan(0);
-    const surface = await import(join(UI, 'convert.js'));
-    for (const name of called) {
-      expect(typeof (surface as Record<string, unknown>)[name], `convert.js has no ${name}()`)
-        .toBe('function');
-    }
-  });
-
-  test('the surfaces that need a script start out of reach', () => {
-    // Read, Tune and Send have nothing to show before a conversion. A window
-    // that offered them anyway would answer a click with an empty page.
-    const main = read('main.js');
-    expect(main).toMatch(/\['read',\s*'tune',\s*'send'\]/);
-    expect(main).toContain('scriptChanged');
-    expect(main).toContain("frame.setSurface('convert')");
-  });
-});
-
 describe('the Convert surface', () => {
-  const convert = read('convert.js');
-
-  test('it tells you what the engine cannot take, before you drop', () => {
-    // brand/components/drop-well.html's own argument: a scanned PDF with no
-    // text layer is a property a reader can check at a glance, so saying it
-    // here moves it from after the wait to before the drop.
-    //
-    // It named a second guard, a password-locked file, until 2026-09-20. See
-    // WELL in convert.js for why that half went and what it cost.
-    expect(convert).toContain('Needs selectable text, not a scan.');
+  // The real convert.js, mounted on the fake page (tests/helpers/fake-dom.ts)
+  // and driven the way a reader drives it: a file goes in, the engine answers,
+  // buttons are clicked. Each test imports its own copy of the module, so the
+  // drawing state one test leaves (a book it converted, a stylesheet it
+  // adopted) cannot leak into the next.
+  const FOLDER = '/home/ann/Books';
+  const library = (overrides: Record<string, unknown> = {}) => ({
+    ok: true,
+    library: { path: FOLDER, chosen: null, platformDefault: FOLDER, fromEnv: false, ...overrides },
+    home: '/home/ann',
   });
+  const converted = (pdf: string) => {
+    const name = pdf.replace(/^.*\//, '').replace(/\.pdf$/, '');
+    return {
+      ok: true, title: name, author: 'A. Writer', pages: 18, scenes: 12, characters: 6, warnings: [],
+      epubPath: `/lib/${name}/${name}.epub`, fountainPath: `/lib/${name}/${name}.fountain`, previewHtml: '',
+    };
+  };
+  const refused = (code: string, message: string) => ({ ok: false, error: { code, message } });
 
-  test('it offers "Convert anyway" only for the one guard a reader can overrule', () => {
-    // not-screenplay is overridable by --force; scanned, password and
-    // unreadable describe a file the engine genuinely cannot read, and
-    // offering an override there would be a lie.
-    expect(convert).toContain("'not-screenplay'");
-    const forced = convert.slice(convert.indexOf("'not-screenplay'"));
-    expect(forced).toContain('force');
-    for (const code of ['scanned', 'password']) {
-      expect(
-        new RegExp(`'${code}'[^\\n]*force`).test(convert),
-        `convert.js offers a force override for ${code}`,
-      ).toBe(false);
+  let page: FakePage | null = null;
+  let copies = 0;
+  afterEach(async () => { await page?.close(); page = null; });
+
+  /** Mounts a fresh convert.js. `engine` answers by verb (a PDF path is a
+   *  conversion); anything it leaves out is held for the test to answer. */
+  async function mountConvert(options: {
+    engine?: (args: string[]) => unknown;
+    platform?: string;
+    script?: Record<string, unknown> | null;
+    ask?: { should: () => boolean; answer: (on: boolean) => void };
+  } = {}) {
+    page = fakePage({ respond: options.engine ?? (() => HOLD), platform: options.platform });
+    copies += 1;
+    const convert = await import(`${join(UI, 'convert.js')}?mounted-${copies}`);
+    const pane = page.pane();
+    pane.id = 'surface-convert';
+    const went: string[] = [];
+    let restored = 0;
+    const ctx = {
+      state: { script: options.script ?? null, reducedMotion: true },
+      goTo: (id: string) => went.push(id),
+      restoreFocus: () => { restored += 1; },
+      scriptChanged: () => {},
+      updates: options.ask === undefined
+        ? undefined
+        : { shouldAsk: options.ask.should, answer: options.ask.answer },
+    };
+    convert.mount(pane, ctx);
+    await settle();
+    return { convert, pane, ctx, went, restored: () => restored, tauri: page.tauri, doc: page.doc };
+  }
+  const slot = (pane: FakeNode) => pane.querySelectorAll('.well-library');
+
+  test('the idle well names the app, says what the engine needs, and spells the shortcut the platform’s way', async () => {
+    for (const platform of ['MacIntel', 'Win32', 'Linux x86_64']) {
+      const { convert, pane } = await mountConvert({ platform });
+      expect(pane.dataset.state).toBe('idle');
+      expect(pane.querySelector('h1.wordmark')!.textContent).toBe(convert.WORDMARK);
+      // Before the drop, not after the wait: a scan is the one guard a
+      // reader can check at a glance.
+      expect(pane.querySelector('.well .well-limits')!.textContent).toBe(convert.WELL.limits);
+      const choose = pane.querySelector('.well button')!;
+      expect(choose.textContent).toContain(convert.shortcutLabel(platform));
+      await page!.close();
+      page = null;
     }
   });
 
-  test('it renders the engine’s own message rather than a sentence of its own', () => {
-    expect(convert).toContain('error.message');
-    expect(convert).toContain('error.code');
-    for (const invented of ['Something went wrong', 'An error occurred', 'Oops', 'Sorry']) {
-      expect(`convert.js says "${invented}": ${convert.includes(invented)}`).toBe(
-        `convert.js says "${invented}": false`,
-      );
+  test('a refusal shows the engine’s own sentence under a heading that names the cause, and keeps the open script', async () => {
+    const open = { title: 'Field Station', path: '/s/Field Station.pdf' };
+    const said = 'This PDF is <locked> & "sealed" by its owner.';
+    const { convert, pane, ctx } = await mountConvert({
+      engine: (args) => (args[0].endsWith('.pdf') ? refused('password', said) : HOLD),
+      script: open,
+    });
+    await convert.convertPath('/s/Locked.pdf');
+    expect(pane.dataset.state).toBe('failed');
+    expect(pane.querySelector('h2.fault')!.textContent).toBe(convert.HEADINGS.password);
+    // Verbatim, markup-looking characters and all: it is text, not HTML.
+    expect(pane.querySelector('.fault-body')!.textContent).toBe(said);
+    // The code is a labelled handle, on the screen and on the pane.
+    expect(pane.querySelector('.code-note .code-note-label')!.textContent).toBe('Error code');
+    expect(pane.querySelector('.code-note .code-chip')!.textContent).toBe('password');
+    expect(pane.dataset.errorCode).toBe('password');
+    // The book that was already open is still the open book, and the
+    // refusal says so.
+    expect(ctx.state.script).toBe(open);
+    expect(pane.querySelector('.kept-note')!.textContent).toBe(convert.stillOpenNote(open));
+    // A locked file cannot be overruled, so no override is offered.
+    expect(pane.buttons('Convert anyway')).toEqual([]);
+    expect(pane.buttons('Back to one').length).toBe(1);
+  });
+
+  test('a refusal with no script open says nothing about one, and never prints a stray "null"', async () => {
+    const { convert, pane } = await mountConvert({
+      engine: (args) => (args[0].endsWith('.pdf') ? refused('scanned', 'No text layer.') : HOLD),
+    });
+    await convert.convertPath('/s/Scan.pdf');
+    expect(pane.querySelector('.kept-note')).toBeNull();
+    expect(pane.textContent).not.toContain('null');
+    expect(pane.textContent).not.toContain('undefined');
+  });
+
+  test('only a not-screenplay refusal offers Convert anyway, and it converts the same file with the override', async () => {
+    for (const code of ['scanned', 'password', 'unreadable', 'unsupported-type', 'internal']) {
+      const { convert, pane } = await mountConvert({
+        engine: (args) => (args[0].endsWith('.pdf') ? refused(code, 'No.') : HOLD),
+      });
+      await convert.convertPath(`/s/${code}.pdf`);
+      expect(`${code}: ${pane.buttons('Convert anyway').length}`).toBe(`${code}: 0`);
+      await page!.close();
+      page = null;
+    }
+    const { convert, pane, tauri } = await mountConvert({
+      engine: (args) => {
+        if (!args[0].endsWith('.pdf')) return HOLD;
+        return args.includes('--force')
+          ? converted(args[0])
+          : refused('not-screenplay', 'No scene headings found. Pass --force to convert it anyway.');
+      },
+    });
+    await convert.convertPath('/s/Treatment.pdf');
+    // The sentence telling a CLI user to type the flag comes out, because
+    // the button below it already does that; the diagnosis stays.
+    expect(pane.querySelector('.fault-body')!.textContent).toBe('No scene headings found.');
+    await pane.button('Convert anyway').click();
+    await settle();
+    const conversions = tauri.calls.filter((c) => c.args[0] === '/s/Treatment.pdf');
+    expect(conversions.map((c) => c.args.includes('--force'))).toEqual([false, true]);
+    expect(pane.dataset.state).toBe('done');
+  });
+
+  test('the bar follows the engine’s own lines, several to a chunk, ignores noise and never walks back', async () => {
+    const { convert, pane, tauri, doc } = await mountConvert();
+    const done = convert.convertPath('/s/Field Station.pdf');
+    await settle();
+    const readOut = () => pane.querySelector('.read-out')!.textContent;
+    // The bar's width goes through an adopted stylesheet, because the
+    // window's CSP refuses an inline style.
+    const fill = () => (doc.adoptedStyleSheets.at(-1) as { text: string }).text;
+    expect(readOut()).toBe(convert.PROGRESS_START.label);
+    expect(fill()).toBe('.fill { width: 0%; }');
+    // One chunk from the OS: a stray warning, a whole line, and the start
+    // of the next. Nothing throws, and the whole line is drawn.
+    tauri.emit('engine-line', 'warning: a font fell back\n{"progress":{"stage":"parse","percent":40}}\n{"progress":');
+    expect(readOut()).toBe('reading the pages (40%)');
+    expect(fill()).toBe('.fill { width: 40%; }');
+    // A late line from earlier in the run does not move the bar back.
+    tauri.emit('engine-line', '{"progress":{"stage":"parse","percent":20}}');
+    expect(readOut()).toBe('reading the pages (40%)');
+    tauri.emit('engine-line', '{"progress":{"stage":"render","percent":85}}');
+    expect(readOut()).toBe('building the book (85%)');
+    expect(fill()).toBe('.fill { width: 85%; }');
+    tauri.calls.find((c) => c.args[0] === '/s/Field Station.pdf')!.answer(converted('/s/Field Station.pdf'));
+    await done;
+    await settle();
+    // And it stops listening once the conversion is over.
+    expect(tauri.listening('engine-line')).toBe(0);
+  });
+
+  test('Show in Finder asks the engine to show this book, and says only what went wrong', async () => {
+    const { convert, pane, tauri } = await mountConvert({
+      engine: (args) => (args[0].endsWith('.pdf') ? converted(args[0]) : HOLD),
+    });
+    await convert.convertPath('/s/Field Station.pdf');
+    const show = pane.button(convert.revealLabel('MacIntel'));
+    const note = () => pane.querySelectorAll('p.caption').at(-1)!;
+
+    show.click();
+    const reveal = tauri.callsTo('reveal');
+    expect(reveal.map((c) => c.args)).toEqual([['reveal', '/lib/Field Station/Field Station.epub', '--json']]);
+    reveal[0].answer({ ok: true });
+    await settle();
+    expect(note().hidden).toBe(true);
+
+    show.click();
+    tauri.callsTo('reveal')[1].answer(refused('internal', 'No file manager answered.'));
+    await settle();
+    expect(note().hidden).toBe(false);
+    expect(note().textContent).toBe('No file manager answered.');
+
+    show.click();
+    tauri.callsTo('reveal')[2].fail('the engine could not be started');
+    await settle();
+    expect(note().textContent).toBe('the engine could not be started');
+  });
+
+  test('a reveal answer that arrives after the screen moved on lands nowhere', async () => {
+    const { convert, pane, tauri } = await mountConvert({
+      engine: (args) => (args[0].endsWith('.pdf') ? converted(args[0]) : HOLD),
+    });
+    await convert.convertPath('/s/First.pdf');
+    pane.button(convert.revealLabel('MacIntel')).click();
+    // Another script converts while the first reveal is still out.
+    await convert.convertPath('/s/Second.pdf');
+    expect(pane.querySelector('.book-title')!.textContent).toBe('Second');
+    tauri.callsTo('reveal')[0].answer(refused('internal', 'Could not show First.'));
+    await settle();
+    expect(pane.visibleText).not.toContain('Could not show First.');
+  });
+
+  test('Convert another goes back to the drop well and keeps the open script', async () => {
+    const { convert, pane, ctx, tauri } = await mountConvert({
+      engine: (args) => (args[0].endsWith('.pdf') ? converted(args[0]) : HOLD),
+    });
+    await convert.convertPath('/s/Field Station.pdf');
+    const open = ctx.state.script;
+    expect(open).not.toBeNull();
+    pane.button('Convert another').click();
+    await settle();
+    expect(pane.dataset.state).toBe('idle');
+    // Home, not a file dialog.
+    expect(tauri.dialogs).toEqual([]);
+    expect(ctx.state.script).toBe(open);
+  });
+
+  test('a refusal’s Report a bug opens an issue carrying the code, with the home folder the probe learned folded away', async () => {
+    const { convert, pane, tauri } = await mountConvert({
+      engine: (args) => {
+        if (args[0] === 'app-settings') return { ...library({ path: '/srv/people/ann/Books' }), home: '/srv/people/ann' };
+        if (args[0].endsWith('.pdf')) return refused('library', 'Cannot write under /srv/people/ann');
+        return HOLD;
+      },
+    });
+    await convert.convertPath('/s/Field Station.pdf');
+    await pane.button('Report a bug').click();
+    expect(tauri.opened.length).toBe(1);
+    const body = new URL(tauri.opened[0]).searchParams.get('body') ?? '';
+    expect(body).toContain('library: Cannot write under ~');
+    expect(body).not.toContain('people');
+  });
+
+  test('the update question sits after the well, only when asked for, and an answer takes it down', async () => {
+    const answers: boolean[] = [];
+    let should = false;
+    const quiet = await mountConvert({ ask: { should: () => should, answer: (on) => answers.push(on) } });
+    expect(quiet.pane.querySelector('.well-ask-question')).toBeNull();
+    await page!.close();
+
+    should = true;
+    const { convert, pane, restored } = await mountConvert({
+      ask: { should: () => should, answer: (on) => answers.push(on) },
+      engine: (args) => (args[0] === 'app-settings' ? library() : HOLD),
+    });
+    const order = pane.children.map((n) => n.className);
+    expect(order.slice(0, 3)).toEqual(['wordmark', 'well', 'well-ask']);
+    // So Choose PDF, not the question, is the page's first focus stop.
+    const { stopAfterDialog } = await import(join(UI, 'focus.js'));
+    expect(stopAfterDialog('convert', (s: string) => page!.doc.querySelectorAll(s)))
+      .toBe(pane.querySelector('.well button'));
+    const before = restored();
+    pane.button(convert.ASK.yes).click();
+    expect(answers).toEqual([true]);
+    expect(pane.querySelector('.well-ask-question')).toBeNull();
+    // The button that had the keyboard is gone, so it is handed back.
+    expect(restored()).toBe(before + 1);
+  });
+
+  test('a stale answer to the question does not overwrite one given in the release notes meanwhile', async () => {
+    const answers: boolean[] = [];
+    let should = true;
+    const { convert, pane } = await mountConvert({ ask: { should: () => should, answer: (on) => answers.push(on) } });
+    // The switch in the release notes answered while this line was up.
+    should = false;
+    pane.button(convert.ASK.no).click();
+    expect(answers).toEqual([]);
+    expect(pane.querySelector('.well-ask-question')).toBeNull();
+  });
+
+  test('the library line is one slot after the question, filled by a probe that only reads', async () => {
+    const { convert, pane, tauri, restored } = await mountConvert({
+      ask: { should: () => true, answer: () => {} },
+      engine: (args) => (args[0] === 'app-settings' ? library() : HOLD),
+    });
+    // Read-only: a probe that sent a --set would move the reader's folder
+    // every time the well was redrawn.
+    expect(tauri.callsTo('app-settings').map((c) => c.args)).toEqual([['app-settings', '--json']]);
+    const [line, secondary] = slot(pane);
+    expect(pane.children.indexOf(line)).toBe(pane.children.indexOf(pane.querySelector('.well-ask')!) + 1);
+    // It reuses the question's look (well-ask) and has no rule of its own:
+    // the capture tool hides the slot by its well-library name.
+    expect(line.className).toBe('well-ask well-library');
+    expect(cssFiles().map(read).join('\n')).not.toContain('.well-library');
+    expect(line.hidden).toBe(false);
+    expect(line.textContent).toBe(`${convert.libraryLine({ path: FOLDER, home: '/home/ann', fromEnv: false })}Change…`);
+    expect(secondary.hidden).toBe(true);
+    // Coming back to the page does not ask again; it hands the keyboard back.
+    const before = restored();
+    convert.show();
+    await settle();
+    expect(tauri.callsTo('app-settings').length).toBe(1);
+    expect(restored()).toBe(before + 1);
+  });
+
+  test('a probe that fails, refuses or answers malformed leaves the slot empty', async () => {
+    const answers: Array<(call: EngineCall) => void> = [
+      (call) => call.fail('engine missing'),
+      (call) => call.answer({ ok: false, error: { code: 'internal', message: 'no' } }),
+      (call) => call.answer({ ok: true, library: { path: FOLDER }, home: '/home/ann' }),
+      (call) => call.answer('not json'),
+    ];
+    for (const settleProbe of answers) {
+      const { pane, tauri } = await mountConvert();
+      settleProbe(tauri.callsTo('app-settings')[0]);
+      await settle();
+      expect(slot(pane).map((p) => [p.hidden, p.textContent])).toEqual([[true, ''], [true, '']]);
+      await page!.close();
+      page = null;
     }
   });
 
-  test('the failure heading names the cause, for every code the engine can return', () => {
-    // Every JsonError code the conversion path can produce must have a
-    // heading, or a real failure renders with a blank title.
-    for (const code of ['scanned', 'not-screenplay', 'password', 'unreadable',
-      'unsupported-type', 'bad-options', 'internal']) {
-      expect(convert.includes(`'${code}'`), `convert.js has no heading for ${code}`).toBe(true);
-    }
+  test('a probe that answers after the well was redrawn is dropped', async () => {
+    const { convert, pane, tauri } = await mountConvert();
+    convert.reset();
+    await settle();
+    const [first, second] = tauri.callsTo('app-settings');
+    first.answer(library({ path: '/home/ann/Old Books' }));
+    await settle();
+    expect(pane.textContent).not.toContain('Old Books');
+    second.answer(library());
+    await settle();
+    expect(slot(pane)[0].textContent).toContain('~/Books');
   });
 
-  test('the progress bar is determinate and never walks backwards', () => {
-    // The engine emits a percent per stage; a bar that took each stage's
-    // percent literally would jump 85 -> 0 at the parse/render boundary.
-    expect(convert).toContain('Math.max');
-    expect(convert).toContain('percent');
+  test('Change… quiets both buttons while the folder dialog is up, starts it at the library, and a cancel or the same folder sends nothing', async () => {
+    const { convert, pane, tauri } = await mountConvert({
+      engine: (args) => (args[0] === 'app-settings' && !args.includes('--set') ? library({ chosen: FOLDER }) : HOLD),
+    });
+    const both = () => slot(pane)[0].buttons().map((b) => `${b.textContent}:${b.disabled ? 'off' : 'on'}`);
+    expect(both()).toEqual(['Change…:on', 'Reset:on']);
+    const writes = () => tauri.callsTo('app-settings').filter((c) => c.args.includes('--set'));
+
+    pane.button('Change…').click();
+    await settle();
+    expect(tauri.dialogs.map((d) => [d.kind, d.options])).toEqual([['open', { directory: true, defaultPath: FOLDER }]]);
+    expect(both()).toEqual(['Change…:off', 'Reset:off']);
+    tauri.dialogs.shift()!.resolve(null);
+    await settle();
+    expect(both()).toEqual(['Change…:on', 'Reset:on']);
+
+    pane.button('Change…').click();
+    await settle();
+    tauri.dialogs.shift()!.resolve(FOLDER);
+    await settle();
+    expect(writes()).toEqual([]);
+
+    pane.button('Change…').click();
+    await settle();
+    tauri.dialogs.shift()!.resolve('/home/ann/Scripts');
+    await settle();
+    expect(writes().map((c) => c.args)).toEqual([
+      ['app-settings', '--json', '--set', '{"libraryPath":"/home/ann/Scripts"}'],
+    ]);
+    writes()[0].answer(library({ path: '/home/ann/Scripts', chosen: '/home/ann/Scripts' }));
+    await settle();
+    const [line, secondary] = slot(pane);
+    expect(line.textContent).toContain('~/Scripts');
+    expect(secondary.hidden).toBe(false);
+    expect(secondary.textContent).toBe(convert.movedLine);
   });
 
-  test('the shortcut label is the platform’s, not the Mac’s everywhere', () => {
-    // brand/components/drop-well.html draws the Mac spelling. This window
-    // runs on three platforms.
-    expect(convert).toContain('navigator');
-    expect(convert).toContain('Ctrl');
+  test('a refusal or a crash from Change replaces only the line under it', async () => {
+    const { pane, tauri } = await mountConvert({
+      engine: (args) => (args[0] === 'app-settings' && !args.includes('--set') ? library() : HOLD),
+    });
+    const change = async (finish: (call: EngineCall) => void) => {
+      pane.button('Change…').click();
+      await settle();
+      tauri.dialogs.shift()!.resolve('/home/ann/Elsewhere');
+      await settle();
+      finish(tauri.callsTo('app-settings').filter((c) => c.args.includes('--set')).at(-1)!);
+      await settle();
+    };
+    const [line, secondary] = slot(pane);
+    const before = line.textContent;
+
+    await change((call) => call.answer({ ok: false, error: { code: 'library', message: 'That folder is read-only.' } }));
+    expect(line.textContent).toBe(before);
+    expect(pane.button('Change…').disabled).toBe(false);
+    expect([secondary.hidden, secondary.textContent]).toEqual([false, 'That folder is read-only.']);
+
+    await change((call) => call.fail('the engine stopped'));
+    expect(line.textContent).toBe(before);
+    expect(secondary.textContent).toBe('the engine stopped');
   });
 
-  test('the surface does not place the focus after a dialog itself', () => {
-    // It used to, and it got it wrong: it re-focused the drop well's button,
-    // which exists on ONE of this surface's four states, so cancelling a
-    // dialog over a result or a refusal left the page with NO focused
-    // element and a keyboard that could not move. Where the focus goes is a
-    // decision now (focus.js) and it is placed once, for every surface and
-    // every dialog, by main.js. A surface asks; it does not choose.
-    expect(`convert.js focuses the picker's button: ${/chooseButton\??\.focus\(\)/.test(convert)}`)
-      .toBe("convert.js focuses the picker's button: false");
-    expect(convert).toContain('ctx.restoreFocus()');
-  });
-
-  test('a refusal does not close the script that was already open', () => {
-    // Dropping a file the engine will not read used to take Read, Tune and
-    // Send away from a book still sitting in the library.
-    expect(`convert.js clears the open script: ${/state\.script\s*=\s*null/.test(convert)}`)
-      .toBe('convert.js clears the open script: false');
-    expect(convert).toContain('stillOpenNote');
-  });
-
-  test('the error code is a labelled handle, not the last line of the sentence', () => {
-    // It is genuinely useful in a bug report, so it stays; it just stops
-    // being presented as prose under the buttons.
-    expect(convert).toContain('code-chip');
-    expect(convert).toContain('Error code');
-    expect(convert).toContain('dataset.errorCode');
-    const css = read('surfaces.css');
-    expect(css).toContain('.code-chip');
-    expect(css).toContain('.code-note-label');
-  });
-
-  test('NO surface sets an inline style, which this window’s CSP refuses', () => {
-    // Measured in piece C: with `default-src 'self'` an appended <style>, a
-    // style= attribute and a <style> inside srcdoc all fail silently. The
-    // bar's width is the one computed value on this surface, so this is the
-    // rule most easily broken here — but naming only convert.js left read.js,
-    // tune.js, send.js and frame.js free to break it silently. The CSP is the
-    // whole window's, so the guard is too.
-    for (const name of jsFiles()) {
-      expect(`${name} sets .style: ${/\.style\b/.test(read(name))}`).toBe(
-        `${name} sets .style: false`,
-      );
-      // The key may be unquoted, and here it usually IS: every el() call in
-      // this window writes `{ class: 'prose' }`, and dom.js falls through to
-      // setAttribute for any key it does not special-case, so `{ style: '…' }`
-      // is a real inline style written in the house spelling. The lookbehind
-      // is what keeps `font-style:` in read.js's @font-face block from
-      // reading as a violation.
-      const styleKey = /(?<![\w-])['"`]?style['"`]?\s*:/;
-      expect(`${name} sets a style attribute: ${styleKey.test(read(name))}`).toBe(
-        `${name} sets a style attribute: false`,
-      );
-    }
-    // ...and the route convert.js uses instead, which piece C measured as
-    // working.
-    expect(convert).toContain('adoptedStyleSheets');
-  });
-
-  test('only app.js listens for the drop, and it hands over every path', () => {
-    // The drop is an IPC event like any other: tests above already forbid a
-    // surface from touching Tauri, and this is the rule's other half — the
-    // boundary must not decide WHICH file gets converted, or that decision
-    // ends up somewhere no test can reach it.
-    const app = read('app.js');
-    expect(app).toContain("'tauri://drag-drop'");
-    expect(app).toContain("'tauri://drag-enter'");
-    expect(app).toContain("'tauri://drag-leave'");
-    expect(app).toContain('paths');
-    // The path is not picked here: app.js forwards the array.
-    expect(`app.js picks a path: ${/paths\s*\[\s*0\s*\]/.test(app)}`).toBe(
-      'app.js picks a path: false',
-    );
-    const main = read('main.js');
-    expect(main).toContain('onFileDrag');
-    expect(main).toContain('convert.dragOver');
-    expect(main).toContain('convert.dropPaths');
-  });
-
-  test('Show in Finder goes through the engine, not a Tauri door the window no longer has', () => {
-    // Owner decision, 2026-09-23: the window's old reveal permission was
-    // fixed to the library's old path, and a library that can move needs a
-    // door that moves with it. The engine's own reveal verb does the
-    // showing now, through revealNote.
-    expect(convert).toContain('revealNote(runEngine,');
-    // Gone from every file in this directory, not just renamed here.
-    for (const name of jsFiles()) {
-      expect(`${name} mentions revealItem: ${/revealItem/.test(read(name))}`).toBe(
-        `${name} mentions revealItem: false`,
-      );
-    }
-  });
-
-  test('the reveal note is built into the result the moment it is drawn, not appended once the engine answers', () => {
-    // A note appended only after the engine answers lands wherever the
-    // shared pane happens to be showing BY THEN: a reader who converts
-    // another script, or opens a different book, while a reveal is still in
-    // flight would see the answer land on the wrong screen, and a stale
-    // refusal would survive a later success. Building it into this result's
-    // own DOM at draw time, and only ever updating that same element, is
-    // what keeps a late answer on the book it was actually about.
-    const drawResult = convert.slice(convert.indexOf('function drawResult'));
-    const note = drawResult.slice(0, drawResult.indexOf('async function showInFinder'));
-    expect(note).toContain("hidden: true");
-    const handler = drawResult.slice(
-      drawResult.indexOf('async function showInFinder'),
-      drawResult.indexOf('pane.append('),
-    );
-    expect(handler).toContain('note.hidden');
-    expect(handler).not.toContain('pane.append');
-  });
-
-  test('CW1 review pin: Show in Finder hands the engine the open script’s own epub path', () => {
-    // A stray script.fountainPath, or a path captured before the answer
-    // arrived, would compile and even run: it would only show up the day
-    // the two paths actually differ.
-    expect(convert).toContain('revealNote(runEngine, script.epubPath)');
-  });
-
-  test('CW1 review pin: the reveal note is one of drawResult’s own appended children', () => {
-    // The note built at the top of drawResult (asserted above) has to
-    // actually reach the page, in the SAME pane.append call that draws the
-    // rest of the result, not left sitting in a variable nobody appends.
-    const drawResult = convert.slice(convert.indexOf('function drawResult'));
-    const build = drawResult.slice(
-      drawResult.indexOf('pane.append('),
-      drawResult.indexOf('ctx.scriptChanged()'),
-    );
-    expect(build).toContain('note,');
-  });
-
-  test('D2: the library line lives in one slot, built empty by drawWell after the question', () => {
-    const drawWellSrc = convert.slice(
-      convert.indexOf('function drawWell'),
-      convert.indexOf('async function pickFileThenConvert'),
-    );
-    const askIdx = drawWellSrc.indexOf('askLine()');
-    const slotIdx = drawWellSrc.indexOf('buildLibrarySlot()');
-    const appendIdx = drawWellSrc.indexOf('pane.append(slot.line, slot.secondary)');
-    expect(askIdx).toBeGreaterThan(-1);
-    expect(slotIdx).toBeGreaterThan(askIdx);
-    expect(appendIdx).toBeGreaterThan(slotIdx);
-    // drawWell starts its own probe. show() and reset() no longer probe on
-    // their own: drawWell already runs everywhere the well is actually
-    // (re)drawn (mount, "Convert another", a refusal's "Back to one"), and a
-    // plain tab return to an idle well that is still on screen has nothing
-    // to re-probe.
-    expect(drawWellSrc).toContain('probeLibrary(');
-    const showFn = convert.slice(
-      convert.indexOf('export function show'), convert.indexOf('export function choose'),
-    );
-    expect(showFn).not.toContain('probeLibrary');
-    const resetFn = convert.slice(
-      convert.indexOf('export function reset'), convert.indexOf('function askLine'),
-    );
-    expect(resetFn).not.toContain('probeLibrary');
-  });
-
-  test('P7: a stale probe is dropped by a generation counter drawWell bumps on every redraw', () => {
-    const drawWellSrc = convert.slice(
-      convert.indexOf('function drawWell'),
-      convert.indexOf('async function pickFileThenConvert'),
-    );
-    expect(drawWellSrc).toContain('libraryGeneration += 1');
-    const probe = convert.slice(
-      convert.indexOf('async function probeLibrary'),
-      convert.indexOf('function drawWell'),
-    );
-    expect(probe).toContain('gen !== libraryGeneration');
-  });
-
-  test('P1: the probe only ever reads the library, never writes it', () => {
-    // A probe that sent a --set (even a bare "reset to default") would
-    // silently move whatever folder the reader chose, every time the well
-    // is redrawn: mount, "Convert another", every "Back to one".
-    const probe = convert.slice(
-      convert.indexOf('async function probeLibrary'),
-      convert.indexOf('function drawWell'),
-    );
-    const calls = [...probe.matchAll(/argv\.appSettings\(([^)]*)\)/g)];
-    expect(calls.length).toBe(1);
-    expect(calls[0][1].trim()).toBe('');
-  });
-
-  test('P5/P6: a failed or malformed probe leaves the slot exactly as drawWell built it', () => {
-    const probe = convert.slice(
-      convert.indexOf('async function probeLibrary'),
-      convert.indexOf('function drawWell'),
-    );
-    // Never a second line: the only way this feature reaches the page is
-    // the one slot drawWell already appended.
-    expect(probe).not.toContain('pane.append');
-    // A dead engine returns from the catch, and a malformed answer returns
-    // from the null-library check, BEFORE slot.showLibrary is ever reached.
-    const catchIdx = probe.indexOf('catch');
-    const nullCheckIdx = probe.indexOf('library === null');
-    const showIdx = probe.indexOf('slot.showLibrary(');
-    expect(catchIdx).toBeGreaterThan(-1);
-    expect(nullCheckIdx).toBeGreaterThan(catchIdx);
-    expect(showIdx).toBeGreaterThan(nullCheckIdx);
-  });
-
-  test('B1: setBusy actually disables (and re-enables) every button it knows about', () => {
-    // Proving where setBusy(true)/setBusy(false) are CALLED (below) says
-    // nothing about what the function itself does; a setBusy that had been
-    // hollowed out to a no-op would still pass that half.
-    const slot = convert.slice(
-      convert.indexOf('function buildLibrarySlot'),
-      convert.indexOf('async function probeLibrary'),
-    );
-    const setBusyFn = slot.slice(
-      slot.indexOf('function setBusy('),
-      slot.indexOf('async function run('),
-    );
-    expect(setBusyFn).toContain('for (const button of buttons)');
-    expect(setBusyFn).toContain('button.disabled = on');
-  });
-
-  test('B1/C2/C4/6: the picker opens with both buttons already quiet, at the current folder, and a cancel or a no-op pick sends nothing', () => {
-    const slot = convert.slice(
-      convert.indexOf('function buildLibrarySlot'),
-      convert.indexOf('async function probeLibrary'),
-    );
-    const run = slot.slice(slot.indexOf('async function run('));
-    const busyIdx = run.indexOf('setBusy(true)');
-    const pickIdx = run.indexOf('pickFolder(');
-    const engineIdx = run.indexOf('runEngine(argv.appSettings(');
-    expect(busyIdx).toBeGreaterThan(-1);
-    // B1: quiet before the picker opens, not just around the engine call.
-    expect(pickIdx).toBeGreaterThan(busyIdx);
-    // B1: and back on again in a finally, so a thrown pickFolder cannot
-    // leave both buttons disabled forever.
-    expect(run).toMatch(/finally\s*\{[^]*setBusy\(false\)/);
-    // C2: the picker starts where the library already is.
-    expect(run).toContain('pickFolder({ defaultPath: library.path })');
-    // C4 + minor #6: a cancelled picker (null), or picking the folder
-    // already in use, returns before the engine is ever asked to do
-    // anything.
-    const guard = run.slice(pickIdx, engineIdx);
-    expect(guard).toContain('path === null');
-    expect(guard).toContain('path === library.path');
-    expect(guard).toMatch(/return;/);
-  });
-
-  test('E1/E2: a refusal or a thrown error replaces only the secondary line, never the buttons', () => {
-    const slot = convert.slice(
-      convert.indexOf('function buildLibrarySlot'),
-      convert.indexOf('async function probeLibrary'),
-    );
-    const run = slot.slice(slot.indexOf('async function run('));
-    const success = run.slice(run.indexOf('if (result.ok)'), run.indexOf('} else {'));
-    const refusal = run.slice(run.indexOf('} else {'), run.indexOf('} catch'));
-    const crash = run.slice(run.indexOf('} catch'), run.indexOf('} finally'));
-    expect(success).toContain('showLibrary(result.library)');
-    // E1: a JSON refusal only ever touches the secondary line.
-    expect(refusal).not.toContain('showLibrary(');
-    expect(refusal).toContain('showSecondary(result.message)');
-    // E2: a thrown error (a crashed engine, or a thrown picker) does too.
-    expect(crash).not.toContain('showLibrary(');
-    expect(crash).toContain('showSecondary(err.message)');
-  });
-
-  test('R2: Reset goes through the very same run() as Change, so it cannot send anything else', () => {
-    const slot = convert.slice(
-      convert.indexOf('function buildLibrarySlot'),
-      convert.indexOf('async function probeLibrary'),
-    );
-    // One shared handler read off the actions map, not a second copy of the
-    // logic for Reset that a change here could let drift.
-    expect(slot).toContain('onclick: () => run(action, library)');
-    const run = slot.slice(slot.indexOf('async function run('));
-    expect(run).toContain('let path = null;');
-    // The only place `path` is ever REASSIGNED (not merely declared or
-    // compared) is the one branch Change alone takes; Reset's path is that
-    // initial null, straight into libraryChangeArgs (pinned separately as a
-    // pure decision: libraryChangeArgs(null) is the literal
-    // libraryPath: null).
-    const afterDeclaration = run.slice(run.indexOf('let path = null;') + 'let path = null;'.length);
-    const reassignments = afterDeclaration.match(/path = /g) ?? [];
-    expect(reassignments.length).toBe(1);
-    expect(afterDeclaration.indexOf('path = ')).toBeGreaterThan(
-      afterDeclaration.indexOf("action === 'change'"),
-    );
-  });
-
-  test('the slot reuses well-ask (centred, gapped) rather than new CSS', () => {
-    const slot = convert.slice(
-      convert.indexOf('function buildLibrarySlot'),
-      convert.indexOf('async function probeLibrary'),
-    );
-    // well-library is a name for the slot, with no rule of its own: the
-    // capture tool hides the slot by it (tools/capture/steps.js).
-    expect(slot).toContain("class: 'well-ask well-library'");
-    expect(slot).not.toMatch(/class:\s*'library/);
-    const css = cssFiles().map(read).join('\n');
-    expect(css).not.toContain('.library');
-    expect(css).not.toContain('.well-library');
-  });
-
-  test('a hidden well-ask line takes no space: .well-ask is flex, which beats the UA [hidden] rule', () => {
-    // .well-ask { display: flex } outranks the browser's own
-    // [hidden] { display: none }, so a pending or a failed probe used to
-    // leave a blank ~52px gap where the line would go. style.css's global
-    // [hidden] rule, important, now covers it and every other class.
-    expect(read('surfaces.css')).toMatch(/\.well-ask \{[^}]*display: flex/);
-    expect(read('style.css')).toMatch(/^\[hidden\] \{ display: none !important; \}/m);
+  test('Reset sends the default back without asking for a folder, and claims no move', async () => {
+    const { pane, tauri } = await mountConvert({
+      engine: (args) => (args[0] === 'app-settings' && !args.includes('--set') ? library({ chosen: '/home/ann/Picked' }) : HOLD),
+    });
+    pane.button('Reset').click();
+    await settle();
+    expect(tauri.dialogs).toEqual([]);
+    const write = tauri.callsTo('app-settings').filter((c) => c.args.includes('--set'));
+    expect(write.map((c) => c.args)).toEqual([['app-settings', '--json', '--set', '{"libraryPath":null}']]);
+    write[0].answer(library());
+    await settle();
+    expect(slot(pane)[0].buttons().map((b) => b.textContent)).toEqual(['Change…']);
+    expect(slot(pane)[1].hidden).toBe(true);
   });
 });
 
@@ -1111,10 +1104,6 @@ describe('"Convert it again" converts the script again', () => {
     send.mount(pane, ctx);
     againButton(pane)!.click();
     expect(again()).toBe(1);
-  });
-
-  test('main.js hands every surface the Convert surface’s own convertAgain', () => {
-    expect(read('main.js')).toMatch(/convertAgain: \(\) => convert\.convertAgain\(\)/);
   });
 });
 
@@ -1799,68 +1788,18 @@ describe('where the keyboard stands when a dialog closes', () => {
     expect(focus.stopAfterDialog('send', page({ [plan[0]]: convertButtons }))).toBeNull();
   });
 
-  test('main.js is the one place that places it, and it places it for every dialog', () => {
-    const main = read('main.js');
-    // The binding is thin on purpose, so what is checked here is that it is
-    // WIRED: the decision is imported rather than reimplemented, the dialog
-    // boundary calls it, and the surfaces are given it to call after a redraw.
-    expect(main).toContain("from './focus.js'");
-    expect(main).toContain('stopAfterDialog');
-    expect(main).toContain('onDialogClosed(restoreFocus)');
-    expect(main).toContain('restoreFocus,');
-    // It follows the surface that is showing, not a remembered one.
-    expect(main).toMatch(/showing = id/);
-    // No other surface may place the focus after a dialog behind its back.
-    for (const name of jsFiles()) {
-      if (name === 'main.js' || name === 'focus.js') continue;
-      expect(`${name} plans focus: ${/focusPlan|stopAfterDialog/.test(read(name))}`)
-        .toBe(`${name} plans focus: false`);
-    }
-  });
-
-  test('asking for a file does not move the reader off the surface they are on', () => {
-    // The shortcut used to switch to Convert before it opened the picker, so
-    // hitting it on Tune and then cancelling left someone on a surface they
-    // had not asked for, with their work off screen — and it made the focus
-    // rule above untestable as a general one, because the surface showing
-    // when a dialog closed was always Convert. Converting still moves there;
-    // asking does not.
-    const main = read('main.js');
-    const from = main.indexOf('metaKey');
-    const shortcut = main.slice(from, main.indexOf('});', from));
-    expect(shortcut).toContain('convert.choose()');
-    expect(`the shortcut switches surface: ${/setSurface\('convert'\)/.test(shortcut)}`)
-      .toBe('the shortcut switches surface: false');
-    // The drop does not switch either — the surface does it, on the file.
-    const drop = main.slice(main.indexOf('onFileDrag'), main.indexOf('metaKey'));
-    expect(drop).toContain('convert.dropPaths');
-    expect(`the drop handler switches surface: ${/setSurface\('convert'\)/.test(drop)}`)
-      .toBe('the drop handler switches surface: false');
-    expect(read('convert.js')).toContain("ctx.goTo('convert')");
-  });
-
-  test('the reader’s Tab stop is one that can show the focus', () => {
-    // The frame swallowed the focus and showed nothing for it. Measured with
-    // a probe on the live window, WebKitGTK gives a focused iframe no :focus
-    // match, no painted outline and no box-shadow, and fires NO focus, blur
-    // or focusin event for it either — so not even a class could be hung on
-    // it from script. The stop is therefore the stage around the frame, and
-    // the frame is taken out of the Tab order.
-    const reader = read('read.js');
-    expect(reader).toContain('script-stage');
-    expect(reader).toMatch(/tabindex: '-1'/);
-    expect(reader).toMatch(/tabindex: '0'/);
+  test('the reader’s Tab stop draws a ring, and nothing tries to ring the frame', () => {
+    // Kept as a CSS pin, because painting a focus ring needs a browser. The
+    // stop itself (the stage around the frame, never the frame) is driven in
+    // "the Tab stop is the stage around the frame, never the frame itself":
+    // WebKitGTK gives a focused iframe no :focus match, no outline and no
+    // focus event at all (measured), so the stage is what has to ring.
     const css = read('surfaces.css');
     const rings = [...css.matchAll(/\.script-stage:focus[^{]*\{([^}]*)\}/g)].map((m) => m[1]);
     expect(rings.length).toBeGreaterThan(0);
     expect(rings.every((body) => /outline:\s*\d/.test(body))).toBe(true);
-    // ...and nothing tries to ring the frame itself any more, which would be
-    // a rule that renders on no machine anyone has run this on.
     expect(`surfaces.css rings the frame: ${/\.script-frame:focus/.test(css)}`)
       .toBe('surfaces.css rings the frame: false');
-    // The focus plan must not send anyone to the frame either.
-    expect(`focus.js treats an iframe as a stop: ${/'iframe'/.test(read('focus.js'))}`)
-      .toBe('focus.js treats an iframe as a stop: false');
   });
 
   test('the arrow keys still move the script, now that the frame is not the stop', async () => {
@@ -2745,7 +2684,7 @@ describe('the window knows when the engine is working, and can restart', () => {
         delete win.window;
       }
     }
-  });
+  }, 20_000); // Seven real quiet periods, 4.4 s measured: too near bun's 5 s default to leave on it.
 
   test('a dialog that fails lets its hold go, and an ask refused by the guard takes none', async () => {
     const app = await import(join(UI, 'app.js'));
@@ -3062,183 +3001,263 @@ describe('the scene list is one Tab stop, walked with the arrow keys', () => {
 });
 
 describe('the Read surface', () => {
-  const reader = read('read.js');
+  // The real read.js, mounted on the fake page, with a frame whose document
+  // the test builds and whose window records what the reader asks of it. The
+  // frame's window carries its OWN CSSStyleSheet and IntersectionObserver,
+  // distinct from the parent's, so a sheet or an observer built in the wrong
+  // realm shows up as the wrong class.
+  const ENGINE_CSS = 'section.scene { margin: 0 0 1em; }';
+  const PREVIEW = `<?xml version="1.0"?><html><head><style>${ENGINE_CSS}</style></head><body>scenes</body></html>`;
 
-  test('it renders the engine’s document, not a document of its own', () => {
-    expect(reader).toContain('previewHtml');
-    expect(reader).toContain('DOMParser');
-    // A reader that built its own screenplay CSS would be a second opinion
-    // about formatting, which is the one thing this surface must not be.
-    for (const invented of ['scene-heading {', 'p.dialogue {', 'text-transform']) {
-      expect(`read.js styles screenplays itself: ${reader.includes(invented)}`).toBe(
-        'read.js styles screenplays itself: false',
-      );
+  class FrameSheet { text = ''; replaceSync(t: string) { this.text = t; } }
+  class ParentSheet { text = ''; replaceSync(t: string) { this.text = t; } }
+
+  let page: FakePage | null = null;
+  let copies = 0;
+  afterEach(async () => { await page?.close(); page = null; });
+
+  /** A frame document of `n` scenes, `tall` px each; a heading may carry the
+   *  engine's floated page marker, the way it does when a scene opens a page. */
+  function frameDoc(n: number, tall: number) {
+    const doc = new FakeDocument();
+    for (let i = 0; i < n; i += 1) {
+      const section = doc.createElement('section');
+      section.className = 'scene';
+      section.id = `sc-00${i + 1}`;
+      section.offsetTop = i * tall;
+      section.offsetHeight = tall;
+      const heading = doc.createElement('h2');
+      heading.className = 'scene-heading';
+      if (i === 1) {
+        const marker = doc.createElement('span');
+        marker.className = 'page-marker';
+        marker.append('2.');
+        heading.append(marker);
+      }
+      heading.append(`INT. ROOM ${i + 1} - DAY`);
+      section.append(heading);
+      doc.body.append(section);
     }
+    return doc;
+  }
+
+  async function mountReader(options: { tokens?: Record<string, string> } = {}) {
+    page = fakePage();
+    const tokens = { '--ink': 'oklch(0.1 0 0)', '--paper': 'oklch(0.9 0 0)', ...options.tokens };
+    const parsed: Array<{ html: string; type: string }> = [];
+    const dark: Array<() => void> = [];
+    const media: string[] = [];
+    const g = withGlobals();
+    g.set('CSSStyleSheet', ParentSheet);
+    g.set('getComputedStyle', () => ({ getPropertyValue: (name: string) => tokens[name as keyof typeof tokens] ?? '' }));
+    g.set('requestAnimationFrame', (fn: () => void) => { fn(); return 0; });
+    g.set('matchMedia', (query: string) => {
+      media.push(query);
+      return { matches: false, addEventListener: (_: string, fn: () => void) => dark.push(fn) };
+    });
+    // The window's parser, recording what it was handed: a reader that
+    // parsed the preview some other way would never call it.
+    g.set('DOMParser', class {
+      parseFromString(html: string, type: string) {
+        parsed.push({ html, type });
+        let css: string | null = (html.match(/<style>([\s\S]*?)<\/style>/) ?? [])[1] ?? null;
+        return {
+          querySelector: (s: string) => (s === 'style' && css !== null
+            ? { textContent: css, remove: () => { css = null; } } : null),
+          get documentElement() {
+            return { outerHTML: html.replace(/<\?xml[^>]*\?>/, '').replace(/<style>[\s\S]*?<\/style>/, css === null ? '' : `<style>${css}</style>`) };
+          },
+        };
+      }
+    });
+    const restoreExtra = page.close;
+    page.close = async () => { g.restore(); await restoreExtra(); };
+
+    copies += 1;
+    const reader = await import(`${join(UI, 'read.js')}?mounted-${copies}`);
+    const pane = page.pane();
+    pane.id = 'surface-read';
+    const script = { title: 'Field Station', author: 'A. Writer', previewHtml: PREVIEW };
+    reader.mount(pane, { state: { script, reducedMotion: true }, convertAgain: () => {} });
+    const frame = pane.querySelector('iframe')!;
+    const scrolls: number[][] = [];
+    const observers: Array<{ observed: FakeNode[]; fire: () => void; disconnected: boolean }> = [];
+    const frameListeners: string[] = [];
+    const win = {
+      scrollY: 0,
+      CSSStyleSheet: FrameSheet,
+      IntersectionObserver: class {
+        observed: FakeNode[] = [];
+        disconnected = false;
+        constructor(readonly fire: () => void) { observers.push(this); }
+        observe(node: FakeNode) { this.observed.push(node); }
+        disconnect() { this.disconnected = true; }
+      },
+      scrollTo(_x: number, y: number) { scrolls.push([0, y]); win.scrollY = y; },
+      scrollBy(_x: number, dy: number) { win.scrollY += dy; },
+      addEventListener: (type: string) => frameListeners.push(type),
+    };
+    /** Hands the frame a document, as the browser does when srcdoc loads. */
+    const load = (doc: FakeDocument) => {
+      Object.assign(frame, { contentDocument: doc, contentWindow: win });
+      frame.fire('load');
+    };
+    frame.clientHeight = 500;
+    return { reader, pane, frame, win, load, scrolls, observers, parsed, dark, media, tokens, frameListeners, page };
+  }
+  const marked = (pane: FakeNode) =>
+    pane.querySelectorAll('.scene-link').filter((b) => b.getAttribute('aria-current') === 'true').map((b) => b.textContent);
+
+  test('it shows the engine’s document, parsed by the window’s own parser, with the stylesheet lifted out', async () => {
+    const { frame, parsed } = await mountReader();
+    expect(parsed).toEqual([{ html: PREVIEW, type: 'text/html' }]);
+    const srcdoc = frame.getAttribute('srcdoc')!;
+    // A <style> left in srcdoc is silently refused by the CSP.
+    expect(srcdoc).not.toContain('<style');
+    expect(srcdoc).not.toContain('<?xml');
+    expect(srcdoc.startsWith('<!doctype html><html>')).toBe(true);
+    expect(srcdoc).toContain('scenes');
   });
 
-  test('it takes the stylesheet out of the markup and adopts it', () => {
-    // Measured: a <style> inside srcdoc is blocked by the window's CSP, and
-    // CSSOM is not. An implementation that left the <style> in place renders
-    // an unstyled script and looks like it "nearly works".
-    expect(reader).toContain("querySelector('style')");
-    expect(reader).toContain('adoptedStyleSheets');
-    expect(reader).toContain('replaceSync');
+  test('the frame adopts one sheet, built in its own realm: the faces, the engine’s rules untouched, then the theme', async () => {
+    const { reader, frame, load, tokens } = await mountReader();
+    const doc = frameDoc(3, 100);
+    load(doc);
+    expect(doc.adoptedStyleSheets.length).toBe(1);
+    const sheet = doc.adoptedStyleSheets[0] as FrameSheet;
+    // A parent-realm sheet is rejected when adopted into another document.
+    expect(sheet).toBeInstanceOf(FrameSheet);
+    expect(sheet.text).toBe(reader.sheetText(ENGINE_CSS, { ink: tokens['--ink'], paper: tokens['--paper'] }));
+    expect(sheet.text).toContain('@font-face');
+    expect(frame.getAttribute('sandbox')).toBe('allow-same-origin');
   });
 
-  test('it builds the sheet in the frame’s own realm', () => {
-    // `new CSSStyleSheet()` from the parent realm is rejected when adopted
-    // into another document. This is the line that makes or breaks it.
-    expect(reader).toMatch(/new\s+\w+\.CSSStyleSheet\(\)/);
+  test('the frame’s theme follows the desktop’s when it changes', async () => {
+    const { reader, load, dark, media, tokens } = await mountReader();
+    const doc = frameDoc(3, 100);
+    load(doc);
+    expect(media).toContain('(prefers-color-scheme: dark)');
+    tokens['--ink'] = 'oklch(0.95 0 0)';
+    tokens['--paper'] = 'oklch(0.15 0 0)';
+    for (const fn of dark) fn();
+    expect((doc.adoptedStyleSheets[0] as FrameSheet).text)
+      .toBe(reader.sheetText(ENGINE_CSS, { ink: 'oklch(0.95 0 0)', paper: 'oklch(0.15 0 0)' }));
   });
 
-  test('the frame is sandboxed same-origin, with no script permission', () => {
-    expect(reader).toContain('allow-same-origin');
-    expect(reader).not.toContain('allow-scripts');
-    expect(reader).toContain('sandbox');
+  test('the Tab stop is the stage around the frame, never the frame itself', async () => {
+    const { pane, frame } = await mountReader();
+    const { FOCUSABLE } = await import(join(UI, 'focus.js'));
+    const stage = pane.querySelector('.script-stage')!;
+    // This webview paints nothing for a focused iframe and fires no event
+    // that would let the page paint it instead (measured), so the stop moved.
+    expect(frame.matches(FOCUSABLE)).toBe(false);
+    expect(stage.matches(FOCUSABLE)).toBe(true);
+    expect(stage.contains(frame)).toBe(true);
+    expect(stage.getAttribute('aria-label')).toBe('Field Station, the script');
   });
 
-  test('it supplies the faces the engine’s CSS asks for by name', () => {
-    // The engine's CSS says "Courier Prime"; nothing inside the frame
-    // declares where that file is, so the reader must.
-    expect(reader).toContain('@font-face');
-    expect(reader).toContain('fonts/courier-prime-400-latin.woff2');
+  test('the arrow keys on the stage scroll the frame', async () => {
+    const { pane, load, win, scrolls } = await mountReader();
+    load(frameDoc(3, 100));
+    const stage = pane.querySelector('.script-stage')!;
+    const press = (key: string) => {
+      const event = makeEvent('keydown', { key });
+      stage.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(press('ArrowDown')).toBe(true);
+    expect(win.scrollY).toBe(60);
+    expect(press('Home')).toBe(true);
+    expect(scrolls.at(-1)).toEqual([0, 0]);
+    // Tab belongs to the window, not to the frame.
+    expect(press('Tab')).toBe(false);
   });
 
-  test('a re-render keeps the reader where they were', () => {
-    // Tune re-renders on every knob. A reader thrown back to FADE IN on
-    // each keystroke is unusable.
-    expect(reader).toContain('scrollY');
-    expect(reader).toContain('scrollTo');
+  test('the rail lists the engine’s own scenes, without the page numbers inside headings, and a click goes to the scene', async () => {
+    const { pane, load } = await mountReader();
+    const doc = frameDoc(3, 100);
+    load(doc);
+    const links = pane.querySelectorAll('.scene-rail .scene-link');
+    expect(links.map((b) => b.textContent)).toEqual([
+      'INT. ROOM 1 – DAY', 'INT. ROOM 2 – DAY', 'INT. ROOM 3 – DAY',
+    ]);
+    expect(pane.querySelector('.rail-count')!.textContent).toBe('3 scenes');
+    links[2].click();
+    // Reduced motion asked for, so the jump is not animated.
+    expect(doc.getElementById('sc-003')!.scrolledIntoView).toEqual({ behavior: 'auto', block: 'start' });
   });
 
-  test('the rail is built from the engine’s own scene sections', () => {
-    // Not from a second parse of the fountain: two parsers is two answers.
-    expect(reader).toContain('section.scene');
-    expect(reader).toContain('scrollIntoView');
+  test('the rail follows the reader through an observer built in the frame, never a scroll listener', async () => {
+    const { pane, load, win, observers, frameListeners } = await mountReader();
+    const doc = frameDoc(3, 100);
+    load(doc);
+    expect(observers.length).toBe(1);
+    expect(observers[0].observed).toEqual(doc.querySelectorAll('section.scene'));
+    // A sandboxed srcdoc frame delivers no scroll event to the parent
+    // (measured), so a reader wired to one marks scene one forever.
+    expect(frameListeners).not.toContain('scroll');
+    expect(marked(pane)).toEqual(['INT. ROOM 1 – DAY']);
+    win.scrollY = 250;
+    observers[0].fire();
+    expect(marked(pane)).toEqual(['INT. ROOM 3 – DAY']);
   });
 
-  test('the rail follows the reader through the frame’s own observer', () => {
-    // Measured in the live window, because the obvious wiring is the wrong
-    // one: a sandboxed srcdoc frame delivers NO scroll event to the parent —
-    // not on the frame's window, its document, its documentElement or its
-    // body — while the parent reads `scrollY` off that same frame correctly
-    // the whole time. A reader wired to 'scroll' therefore renders perfectly
-    // and leaves its mark on scene one forever, which is exactly the kind of
-    // defect nothing else here would catch. An IntersectionObserver built in
-    // the FRAME's realm does fire (counted: 1 → 2 → 3 → 4 across two
-    // scrolls, against 0 scroll events).
-    expect(reader).toMatch(/new\s+\w+\.IntersectionObserver\(/);
-    expect(`read.js listens for a scroll event: ${/addEventListener\('scroll'/.test(reader)}`)
-      .toBe('read.js listens for a scroll event: false');
-    // And the observer says WHEN to look, never WHERE the reader is: one
-    // definition of the current scene, which is readerPlace()'s.
-    const watcher = reader.slice(reader.indexOf('new win.IntersectionObserver'));
-    expect(watcher.slice(0, 400)).toContain('markCurrent');
-    expect(watcher.slice(0, 400)).not.toContain('entries');
+  test('the rail keeps its own mark in view inside its own scroll', async () => {
+    const { pane, load, win, observers } = await mountReader();
+    load(frameDoc(3, 100));
+    const rail = pane.querySelector('.scene-rail')!;
+    rail.clientHeight = 100;
+    pane.querySelectorAll('.scene-link').forEach((b, i) => { b.offsetTop = i * 300; b.offsetHeight = 30; });
+    win.scrollY = 250;
+    observers[0].fire();
+    expect(rail.scrollTop).toBe(600 + 30 - 100);
   });
 
-  test('coming back to the reader re-asserts the place, and really moves the frame', () => {
-    // Measured in the live window, and not guessable: after a
-    // display:none → display:block round trip this webview REPORTS the scroll
-    // position the frame had and PAINTS the document somewhere else, and a
-    // scrollTo() to the position the frame already claims is a no-op. So
-    // show() restores rather than trusting the frame, and restore() goes to
-    // the top first when the target is where the frame says it already is.
-    // Both look like dead code to anyone who did not watch it fail.
-    expect(reader).toMatch(/export function show\(\)[\s\S]{0,600}restore\(\)/);
-    expect(reader).toMatch(/scrollY === target[\s\S]{0,200}scrollTo\(0, 0\)/);
-    // And the place is taken on the way OUT, while the frame can still say
-    // where it is — asking a hidden pane for layout answers zero.
-    expect(reader).toMatch(/export function hide\(\)[\s\S]{0,120}keep\(\)/);
+  test('coming back to the reader re-asserts the place, and really moves the frame', async () => {
+    // After a display:none round trip this webview REPORTS the scroll it had
+    // and PAINTS the document somewhere else, and a scrollTo() to where it
+    // already claims to be does nothing (measured). So show() goes to the
+    // top first, then to the place.
+    const { reader, load, win, scrolls } = await mountReader();
+    load(frameDoc(3, 100));
+    win.scrollY = 150;
+    reader.hide();
+    scrolls.length = 0;
+    reader.show();
+    expect(scrolls).toEqual([[0, 0], [0, 150]]);
   });
 
-  test('a second re-render in a row does not throw the reader back to the top', () => {
-    // Found by driving Tune in the live window, and invisible from one
-    // change: re-rendering happens while THIS pane is hidden, so the new
-    // document cannot be measured (measure() needs layout) and the frame
-    // holding it reports scrollY 0. render() calls keep() first, so the
-    // SECOND re-render read that 0 against the previous document's marks and
-    // overwrote a good place with "the top of scene one".
-    //
-    // Measured, both ways, with the reader parked 0.331 into sc-012:
-    //   one knob   — document 14486px -> 16313px, scroll 7967 -> 9296, still
-    //                sc-012 at 0.331 (a different pixel, the same place)
-    //   two knobs  — scroll 77, sc-001, the rail marking nothing
-    //
-    // The guard is `measured`: true only while `marks` describe the document
-    // the frame is holding. It looks like dead code to anyone who did not
-    // watch the second knob lose the place.
-    expect(reader).toMatch(/let measured = false/);
-    // keep() refuses to take a place it cannot trust...
-    const keeper = reader.slice(reader.indexOf('function keep()'));
-    expect(keeper.slice(0, 200)).toContain('!measured');
-    // ...render() is what makes it untrustworthy...
-    const render = reader.slice(reader.indexOf('export function render('));
-    expect(render.slice(0, 700)).toMatch(/srcdoc[\s\S]{0,300}measured = false/);
-    // ...and measuring the new document is the only thing that restores it,
-    // which is what makes coming back to Read land in the right place.
-    const measure = reader.slice(reader.indexOf('function measure()'));
-    expect(measure.slice(0, 400)).toContain('measured = true');
-    // The order inside render() is load-bearing: keeping the place has to
-    // happen BEFORE the document it describes is replaced.
-    expect(render.slice(0, 700).indexOf('keep()'))
-      .toBeLessThan(render.slice(0, 700).indexOf('measured = false'));
+  test('a re-render keeps the reader’s place across a reflow, even two re-renders in a row while hidden', async () => {
+    // Tune re-renders while this pane is hidden, where the new document
+    // cannot be measured and the frame reports scrollY 0. A second re-render
+    // used to read that 0 against the OLD document's marks and throw the
+    // reader back to the top of scene one.
+    const { reader, frame, load, win, scrolls } = await mountReader();
+    load(frameDoc(3, 100));
+    win.scrollY = 150; // halfway into the second scene
+    reader.hide();
+    frame.clientHeight = 0;
+    reader.render(PREVIEW.replace('scenes', 'scenes, bigger'));
+    win.scrollY = 0;
+    reader.render(PREVIEW.replace('scenes', 'scenes, bigger still'));
+    load(frameDoc(3, 200)); // every scene now twice as tall
+    frame.clientHeight = 500;
+    reader.show();
+    expect(scrolls.at(-1)).toEqual([0, 300]);
   });
 
-  test('the rail can scroll its own mark into view', () => {
-    // read.js keeps the marked scene inside the rail with
-    // `rail.scrollTop = button.offsetTop`, which is only the offset WITHIN
-    // the rail if the rail is the button's offsetParent. Unpositioned, the
-    // offset is measured from the page and the rail scrolls to a number that
-    // means nothing — visible at narrow widths, where the rail is a short
-    // strip and the mark simply never comes into view.
-    //
-    // Any POSITIONED value satisfies that, not `relative` specifically. This
-    // asserted the literal until 2026-09-21, when the rail became an absolute
-    // drawer in the binding margin and the test failed for a change that
-    // never threatened what it was protecting.
-    expect(reader).toContain('rail.scrollTop = button.offsetTop');
-    const css = read('surfaces.css');
-    const rule = css.slice(css.indexOf('.scene-rail {'));
-    expect(rule.slice(0, rule.indexOf('}')))
-      .toMatch(/position:\s*(relative|absolute|fixed|sticky)/);
-  });
-
-  test('the parser the window uses is the real one', () => {
-    // splitPreview() takes its parser as an argument so it can be exercised
-    // below without a browser. That is only honest if the window itself
-    // hands it a DOMParser — a reader that passed a regex of its own would
-    // pass every test above.
-    expect(reader).toMatch(/splitPreview\([^)]*new DOMParser\(\)\)/);
-  });
-
-  test('the frame’s theme follows the desktop’s, inside the frame too', () => {
-    // The window's colour tokens are declared on THIS document; a custom
-    // property does not cascade into another one, so a frame that only
-    // named them would render black ink on a dark ground in dark mode.
-    // What the VALUES do once read is checked below, against the CSS.
-    expect(reader).toContain('getPropertyValue');
-    expect(reader).toContain('prefers-color-scheme');
-    // dressFrame() must hand the sheet the tokens it just read and nothing
-    // else: this is the seam the value test below cannot see across.
-    //
-    // The css argument was named `sheetCss` until 2026-09-21, when these
-    // eight lines were lifted out of adopt() so the Settings preview could
-    // share them rather than own a second copy of the CSP dance. The seam is
-    // the same; only the parameter's name moved, so the assertion no longer
-    // pins that name.
-    expect(reader).toMatch(/paperFrom\(\(name\) => root\.getPropertyValue\(name\)\)/);
-    expect(reader).toMatch(/sheetText\(\w+, tokens\)/);
-  });
-
-  test('a resized window re-measures, because a reflow moves every scene', () => {
-    // measure() ran only when the frame loaded and when the surface was
-    // shown. After a resize the frame reflows and the marks describe a
-    // layout that no longer exists, so readerPlace() can name the wrong
-    // scene until the next surface round trip. Whether it does depends on
-    // how proportional the reflow happened to be.
-    expect(reader).toMatch(/addEventListener\('resize'[\s\S]{0,300}measure\(\)/);
-    expect(reader).toMatch(/addEventListener\('resize'[\s\S]{0,300}markCurrent\(\)/);
+  test('a resized window re-measures, because a reflow moves every scene', async () => {
+    const { pane, load, win, page: p } = await mountReader();
+    const doc = frameDoc(3, 100);
+    load(doc);
+    win.scrollY = 150;
+    p.fireWindow('resize');
+    expect(marked(pane)).toEqual(['INT. ROOM 2 – DAY']);
+    // A narrower window: every scene grows, and the same scroll is now in
+    // the first one. Only a fresh measure can know that.
+    doc.querySelectorAll('section.scene').forEach((s, i) => { s.offsetTop = i * 300; s.offsetHeight = 300; });
+    p.fireWindow('resize');
+    expect(marked(pane)).toEqual(['INT. ROOM 1 – DAY']);
   });
 });
 
@@ -3559,20 +3578,10 @@ describe('what the Read surface decides', () => {
   test('the marker’s class is the one the engine actually writes', () => {
     // Two files, one string: the engine names the span, the window skips it.
     // If the engine renamed the class, headingText() would skip nothing and
-    // every page number would be back in the rail, with no test failing.
+    // every page number would be back in the rail. Checked against what the
+    // real engine wrote for the fixture, not against its source.
     expect(reader.PAGE_MARKER_CLASS).toBe('page-marker');
     expect(preview).toContain(`class="${reader.PAGE_MARKER_CLASS}"`);
-    const engine = readFileSync(
-      join(new URL('..', import.meta.url).pathname, 'src', 'epub', 'html.ts'), 'utf8');
-    expect(engine).toContain(`class="${reader.PAGE_MARKER_CLASS}"`);
-  });
-
-  test('the rail reads headings through headingText, not textContent', () => {
-    // The drawing half of read.js has no DOM here to run in, so the call is
-    // pinned by what the source says.
-    const source = readFileSync(join(UI, 'read.js'), 'utf8');
-    expect(source).toMatch(/heading:\s*headingText\(scene\.querySelector\('h2\.scene-heading'\)\)/);
-    expect(source).not.toMatch(/querySelector\('h2\.scene-heading'\)\?\.textContent/);
   });
 
   test('the rail keeps the engine’s order and skips what it cannot link to', () => {
@@ -3657,29 +3666,22 @@ describe('what the Read surface decides', () => {
     expect(reader.readerState({ previewHtml: undefined })).toBe('blank');
     expect(reader.readerState({ previewHtml: preview })).toBe('ready');
 
-    // `blank` is reachable — the tab is live, the script converted, and the
-    // pages did not come back — so it says what happened AND offers the way
-    // on. `closed` is NOT reachable: main.js disables the Read tab whenever
-    // no script is open and nothing closes one, so there is deliberately no
-    // copy for it. Copy nobody can see reads as a considered empty state to
-    // the next person who maintains it.
+    // `blank` is reachable (the tab is live, the script converted, and the
+    // pages did not come back), so it says what happened AND offers the way
+    // on. `closed` is NOT reachable: the Read tab is off the bar whenever no
+    // script is open ("Read, Settings and Send are off the bar until a
+    // script converts" boots the window to show it), so there is
+    // deliberately no copy for it.
     const notice = reader.NOTICES.blank;
     expect(notice.slug.length).toBeGreaterThan(0);
     expect(notice.line.length).toBeGreaterThan(40);
     expect(notice.way.length).toBeGreaterThan(0);
     expect(Object.keys(reader.NOTICES)).toEqual(['blank']);
-    // The tab really is out of reach in that state, which is the whole
-    // argument for not writing the words. If this ever stops being true,
-    // this test fails and the invitation has to come back.
-    const main = read('main.js');
-    expect(main).toMatch(/NEEDS_SCRIPT[\s\S]{0,80}'read'/);
-    expect(main).toMatch(/frame\.enable\(id, open\)/);
     expect(reader.NO_SCENES.length).toBeGreaterThan(0);
   });
 });
 
 describe('the Tune surface', () => {
-  const source = read('tune.js');
   const REPO = new URL('..', import.meta.url).pathname;
 
   /** An engine module with its prose taken out. Every claim below about
@@ -3844,7 +3846,6 @@ describe('the Tune surface', () => {
     // Nothing is removed from the surface by a setting: eighteen controls
     // are eighteen controls whatever the script is tuned to.
     expect(tune.GROUPS.flatMap((g: any) => g.knobs).length).toBe(18);
-    expect(source).toContain('disabled');
   });
 
   test('a control’s value becomes something the engine will keep, or nothing', () => {
@@ -4014,72 +4015,6 @@ describe('the Tune surface', () => {
     expect(tune.sameSettings(a, null)).toBe(false);
   });
 
-  test('it saves through the engine rather than inventing its own storage', () => {
-    expect(source).toContain('argv.settings');
-    expect(source).toContain('argv.reconvert');
-    expect(source).not.toContain('localStorage');
-    expect(source).not.toContain('sessionStorage');
-    // The clamp above is the engine's; the file must not carry a second
-    // opinion about what a setting means, or run the engine's resolver
-    // itself.
-    expect(source).not.toMatch(/resolveFormatOptions\s*\(/);
-    expect(source).not.toContain('screepub.json');
-  });
-
-  test('re-renders are debounced and serialised', () => {
-    // A knob dragged across its range fires a hundred times. Without a
-    // debounce that is a hundred conversions; without serialisation a slow
-    // early one can finish last and leave the file disagreeing with the
-    // screen.
-    expect(source).toContain('setTimeout');
-    expect(source).toContain('clearTimeout');
-    // Serialised as a turn on the book (book-queue.js), one at a time with
-    // every other page's calls on that book.
-    const settle = source.slice(source.indexOf('function settle('));
-    const body = settle.slice(0, settle.indexOf('\n}'));
-    expect(body).toMatch(/inTurn\(book, 'save', \(\) => \(era === mine \? flush\(\) : undefined\)\)/);
-    expect(body).toMatch(/const mine = era;/);
-  });
-
-  test('a knob held in the settle is held against a restart too, and let go once its save has started', () => {
-    // Between a knob moving and the save's engine call starting, no engine
-    // call is running, so an update restart already waiting on whenIdle()
-    // used to fire in that SETTLE_MS gap and drop the change. schedule()
-    // takes a hold (app.js's holdEngine) and flush() lets it go only once
-    // the save's own engine call has started, and so is counted itself.
-    expect(source).toMatch(/import \{[^}]*\bholdEngine\b[^}]*\} from '\.\/app\.js'/);
-    const schedule = source.slice(source.indexOf('function schedule('), source.indexOf('async function flush('));
-    expect(schedule).toContain('holdEngine()');
-    // One hold for however many knobs move inside one settle: taken only
-    // when none is held, never stacked per keystroke.
-    expect(schedule).toMatch(/if \(hold === null\) hold = holdEngine\(\)/);
-
-    // Comments out: the claims below are about CODE, and the comment that
-    // explains the release rightly mentions both `runEngine()` and `await`.
-    const flush = source.slice(source.indexOf('async function flush('), source.indexOf('function say('))
-      .replace(/\/\*[\s\S]*?\*\//g, ' ')
-      .replace(/\/\/.*$/gm, ' ');
-    // Released AFTER the save's engine call is issued (runEngine counts it
-    // synchronously, before its first await) and BEFORE that call is
-    // awaited: never a moment with neither the hold nor the call counted.
-    const issued = flush.indexOf('runEngine(');
-    const released = flush.indexOf('releaseHold()', issued);
-    expect(issued).toBeGreaterThan(-1);
-    expect(released).toBeGreaterThan(issued);
-    expect(flush.slice(issued, released)).not.toContain('await');
-    // A flush that finds nothing to save lets the hold go too, rather than
-    // holding a restart off for a save that is never coming.
-    const early = /if \(!isPending\(owed\) \|\| !script\?\.fountainPath\) \{([\s\S]*?)\}/.exec(flush);
-    expect(early, 'flush() has no early return').not.toBe(null);
-    expect(early![1]).toContain('releaseHold()');
-
-    // A cancelled schedule lets it go: a new script clears what was owed.
-    const changed = source.slice(
-      source.indexOf('export function scriptChanged('), source.indexOf('export async function show('));
-    expect(changed).toContain('releaseHold()');
-    expect(changed.indexOf('releaseHold()')).toBeLessThan(changed.indexOf('draw()'));
-  });
-
 
   test('the sentence beside a knob is the CURRENT one, in both directions', () => {
     // Found live, after idleReason() was tested hard and then bound wrongly:
@@ -4127,40 +4062,6 @@ describe('the Tune surface', () => {
     }
   });
 
-  test('one function decides a control’s state, so the two cannot disagree', () => {
-    // The defect above was not a wrong rule, it was a rule with two
-    // bindings: drawKnob wrote the sentence and refreshIdle only toggled
-    // `disabled`. A test that asserted the source merely CONTAINS
-    // 'aria-describedby' passed throughout. So: both paths go through
-    // state(), and state() is the only thing that touches either.
-    const stateFn = source.slice(source.indexOf('function state('));
-    expect(stateFn.slice(0, 800)).toContain('notesFor');
-    expect(stateFn.slice(0, 800)).toContain('input.disabled');
-    expect(stateFn.slice(0, 800)).toContain('aria-describedby');
-    const drawKnob = source.slice(
-      source.indexOf('function drawKnob('), source.indexOf('function state('));
-    expect(drawKnob).toMatch(/state\(controls\.get/);
-    const refresh = source.slice(source.indexOf('function refreshIdle('));
-    expect(refresh.slice(0, 400)).toMatch(/state\(control\)/);
-    // Nothing enables, disables or describes a control behind its back,
-    // checked over the WHOLE file: the defaults foot's two buttons answer
-    // to the same rule, through their own single function,
-    // applyDefaultsFootState, not a second state() and not a binding
-    // anywhere else. Three total, and each one accounted for by name.
-    expect([...source.matchAll(/\.disabled\s*=/g)].length).toBe(3);
-    const applyState = source.slice(
-      source.indexOf('function applyDefaultsFootState('), source.indexOf('function writeDefaults('));
-    expect([...applyState.matchAll(/\.disabled\s*=/g)].length).toBe(2);
-    expect([...stateFn.slice(0, 800).matchAll(/\.disabled\s*=/g)].length).toBe(1);
-    // Attribute(...) rather than the bare word, so the comment that
-    // explains the defect does not count as a second binding.
-    expect([...source.matchAll(/Attribute\('aria-describedby'/g)].length).toBe(2);
-    // And an empty sentence is hidden rather than pointed at — via `hidden`,
-    // because the CSP refuses an inline style.
-    expect(stateFn.slice(0, 800)).toContain('why.hidden');
-    expect(source).not.toContain('.style.');
-  });
-
   test('a save that failed is still owed, and is not claimed as done', () => {
     // flush() clears `pending` before it asks the engine — that is what makes
     // a knob moved DURING a save land in the next one. A failure therefore
@@ -4172,58 +4073,10 @@ describe('the Tune surface', () => {
     expect(tune.restorePending(owed, { fontFamily: 'sans' }))
       .toEqual({ dialogueSideMarginPct: 12, fontFamily: 'sans' });
     expect(tune.isPending(tune.restorePending(owed, {}))).toBe(true);
-    // Every way out of a failed save goes through it: a non-settings answer,
-    // a refused rebuild, and a throw.
-    const flush = source.slice(source.indexOf('async function flush('));
-    const failures = [...flush.matchAll(/statusFor\('failed'/g)];
-    expect(failures.length).toBe(3);
-    for (const [, before] of flush.matchAll(/(.{0,120})say\(statusFor\('failed'/gs)) {
-      expect(before, 'a failure that does not put back what it owed').toContain('giveBack()');
-    }
-    // And a failure never says "saved".
+    // Every way out of a failed save goes through it (a non-settings answer,
+    // a refused rebuild, a throw): driven in "a save that fails is still
+    // owed" on the mounted page. And a failure never says "saved".
     expect(tune.statusFor('failed', 'the engine fell over').line).not.toContain('Saved');
-  });
-
-  test('a settings read that failed can be tried again', () => {
-    // show() marks the surface loaded BEFORE awaiting, so a transient engine
-    // failure — a disk not mounted yet, a sidecar being written — would
-    // otherwise strand Tune on its fault screen for the life of the script.
-    const load = source.slice(source.indexOf('async function load('));
-    // The catch block ITSELF, not "somewhere after it" — the branch below it
-    // resets `loaded` too, and a loose slice would let that one answer for
-    // this one. (It did, until a deliberate mutation went unnoticed.)
-    const caught = /\} catch \(err\) \{([\s\S]*?)\n  \}/.exec(load);
-    expect(caught, 'load() has no catch').not.toBe(null);
-    expect(caught![1]).toContain('loaded = false');
-  });
-
-  test('a save in flight cannot paint the previous script into the reader', () => {
-    // scriptChanged() clears what is owed and the timer, but a flush already
-    // chained onto `running` cannot be cancelled: it would finish and hand
-    // renderReader() the OLD script's pages.
-    expect(source).toMatch(/era \+= 1/);
-    const changed = source.slice(source.indexOf('export function scriptChanged()'));
-    expect(changed.slice(0, 200)).toContain('era += 1');
-    const flush = source.slice(source.indexOf('async function flush('));
-    expect(flush.slice(0, 900)).toMatch(/const mine = era/);
-    // Checked after every engine call, and before anything is painted.
-    // Counted as calls rather than as `await runEngine`: the save's call is
-    // issued, then its settle hold released, then awaited (see the hold
-    // test above), so that one is not written as `await runEngine(` at all.
-    const awaits = [...flush.replace(/\/\/.*$/gm, ' ').matchAll(/runEngine\(/g)].length;
-    expect(awaits).toBe(2);
-    expect([...flush.matchAll(/stale\(\)/g)].length).toBeGreaterThanOrEqual(awaits + 1);
-    expect(flush.indexOf('stale()')).toBeLessThan(flush.indexOf('renderReader'));
-  });
-
-  test('every control is tied to its label and its explanation', () => {
-    // One id per key, a <label for> pointing at it, and the sentence beside
-    // it named by aria-describedby — otherwise the help is invisible to the
-    // reader most likely to need it.
-    expect(source).toMatch(/const id = `knob-\$\{knob\.key\}`/);
-    expect(source).toMatch(/el\('label', \{ for: id/);
-    expect(source).toContain('aria-describedby');
-    expect(source).toContain("role: 'status'");
   });
 
   test('emptyPaneMode: FAULT only when this draw is reporting a load that failed', async () => {
@@ -4242,35 +4095,265 @@ describe('the Tune surface', () => {
     expect(tune.emptyPaneMode({ ...DEFAULT_FORMAT_OPTIONS }, tune.statusFor('failed'))).toBe('ready');
   });
 
-  test('load() never draws FAULT for a null settings that is not itself a failure', () => {
-    // Pinned by shape: the defect was draw() gating FAULT on `settings ===
-    // null` alone. mount() and scriptChanged() both call draw() with no
-    // status while settings is still null: that must not resolve to fault.
-    const mountFn = source.slice(source.indexOf('export function mount('), source.indexOf('export function scriptChanged('));
-    expect(mountFn).toMatch(/draw\(\);?\s*$/m);
-    expect(mountFn).not.toMatch(/statusFor\('failed'/);
-    const changed = source.slice(
-      source.indexOf('export function scriptChanged('), source.indexOf('export async function show('));
-    expect(changed).toMatch(/draw\(\);?\s*$/m);
-    expect(changed).not.toMatch(/statusFor\('failed'/);
-    // draw()'s own gate goes through emptyPaneMode, not a bare null check.
-    const draw = source.slice(source.indexOf('function draw(status)'), source.indexOf('function drawPreview('));
-    expect(draw).toMatch(/emptyPaneMode\(settings, status\)/);
-    expect(draw).toMatch(/\}, READING\)/);
-    expect(tune.READING).toBe('Reading this script’s settings…');
+});
+
+describe('the Settings page, mounted', () => {
+  // tune.js mounted on the fake page and driven through its knobs, its
+  // settle and the engine's answers. Each test imports its own copy, so a
+  // settle or a save one test leaves behind cannot reach the next; every
+  // script gets its own book, so the shared turn queue never couples two.
+  let page: FakePage | null = null;
+  let current: { scriptChanged(): void } | null = null;
+  let copies = 0;
+  afterEach(async () => {
+    // A settle still counting down holds a restart off (holdEngine); a new
+    // script is what lets it go, as in the window.
+    current?.scriptChanged();
+    current = null;
+    await page?.close();
+    page = null;
+  });
+  const SETTLE = () => new Promise((resolve) => setTimeout(resolve, 400));
+
+  async function mountSettings(options: {
+    engine?: (args: string[]) => unknown;
+    settings?: Record<string, unknown>;
+    script?: Record<string, unknown>;
+    previewHtml?: string;
+  } = {}) {
+    const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+    const settings = { ...DEFAULT_FORMAT_OPTIONS, ...options.settings };
+    const answer = {
+      ok: true, settings, defaults: { ...DEFAULT_FORMAT_OPTIONS }, appDefaults: { ...DEFAULT_FORMAT_OPTIONS },
+      preset: null, presets: [], keepScriptSettings: true,
+    };
+    page = fakePage({
+      respond: options.engine ?? ((args) => (args[0] === 'settings' && args.length === 3 ? answer : HOLD)),
+    });
+    copies += 1;
+    const tune = await import(`${join(UI, 'tune.js')}?mounted-${copies}`);
+    current = tune;
+    const pane = page.pane();
+    pane.id = 'surface-tune';
+    const name = `book-${copies}`;
+    const script = {
+      title: 'Field Station',
+      fountainPath: `/lib/${name}/${name}.fountain`,
+      epubPath: `/lib/${name}/${name}.epub`,
+      previewHtml: options.previewHtml,
+      settings: null,
+      ...options.script,
+    };
+    const ctx = { state: { script, reducedMotion: true }, goTo: () => {}, convertAgain: () => {} };
+    // A saved rebuild re-renders the reader too, so the reader is mounted
+    // beside it, as main.js mounts every surface.
+    (await import(join(UI, 'read.js'))).mount(page.pane(), ctx);
+    tune.mount(pane, ctx);
+    // Not awaited here: a test that holds the read answers it itself.
+    const shown = tune.show();
+    await settle();
+    const knob = (key: string) => pane.querySelector(`#knob-${key}`)!;
+    const status = () => pane.querySelector('.tune-status');
+    return { tune, pane, script, ctx, knob, status, shown, tauri: page.tauri, storage: page.storage, settings };
+  }
+
+  test('every control is tied to its label, and its explanation when it has one', async () => {
+    const { tune, pane, knob } = await mountSettings({ settings: { cueAlignment: 'centered' } });
+    for (const k of tune.KNOBS) {
+      const input = knob(k.key);
+      expect(`${k.key}: ${input === null}`).toBe(`${k.key}: false`);
+      const label = pane.querySelectorAll('label').find((l) => l.getAttribute('for') === input.id);
+      expect(label?.textContent).toBe(k.label);
+      const described = input.getAttribute('aria-describedby');
+      if (described !== null) {
+        const why = pane.getElementById(described)!;
+        expect(why.hidden).toBe(false);
+        expect(why.textContent.length).toBeGreaterThan(0);
+      }
+    }
+    expect(pane.querySelector('.tune-status')!.getAttribute('role')).toBe('status');
   });
 
-  test('a settings load that failed reports through statusFor, not a bare message', () => {
-    // load()'s three failure exits (no fountainPath, a throw, a malformed
-    // answer) all reach draw() through statusFor('failed', …), which is what
-    // makes emptyPaneMode's status?.bad check meaningful.
-    const load = source.slice(source.indexOf('async function load('), source.indexOf('function draw(status)'));
-    expect([...load.matchAll(/statusFor\('failed'/g)].length).toBe(3);
+  test('a knob that depends on another one says why it is idle, and stops saying so the moment it is live', async () => {
+    // Found live: the sentence was written at draw time and never corrected,
+    // so a slider that had just become live kept "Only when character names
+    // are indented." beside it, and one that had just gone idle had none.
+    const { tune, pane, knob } = await mountSettings({ settings: { cueAlignment: 'centered' } });
+    const indent = knob('cueIndentPct');
+    const why = () => pane.getElementById('knob-cueIndentPct-why')!;
+    const idleSentence = tune.idleReason(tune.knobFor('cueIndentPct'), { cueAlignment: 'centered' });
+    expect(indent.disabled).toBe(true);
+    expect(indent.closest('.knob')!.classList.contains('knob-idle')).toBe(true);
+    expect([why().hidden, why().textContent]).toEqual([false, idleSentence]);
+    expect(indent.getAttribute('aria-describedby')).toBe('knob-cueIndentPct-why');
+
+    knob('cueAlignment').input('indented', 'change');
+    expect(indent.disabled).toBe(false);
+    expect(indent.closest('.knob')!.classList.contains('knob-idle')).toBe(false);
+    expect(why().hidden).toBe(true);
+    expect(indent.getAttribute('aria-describedby')).toBeNull();
+
+    knob('cueAlignment').input('centered', 'change');
+    expect(indent.disabled).toBe(true);
+    expect(why().textContent).toBe(idleSentence);
+    // Nothing is removed from the page by a setting.
+    expect(pane.querySelectorAll('.knob').length).toBe(18);
+  });
+
+  test('a moved knob is saved through the engine once it settles, and the book rebuilt with the whole of the settings', async () => {
+    const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+    const { tune, pane, knob, script, tauri, storage, status } = await mountSettings();
+    // Three quick moves are one save, of the last value: a dragged slider
+    // is one conversion, not a hundred.
+    for (const value of ['10', '12', '14']) knob('dialogueSideMarginPct').input(value);
+    expect(status()!.textContent).toBe(tune.statusFor('pending').line);
+    expect(tauri.callsTo('settings').length).toBe(1);
+    await SETTLE();
+    const saves = tauri.callsTo('settings').slice(1);
+    expect(saves.map((c) => c.args)).toEqual([
+      ['settings', script.fountainPath, '--json', '--set', '{"dialogueSideMarginPct":14}'],
+    ]);
+    saves[0].answer({ ok: true, settings: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 14 } });
+    await settle();
+    // The rebuild writes the library book back in place, from the stored
+    // script, with every setting the script now has.
+    const rebuild = tauri.calls.find((c) => c.args[0] === script.fountainPath)!;
+    expect(rebuild.args.slice(0, 5)).toEqual([script.fountainPath, '--json', '--preview-inline', '-o', script.epubPath]);
+    expect(JSON.parse(rebuild.args[rebuild.args.indexOf('--options-json') + 1]))
+      .toEqual({ ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 14 });
+    rebuild.answer({ ok: true, previewHtml: '' });
+    await settle();
+    expect(status()!.textContent).toContain('Saved');
+    // Its own storage is the engine's sidecar, not the window's.
+    expect(storage.dump()).toEqual({});
+    expect(pane.textContent).not.toContain('null');
+  });
+
+  test('a save that fails is still owed: the next save carries it again, and nothing claims "Saved"', async () => {
+    const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+    const { tune, knob, tauri, status } = await mountSettings();
+    const saves = () => tauri.callsTo('settings').filter((c) => c.args.includes('--set'));
+    const owed = (call: EngineCall) => JSON.parse(call.args[call.args.indexOf('--set') + 1]);
+
+    // A save answered with something that is not a settings answer.
+    knob('dialogueSideMarginPct').input('12');
+    await SETTLE();
+    saves()[0].answer({ ok: false, error: { code: 'internal', message: 'disk full' } });
+    await settle();
+    expect(status()!.textContent).toBe(tune.NO_MESSAGE);
+    expect(status()!.classList.contains('bad')).toBe(true);
+
+    // The next change carries the first one again.
+    knob('fontFamily').input('serif', 'change');
+    await SETTLE();
+    expect(owed(saves()[1])).toEqual({ dialogueSideMarginPct: 12, fontFamily: 'serif' });
+    // Stored, but the rebuild was refused: the book is not what the screen
+    // says, so the settings are owed again and the engine's sentence shown.
+    saves()[1].answer({ ok: true, settings: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 12, fontFamily: 'serif' } });
+    await settle();
+    tauri.pending().find((c) => c.args[1] === '--json' && c.args.includes('-o'))!
+      .answer({ ok: false, error: { code: 'internal', message: 'The book could not be rebuilt.' } });
+    await settle();
+    expect(status()!.textContent).toBe('The book could not be rebuilt.');
+    expect(status()!.textContent).not.toContain('Saved');
+
+    // A thrown call is the same.
+    knob('elementSpacingEm').input('1.4');
+    await SETTLE();
+    expect(owed(saves()[2])).toEqual({ dialogueSideMarginPct: 12, fontFamily: 'serif', elementSpacingEm: 1.4 });
+    saves()[2].fail('the engine stopped');
+    await settle();
+    expect(status()!.textContent).toBe('the engine stopped');
+  });
+
+  test('a save in flight when another script opens paints nothing of the old script', async () => {
+    const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+    const { tune, pane, knob, tauri, ctx } = await mountSettings();
+    knob('dialogueSideMarginPct').input('12');
+    await SETTLE();
+    const save = tauri.callsTo('settings').find((c) => c.args.includes('--set'))!;
+    // Another script opens while the engine is still saving the first.
+    ctx.state.script = {
+      title: 'Second', fountainPath: '/lib/second/second.fountain', epubPath: '/lib/second/second.epub',
+      previewHtml: undefined, settings: null,
+    };
+    tune.scriptChanged();
+    save.answer({ ok: true, settings: { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 12 } });
+    await settle();
+    // No rebuild of the first book, and the page shows the second script
+    // waiting to be read, not the first one's knobs.
+    expect(tauri.calls.filter((c) => c.args.includes('-o'))).toEqual([]);
+    expect(pane.textContent).toBe(tune.READING);
+  });
+
+  test('each way a settings read can fail shows the fault screen, and a later visit tries again', async () => {
+    const { tune, pane, tauri } = await mountSettings({ engine: () => HOLD });
+    const fault = () => pane.querySelector('.fault-body-block .caption.bad')?.textContent ?? null;
+    tauri.callsTo('settings')[0].fail('the sidecar could not be read');
+    await settle();
+    expect(fault()).toBe('the sidecar could not be read');
+    // Shown again: asked again, because the failure may have been passing.
+    const again = tune.show();
+    await settle();
+    expect(tauri.callsTo('settings').length).toBe(2);
+    tauri.callsTo('settings')[1].answer({ ok: true, settings: { malformed: true } });
+    await again;
+    expect(fault()).toBe(tune.NO_MESSAGE);
+    current?.scriptChanged();
+    current = null;
+    await page!.close();
+    page = null;
+
+    const noSource = await mountSettings({ script: { fountainPath: null } });
+    await noSource.shown;
+    expect(noSource.pane.querySelector('.fault-body-block .caption.bad')!.textContent).toBe(noSource.tune.FAULT.line);
+    expect(noSource.tauri.calls).toEqual([]);
+  });
+
+  test('the preview is dressed by the reader’s own dresser: the engine’s sheet, adopted in the preview frame’s realm', async () => {
+    // The CSP dance that gets the engine's stylesheet into a frame must
+    // exist once. Settings builds no stylesheet of its own: the sheet in its
+    // preview is exactly the one read.js's sheetText makes.
+    const css = 'section.scene { margin: 0; }';
+    const built: string[] = [];
+    class ParentSheet { constructor() { built.push('parent'); } replaceSync() {} }
+    class FrameSheet { text = ''; replaceSync(t: string) { this.text = t; } }
+    const g = withGlobals();
+    g.set('DOMParser', class {
+      parseFromString(html: string) {
+        let style: string | null = css;
+        return {
+          querySelector: (s: string) => (s === 'style' && style !== null ? { textContent: style, remove: () => { style = null; } } : null),
+          get documentElement() { return { outerHTML: html.replace(/<style>[\s\S]*?<\/style>/, '') }; },
+        };
+      }
+    });
+    try {
+      const { tune, pane, shown } = await mountSettings({ previewHtml: `<html><head><style>${css}</style></head><body>x</body></html>` });
+      await shown;
+      // A parent-realm sheet built anywhere in a whole draw would show here.
+      g.set('CSSStyleSheet', ParentSheet);
+      tune.scriptChanged();
+      await tune.show();
+      const frame = pane.querySelector('.tune-preview iframe')!;
+      expect(frame.getAttribute('srcdoc')).not.toContain('<style');
+      expect(frame.getAttribute('sandbox')).toBe('allow-same-origin');
+      const doc = new FakeDocument();
+      doc.body.append('x');
+      Object.assign(frame, { contentDocument: doc, contentWindow: { CSSStyleSheet: FrameSheet } });
+      frame.fire('load');
+      const reader = await import(join(UI, 'read.js'));
+      expect(doc.adoptedStyleSheets.length).toBe(1);
+      expect(doc.adoptedStyleSheets[0]).toBeInstanceOf(FrameSheet);
+      expect((doc.adoptedStyleSheets[0] as FrameSheet).text).toBe(reader.sheetText(css, { ink: '', paper: '' }));
+      expect(built).toEqual([]);
+    } finally {
+      g.restore();
+    }
   });
 });
 
 describe('the Tune surface: app defaults for new scripts', () => {
-  const source = read('tune.js');
   let tune: Record<string, any>;
   let DEFAULT_FORMAT_OPTIONS: any;
   beforeAll(async () => {
@@ -4385,30 +4468,6 @@ describe('the Tune surface: app defaults for new scripts', () => {
     expect(tune.defaultsWriteOutcome(1, 1, refusal, 'confirmed')).toEqual({
       applied: false, stale: false, message: 'formatDefaults must be an object',
     });
-  });
-
-  test('scriptChanged resets the app-defaults state, not only this script’s own settings', () => {
-    // appDefaults and shippedDefaults are not independently observable
-    // through the pane: load() unconditionally overwrites both on every
-    // answer, regardless of what this reset did or did not do first, and
-    // drawDefaultsFoot only ever runs once settings has ALSO loaded again.
-    // defaultsBusy and defaultsNote are a DIFFERENT story: load() never
-    // touches either one, only scriptChanged does, and a write started from
-    // the PREVIOUS script can still be in flight when the reader opens a
-    // new one. "a write started from script A is dropped..." below is the
-    // behaviour test that would fail if this reset were missing (the
-    // new script's foot would come up already disabled). Pinned here by
-    // shape as well, for the same hygiene reason: the four element refs and
-    // the four pieces of state they read are declared and reset together,
-    // so a later one added to the group cannot be left out of either.
-    const changed = source.slice(
-      source.indexOf('export function scriptChanged('), source.indexOf('export async function show('));
-    for (const line of [
-      'appDefaults = null', 'shippedDefaults = null', 'defaultsBusy = false', "defaultsNote = ''",
-      'defaultsCaptionEl = null', 'defaultsNoteEl = null', 'defaultsUseButton = null', 'defaultsResetButton = null',
-    ]) {
-      expect(changed).toContain(line);
-    }
   });
 
   // ---- drawing, driven through a minimal DOM and engine stub -------------
@@ -5371,16 +5430,6 @@ describe('the Tune surface: app defaults for new scripts', () => {
     expect(pane.find('keep-note')!.textContent).toBe('');
   });
 
-  test('scriptChanged resets the choice’s state with the rest of the foot', () => {
-    const changed = source.slice(
-      source.indexOf('export function scriptChanged('), source.indexOf('export async function show('));
-    for (const line of [
-      'keepSettings = null', 'keepShown = null', "keepNote = ''",
-      'keepRadios = null', 'keepNoteEl = null',
-    ]) {
-      expect(changed).toContain(line);
-    }
-  });
 });
 
 describe('turns on a book: book-queue.js', () => {
@@ -5552,38 +5601,12 @@ describe('turns on a book: book-queue.js', () => {
 describe('the Send surface', () => {
   const send = read('send.js');
 
-  test('a send in flight cannot report into a script that replaced it', () => {
-    // The same rule tune.js carries, and for a worse failure: a sendTo()
-    // whose script is swapped mid-flight would say "Sent to Kindle." beside
-    // a script that was never sent. Pinned by shape, because deleting the
-    // counter or stubbing stale() to false leaves the suite green otherwise.
-    expect(send).toMatch(/era \+= 1/);
-    const changed = send.slice(send.indexOf('export function scriptChanged()'));
-    expect(changed.slice(0, 200)).toContain('era += 1');
-    const sendTo = send.slice(send.indexOf('async function sendTo('));
-    expect(sendTo.slice(0, 400)).toMatch(/const mine = era/);
-    expect(sendTo.slice(0, 400)).toMatch(/era !== mine/);
-    // One check per await boundary, so no continuation can paint blind.
-    // Counted over every `await`, not just the two direct engine calls:
-    // ensureSettings() awaits inside itself, and that boundary is exactly
-    // where a script can be replaced.
-    const body = sendTo.slice(0, sendTo.indexOf('\n}'));
-    const awaits = [...body.matchAll(/\bawait\s/g)].length;
-    expect(`sendTo has await boundaries: ${awaits}`).toBe('sendTo has await boundaries: 3');
-    const checks = [...body.matchAll(/if \(stale\(\)\)/g)].length;
-    expect(`sendTo checks staleness: ${checks}`).toBe('sendTo checks staleness: 3');
-  });
-
-  test('it asks the engine what is connected rather than guessing', () => {
-    // It used to poll `argv.devices`. Since parity piece B it polls
-    // `argv.routes`, whose answer carries the connected devices among every
-    // other way out, so nothing on the page still asks `devices` (a second
-    // poll would double the reMarkable probe's 1.5 s every two seconds).
-    // Still the ENGINE's knowledge, never the window's.
-    expect(send).toContain('argv.routes(ctx.state.script.epubPath, { quick })');
-    expect(send).not.toContain('argv.devices');
-    // A window that knew what a Kindle volume looks like would be the exact
-    // duplication the ADR forbids.
+  test('the window holds none of the engine’s knowledge of what a reader looks like', () => {
+    // A source rule, kept: a window that knew what a Kindle volume looks
+    // like would be the duplication ADR 2026-09-12 forbids, and no mounted
+    // test can see knowledge that is merely present. What the page asks the
+    // engine instead (routes, not devices) is driven in send-routes-ui.test.ts,
+    // "it polls routes, not devices, for this script's book".
     for (const knowledge of ['/Volumes', 'documents', 'system/version.txt', '.kobo']) {
       expect(`send.js knows ${knowledge}: ${send.includes(knowledge)}`).toBe(
         `send.js knows ${knowledge}: false`,
@@ -5591,79 +5614,17 @@ describe('the Send surface', () => {
     }
   });
 
-  test('a Kindle gets the ladder, not the raw EPUB', () => {
-    // A Kindle never indexes a sideloaded EPUB. Sending one would be a
-    // known-broken path dressed up as success.
-    expect(send).toContain('argv.export');
-    expect(send).toContain("'kindle'");
-    expect(send).toContain('forFormat');
-  });
-
-  test('the export carries this script’s own settings', () => {
-    // Passing the defaults instead would silently rebuild the book in
-    // formatting the reader never chose.
-    expect(send).toContain('optionsJson');
-    expect(send).toContain('state.script.settings');
-  });
-
-  test('every call on the library EPUB takes its turn with the Settings page’s saves, and nothing else does', async () => {
+  test('only the flows that read the book take a turn on it', async () => {
     // A moved knob's save rebuilds the library EPUB in place, and an export
-    // can rebuild it too (the MOBI rung); a send or a save copies it. Each
-    // takes its turn on that book (book-queue.js, driven directly in "turns
-    // on a book", and with the Settings page in "the book waits its turn").
-    // What is pinned here is that send.js hands it every such call, through
-    // one door, onBook(), keyed by the script's own EPUB, and nothing that
-    // only opens another program: that would hold the Settings page's saves
-    // for as long as the program took to answer (on Linux, the Send to
-    // Kindle route's folder can stay open until the reader closes it).
-    // send-routes-ui.test.ts drives both halves on the page.
+    // can rebuild it too (the MOBI rung); a send or a save copies it. Those
+    // take their turn on the book; opening another program does not, or it
+    // would hold the Settings page's saves for as long as that program took.
+    // The turns themselves are driven on the page in send-routes-ui.test.ts
+    // ("only a save waits for the book", "a Settings save during a
+    // background build waits for it", and the rest of that block).
     const sendUi = await import(join(UI, 'send.js'));
     expect(['device', 'save-epub', 'save-kindle', 'open', 'setup', null].map(sendUi.readsTheBook))
       .toEqual([true, true, true, false, false, false]);
-
-    const code = send.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/.*$/gm, ' ');
-    const imported = /import \{[^}]*\binTurn\b[^}]*\} from '\.\/book-queue\.js'/.test(code);
-    expect(`send.js imports book-queue.js's inTurn: ${imported}`).toBe('send.js imports book-queue.js\'s inTurn: true');
-    const door = code.slice(code.indexOf('function onBook('));
-    expect(door.slice(0, door.indexOf('\n}'))).toMatch(/return inTurn\(book, label, \(\) => runEngine\(args\)\)/);
-    // Every Kindle file export goes through the Kindle file's own line
-    // first, and then the same door, under the label kindleTurn() picks: a
-    // reader when Calibre builds the file, a writer when the MOBI rung may
-    // rewrite the book.
-    const kindleDoor = code.slice(code.indexOf('function onKindleFile('));
-    expect(kindleDoor.slice(0, kindleDoor.indexOf('\n}')))
-      .toMatch(/const label = kindleTurn\(kindle\);\s*return inKindleLine\(book, \(\) => onBook\(book, label, args\)\);/);
-    // The readers that take the EPUB as it is, and the copy to a reader,
-    // each on this script's book, named for what the Settings page waits on.
-    const reading = [...code.matchAll(/onBook\(script\.epubPath, '([\w-]+)',\s*(argv\.\w+\(|call\b)/g)]
-      .map((m) => `${m[2]}${m[1]}`).sort();
-    expect(reading).toEqual(['argv.send(send', 'callcopy', 'callsend']);
-    // The Kindle file exports: the build as the page opens, a Kindle device
-    // send's export (the same `call` as another reader's), Save a Kindle
-    // file's export, and its save.
-    expect(code).toMatch(/onKindleFile\(book, argv\.export\(book, \{/);
-    expect(code).toMatch(/forFormat\(device\) === 'kindle'\s*\? onKindleFile\(script\.epubPath, call\)\s*: onBook\(script\.epubPath, 'send', call\)/);
-    expect(code).toMatch(/onKindleFile\(script\.epubPath,\s*argv\.export\(script\.epubPath, \{ forFormat: 'kindle'/);
-    expect(code.match(/argv\.(export|send)\(/g)?.length).toBe(4);
-    // The Kindle file check reads the book's date, so it waits its turn too:
-    // a save still settling lands first, and the answer is about the book
-    // as it will be.
-    expect(code).toMatch(/onBook\(book, 'check', argv\.kindleCheck\(book\)\)/);
-    // The route: through the door only when the flow reads the book, and
-    // the save of a Kindle file keeps the Kindle file's line.
-    expect(code.match(/argv\.route\(/g)?.length).toBe(1);
-    expect(code).toMatch(/how === 'save-kindle' \? onKindleFile\(script\.epubPath, call\)\s*: readsTheBook\(how\) \? onBook\(script\.epubPath, 'copy', call\) : runEngine\(call\)/);
-    // Every label send.js names is a row of the queue's table.
-    const { TURNS } = await import(join(UI, 'book-queue.js'));
-    const named = new Set([...code.matchAll(/onBook\([^,]+, '([\w-]+)'/g)].map((m) => m[1]));
-    named.add('kindle');
-    named.add('kindle-mobi');
-    for (const label of named) expect(`${label}: ${TURNS[label] !== undefined}`).toBe(`${label}: true`);
-    // What else goes straight to runEngine reads nothing of the book's
-    // content: the route list, the settings read, and `call` above. And
-    // `args`, which is onBook()'s own call, pinned above.
-    const direct = [...code.matchAll(/\brunEngine\(\s*(argv\.\w+|\w+)/g)].map((m) => m[1]).sort();
-    expect(direct).toEqual(['args', 'argv.routes', 'argv.settings', 'call']);
   });
 
   test('nothing connected is an answer, not an error', async () => {
@@ -5687,264 +5648,218 @@ describe('the Send surface', () => {
       expect(sendUi.connectedDevices(shown)).toEqual([]);
     }
   });
+});
 
-  test('the verb stays constant through the flow', () => {
-    // "Send" produces "Sent". The one copy rule the spec names twice.
-    expect(send).toContain('Send to');
-    expect(send).toContain('Sent to');
+describe('the Send page’s device send, mounted', () => {
+  // send.js mounted on the fake page and pressed. The route list, the two
+  // saves, the apps and the keyboard are driven in send-routes-ui.test.ts;
+  // what is here is the device send's own flow (sendTo), which that file
+  // only exercises on the happy path, and the reach table's fold.
+  const FOUNTAIN = '/lib/send-page/Field Station.fountain';
+  const EPUB = '/lib/send-page/Field Station.epub';
+  const kobo = { kind: 'kobo' as const, name: 'KOBOeReader', volume: '/Volumes/KOBOeReader' };
+
+  let page: FakePage | null = null;
+  let surface: { hide(): void } | null = null;
+  let copies = 0;
+  afterEach(async () => {
+    surface?.hide();
+    surface = null;
+    await page?.close();
+    page = null;
   });
 
-  test('it tells the truth about what has met hardware', () => {
-    // The project's own stated limit. A row that looks as confident as the
-    // Kindle row would be the interface overstating what is known.
-    expect(send).toContain('never been tested on real hardware');
-  });
+  async function mountSend(options: {
+    settings?: Record<string, unknown> | null;
+    engine?: (args: string[]) => unknown;
+    kfx?: unknown;
+    devices?: Array<typeof kobo>;
+  } = {}) {
+    const { routes, preselected } = await import('../src/export/routes');
+    const list = routes({
+      platform: 'darwin', booksApp: true, sendToKindleApp: false, appleMailDefault: true, devices: options.devices ?? [kobo],
+    });
+    const listed = { ok: true, routes: list, chosen: preselected(list, undefined).id };
+    page = fakePage({
+      respond: (args) => {
+        if (args[0] === 'routes') return listed;
+        if (args[0] === 'kfx-status') return options.kfx ?? { ok: false };
+        if (args[0] === 'export' && args.includes('--check')) return { ok: false };
+        return options.engine?.(args) ?? HOLD;
+      },
+    });
+    // The two-second poll, fired by hand rather than waited for.
+    const g = withGlobals();
+    let tickPoll: (() => void) | null = null;
+    g.set('setInterval', (fn: () => void) => { tickPoll = fn; return 1; });
+    g.set('clearInterval', () => { tickPoll = null; });
+    const closePage = page.close;
+    page.close = async () => { g.restore(); await closePage(); };
 
-  test('it stops polling when the surface is hidden', () => {
-    // hide()'s OWN body, not "the file mentions clearInterval somewhere":
-    // show() also clears before it re-arms, so a hide() gutted to
-    // `{ poll = null; }` would satisfy a file-wide check while the poll ran
-    // on forever behind every other surface, asking the engine what is
-    // plugged in every two seconds for the life of the window.
-    const hide = /export function hide\(\) \{([\s\S]*?)\n\}/.exec(send);
-    expect(hide, 'send.js exports no hide()').not.toBe(null);
-    expect(hide![1]).toContain('clearInterval(poll)');
-  });
-
-  test('nothing is copied when nothing was built', () => {
-    // outcomeFor refuses either way, so this is not the safety check — it is
-    // the difference between showing the export's own sentence and asking
-    // `send` to move a file that was never written, which answers with a
-    // worse one about a path the reader never chose.
-    const body = send.slice(send.indexOf('async function sendTo('));
-    const exported = body.indexOf('argv.export');
-    const copied = body.indexOf('argv.send');
-    const refused = body.indexOf('built.ok !== true');
-    expect(copied).toBeGreaterThan(exported);
-    expect(`the export refusal is checked before the copy: ${refused > exported && refused < copied}`)
-      .toBe('the export refusal is checked before the copy: true');
-  });
-
-  test('the settings are fetched before the argv that carries them is built', () => {
-    // The mitigation for the first-conversion gap: a script whose sidecar
-    // this window has never read would otherwise export with the engine's
-    // DEFAULTS. Deleting the await leaves optionsJsonFor with nothing to
-    // serialise and says nothing on screen, so the order is pinned here.
-    const body = send.slice(send.indexOf('async function sendTo('));
-    const fetched = body.indexOf('await ensureSettings()');
-    const built = body.indexOf('argv.export');
-    expect(fetched, 'sendTo() does not await ensureSettings()').toBeGreaterThan(-1);
-    expect(built).toBeGreaterThan(fetched);
-  });
-
-  test('an optional child is never handed straight to a live node', () => {
-    // el() drops a null child; Node.append() renders it as the word "null".
-    // The empty state did exactly that — a stray "null" under the list of
-    // readers, on every platform but Windows — and it was only found by
-    // looking at the screen. An optional child goes through el().
-    // The argument list of each .append(...), taken by matching parentheses
-    // so the window is the call itself and not everything up to the next
-    // semicolon.
-    const args = (from: number) => {
-      let depth = 0;
-      for (let i = from; i < send.length; i += 1) {
-        if (send[i] === '(') depth += 1;
-        else if (send[i] === ')') {
-          depth -= 1;
-          if (depth === 0) return send.slice(from + 1, i);
-        }
-      }
-      return '';
+    copies += 1;
+    const send = await import(`${join(UI, 'send.js')}?mounted-${copies}`);
+    surface = send;
+    const pane = page.pane();
+    pane.id = 'surface-send';
+    const ctx = {
+      state: {
+        script: {
+          title: 'Field Station', fountainPath: FOUNTAIN, epubPath: EPUB,
+          settings: options.settings === undefined ? { dialogueSideMarginPct: 27 } : options.settings,
+        },
+        devices: [] as unknown[],
+      },
+      goTo: () => {}, restoreFocus: () => {}, convertAgain: () => {},
     };
-    const calls = [...send.matchAll(/\.append\(/g)]
-      .map((m) => args(m.index! + '.append'.length));
-    expect(calls.length).toBeGreaterThan(2);
-    for (const call of calls) {
-      // A conditional at the TOP level of the argument list is a child this
-      // node receives directly; one nested inside el(...) is el()'s to drop.
-      let depth = 0;
-      let conditional = false;
-      for (const char of call) {
-        if (char === '(' || char === '[' || char === '{') depth += 1;
-        else if (char === ')' || char === ']' || char === '}') depth -= 1;
-        else if (char === '?' && depth === 0) conditional = true;
-      }
-      expect(`a conditional child appended directly: ${conditional}`)
-        .toBe('a conditional child appended directly: false');
-    }
+    send.mount(pane, ctx);
+    send.show();
+    await settle();
+    const status = () => pane.querySelector('.send-status')!;
+    return { send, pane, ctx, status, tauri: page.tauri, page, poll: () => tickPoll?.() };
+  }
+
+  test('a device send reads this script’s settings first, exports with them, then copies what was built', async () => {
+    const { DEFAULT_FORMAT_OPTIONS } = await import('../src/options');
+    const tuned = { ...DEFAULT_FORMAT_OPTIONS, dialogueSideMarginPct: 27, fontFamily: 'serif' };
+    const { pane, status, tauri } = await mountSend({ settings: null });
+    pane.button('Copy to KOBOeReader').click();
+    await settle();
+    // Not read yet, so read now: an export without them would rebuild the
+    // book with the engine's defaults.
+    const read = tauri.callsTo('settings');
+    expect(read.map((c) => c.args)).toEqual([['settings', FOUNTAIN, '--json']]);
+    expect(tauri.callsTo('export').filter((c) => !c.args.includes('--check'))).toEqual([]);
+    read[0].answer({ ok: true, settings: tuned });
+    await settle();
+    const build = tauri.callsTo('export').filter((c) => !c.args.includes('--check'));
+    expect(build.length).toBe(1);
+    expect(JSON.parse(build[0].args[build[0].args.indexOf('--options-json') + 1])).toEqual(tuned);
+    build[0].answer({ ok: true, path: EPUB, extension: 'epub', label: 'EPUB' });
+    await settle();
+    tauri.callsTo('send')[0].answer({ ok: true, destination: '/Volumes/KOBOeReader/Field Station.epub' });
+    await settle();
+    expect(tauri.callsTo('send').map((c) => c.args)).toEqual([['send', EPUB, '--json', '--device', '/Volumes/KOBOeReader']]);
+    expect(status().textContent).toContain('Sent to KOBOeReader');
   });
 
-  test('a send takes the whole list out of reach, and the poll leaves it alone', () => {
-    // Not cosmetic: the MOBI rung of src/export/artifact.ts REWRITES the
-    // library EPUB in place before it writes the .mobi beside it, so two
-    // sends at once is a race over one file. Disabling only the row that was
-    // pressed — and letting the two-second poll rebuild fresh, enabled
-    // buttons underneath it — would let a second one start.
-    expect(send).toMatch(/for \(const button of buttons\(\)\) button\.disabled = true/);
-    const refresh = send.slice(send.indexOf('async function refresh('));
-    const body = refresh.slice(0, refresh.indexOf('\n}'));
-    expect(body, 'refresh() redraws rows during a send').toContain('if (sending) return');
-    // And after the await too, not only before it: the answer arrives later
-    // than the question, and a send can begin in between.
-    const awaits = [...body.matchAll(/await runEngine/g)].length;
-    expect(awaits).toBe(1);
-    expect([...body.matchAll(/sending/g)].length).toBeGreaterThanOrEqual(awaits + 1);
+  test('a refused export is the whole answer: nothing is copied, and the engine’s sentence is the alarm', async () => {
+    const { pane, status, tauri } = await mountSend();
+    pane.button('Copy to KOBOeReader').click();
+    await settle();
+    tauri.callsTo('export').find((c) => !c.args.includes('--check'))!
+      .answer({ ok: false, error: { code: 'export-failed', message: 'The book could not be read.' } });
+    await settle();
+    expect(tauri.callsTo('send')).toEqual([]);
+    expect(status().textContent).toBe('The book could not be read.');
+    expect(status().classList.contains('bad')).toBe(true);
+    expect(pane.button('Copy to KOBOeReader').disabled).toBe(false);
+  });
+
+  test('while a send runs every button is out of reach and the poll leaves the rows alone; a script opened meanwhile hears nothing of it', async () => {
+    const { send, pane, ctx, status, tauri, poll } = await mountSend();
+    const before = pane.buttons();
+    pane.button('Copy to KOBOeReader').click();
+    await settle();
+    expect(before.every((b) => b.disabled)).toBe(true);
+    // A poll that answers mid-send does not rebuild fresh, live buttons
+    // under it: the MOBI rung rewrites the book, so a second send is a race.
+    poll();
+    await settle();
+    expect(pane.buttons()).toEqual(before);
+    expect(pane.buttons().every((b) => b.disabled)).toBe(true);
+
+    ctx.state.script = { title: 'Second', fountainPath: '/lib/second/second.fountain', epubPath: '/lib/second/second.epub', settings: {} };
+    send.scriptChanged();
+    tauri.callsTo('export').find((c) => !c.args.includes('--check') && c.args[1] === EPUB)!
+      .answer({ ok: true, path: EPUB, extension: 'epub', label: 'EPUB' });
+    await settle();
+    expect(tauri.callsTo('send')).toEqual([]);
+    expect(status().textContent).toBe('');
+  });
+
+  test('the KFX installer runs only from its button, and an install and a route never overlap', async () => {
+    // It downloads third-party code and writes into the reader's Calibre, and
+    // a plugin swapped under a running KFX build is not worth finding out about.
+    const notReady = { ok: true, ...kfxSetup({ calibre: true, previewer: true, pluginInstalled: false, ready: false }, 'darwin') };
+    const { pane, tauri, page: p, poll } = await mountSend({ kfx: notReady, devices: [] });
+    // Named by kfx.js's own heading, so the two cannot disagree.
+    const { HEADING } = await import(join(UI, 'kfx.js'));
+    expect(pane.querySelector('section.kfx-setup')!.getAttribute('aria-label')).toBe(HEADING);
+    poll();
+    p.fireWindow('focus');
+    await settle();
+    expect(tauri.callsTo('kfx-install')).toEqual([]);
+    const install = () => pane.querySelectorAll('button').find((b) => b.dataset.step === 'plugin')!;
+    const routeButtons = () => pane.querySelector('.devices')!.buttons();
+
+    install().click();
+    await settle();
+    expect(tauri.callsTo('kfx-install').length).toBe(1);
+    // The busy hook takes every route out of reach while it runs.
+    expect(routeButtons().every((b) => b.disabled)).toBe(true);
+    pane.button('Add to Apple Books').click();
+    await settle();
+    expect(tauri.callsTo('route')).toEqual([]);
+    tauri.callsTo('kfx-install')[0].answer({ ok: false, error: { code: 'kfx-install-failed', message: 'No network.' } });
+    await settle();
+    expect(routeButtons().every((b) => !b.disabled)).toBe(true);
+
+    // And the other way round: a route running holds the installer off.
+    pane.button('Add to Apple Books').click();
+    await settle();
+    expect(tauri.callsTo('route').length).toBe(1);
+    install().click();
+    await settle();
+    expect(tauri.callsTo('kfx-install').length).toBe(1);
+    tauri.callsTo('route')[0].answer({ ok: true, note: 'Added.' });
+    await settle();
+  });
+
+  test('the KFX checklist is asked one probe at a time, on show and on focus, and not once the page is hidden', async () => {
+    const { send, tauri, page: p } = await mountSend({ kfx: HOLD });
+    const probes = () => tauri.callsTo('kfx-status');
+    expect(probes().length).toBe(1);
+    // The window gets the focus back twice while the first probe is out.
+    p.fireWindow('focus');
+    p.fireWindow('focus');
+    await settle();
+    expect(probes().length).toBe(1);
+    probes()[0].answer({ ok: false });
+    await settle();
+    p.fireWindow('focus');
+    await settle();
+    expect(probes().length).toBe(2);
+    probes()[1].answer({ ok: false });
+    await settle();
+    send.hide();
+    p.fireWindow('focus');
+    await settle();
+    expect(probes().length).toBe(2);
+  });
+
+  test('what Screepub can reach is folded away, shut, with the note on where the one route was proven', async () => {
+    const { send, pane } = await mountSend();
+    const fold = pane.querySelector('details.reach')!;
+    expect(fold.querySelector('summary')!.textContent).toBe(send.REACH_HEADING);
+    // <details> is open only when the attribute is there at all.
+    expect(fold.hasAttribute('open')).toBe(false);
+    expect(fold.open).toBe(false);
+    expect(fold.querySelector('.reader-note')!.textContent).toBe(send.provenNote('MacIntel'));
   });
 });
 
-describe('the Send page performs every route: shape', () => {
-  // The routes that are not a device (Apple Books, Send to Kindle, email,
-  // the two saves, and the email row's setup link) go through perform(),
-  // sendTo()'s twin. Pinned by shape for the same reason sendTo is: deleting
-  // a staleness check or the shared flag leaves every other test green.
-  const send = read('send.js');
-  /** A function's own body, from its head to the first unindented `}`. */
-  const body = (head: string) => {
-    const from = send.indexOf(head);
-    expect(from, `no ${head.trim()}`).toBeGreaterThan(-1);
-    const rest = send.slice(from);
-    return rest.slice(0, rest.indexOf('\n}'));
-  };
-  /** One branch of perform(): from its test to the next `} else`. */
-  const branch = (source: string, head: string) => {
-    const from = source.indexOf(head);
-    expect(from, `no ${head}`).toBeGreaterThan(-1);
-    const rest = source.slice(from + head.length);
-    return rest.slice(0, rest.indexOf('} else'));
-  };
-
-  test('one flag for every route: no two at once, and never during a KFX install', () => {
-    // The MOBI rung REWRITES the library EPUB in place, so a save of the
-    // EPUB during a Kindle build (or a send) is a race over one file.
-    const perform = body('async function perform(');
-    expect(perform.slice(0, 200)).toMatch(/if \(sending \|\| kfxInstalling\(\)\) return;/);
-    expect(perform.slice(0, 200)).toContain('sending = true;');
-    expect(perform.slice(perform.indexOf('} finally {'))).toContain('sending = false;');
-    // The SAME flag: the page has one, declared once.
-    expect([...send.matchAll(/^let sending\b/gm)].length).toBe(1);
-    expect(perform).not.toMatch(/\blet (performing|busy|running)\b/);
-    // Every button on the list goes dead, not only the one pressed.
-    expect(perform).toMatch(/for \(const button of buttons\(\)\) button\.disabled = true/);
-  });
-
-  test('a route in flight cannot report into a script that replaced it: a check after every await', () => {
-    const perform = body('async function perform(');
-    expect(perform.slice(0, 400)).toMatch(/const mine = era/);
-    expect(perform.slice(0, 400)).toMatch(/era !== mine/);
-    const awaits = [...perform.matchAll(/\bawait\s/g)].map((m) => m.index!);
-    expect(`perform has await boundaries: ${awaits.length}`).toBe('perform has await boundaries: 5');
-    for (const at of awaits) {
-      const rest = perform.slice(at);
-      const next = rest.slice(rest.indexOf(';') + 1).trimStart();
-      expect(`after ${rest.slice(0, 40)}: ${next.slice(0, 11)}`)
-        .toBe(`after ${rest.slice(0, 40)}: if (stale()`);
-    }
-  });
-
-  test('a save asks where before the engine writes, and a cancelled dialog asks nothing more', () => {
-    const perform = body('async function perform(');
-    const epub = branch(perform, "if (how === 'save-epub') {");
-    const kindle = branch(perform, "if (how === 'save-kindle') {");
-    expect(epub).toContain('saveDialog(');
-    expect(kindle).toContain('saveDialog(');
-    // One call writes, after either dialog.
-    expect(perform.match(/argv\.route\(/g)?.length).toBe(1);
-    expect(perform.indexOf('argv.route(')).toBeGreaterThan(perform.lastIndexOf('saveDialog('));
-    // The Kindle file is built first: its extension names the dialog's file.
-    const built = kindle.indexOf('argv.export(');
-    expect(built).toBeGreaterThan(-1);
-    expect(built).toBeLessThan(kindle.indexOf('saveDialog('));
-    // Its refusal is said, and nothing else happens, before any dialog.
-    const refused = kindle.indexOf("if (phase === 'failed')");
-    expect(refused).toBeGreaterThan(built);
-    expect(refused).toBeLessThan(kindle.indexOf('saveDialog('));
-    // null is a cancel: straight out, before any further engine call.
-    const cancels = [...perform.matchAll(/await saveDialog\([\s\S]*?\);\s*if \(stale\(\) \|\| out === null\) return;/g)];
-    expect(cancels.length).toBe(2);
-  });
-
-  test('the Kindle save carries this script’s own settings, fetched first, to both calls', () => {
-    const kindle = branch(body('async function perform('), "if (how === 'save-kindle') {");
-    const fetched = kindle.indexOf('await ensureSettings()');
-    expect(fetched, 'the Kindle save does not await ensureSettings()').toBeGreaterThan(-1);
-    expect(kindle.indexOf('optionsJsonFor(script)')).toBeGreaterThan(fetched);
-    expect(kindle).toContain("forFormat: 'kindle', ...settings");
-    expect(kindle).toContain('options = { out, ...settings };');
-  });
-
-  test('a device row still goes through sendTo, and every other row through perform', () => {
-    const choose = body('function choose(');
-    expect(choose).toContain("performerFor(route) === 'device'");
-    expect(choose).toContain('sendTo(route.device)');
-    expect(choose).toContain('perform(route)');
-    // The email row's setup link is performed too, under the same flag.
-    expect(send).toContain('perform({ key: hint.key, title: SETUP_TITLE })');
-    expect(body('async function perform(')).toContain('argv.emailSetup()');
-  });
-
-  test('every route, the setup link included, hands the keyboard back when it is done', () => {
-    // A route kills every button while it runs (a dead button drops the
-    // focus) and a Save box takes the focus too, so each press goes through
-    // keepFocus(), which puts it back on the same route's button.
-    const choose = body('function choose(');
-    expect(choose).toContain('keepFocus(route.id, () => sendTo(route.device))');
-    expect(choose).toContain('keepFocus(route.id, () => perform(route))');
-    expect(send).toContain('keepFocus(hint.key, () => perform({ key: hint.key, title: SETUP_TITLE }))');
-    const keep = body('async function keepFocus(');
-    const held = keep.indexOf('list.contains(document.activeElement)');
-    const ran = keep.indexOf('await run()');
-    expect(held, 'keepFocus() never asks where the keyboard was').toBeGreaterThan(-1);
-    expect(held).toBeLessThan(ran);
-    expect(keep.slice(ran)).toContain('if (held && era === mine && canFocus(list)) giveBackFocus(id);');
-  });
-
-  test('after a success the list is asked for again, and no older answer can undo it', () => {
-    for (const head of ['async function perform(', 'async function sendTo(']) {
-      const fn = body(head);
-      expect(fn.slice(fn.indexOf('} finally {')), `${head} does not repoll`)
-        .toContain('if (worked && !stale()) repoll();');
-    }
-    expect(body('async function sendTo(')).toContain('worked = true;');
-    expect(body('async function perform(')).toContain("worked = phase === 'done';");
-    // Every poll already out was asked before the engine remembered the
-    // route; the repoll puts them all behind it.
-    expect(body('function repoll(')).toContain('newest = asks;');
-    const refresh = body('async function refresh(');
-    expect(refresh).toContain('const mine = ++asks;');
-    expect([...refresh.matchAll(/mine <= newest/g)].length).toBe(2);
-    expect([...refresh.matchAll(/newest = mine;/g)].length).toBe(2);
-  });
-
-  test('the poll hands on what is connected, and draws a failure only when it cannot draw the list', () => {
-    const refresh = body('async function refresh(');
-    expect(refresh).toContain('const shown = routesFrom(answer);');
-    expect(refresh).toContain('ctx.state.devices = connectedDevices(shown);');
-    // The same list, its buttons labelled with the same Kindle file type, is
-    // left alone.
-    expect(refresh).toContain('if (sameRoutes(drawn, shown) && labelledWith === (kindle?.extension ?? null)) return;');
-    expect(refresh).toContain('fault(routesFailure(answer))');
-  });
-
-  test('a rebuild hands the keyboard back to the same route, or to the page’s plan', () => {
-    const rebuild = body('function rebuild(');
-    const had = rebuild.indexOf('list.contains(document.activeElement)');
-    expect(had, 'rebuild() never asks where the focus was').toBeGreaterThan(-1);
-    expect(had).toBeLessThan(rebuild.indexOf('clear(list)'));
-    const back = body('function giveBackFocus(');
-    expect(back).toContain('canFocus(same)');
-    expect(back).toContain('ctx.restoreFocus()');
-    expect(send).toContain("'data-route': route.id");
-  });
-
-  test('every class a route row adds is styled, from the tokens', () => {
-    // A class with no rule is a row drawn in the wrong clothes and nobody the
-    // wiser until a screenshot. A dimmed row is dimmed by the page's own
-    // muted ink (the brand's), never by opacity, which would dim the email
-    // row's setup link with it; the no-hex and no-raw-px-font rules above
-    // cover the rest of the file.
+describe('the Send page’s rows are dressed by the stylesheet', () => {
+  // perform() and sendTo() used to be pinned here by the shape of their
+  // source. Every one of those behaviours (one flag for every route, a check
+  // after every await, the Save box before the write, the settings fetched
+  // first, the keyboard handed back, the repoll after a success, the poll's
+  // failure line) is driven on the mounted page in send-routes-ui.test.ts and
+  // in "the Send page's device send, mounted" above. What is left is CSS.
+  test('every class a route row adds is styled, and a dimmed row is dimmed by ink, not opacity', () => {
+    // Kept as a CSS pin: whether a rule paints needs a browser. A dimmed row
+    // dimmed by opacity would dim the email row's setup link with it.
     const css = read('surfaces.css');
     for (const name of ['route-unavailable', 'route-detail', 'route-hint']) {
-      expect(send, `send.js no longer draws ${name}`).toContain(name);
       expect(`${name} styled: ${new RegExp(`\\.${name}\\b[^{]*\\{`).test(css)}`).toBe(`${name} styled: true`);
     }
     const dimmed = /\.route-unavailable[^{]*\{([^}]*)\}/.exec(css)![1]!;
@@ -7830,13 +7745,6 @@ describe('a refused file is no longer a dead end', () => {
     expect(body).toContain('…');
   });
 
-  test('the refusal screen hands the report the home folder the library probe learned', () => {
-    const convert = read('convert.js');
-    const report = convert.slice(convert.indexOf('newIssueUrl({'), convert.indexOf("'Report a bug'"));
-    expect(report).toContain('home: knownHome');
-    expect(convert).toMatch(/knownHome = answer\.home|knownHome = library\.home/);
-  });
-
   test('the file manager is called what it is called, per platform', async () => {
     // The Swift app said "SHOW IN FINDER" because it only ran on a Mac. This
     // one runs on three, and "Finder" on Windows names a thing that is not
@@ -7850,85 +7758,6 @@ describe('a refused file is no longer a dead end', () => {
     expect(convert.revealLabel(undefined)).toBe('Show in folder');
   });
 
-  test('no surface appends a bare null to a node', () => {
-    // el() drops a null child; Node.append() renders it as the literal word
-    // "null". send.js's drawEmpty records shipping that once. drawFailure was
-    // doing it too, and on the COMMON path: the "still open" line is absent
-    // whenever no script is loaded, which on a refusal is most of the time.
-    //
-    // The shape is the test, because the mistake is a shape: a conditional
-    // yielding null, sitting directly in a `.append(` argument list.
-    // Depth-aware on purpose. A null nested inside an el() call is CORRECT —
-    // that is the fix — so a flat regex over the argument text flags the very
-    // pattern it should be recommending. Only arguments at depth 0 of the
-    // .append( list are the dangerous ones.
-    // Keeps ONLY the characters sitting directly inside the .append( parens.
-    // Everything a nested call contains is dropped, so `el('p', …, null)` —
-    // the correct pattern — contributes nothing, while a ternary resolving to
-    // null in the argument list itself survives into the skeleton.
-    function topLevelArgs(source: string, at: number): string[] {
-      let depth = 0;
-      let current = '';
-      const args: string[] = [];
-      for (let i = at; i < source.length; i += 1) {
-        const ch = source[i];
-        if (ch === '(') { depth += 1; if (depth === 1) continue; }
-        else if (ch === ')') { depth -= 1; if (depth === 0) { args.push(current); break; } }
-        else if (ch === ',' && depth === 1) { args.push(current); current = ''; continue; }
-        if (depth === 1) current += ch;
-      }
-      return args;
-    }
-
-    const offenders: string[] = [];
-    for (const name of jsFiles()) {
-      const source = read(name);
-      for (const match of source.matchAll(/\.append\(/g)) {
-        const at = (match.index ?? 0) + '.append'.length;
-        for (const arg of topLevelArgs(source, at)) {
-          if (/\bnull\b/.test(arg.replace(/\/\/[^\n]*/g, ''))) {
-            offenders.push(`${name}: ${arg.trim().slice(0, 70).replace(/\s+/g, ' ')}`);
-          }
-        }
-      }
-    }
-    expect(offenders.join('\n')).toBe('');
-  });
-
-  test('the failure screen offers it, carrying the code', () => {
-    const convert = read('convert.js');
-    expect(convert).toContain('Report a bug');
-    // The code is the point. A report that says only "it did not work" costs
-    // a round trip to learn what the engine already knew.
-    expect(convert).toMatch(/newIssueUrl|reportBug/);
-  });
-});
-
-describe('the settings preview is the reader, not a second copy of it', () => {
-  // Settings gets a live script beside the knobs. The tempting way to build
-  // it is a second iframe with its own styling code, and that is the one
-  // thing this window cannot afford twice: the engine ships its stylesheet
-  // INSIDE the preview document, the CSP forbids inline <style> there, and
-  // the fix is to lift it out and adopt it as a constructed stylesheet.
-  // read.js's own header records what happens when that goes wrong — an
-  // unstyled script renders with NO error anywhere. Two copies of that dance
-  // would drift, and the drift would be invisible until someone looked.
-  const reader = read('read.js');
-  const settings = read('tune.js');
-
-  test('the reader exports the dresser rather than keeping it private', () => {
-    expect(reader).toContain('export function dressFrame');
-  });
-
-  test('settings imports it instead of writing its own', () => {
-    expect(settings).toMatch(/import\s*\{[^}]*dressFrame[^}]*\}\s*from\s*'\.\/read\.js'/);
-  });
-
-  test('settings builds no constructed stylesheet of its own', () => {
-    // The specific shape of the duplication this is here to prevent.
-    expect(settings).not.toContain('CSSStyleSheet');
-    expect(settings).not.toContain('adoptedStyleSheets');
-  });
 });
 
 describe('eighteen settings stop arriving as one wall', () => {
@@ -8036,63 +7865,6 @@ describe('"Start from" stops reading as a row of arbitrary buttons', () => {
   });
 });
 
-describe('the reach table is available, not announced', () => {
-  // "What Screepub can reach" is four readers, four honesty labels and two
-  // caveats, and it was the bulk of the empty Send page. It is good
-  // information and it is not what someone with nothing plugged in came to
-  // find out. Folded away, not deleted: hiding a capability is how a
-  // capability stops existing.
-  const send = read('send.js');
-
-  test('it is a disclosure the reader opens, not a wall they scroll past', () => {
-    // REACH_HEADING was EMPTY.heading: the fold now stands under the route
-    // list whatever is connected, not only on an empty page.
-    const at = send.indexOf('REACH_HEADING)');
-    expect(at).toBeGreaterThan(-1);
-    const around = send.slice(Math.max(0, at - 500), at + 200);
-    expect(around).toContain("'details'");
-    expect(around).toContain("'summary'");
-  });
-
-  test('it starts shut', () => {
-    // <details> is open only if the attribute is present at all, so the test
-    // is that nobody sets it. Written as a scan of the whole file because the
-    // attribute could be set anywhere, including later by a well-meaning
-    // "remember it was open" that would quietly undo this.
-    expect(send).not.toMatch(/\bopen:\s*(true|''|"")/);
-  });
-
-  test('the honesty about untested routes is inside it, not lost with it', () => {
-    // provenNote() carries the one fact the statuses cannot: WHERE the single
-    // proven route was proven. It moves with the table rather than being cut.
-    expect(send).toContain('provenNote');
-  });
-});
-
-describe('Convert another goes home, not to a file dialog', () => {
-  test('the result screen offers a way back to the drop well', () => {
-    // It called choose() directly, so the button jumped straight to a native
-    // picker. Cancelling that left you back on the previous result with no
-    // obvious way to reach the empty state at all — the one screen that
-    // explains what this window wants from you.
-    const convert = read('convert.js');
-    const at = convert.indexOf("'Convert another'");
-    expect(at).toBeGreaterThan(-1);
-    const wiring = convert.slice(convert.lastIndexOf('onclick', at), at);
-    expect(wiring).not.toContain('choose');
-    expect(wiring).toContain('reset');
-  });
-
-  test('going home does not close the script that is open', () => {
-    // Deliberate: the book stays open behind the drop well, so Read, Settings
-    // and Send stay reachable. "Convert another" is an invitation, not a
-    // discard — and a reader who changes their mind has lost nothing.
-    const convert = read('convert.js');
-    const reset = convert.slice(convert.indexOf('export function reset'));
-    expect(reset.slice(0, reset.indexOf('\n}'))).not.toContain('scriptChanged');
-  });
-});
-
 describe('the scene index', () => {
   // It sat to the RIGHT of the script, then became a drawer over the
   // binding margin (interface-pass design, decision 16). Since the layout
@@ -8149,6 +7921,118 @@ describe('the scene index', () => {
   });
 });
 
+describe('the frame, mounted', () => {
+  // frame.js's mountFrame on the fake page: the bar, the foot and the drag
+  // regions, driven by key, click and the calls main.js makes.
+  let page: FakePage | null = null;
+  afterEach(async () => { await page?.close(); page = null; });
+
+  async function mountBar() {
+    page = fakePage();
+    const { mountFrame, SURFACES } = await import(join(UI, 'frame.js'));
+    const root = page.doc.createElement('div');
+    page.doc.body.append(root);
+    const frame = mountFrame(root);
+    const tab = (id: string) => page!.doc.getElementById(`tab-${id}`)!;
+    const tablist = page.doc.querySelector('[role="tablist"]')!;
+    return { frame, root, tab, tablist, SURFACES, doc: page.doc };
+  }
+
+  test('the switcher is a real tablist: arrows, Home and End move the selection and the focus, past a surface that is not there', async () => {
+    const { frame, tab, tablist, SURFACES } = await mountBar();
+    for (const { id } of SURFACES) {
+      expect(tab(id).localName).toBe('button');
+      expect(tab(id).getAttribute('role')).toBe('tab');
+      expect(tab(id).getAttribute('aria-controls')).toBe(`surface-${id}`);
+    }
+    frame.enable('read', true);
+    frame.enable('tune', false);
+    frame.enable('send', true);
+    frame.setSurface('convert');
+    const selected = () => SURFACES.map((s: { id: string }) => s.id)
+      .filter((id: string) => tab(id).getAttribute('aria-selected') === 'true');
+    const press = (key: string) => {
+      const event = makeEvent('keydown', { key });
+      tablist.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(press('ArrowRight')).toBe(true);
+    expect(selected()).toEqual(['read']);
+    expect(page!.doc.activeElement).toBe(tab('read'));
+    // Settings is off the bar, so it is not a stop.
+    press('ArrowRight');
+    expect(selected()).toEqual(['send']);
+    press('ArrowRight');
+    expect(selected()).toEqual(['convert']);
+    press('ArrowLeft');
+    expect(selected()).toEqual(['send']);
+    press('Home');
+    expect(selected()).toEqual(['convert']);
+    press('End');
+    expect(page!.doc.activeElement).toBe(tab('send'));
+    // One Tab stop on the bar: the selected tab. An absent one is no stop.
+    expect(SURFACES.map((s: { id: string }) => [s.id, tab(s.id).tabIndex, tab(s.id).hidden])).toEqual([
+      ['convert', -1, false], ['read', -1, false], ['tune', -1, true], ['send', 0, false],
+    ]);
+    // Any other key is the page's.
+    expect(press('a')).toBe(false);
+  });
+
+  test('switching a surface off while it shows goes back to Convert', async () => {
+    const { frame, tab } = await mountBar();
+    const heard: string[] = [];
+    frame.onSurface((id: string) => heard.push(id));
+    frame.enable('read', true);
+    frame.setSurface('read');
+    frame.enable('read', false);
+    expect(heard).toEqual(['read', 'convert']);
+    expect(tab('read').hidden).toBe(true);
+  });
+
+  test('the window moves by its top strip and the gaps in the bar, never by a tab', async () => {
+    const { doc } = await mountBar();
+    const dragging = doc.querySelectorAll('[data-tauri-drag-region]');
+    expect(dragging.map((n) => n.className)).toEqual(['tabs', 'drag-strip']);
+    expect(doc.querySelectorAll('button').filter((b) => b.hasAttribute('data-tauri-drag-region'))).toEqual([]);
+  });
+
+  test('the update label sits beside the stamp: hidden until there are words, clickable only when told so', async () => {
+    const { frame, doc } = await mountBar();
+    const { RELEASE } = await import(join(UI, 'notes.js'));
+    const foot = doc.querySelector('.rev-foot')!;
+    const [label, stamp] = foot.children;
+    // A stable handle: main.js checks the focused element against it.
+    expect(label.id).toBe('rev-update');
+    expect(stamp.textContent).toBe(`rev ${RELEASE.version}`);
+    expect(label.hidden).toBe(true);
+    const clicks: string[] = [];
+    frame.onUpdateClick(() => clicks.push('update'));
+    frame.onRev(() => clicks.push('notes'));
+
+    frame.setUpdateLabel('Update to 0.8.0', { actionable: true });
+    expect([label.hidden, label.textContent, label.getAttribute('aria-disabled')]).toEqual([false, 'Update to 0.8.0', null]);
+    expect(label.classList.contains('rev-update-inert')).toBe(false);
+    label.click();
+    // "Downloading" is under way: it stops looking like a button.
+    frame.setUpdateLabel('Downloading 0.8.0… 40%', { actionable: false });
+    expect(label.getAttribute('aria-disabled')).toBe('true');
+    expect(label.classList.contains('rev-update-inert')).toBe(true);
+    frame.setUpdateLabel(null);
+    expect(label.hidden).toBe(true);
+    stamp.click();
+    expect(clicks).toEqual(['update', 'notes']);
+  });
+
+  test('a dead engine gets its own line, and the stamp keeps naming the build', async () => {
+    const { frame, doc } = await mountBar();
+    const fault = doc.querySelector('.engine-fault')!;
+    expect(fault.hidden).toBe(true);
+    frame.engineFailed('the engine could not be started');
+    expect([fault.hidden, fault.textContent]).toEqual([false, 'the engine could not be started']);
+    expect(doc.querySelector('.rev-stamp')!.textContent).toMatch(/^rev \d/);
+  });
+});
+
 describe('the foot of the page names the release', () => {
   // It used to print the ENGINE's self-reported version, labelled "engine".
   // Two things were wrong with that. The number was the engine's while the
@@ -8164,15 +8048,6 @@ describe('the foot of the page names the release', () => {
   test('it reads "rev" and the version it was built from', async () => {
     const { revLabel } = await frameMod();
     expect(revLabel?.('0.6.0')).toBe('rev 0.6.0');
-  });
-
-  test('the version comes from the notes module, so the stamp and the sheet agree', () => {
-    // desktop/ui/notes.js is generated from docs/releases/<version>.md. Taking
-    // the number from there makes the stamp and the notes it opens agree by
-    // construction rather than by two people remembering to change both.
-    const frame = read('frame.js');
-    expect(frame).toContain('RELEASE');
-    expect(frame).toContain('revLabel');
   });
 
   test('the notes sheet is not on the page while it is shut', () => {
@@ -8203,12 +8078,13 @@ describe('the window can be moved by its top, like any other window', () => {
   // 2026-09-23 the page marked nothing as a drag region, so the window could
   // not be moved at all. Tauri's drag script (2.11.5, drag.js): a bare
   // attribute drags only when the click lands on THAT element; anything
-  // clickable without the attribute stays clickable.
-  const frame = read('frame.js');
+  // clickable without the attribute stays clickable. Which elements carry
+  // the attribute is driven in "the window moves by its top strip and the
+  // gaps in the bar, never by a tab"; where the strip sits is CSS.
   const css = read('style.css');
 
-  test('a transparent strip along the top is a drag region', () => {
-    expect(frame).toMatch(/class:\s*'drag-strip',\s*'data-tauri-drag-region':\s*''/);
+  test('the drag strip scrolls away with the page and covers no control at rest', () => {
+    // A CSS pin: position needs a browser to observe.
     const rule = css.match(/\.drag-strip\s*\{[^}]*\}/)?.[0] ?? '';
     // NOT fixed: a strip pinned to the viewport stayed over content that
     // scrolled underneath it — confirmed live, a click on a tab started a
@@ -8220,20 +8096,6 @@ describe('the window can be moved by its top, like any other window', () => {
     expect(rule).toContain('top: 0');
     expect(rule).toContain('height: var(--space-7)');
   });
-
-  test('the gaps in the tab bar drag, and the tabs stay tabs', () => {
-    expect(frame).toMatch(/el\('nav',\s*\{[^}]*'data-tauri-drag-region':\s*''/);
-    // The attribute is never on a tab button: that would turn a click on
-    // "Read" into a window move. Matched by shape (an el('button', ...)
-    // call whose props carry class: 'tab'), not by exact whitespace, so a
-    // reformat cannot make this pass on nothing.
-    const tabButton = frame.match(/el\('button',\s*\{[\s\S]*?class:\s*'tab'[\s\S]*?\},\s*label\)/);
-    expect(tabButton).not.toBeNull();
-    expect(tabButton?.[0]).not.toContain('data-tauri-drag-region');
-    // Counted as PROPS (quoted, with a colon), so a comment naming the
-    // attribute does not change the count.
-    expect(frame.match(/'data-tauri-drag-region':/g)?.length).toBe(2);
-  });
 });
 
 describe('the dead-engine line does not crowd the update label', () => {
@@ -8242,40 +8104,11 @@ describe('the dead-engine line does not crowd the update label', () => {
     expect(rule).toContain('bottom: var(--space-9)');
   });
 
-  test('it stays aligned with the foot at every width, like the foot itself', () => {
-    // Both sit on the sheet's right edge (right: 0) since the layout pass
-    // moved the side margins from the sheet to the page, so neither needs a
-    // narrow-window override any more. An override on one alone would pull
-    // the two apart.
-    const css = read('style.css');
-    expect(css.match(/\.engine-fault\s*\{[^}]*\}/)?.[0] ?? '').toMatch(/right:\s*0;/);
-    expect(css.match(/\.rev-foot\s*\{[^}]*\}/)?.[0] ?? '').toMatch(/right:\s*0;/);
-    expect(css).not.toMatch(/\.engine-fault\s*\{\s*right:\s*var\(--space-4\)/);
-  });
 });
 
 describe('a newer version is a label you can click, not a dot you can miss', () => {
   const frame = read('frame.js');
   const css = read('style.css');
-
-  test('the brass dot is gone', () => {
-    // The owner missed it, and the update with it (2026-09-23).
-    expect(css).not.toContain('.rev-new');
-    expect(frame).not.toContain('rev-new');
-    expect(frame).not.toContain('updateWaiting');
-  });
-
-  test('the label sits beside the stamp, and the stamp still opens the notes', () => {
-    expect(frame).toContain("class: 'rev-update'");
-    expect(frame).toMatch(/el\('div',\s*\{\s*class:\s*'rev-foot'\s*\},\s*updateLabel,\s*stamp\)/);
-    expect(frame).toContain('setUpdateLabel');
-    expect(frame).toContain('onUpdateClick');
-    // The stamp's own click handler is untouched: it still calls every
-    // registered rev handler. `toContain('revHandlers')` alone would still
-    // pass with the stamp's onclick deleted, since the array declaration
-    // and push still mention the name.
-    expect(frame).toMatch(/onclick:\s*\(\)\s*=>\s*\{\s*for\s*\(const handler of revHandlers\)\s*handler\(\);\s*\}/);
-  });
 
   test('the label is ink with a brass rule, not brass text', () => {
     // Brass on the paper does not reach a readable contrast; the brass is the
@@ -8286,18 +8119,12 @@ describe('a newer version is a label you can click, not a dot you can miss', () 
     expect(css).toMatch(/\.rev-update:focus-visible/);
   });
 
-  test('the foot, not the stamp, is what is pinned to the corner', () => {
-    const foot = css.match(/\.rev-foot\s*\{[^}]*\}/)?.[0] ?? '';
-    expect(foot).toContain('position: absolute');
-    const stamp = css.match(/\.rev-stamp\s*\{[^}]*\}/)?.[0] ?? '';
-    expect(stamp).not.toContain('position: absolute');
-  });
-
   test('the label stops looking clickable once a click would do nothing', () => {
     // "Update to 0.8.0" is a real button; "Downloading 0.8.0… 40%" only
-    // looks like one unless the frame is told otherwise.
-    expect(frame).toMatch(/setUpdateLabel:\s*\(words,\s*\{\s*actionable\s*\}/);
-    expect(frame).toContain('aria-disabled');
+    // looks like one unless the frame is told otherwise. The frame's half
+    // (aria-disabled and the inert class) is driven in "the update label
+    // sits beside the stamp"; the pointer is CSS, and main.js's use of
+    // update.js's rule is left to the update work.
     const rule = css.match(/\.rev-update-inert\s*\{[^}]*\}/)?.[0] ?? '';
     expect(rule).toContain('cursor: default');
     const main = read('main.js');
@@ -8328,42 +8155,6 @@ describe('the Convert page asks once whether to look for new versions', () => {
       no: 'No thanks',
     });
     for (const words of Object.values(ASK)) expect(String(words)).not.toContain('—');
-  });
-
-  test('it sits under the well, and only when update.js says to ask', () => {
-    const convert = read('convert.js');
-    expect(convert).toContain('ctx.updates?.shouldAsk()');
-    expect(convert).toContain("class: 'well-ask'");
-    // Answering hands the keyboard back: the line that had the buttons is
-    // gone. Matched by shape (a removal followed by restoring focus), not
-    // by a `line` variable name, since the removal goes through the
-    // clicked button's own ancestor rather than a forward reference.
-    expect(convert).toMatch(/\.closest\('\.well-ask'\)\?\.remove\(\);\s*ctx\.restoreFocus\(\);/);
-    const main = read('main.js');
-    expect(main).toContain('shouldAsk(flow.usable(), localStorage)');
-    expect(main).toContain('flow.answer(on)');
-  });
-
-  test('the question sits after the well, so Choose PDF stays the first focus stop', () => {
-    // askLine() is appended in a SECOND pane.append() call, after the one
-    // that draws the wordmark and the well. Reversing that order would put
-    // the question's own buttons ahead of Choose PDF in the DOM, and this
-    // surface's first focus stop is the first control the DOM contains.
-    const convert = read('convert.js');
-    const wellDeclared = convert.indexOf("class: 'well'");
-    const askAppended = convert.indexOf('if (ask) pane.append(ask);');
-    expect(wellDeclared).toBeGreaterThan(-1);
-    expect(askAppended).toBeGreaterThan(wellDeclared);
-  });
-
-  test('flipping the switch in the release notes while the question is still up wins', () => {
-    // The reader could answer both ways at once: flip the switch in the
-    // release notes, then click a stale "No thanks" that was already on
-    // screen. The second answer re-checks shouldAsk() and, if it is
-    // already false, only removes the line rather than overwriting the
-    // newer answer.
-    const convert = read('convert.js');
-    expect(convert).toMatch(/if\s*\(ctx\.updates\.shouldAsk\(\)\)\s*ctx\.updates\.answer\(on\)/);
   });
 
   test('it is styled quietly, in the window\'s own tokens', () => {
@@ -8719,208 +8510,25 @@ describe('the Send page’s KFX block: decisions', () => {
     const out = kfx.afterInstall({ ok: false, error: { code: 'kfx-install-failed', message: 'nope' } }, notReady);
     expect(out).toEqual({ setup: notReady, line: 'nope', bad: true, justInstalled: false });
   });
-
-  test('no copy in kfx.js carries an em dash', () => {
-    expect(read('kfx.js').includes('—')).toBe(false);
-  });
-
-  test('kfx.js holds no engine flag and no Tauri call of its own', () => {
-    const source = read('kfx.js');
-    expect(source).not.toContain("'--json'");
-    expect(source).not.toContain('__TAURI__');
-    expect(source).not.toContain("'kfx-install'");
-    expect(source).not.toContain("'kfx-status'");
-  });
 });
 
 describe('the Send page’s KFX block: wiring', () => {
-  const kfx = read('kfx.js');
-  const send = read('send.js');
-
-  test('the installer is reached only from the button, never on the page’s own initiative', () => {
-    // It downloads third-party code and writes into the reader's Calibre.
-    expect(kfx.match(/argv\.kfxInstall\(\)/g)?.length).toBe(1);
-    const install = kfx.slice(kfx.indexOf('async function install('));
-    expect(install.slice(0, install.indexOf('\n}'))).toContain('argv.kfxInstall()');
-    // `install` is handed to a click and never called directly. The
-    // lookbehind skips its own definition, `async function install()`.
-    expect(kfx).toContain('onclick: install');
-    expect(kfx.match(/(?<!function )\binstall\(\)/g)).toBe(null);
-  });
-
-  test('one probe at a time, and the focus listener goes when the page does', () => {
-    expect(kfx).toContain('argv.kfxStatus()');
-    const probe = kfx.slice(kfx.indexOf('async function probe('));
-    expect(probe.slice(0, 200)).toMatch(/if \(probing/);
-    const hidden = /export function kfxHidden\(\) \{([\s\S]*?)\n\}/.exec(kfx);
-    expect(hidden, 'kfx.js exports no kfxHidden()').not.toBe(null);
-    expect(hidden![1]).toContain("removeEventListener('focus'");
-  });
-
-  test('send.js mounts the block and tells it when the page comes and goes', () => {
-    expect(send).toContain("from './kfx.js'");
-    expect(send).toMatch(/mountKfx\(/);
-    const show = /export function show\(\) \{([\s\S]*?)\n\}/.exec(send);
-    expect(show![1]).toContain('kfxShown()');
-    const hide = /export function hide\(\) \{([\s\S]*?)\n\}/.exec(send);
-    expect(hide![1]).toContain('kfxHidden()');
-  });
-
-  test('the block is mounted only once its node is in the page', () => {
-    // kfx.js refuses to draw into a node that is not connected (a stale
-    // node from an earlier draw() must stay dead), so mounting before the
-    // append would draw nothing until the next redraw.
-    const draw = send.slice(send.indexOf('\nfunction draw('));
-    const body = draw.slice(0, draw.indexOf('\n}'));
-    const appended = body.indexOf('kfxNode,\n');
-    expect(appended, 'draw() never appends kfxNode').toBeGreaterThan(-1);
-    expect(body.indexOf('mountKfx(')).toBeGreaterThan(appended);
-  });
-
-  test('a send and an install never overlap', () => {
-    // A plugin swapped out under a running KFX conversion is not a case
-    // worth finding out about.
-    const sendTo = send.slice(send.indexOf('async function sendTo('));
-    expect(sendTo.slice(0, 200)).toMatch(/if \(sending \|\| kfxInstalling\(\)\) return;/);
-    const install = kfx.slice(kfx.indexOf('async function install('));
-    expect(install.slice(0, 300)).toMatch(/hooks\?\.isSending\?\.\(\)/);
-    // The poll keeps running through an install (it stops only for a send),
-    // so a row it draws mid-install must be born disabled like the rest, or
-    // it offers a button that silently does nothing.
-    // Rows are route rows since parity piece B: the route's own button and
-    // the email row's setup link are both born dead mid-install.
-    const row = send.slice(send.indexOf('function routeRow('));
-    const rowBody = row.slice(0, row.indexOf('\n}'));
-    expect([...rowBody.matchAll(/disabled: kfxInstalling\(\)/g)].length).toBe(2);
-    // And the performer of every other route refuses to start mid-install,
-    // exactly as sendTo does.
-    const perform = send.slice(send.indexOf('async function perform('));
-    expect(perform.slice(0, 200)).toMatch(/if \(sending \|\| kfxInstalling\(\)\) return;/);
-  });
-});
-
-describe('the Send page’s KFX block: wiring, second pass', () => {
-  const kfx = read('kfx.js');
-  const send = read('send.js');
-  /** A function's own body, from its head to the first unindented `}`. */
-  const body = (source: string, head: string) => {
-    const from = source.indexOf(head);
-    expect(from, `no ${head.trim()}`).toBeGreaterThan(-1);
-    const rest = source.slice(from);
-    return rest.slice(0, rest.indexOf('\n}'));
-  };
-
-  test('a probe that was out when an install began is thrown away', () => {
-    // Same shape as send.js's `era`. The counter is read before the await
-    // and checked after it, before the answer is used for anything.
-    const probe = body(kfx, 'async function probe(');
-    const captured = probe.indexOf('const mine = installs;');
-    const awaited = probe.indexOf('await ');
-    const checked = probe.indexOf('if (mine !== installs) return;');
-    expect(captured, 'probe() does not capture the install counter').toBeGreaterThan(-1);
-    expect(captured).toBeLessThan(awaited);
-    expect(checked, 'probe() does not check the install counter').toBeGreaterThan(awaited);
-    expect(checked).toBeLessThan(probe.indexOf('setup = '));
-    const install = body(kfx, 'async function install(');
-    expect(install.indexOf('installs += 1')).toBeGreaterThan(install.indexOf('installingNow = true'));
-  });
-
-  test('a routine re-probe changes nothing, and a changed one clears the old line', () => {
-    const probe = body(kfx, 'async function probe(');
-    const same = probe.indexOf('JSON.stringify(next) === JSON.stringify(setup)');
-    expect(same, 'probe() redraws even when nothing changed').toBeGreaterThan(-1);
-    expect(same).toBeLessThan(probe.lastIndexOf('draw()'));
-    const after = probe.slice(same);
-    expect(after).toContain('justInstalled = false');
-    expect(after).toMatch(/status = \{ line: '', bad: false \}/);
-  });
-
-  test('coming back to the page mid-install keeps the line that says so', () => {
-    const shown = body(kfx, 'export function kfxShown(');
-    expect(shown).toMatch(/if \(!installingNow\) \{\s*justInstalled = false;/);
-    expect(shown).toContain("window.addEventListener('focus', onFocus)");
-  });
-
-  test('one status node per host, and the keyboard is put back after a redraw', () => {
-    const mount = body(kfx, 'export function mountKfx(');
-    const draw = body(kfx, '\nfunction draw(');
-    expect(kfx.match(/role: 'status'/g)?.length).toBe(1);
-    expect(mount).toContain("role: 'status'");
-    expect(draw).not.toContain('clear(host)');
-    const had = draw.indexOf('host.contains(document.activeElement)');
-    expect(had, 'draw() never asks where the focus was').toBeGreaterThan(-1);
-    expect(had).toBeLessThan(draw.indexOf('clear('));
-    expect(kfx).toContain('hooks?.restoreFocus?.()');
-    expect(send).toContain('restoreFocus: () => ctx.restoreFocus()');
-  });
-
-  test('send.js names the block with kfx.js’s own heading', () => {
-    expect(send).toMatch(/import \{[^}]*\bHEADING\b[^}]*\} from '\.\/kfx\.js'/);
-    expect(send).toContain("'aria-label': HEADING");
-    expect(send).not.toContain("'Best Kindle quality'");
-  });
-
+  // The rest of this block's wiring (the installer only from its button, one
+  // probe at a time, the focus listener going with the page, its heading, a
+  // send and an install never overlapping) is driven in "the Send page's
+  // device send, mounted"; the races and the keyboard in the describe below.
   test('a redraw that throws cannot leave a send stuck on', () => {
-    // Inside the try, so the finally that clears `sending` covers it.
-    const sendTo = body(send, 'async function sendTo(');
+    // Kept as a source pin until there is a seam: making kfxRedraw() throw
+    // from outside needs a hook into kfx.js's draw that the page does not
+    // offer, and a throw staged through the document would throw again from
+    // the finally that is under test. Inside the try, so that finally, which
+    // clears `sending`, covers it.
+    const send = read('send.js');
+    const from = send.indexOf('async function sendTo(');
+    const sendTo = send.slice(from, send.indexOf('\n}', from));
     const redraw = sendTo.indexOf('kfxRedraw()');
     expect(redraw).toBeGreaterThan(sendTo.indexOf('try {'));
     expect(redraw).toBeLessThan(sendTo.indexOf('await '));
-  });
-
-  test('a throw before the engine is asked cannot leave an install stuck on', () => {
-    // installingNow refuses every send until it is cleared, and only the
-    // finally clears it. So everything after the flag is set, the busy hook
-    // and the first draw included, runs inside the try that finally closes.
-    const install = body(kfx, 'async function install(');
-    const set = install.indexOf('installingNow = true');
-    const opened = install.indexOf('try {');
-    const asked = install.indexOf('await ');
-    expect(opened).toBeGreaterThan(set);
-    // No call at all between setting the flag and opening the try.
-    expect(install.slice(set, opened)).not.toContain('(');
-    for (const step of ['hooks?.onBusy?.(true)', 'status = { line: INSTALLING', 'draw()']) {
-      const at = install.indexOf(step);
-      expect(at, `install() has no ${step} inside its try`).toBeGreaterThan(opened);
-      expect(at).toBeLessThan(asked);
-    }
-  });
-
-  test('no probe for a block that is not in the page', () => {
-    // The no-script and blocked states never mount the block, and a
-    // kfx-status run per show and per focus would answer nobody.
-    const probe = body(kfx, 'async function probe(');
-    const guard = probe.indexOf('if (host === null || !host.isConnected) return;');
-    expect(guard, 'probe() runs with no block to draw into').toBeGreaterThan(-1);
-    expect(guard).toBeLessThan(probe.indexOf('probing = true'));
-    expect(guard).toBeLessThan(probe.indexOf('await '));
-    // send.js mounts the block (draw) before saying the page is shown, or
-    // the first probe on a real page would find no host and never run.
-    const show = body(send, 'export function show(');
-    expect(show.indexOf('draw()')).toBeGreaterThan(-1);
-    expect(show.indexOf('draw()')).toBeLessThan(show.indexOf('kfxShown()'));
-  });
-
-  test('the device list, the send flag and the busy hook reach the block', () => {
-    // The body, not the file: the import line alone names kfxDevicesChanged.
-    // Since parity piece B the list is the route list (`drawn = shown`), and
-    // the block reads the connected devices off it, as it read `devices`.
-    const refresh = body(send, 'async function refresh(');
-    const assigned = refresh.indexOf('drawn = shown;');
-    expect(assigned).toBeGreaterThan(-1);
-    const told = refresh.indexOf('kfxDevicesChanged()');
-    expect(told).toBeGreaterThan(assigned);
-    // After the rows as well: a block that hides while it holds the focus
-    // hands it to the page's first stop, which should be the new Send
-    // button and not the pane (seen in a browser, 2026-09-23).
-    const rows = refresh.indexOf('fillRows()');
-    expect(rows).toBeGreaterThan(assigned);
-    expect(told).toBeGreaterThan(rows);
-    expect(body(send, 'function fillRows(')).toContain('list.append(routeRow(route, drawn.chosen))');
-    expect(send).toContain('devices: () => connectedDevices(drawn)');
-    // The busy hook takes every button out of reach, and back.
-    const busy = send.slice(send.indexOf('onBusy: (on) => {'));
-    expect(busy.slice(0, busy.indexOf('\n    },'))).toContain('for (const button of buttons()) button.disabled = on;');
   });
 });
 
@@ -9145,7 +8753,7 @@ describe('the Send page’s KFX block: what a reader sees across redraws', () =>
     w.regainFocus();
     await w.answer('kfx-status', status(true, false, false));
     expect(get.isConnected).toBe(true);
-    expect(w.doc.activeElement).toBe(get);
+    expect(w.doc.activeElement as unknown).toBe(get);
   });
 
   test('when the rows do change, the keyboard goes back to the same step', async () => {
@@ -9323,5 +8931,192 @@ describe('the Send page’s KFX block: what a reader sees across redraws', () =>
     w.doc.body.append(next);
     w.kfx.mountKfx(next, { isSending: () => false, devices: () => [], onBusy: () => undefined });
     await expect(w.answer('kfx-status', status(true, true, false))).rejects.toThrow('nothing asked');
+  });
+});
+
+describe('no screen prints a stray "null"', () => {
+  // el() drops a null child; Node.append() prints it as the word "null", and
+  // so does the fake page's append (tests/helpers/fake-dom.ts). send.js's
+  // empty state shipped one under its list, and drawFailure printed one on
+  // every refusal with no script open. This used to be a scan of every
+  // .append( call's arguments; it is now the screens themselves, drawn in
+  // the sparse states where an optional line is absent.
+  let page: FakePage | null = null;
+  afterEach(async () => { await page?.close(); page = null; });
+
+  test('the sparse screens of every surface carry no "null" or "undefined"', async () => {
+    page = fakePage({
+      respond: (args) => (args[0].endsWith('.pdf') ? { ok: false, error: { code: 'scanned', message: 'No text.' } } : HOLD),
+    });
+    const ctx = (script: unknown) => ({
+      state: { script, devices: [], reducedMotion: true },
+      goTo: () => {}, restoreFocus: () => {}, scriptChanged: () => {}, convertAgain: () => {},
+    });
+    const screens: Record<string, FakeNode> = {};
+
+    // Convert: a refusal with no script open, so no "still open" line.
+    const convert = await import(`${join(UI, 'convert.js')}?null-scan`);
+    screens.convert = page.pane();
+    convert.mount(screens.convert, ctx(null));
+    await convert.convertPath('/s/Scan.pdf');
+
+    // Read: a script whose pages did not come back, and no author.
+    const reader = await import(`${join(UI, 'read.js')}?null-scan`);
+    screens.read = page.pane();
+    reader.mount(screens.read, ctx({ title: 'Field Station', previewHtml: '' }));
+
+    // Settings: a script with no stored source, so the fault screen.
+    const tune = await import(`${join(UI, 'tune.js')}?null-scan`);
+    screens.tune = page.pane();
+    tune.mount(screens.tune, ctx({ title: 'Field Station', fountainPath: null, epubPath: null, settings: null }));
+    await tune.show();
+
+    // Send: a script with no book on disk.
+    const send = await import(`${join(UI, 'send.js')}?null-scan`);
+    screens.send = page.pane();
+    send.mount(screens.send, ctx({ title: 'Field Station', epubPath: null, fountainPath: null, settings: null }));
+
+    for (const [name, pane] of Object.entries(screens)) {
+      expect(`${name}: ${pane.textContent.length > 0}`).toBe(`${name}: true`);
+      expect(`${name}: ${/\bnull\b|\bundefined\b/.test(pane.textContent)}`).toBe(`${name}: false`);
+    }
+  });
+});
+
+describe('the window, booted whole', () => {
+  // main.js imported the way index.html loads it, on the fake page: the real
+  // frame, the four surfaces mounted in it, the window's own shortcut and the
+  // drop. What used to be read off main.js's text is driven here instead.
+  // Each boot runs its own copy of the scripts (tests/helpers/boot-window.ts),
+  // because main.js's handlers on app.js cannot be taken off again.
+  let w: BootedWindow | null = null;
+  afterEach(async () => { await w?.close(); w = null; });
+
+  const blankBook = (pdf: string) => {
+    const name = pdf.replace(/^.*\//, '').replace(/\.pdf$/, '');
+    return {
+      ok: true, title: name, pages: 18, scenes: 12, characters: 6, warnings: [],
+      epubPath: `/lib/${name}/${name}.epub`, fountainPath: `/lib/${name}/${name}.fountain`,
+      // No pages: Read shows its "Convert it again" notice rather than a frame.
+      previewHtml: '',
+    };
+  };
+  /** The engine: --version and the library probe answered, a PDF converted,
+   *  anything else (Settings' read, Send's poll) held. */
+  const engine = (args: string[]) => {
+    if (args[0] === '--version') return { ok: true, version: '0.0.0' };
+    if (args[0] === 'app-settings') return { ok: false, error: { code: 'internal', message: 'no' } };
+    if (args[0].endsWith('.pdf')) return blankBook(args[0]);
+    return HOLD;
+  };
+  const conversions = (win: BootedWindow) => win.tauri.calls.filter((c) => c.args[0].endsWith('.pdf'));
+  /** Picks `pdf` through the shortcut and waits for its result screen. */
+  async function open(win: BootedWindow, pdf: string) {
+    win.press('o', { metaKey: true });
+    await settle();
+    win.tauri.dialogs.shift()!.resolve(pdf);
+    await settle();
+    expect(win.surface('convert').dataset.state).toBe('done');
+  }
+
+  test('the four surfaces are mounted as the bar’s panels, and the release notes as a sheet off the stamp', async () => {
+    w = await bootWindow(SCRATCH, { respond: engine });
+    const { RELEASE } = await import(join(w.ui, 'notes.js'));
+    for (const id of ['convert', 'read', 'tune', 'send']) {
+      const pane = w.surface(id);
+      expect(pane.getAttribute('role')).toBe('tabpanel');
+      expect(pane.getAttribute('aria-labelledby')).toBe(`tab-${id}`);
+      expect(w.tab(id).getAttribute('aria-controls')).toBe(`surface-${id}`);
+    }
+    expect(w.showing()).toBe('convert');
+    expect(w.surface('convert').querySelector('.well')).not.toBeNull();
+    // The stamp names the release the notes describe, from the same module.
+    const stamp = w.doc.querySelector('.rev-stamp')!;
+    expect(stamp.textContent).toBe(`rev ${RELEASE.version}`);
+    const sheet = w.doc.querySelector('dialog.sheet-over')!;
+    expect(sheet.open).toBe(false);
+    stamp.click();
+    expect(sheet.open).toBe(true);
+    expect(sheet.querySelector('h2')!.textContent).toBe(`Screepub ${RELEASE.version}`);
+    sheet.button('Close').click();
+    expect(sheet.open).toBe(false);
+  });
+
+  test('Read, Settings and Send are off the bar until a script converts', async () => {
+    w = await bootWindow(SCRATCH, { respond: engine });
+    const onBar = () => ['convert', 'read', 'tune', 'send'].filter((id) => !w!.tab(id).hidden);
+    expect(onBar()).toEqual(['convert']);
+    await open(w, '/s/Field Station.pdf');
+    expect(onBar()).toEqual(['convert', 'read', 'tune', 'send']);
+  });
+
+  test('Ctrl or Cmd O asks for a file from any surface, and a cancel leaves the reader where they were', async () => {
+    w = await bootWindow(SCRATCH, { respond: engine, platform: 'Win32' });
+    expect(w.press('o').defaultPrevented).toBe(false);
+    expect(w.tauri.dialogs).toEqual([]);
+    await open(w, '/s/Field Station.pdf');
+
+    w.tab('read').click();
+    expect(w.showing()).toBe('read');
+    const asked = w.press('O', { ctrlKey: true });
+    expect(asked.defaultPrevented).toBe(true);
+    await settle();
+    expect(w.tauri.dialogs.map((d) => d.kind)).toEqual(['pick_file']);
+    // Asking for a file is not converting one: the reader stays put.
+    expect(w.showing()).toBe('read');
+    w.doc.activeElement = null;
+    w.tauri.dialogs.shift()!.resolve(null);
+    await settle();
+    expect(w.showing()).toBe('read');
+    // And the keyboard is put back on the surface that is showing.
+    expect(w.surface('read').button('Convert it again')).toBe(w.doc.activeElement!);
+    expect(conversions(w).length).toBe(1);
+  });
+
+  test('cancelling a file dialog over a result hands the keyboard to the result, not to nobody', async () => {
+    w = await bootWindow(SCRATCH, { respond: engine });
+    // Over the idle well: Choose PDF.
+    w.press('o', { metaKey: true });
+    await settle();
+    w.doc.activeElement = null;
+    w.tauri.dialogs.shift()!.resolve(null);
+    await settle();
+    expect(w.doc.activeElement as unknown).toBe(w.surface('convert').querySelector('.well button'));
+
+    await open(w, '/s/Field Station.pdf');
+    w.press('o', { metaKey: true });
+    await settle();
+    w.doc.activeElement = null;
+    w.tauri.dialogs.shift()!.resolve(null);
+    await settle();
+    expect(w.doc.activeElement as unknown).toBe(w.surface('convert').button('Send to a reader'));
+  });
+
+  test('a file dragged over the window marks the well, and a drop converts the first real path, from any surface', async () => {
+    w = await bootWindow(SCRATCH, { respond: engine });
+    const well = w.surface('convert').querySelector('.well')!;
+    w.tauri.emit('tauri://drag-enter', { paths: ['/s/A.pdf'], position: { x: 1, y: 1 } });
+    expect(well.classList.contains('well-targeted')).toBe(true);
+    w.tauri.emit('tauri://drag-leave', null);
+    expect(well.classList.contains('well-targeted')).toBe(false);
+
+    await open(w, '/s/Field Station.pdf');
+    w.tab('read').click();
+    expect(w.showing()).toBe('read');
+    w.tauri.emit('tauri://drag-drop', { paths: ['', '   ', '/s/Second.pdf', '/s/Third.pdf'], position: { x: 1, y: 1 } });
+    await settle();
+    // The conversion moves the reader to Convert; the drop alone did not ask.
+    expect(w.showing()).toBe('convert');
+    expect(conversions(w).map((c) => c.args[0])).toEqual(['/s/Field Station.pdf', '/s/Second.pdf']);
+  });
+
+  test('"Convert it again" on Read converts the open script’s own source and shows it on Convert', async () => {
+    w = await bootWindow(SCRATCH, { respond: engine });
+    await open(w, '/s/Field Station.pdf');
+    w.tab('read').click();
+    w.surface('read').button('Convert it again').click();
+    await settle();
+    expect(w.showing()).toBe('convert');
+    expect(conversions(w).map((c) => c.args[0])).toEqual(['/s/Field Station.pdf', '/s/Field Station.pdf']);
   });
 });

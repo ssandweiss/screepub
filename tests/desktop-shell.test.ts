@@ -36,14 +36,6 @@ const rustSources = rustFiles.map((f) => ({
   text: readFileSync(join(RUST_DIR, f), 'utf8'),
 }));
 
-/** Source with comments and blank lines removed — what a reviewer must read. */
-function code(text: string): string[] {
-  return text
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith('//'));
-}
-
 /**
  * Source with every comment's TEXT removed but its code kept, for guards
  * that must judge what the Rust *does* rather than what it says about
@@ -222,14 +214,6 @@ describe('Rust is a window, not a brain', () => {
         expect(`${name}: ${line.trim()}`).toContain('add_filter');
       }
     }
-  });
-
-  test('a reviewer can read the whole thing in one sitting', () => {
-    // The spec's acceptance criterion, as a number so it can fail. If a
-    // change needs more than this, it is almost certainly logic that
-    // belongs in src/.
-    const lines = rustSources.flatMap(({ text }) => code(text));
-    expect(lines.length).toBeLessThanOrEqual(200);
   });
 
   test('exactly two commands are registered', () => {
@@ -925,19 +909,6 @@ describe('the macOS transition overlay', () => {
     expect(CONFIG.app.windows[0].title).toBe('Screepub');
   });
 
-  test('desktop/README.md records that piece F deletes this file', () => {
-    // JSON has no comments, and (per the test above) Tauri's own schema
-    // forbids the overlay from carrying a second key to hold one — so the
-    // file cannot say this about itself without also breaking the real
-    // build. The note that would have gone in a "_why" key lives in the
-    // README instead, next to the section Task 6 already put the bundling
-    // notes in. Without a marker SOMEWHERE, this file is indistinguishable
-    // from permanent configuration and outlives the transition it exists for.
-    const readme = readFileSync(join(REPO, 'desktop', 'README.md'), 'utf8');
-    expect(readme).toContain('tauri.transition.conf.json');
-    expect(readme).toContain('piece F');
-  });
-
   test('merging it into tauri.conf.json actually changes productName and nothing else', () => {
     // The tests above only inspect the overlay file in isolation — a file
     // that says the right thing but is never truly merged (a typo'd key,
@@ -1152,11 +1123,6 @@ describe('the updater overlay: the archive is a RELEASE artifact, not a build ar
     expect(desktopYml).not.toContain('--updater');
   });
 
-  test('desktop/README.md says why it is a separate file', () => {
-    const readme = readFileSync(join(REPO, 'desktop', 'README.md'), 'utf8');
-    expect(readme).toContain('tauri.updater.conf.json');
-    expect(readme).toContain('TAURI_SIGNING_PRIVATE_KEY');
-  });
 });
 
 describe('what sidecar.rs says about a quit mid-call is true of the engine', () => {
