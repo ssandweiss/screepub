@@ -29,9 +29,9 @@ function ruleBlock(sheet: string, selector: string): string {
 }
 
 /** Every @media block for one query, joined, braces balanced. */
-function mediaBlocks(sheet: string, query: string): string {
+function mediaBlocks(sheet: string, query: string, rule = '@media'): string {
   const out: string[] = [];
-  const head = `@media ${query} {`;
+  const head = `${rule} ${query} {`;
   let at = sheet.indexOf(head);
   while (at !== -1) {
     let i = sheet.indexOf('{', at);
@@ -47,6 +47,38 @@ function mediaBlocks(sheet: string, query: string): string {
   expect(out.length, `no ${head} block`).toBeGreaterThan(0);
   return out.join('\n');
 }
+
+/** The content block width below which Read and Settings fold to one
+ *  column. A container query on the sheet, not a media query on the window:
+ *  the block is the window less 148px of side margins, so a window-width
+ *  breakpoint left Settings two-column with a ~300px preview between 900 and
+ *  about 1050 wide. 880 = 420 (settings) + 32 (gap, --space-7) + 428, so the
+ *  preview is never under 420 while it sits beside the settings. */
+const FOLD = 880;
+const NARROW = `(max-width: ${FOLD - 1}px)`;
+const containerBlocks = (sheet: string, query: string) => mediaBlocks(sheet, query, '@container');
+
+describe('the two-column surfaces fold on the block, not the window', () => {
+  const style = windowCss('style.css');
+  const surfaces = windowCss('surfaces.css');
+
+  test('the sheet is the query container', () => {
+    expect(ruleBlock(style, '.sheet')).toContain('container-type: inline-size');
+  });
+
+  test('no surface folds on the window width any more', () => {
+    expect(surfaces).not.toMatch(/@media[^{]*\((max|min)-width: 90[01]px\)/);
+  });
+
+  test('two-column Settings never gives the preview less than 420', () => {
+    const settings = 420;
+    const gap = 32; // --space-7, 2rem
+    expect(ruleBlock(surfaces, '.tune-split')).toContain(`grid-template-columns: ${settings}px minmax(0, 1fr)`);
+    expect(ruleBlock(surfaces, '.tune-split')).toContain('gap: var(--space-7)');
+    expect(FOLD - settings - gap).toBeGreaterThanOrEqual(420);
+    expect(containerBlocks(surfaces, NARROW)).toContain('.tune-split { grid-template-columns: 1fr; }');
+  });
+});
 
 describe('the page fills the window (frame B)', () => {
   const brand = css(join(REPO, 'brand', 'tokens.css'));
@@ -156,19 +188,20 @@ describe('Read gives the scene index a slot of its own', () => {
     expect(open).not.toContain('box-shadow');
   });
 
-  test('under 900 wide the index goes above the script, and a shut one takes no room', () => {
-    const narrow = mediaBlocks(surfaces, '(max-width: 900px)');
+  test('in a narrow block the index goes above the script, and a shut one takes no room', () => {
+    const narrow = containerBlocks(surfaces, NARROW);
     expect(narrow).toContain('.reader { grid-template-columns: minmax(0, 1fr); }');
     expect(narrow).toContain('.reader:not(.index-open) .scene-rail { display: none; }');
     expect(narrow).toContain('.script-stage { grid-column: 1; grid-row: 2; }');
   });
 
   test('a short window only grows the rail when it is still beside the script, not stacked above it', () => {
-    // Below 900px wide the rail is already a short strip (the 900px block
-    // above caps it at 6.5rem); a short-window override meant for the
-    // two-column layout must not also apply there.
-    const short = mediaBlocks(surfaces, '(max-height: 560px) and (min-width: 901px)');
-    expect(short).toContain('.scene-rail { max-height: 62vh; }');
+    // In a narrow block the rail is already a short strip (the narrow
+    // container block caps it at 6.5rem); a short-window override meant for
+    // the two-column layout must not also apply there.
+    const short = mediaBlocks(surfaces, '(max-height: 560px)');
+    expect(short).toContain(`@container (min-width: ${FOLD}px) {`);
+    expect(containerBlocks(short, `(min-width: ${FOLD}px)`)).toContain('.scene-rail { max-height: 62vh; }');
   });
 });
 
@@ -186,8 +219,8 @@ describe('Settings gives the preview the room', () => {
     expect(frame).not.toContain('62vh');
   });
 
-  test('under 900 wide it is still one column, with the preview unpinned', () => {
-    const narrow = mediaBlocks(surfaces, '(max-width: 900px)');
+  test('in a narrow block it is still one column, with the preview unpinned', () => {
+    const narrow = containerBlocks(surfaces, NARROW);
     expect(narrow).toContain('.tune-split { grid-template-columns: 1fr; }');
     expect(narrow).toContain('.tune-preview { position: static; }');
   });
@@ -226,8 +259,8 @@ describe('each Settings section is a box', () => {
     expect(tune).toMatch(/el\('div', \{ class: 'tune-foot' \},\s*drawDefaultsFoot\(\),\s*drawKeepChoice\(\)\)/);
   });
 
-  test('under 900 wide the boxes stay a measure wide, not the whole column', () => {
-    const narrow = mediaBlocks(surfaces, '(max-width: 900px)');
+  test('in a narrow block the boxes stay a measure wide, not the whole column', () => {
+    const narrow = containerBlocks(surfaces, NARROW);
     expect(narrow).toContain('.knob-group, .tune-foot { max-width: var(--measure); }');
   });
 
@@ -241,5 +274,54 @@ describe('each Settings section is a box', () => {
         ).toBe(`${ink} on panel (${mode}): true`);
       }
     }
+  });
+});
+
+describe('a long unbroken line wraps inside its box', () => {
+  // A library path, a script title with no spaces, or an engine sentence
+  // quoting a long file path ran straight out of its box: nothing let the
+  // line break inside a word.
+  const style = windowCss('style.css');
+  const surfaces = windowCss('surfaces.css');
+
+  test('every box that prints a path, a title or an engine sentence may break anywhere', () => {
+    for (const [sheet, selector] of [
+      [surfaces, '.caption'], [surfaces, '.well-ask'], [surfaces, '.book-title'],
+      [surfaces, '.fault-body'], [surfaces, '.read-title'], [style, '.engine-fault'],
+    ] as const) {
+      expect(`${selector}: ${ruleBlock(sheet, selector).includes('overflow-wrap: anywhere')}`)
+        .toBe(`${selector}: true`);
+    }
+  });
+
+  test('the library line’s words may shrink inside the flex row they sit in', () => {
+    // A flex item will not go narrower than its longest word unless told it may.
+    expect(ruleBlock(surfaces, '.well-ask > *')).toContain('min-width: 0');
+  });
+});
+
+describe('a hidden element is hidden, whatever its class says about display', () => {
+  // .btn { display: inline-block } outranked the browser's own
+  // [hidden] { display: none }, so the release notes' hidden Install button
+  // drew as an empty brass pill anyone could click. One global rule, marked
+  // important so no class rule can beat it, replaces the per-class patches.
+  const style = windowCss('style.css');
+  const surfaces = windowCss('surfaces.css');
+
+  test('style.css hides every [hidden] element, and nothing can outrank it', () => {
+    expect(style).toMatch(/^\[hidden\] \{ display: none !important; \}/m);
+  });
+
+  test('no stylesheet keeps a per-class [hidden] patch the global rule covers', () => {
+    for (const [name, sheet] of [['style.css', style], ['surfaces.css', surfaces]]) {
+      const patches = [...sheet.matchAll(/^[^\n{]*\S\[hidden\][^{]*\{/gm)].map((m) => m[0].trim());
+      expect(`${name}: ${patches.join(', ')}`).toBe(`${name}: `);
+    }
+  });
+
+  test('the notes Install button that started this is a .btn built hidden', () => {
+    const notes = readFileSync(join(UI, 'notes-surface.js'), 'utf8');
+    expect(notes).toContain("el('button', { type: 'button', class: 'btn btn-brad btn-small', hidden: true }");
+    expect(ruleBlock(surfaces, '.btn')).toContain('display: inline-block');
   });
 });

@@ -841,6 +841,17 @@ describe('what the Linux package tells a user about itself', () => {
   });
 });
 
+describe('the window has a floor', () => {
+  test('it cannot be dragged smaller than 640 by 480', () => {
+    // With no minimum the window could be squeezed until the drop well, the
+    // tabs and the page margins overlapped. 640 by 480 still fits the narrow
+    // layout (surfaces.css folds to one column well above it).
+    const w = CONFIG.app.windows[0];
+    expect([w.minWidth, w.minHeight]).toEqual([640, 480]);
+    expect([w.width, w.height]).toEqual([1280, 800]);
+  });
+});
+
 describe('the macOS transition overlay', () => {
   const overlayPath = join(REPO, 'desktop', 'src-tauri', 'tauri.transition.conf.json');
 

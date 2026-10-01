@@ -86,6 +86,9 @@ const context = {
     shouldAsk: () => shouldAsk(flow.usable(), localStorage),
     answer: (on) => flow.answer(on),
   },
+  /** "Convert it again" on any surface: the open script's source, converted
+   *  again on Convert. convert.js owns the conversion; this only carries it. */
+  convertAgain: () => convert.convertAgain(),
   /** Called whenever the script on screen changes, so the other surfaces
    *  stop showing a book that is no longer open. */
   scriptChanged() {

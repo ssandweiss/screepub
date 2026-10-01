@@ -890,7 +890,7 @@ function draw() {
       el('p', { class: 'fault-body' }, blocked),
       el('div', { class: 'read-ways' },
         el('button', {
-          type: 'button', class: 'btn btn-outline', onclick: () => ctx.goTo('convert'),
+          type: 'button', class: 'btn btn-outline', onclick: () => ctx.convertAgain(),
         }, 'Convert it again')),
     );
     return;

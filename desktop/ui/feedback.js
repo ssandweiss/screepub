@@ -28,15 +28,64 @@ export const NEW_ISSUE_BASE = 'https://github.com/ssandweiss/screepub/issues/new
  *  "C  ". URLSearchParams encodes it correctly to begin with, which is why
  *  this port does not carry that fix-up across: the bug it fixed does not
  *  exist here. */
-export function newIssueUrl({ appVersion, osVersion, context = null }) {
-  let body = '<!-- Describe the issue or suggestion. -->\n\n';
+export function newIssueUrl({ appVersion, osVersion, context = null, home = null }) {
+  const head = '<!-- Describe the issue or suggestion. -->\n\n';
+  const foot = `\n---\nScreepub ${appVersion} · ${osVersion}\n`;
+  let block = '';
   if (typeof context === 'string' && context.trim() !== '') {
-    body += `\n**What happened:**\n${context}\n`;
+    const open = '\n**What happened:**\n';
+    const room = MAX_BODY - head.length - foot.length - open.length - 1;
+    let said = redact(context, home);
+    if (said.length > room) said = `${said.slice(0, Math.max(0, room - 1))}…`;
+    block = `${open}${said}\n`;
   }
-  body += `\n---\nScreepub ${appVersion} · ${osVersion}\n`;
+  const body = `${head}${block}${foot}`;
 
   const query = new URLSearchParams({ body });
   return `${NEW_ISSUE_BASE}?${query.toString()}`;
+}
+
+/** About the longest body a report carries. The context is cut to fit; the
+ *  footer with the versions never is. */
+export const MAX_BODY = 2000;
+
+/** A path's start: the home sign, a drive letter, or a bare separator, at the
+ *  start of the text or after a space, a quote or a bracket. Not after a
+ *  letter (so "and/or" is prose) or a colon (so a link is left alone). */
+const PATH = /(?<=^|[\s'"`(\[])(?:~|[A-Za-z]:)?[\\/][^\r\n'"`<>|]*/g;
+
+/** The file name at the start of `rest`: up to its extension when it has one
+ *  (a name may hold spaces), else up to the first space. */
+function nameLength(rest) {
+  const withExt = /^[^\\/\r\n]*?\.[A-Za-z0-9]{1,8}(?=$|[\s,;:)\]]|\.(?:\s|$))/.exec(rest);
+  if (withExt) return withExt[0].length;
+  const word = /^[^\s]*/.exec(rest);
+  return word[0].length;
+}
+
+/** The engine's sentence, safe to put in a public URL. Every absolute path
+ *  (POSIX, ~/... or Windows) becomes <path>, keeping only its last
+ *  segment's extension (<path>.epub), which says what kind of file without
+ *  saying which: a file name is usually the script's title, and so is the
+ *  library folder the book sits in. The home folder (`home` when the window
+ *  knows it, else any /Users/name, /home/name or C:\Users\name) becomes ~
+ *  first, which is all that is left of it when it stands alone. */
+export function redact(message, home = null) {
+  let out = String(message ?? '');
+  if (typeof home === 'string' && home.trim().length > 1) {
+    const h = home.replace(/[\\/]+$/, '');
+    out = out.split(h).join('~');
+  }
+  out = out
+    .replace(/(?<![\w~])\/(?:Users|home)\/[^/\s'"`]+/g, '~')
+    .replace(/(?<![\w~])[A-Za-z]:\\Users\\[^\\\s'"`]+/g, '~');
+  return out.replace(PATH, (path) => {
+    const at = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+    const rest = path.slice(at + 1);
+    const n = nameLength(rest);
+    const ext = /\.[A-Za-z0-9]{1,8}$/.exec(rest.slice(0, n))?.[0] ?? '';
+    return `<path>${ext}${rest.slice(n)}`;
+  });
 }
 
 /** What the window knows about the machine it is on, for the footer. The

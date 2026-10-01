@@ -745,7 +745,7 @@ function draw(status) {
       el('p', { class: 'caption bad' }, status.line),
       el('div', { class: 'read-ways' },
         el('button', {
-          type: 'button', class: 'btn btn-outline', onclick: () => ctx.goTo('convert'),
+          type: 'button', class: 'btn btn-outline', onclick: () => ctx.convertAgain(),
         }, FAULT.way)),
     ));
     return;

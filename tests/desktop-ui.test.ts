@@ -781,11 +781,11 @@ describe('the Convert surface', () => {
 
   test('a hidden well-ask line takes no space: .well-ask is flex, which beats the UA [hidden] rule', () => {
     // .well-ask { display: flex } outranks the browser's own
-    // [hidden] { display: none }, and style.css/surfaces.css have no
-    // general [hidden] rule to fall back on, so a pending or a failed
-    // probe used to leave a blank ~52px gap where the line would go.
-    const css = read('surfaces.css');
-    expect(css).toMatch(/\.well-ask\[hidden\]\s*\{\s*display:\s*none;?\s*\}/);
+    // [hidden] { display: none }, so a pending or a failed probe used to
+    // leave a blank ~52px gap where the line would go. style.css's global
+    // [hidden] rule, important, now covers it and every other class.
+    expect(read('surfaces.css')).toMatch(/\.well-ask \{[^}]*display: flex/);
+    expect(read('style.css')).toMatch(/^\[hidden\] \{ display: none !important; \}/m);
   });
 });
 
@@ -887,6 +887,234 @@ describe('converting a PDF again takes its turn on the book it rewrites', () => 
     expect(conversions().map((c) => c.args[0])).toEqual(['/s/Field Station.pdf']);
     await answer('/s/Field Station.pdf', BOOK);
     await again;
+  });
+
+  test('while it waits its turn the read-out says what for, then "starting up" once it starts', async () => {
+    // A conversion that waited out a half-minute Kindle build used to sit on
+    // "starting up" the whole time, which reads as a stuck engine.
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const asked: { args: string[]; resolve: (stdout: string) => void }[] = [];
+    g.document = {
+      createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
+      createTextNode: (value: string) => Object.assign(new Node('#text'), { text: value }),
+      adoptedStyleSheets: [],
+    };
+    g.CSSStyleSheet = class { replaceSync() {} };
+    g.window = {
+      __TAURI__: {
+        core: { invoke: (_cmd: string, { args }: { args: string[] }) => new Promise<string>((resolve) => asked.push({ args, resolve })) },
+        event: { listen: async () => () => {} },
+      },
+    };
+    const convert = await import(`${join(UI, 'convert.js')}?waiting`);
+    const { inTurn } = await import(join(UI, 'book-queue.js'));
+    const pane = new Node('section');
+    convert.mount(pane, { state: { script: null as unknown }, goTo: () => {}, restoreFocus: () => {}, scriptChanged: () => {} });
+    const readOut = (): string => {
+      const walk = (n: Node): Node | null => {
+        if (n.className === 'read-out') return n;
+        for (const k of n.kids) { const found = walk(k); if (found) return found; }
+        return null;
+      };
+      return walk(pane)?.textContent ?? '(none)';
+    };
+    const conversion = () => asked.find((c) => c.args[1] === '--json' && c.args[0] === '/s/Night Shift.pdf');
+    const BOOK = '/lib/night-shift/Night Shift.epub';
+    const answer = async () => {
+      const call = conversion()!;
+      asked.splice(asked.indexOf(call), 1);
+      call.resolve(JSON.stringify({ ok: true, title: 'Night Shift', epubPath: BOOK, fountainPath: BOOK.replace(/epub$/, 'fountain'), previewHtml: '' }));
+      await tick();
+      await tick();
+    };
+
+    // Free book: straight to "starting up".
+    const first = convert.convertPath('/s/Night Shift.pdf');
+    await tick();
+    expect(readOut()).toBe(convert.PROGRESS_START.label);
+    await answer();
+    await first;
+
+    // A Kindle build holds the book: the read-out names it until it is done.
+    let free: () => void = () => {};
+    const building = inTurn(BOOK, 'kindle', () => new Promise<void>((resolve) => { free = resolve; }));
+    const again = convert.convertPath('/s/Night Shift.pdf');
+    await tick();
+    expect(conversion()).toBeUndefined();
+    expect(readOut()).toBe('Waiting for the Kindle file to finish building…');
+    free();
+    await building;
+    await tick();
+    expect(conversion()).toBeDefined();
+    expect(readOut()).toBe(convert.PROGRESS_START.label);
+    await answer();
+    await again;
+    for (const call of asked.splice(0)) call.resolve(JSON.stringify({ ok: false }));
+    await tick();
+  });
+
+  test('waitingLabel names the turn a conversion waits for, the longest wait first', async () => {
+    const { waitingLabel } = await import(join(UI, 'convert.js'));
+    expect(waitingLabel([])).toBeNull();
+    expect(waitingLabel(['check', 'kindle'])).toBe('Waiting for the Kindle file to finish building…');
+    expect(waitingLabel(['send'])).toBe('Waiting for the send to finish…');
+    expect(waitingLabel(['save'])).toBe('Waiting for the settings to finish saving…');
+    expect(waitingLabel(['check'])).toBe('Waiting for the book to be free…');
+  });
+});
+
+describe('"Convert it again" converts the script again', () => {
+  // Read's blank notice, Settings' fault screen and Send's "no book" screen
+  // each offer "Convert it again". It used to call goTo('convert') and
+  // nothing else, which lands on the result screen the reader just left,
+  // with no way to convert anything. Now it converts the open script's own
+  // source, taking its book's turn, and shows the progress on Convert.
+  class Node {
+    kids: Node[] = [];
+    parent: Node | null = null;
+    attrs = new Map<string, string>();
+    handlers = new Map<string, Array<(event: unknown) => unknown>>();
+    dataset: Record<string, string> = {};
+    className = '';
+    hidden = false;
+    disabled = false;
+    text = '';
+    constructor(readonly tag: string) {}
+    append(...nodes: (Node | string | null | undefined)[]) {
+      for (const n of nodes) {
+        if (n == null) continue;
+        const node = typeof n === 'string' ? Object.assign(new Node('#text'), { text: n }) : n;
+        node.parent = this;
+        this.kids.push(node);
+      }
+    }
+    get firstChild() { return this.kids[0] ?? null; }
+    removeChild(node: Node) { this.kids.splice(this.kids.indexOf(node), 1); node.parent = null; return node; }
+    get textContent(): string { return this.tag === '#text' ? this.text : this.kids.map((k) => k.textContent).join(''); }
+    set textContent(value: string) { this.kids = []; this.append(value); }
+    setAttribute(name: string, value: string) { this.attrs.set(name, value); }
+    getAttribute(name: string) { return this.attrs.get(name) ?? null; }
+    addEventListener(type: string, fn: (event: unknown) => unknown) {
+      this.handlers.set(type, [...(this.handlers.get(type) ?? []), fn]);
+    }
+    click() { for (const fn of this.handlers.get('click') ?? []) fn({ target: this, currentTarget: this }); }
+    querySelector() { return null; }
+    get classList() { return { toggle: () => true, contains: () => false, add: () => {}, remove: () => {} }; }
+    buttons(): Node[] {
+      return this.kids.flatMap((k) => (k.tag === 'button' ? [k, ...k.buttons()] : k.buttons()));
+    }
+  }
+  const g = globalThis as unknown as Record<string, unknown>;
+  const asked: string[][] = [];
+  // Every engine call is held, then refused once the test is done: app.js
+  // counts a running call toward "busy" for the whole file, so a call left
+  // hanging here would hold off every later test's idle wait.
+  const pending: Array<(stdout: string) => void> = [];
+  beforeEach(() => {
+    asked.length = 0;
+    g.document = {
+      createElement: (tag: string) => new Node(tag),
+      createElementNS: (_ns: string, tag: string) => new Node(tag),
+      createTextNode: (value: string) => Object.assign(new Node('#text'), { text: value }),
+      adoptedStyleSheets: [],
+    };
+    g.CSSStyleSheet = class { replaceSync() {} };
+    g.window = {
+      __TAURI__: {
+        core: {
+          invoke: (_cmd: string, { args }: { args: string[] }) => {
+            asked.push(args);
+            return new Promise<string>((resolve) => pending.push(resolve));
+          },
+        },
+        event: { listen: async () => () => {} },
+      },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+  });
+  afterEach(async () => {
+    for (const resolve of pending.splice(0)) resolve(JSON.stringify({ ok: false }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    delete g.window; delete g.document; delete g.CSSStyleSheet;
+  });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  /** The surfaces' shared context, recording where it was sent. */
+  function context(script: unknown) {
+    const went: string[] = [];
+    let again = 0;
+    return {
+      went,
+      again: () => again,
+      ctx: {
+        state: { script, reducedMotion: true },
+        goTo: (id: string) => went.push(id),
+        restoreFocus: () => {},
+        scriptChanged: () => {},
+        convertAgain: () => { again += 1; },
+      },
+    };
+  }
+  const againButton = (pane: Node) => pane.buttons().find((b) => b.textContent === 'Convert it again');
+
+  test('convertAgain converts the open script’s own source and goes to Convert to show it', async () => {
+    const convert = await import(`${join(UI, 'convert.js')}?again-source`);
+    const { ctx, went } = context({ path: '/s/Field Station.pdf', title: 'Field Station' });
+    convert.mount(new Node('section'), ctx);
+    went.length = 0;
+    asked.length = 0;
+    convert.convertAgain();
+    await tick();
+    expect(went).toEqual(['convert']);
+    expect(asked.map((args) => args[0])).toEqual(['/s/Field Station.pdf']);
+    expect(asked[0]).toContain('--json');
+  });
+
+  test('a script with no source path known only goes to Convert', async () => {
+    const convert = await import(`${join(UI, 'convert.js')}?again-nopath`);
+    const { ctx, went } = context({ path: null, title: 'Field Station' });
+    convert.mount(new Node('section'), ctx);
+    went.length = 0;
+    asked.length = 0;
+    convert.convertAgain();
+    await tick();
+    expect(went).toEqual(['convert']);
+    expect(asked).toEqual([]);
+  });
+
+  test('Read’s blank notice converts again', async () => {
+    const reader = await import(`${join(UI, 'read.js')}?again`);
+    const { ctx, went, again } = context({ path: '/s/a.pdf', title: 'A', previewHtml: '' });
+    const pane = new Node('section');
+    reader.mount(pane, ctx);
+    againButton(pane)!.click();
+    expect(again()).toBe(1);
+    expect(went).toEqual([]);
+  });
+
+  test('Settings’ fault screen converts again', async () => {
+    const tune = await import(`${join(UI, 'tune.js')}?again`);
+    const { ctx, again } = context({ path: '/s/a.pdf', title: 'A', fountainPath: null, epubPath: null, settings: null });
+    const pane = new Node('section');
+    tune.mount(pane, ctx);
+    await tune.show();
+    againButton(pane)!.click();
+    expect(again()).toBe(1);
+  });
+
+  test('Send’s "no book to send" screen converts again', async () => {
+    const send = await import(`${join(UI, 'send.js')}?again`);
+    const { ctx, again } = context({ path: '/s/a.pdf', title: 'A', epubPath: null });
+    const pane = new Node('section');
+    send.mount(pane, ctx);
+    againButton(pane)!.click();
+    expect(again()).toBe(1);
+  });
+
+  test('main.js hands every surface the Convert surface’s own convertAgain', () => {
+    expect(read('main.js')).toMatch(/convertAgain: \(\) => convert\.convertAgain\(\)/);
   });
 });
 
@@ -2665,6 +2893,171 @@ describe('the real flow and the real runEngine, driven together end to end', () 
       delete g.window;
       delete g.localStorage;
     }
+  });
+});
+
+describe('the scene list is one Tab stop, walked with the arrow keys', () => {
+  // One Tab stop per scene put ninety stops between the tabs and the script.
+  // The list is now one stop with a roving tabindex, the pattern frame.js's
+  // tablist uses: Up/Down/Home/End move between scenes, Enter and Space are
+  // the buttons' own, and the stop is the scene the reader is in.
+  type Rove = {
+    railStep: (key: string, at: number, count: number) => number | null;
+  };
+
+  test('railStep moves one scene, or to an end, and stops at the ends', async () => {
+    const { railStep } = (await import(join(UI, 'read.js'))) as Rove;
+    expect(railStep('ArrowDown', 0, 3)).toBe(1);
+    expect(railStep('ArrowDown', 2, 3)).toBe(2);
+    expect(railStep('ArrowUp', 1, 3)).toBe(0);
+    expect(railStep('ArrowUp', 0, 3)).toBe(0);
+    expect(railStep('Home', 2, 3)).toBe(0);
+    expect(railStep('End', 0, 3)).toBe(2);
+    expect(railStep('Enter', 0, 3)).toBeNull();
+    expect(railStep('ArrowRight', 0, 3)).toBeNull();
+    expect(railStep('ArrowDown', 0, 0)).toBeNull();
+  });
+
+  // A document just big enough for the reader to draw a ready script into,
+  // load it, build its rail and mark a scene.
+  class Node {
+    kids: Node[] = [];
+    parent: Node | null = null;
+    attrs = new Map<string, string>();
+    handlers = new Map<string, Array<(event: unknown) => unknown>>();
+    className = '';
+    hidden = false;
+    disabled = false;
+    text = '';
+    tabIndex = 0;
+    [key: string]: unknown;
+    constructor(readonly tag: string) {}
+    append(...nodes: (Node | string | null | undefined)[]) {
+      for (const n of nodes) {
+        if (n == null) continue;
+        const node = typeof n === 'string' ? Object.assign(new Node('#text'), { text: n }) : n;
+        node.parent = this;
+        this.kids.push(node);
+      }
+    }
+    get firstChild() { return this.kids[0] ?? null; }
+    removeChild(node: Node) { this.kids.splice(this.kids.indexOf(node), 1); node.parent = null; return node; }
+    get textContent(): string { return this.tag === '#text' ? this.text : this.kids.map((k) => k.textContent).join(''); }
+    set textContent(value: string) { this.kids = []; this.append(value); }
+    setAttribute(name: string, value: string) {
+      this.attrs.set(name, value);
+      if (name === 'tabindex') this.tabIndex = Number(value);
+    }
+    getAttribute(name: string) { return this.attrs.get(name) ?? null; }
+    removeAttribute(name: string) { this.attrs.delete(name); }
+    addEventListener(type: string, fn: (event: unknown) => unknown) {
+      this.handlers.set(type, [...(this.handlers.get(type) ?? []), fn]);
+    }
+    fire(type: string, event: Record<string, unknown> = {}) {
+      for (const fn of this.handlers.get(type) ?? []) fn({ target: this, ...event });
+    }
+    focus() { (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement = this; }
+    get classList() {
+      const self = this;
+      const parts = () => self.className.split(' ').filter(Boolean);
+      return {
+        toggle(cls: string, force?: boolean) {
+          const want = force ?? !parts().includes(cls);
+          self.className = parts().filter((c) => c !== cls).concat(want ? [cls] : []).join(' ');
+          return want;
+        },
+        contains: (cls: string) => parts().includes(cls),
+        add: (cls: string) => { if (!parts().includes(cls)) self.className = parts().concat(cls).join(' '); },
+        remove: (cls: string) => { self.className = parts().filter((c) => c !== cls).join(' '); },
+      };
+    }
+    all(tag: string): Node[] { return this.kids.flatMap((k) => (k.tag === tag ? [k, ...k.all(tag)] : k.all(tag))); }
+    byClass(cls: string): Node | null {
+      for (const k of this.kids) {
+        if (k.className.split(' ').includes(cls)) return k;
+        const found = k.byClass(cls);
+        if (found) return found;
+      }
+      return null;
+    }
+  }
+  const g = globalThis as unknown as Record<string, unknown>;
+  const saved: Record<string, unknown> = {};
+  const GLOBALS = ['document', 'DOMParser', 'matchMedia', 'getComputedStyle', 'requestAnimationFrame'];
+  beforeEach(() => { for (const k of GLOBALS) saved[k] = g[k]; });
+  afterEach(() => { for (const k of GLOBALS) { if (saved[k] === undefined) delete g[k]; else g[k] = saved[k]; } });
+
+  /** Mounts the reader on a three-scene script, scrolled into the second
+   *  scene, and loads the frame. Hands back the rail's buttons. */
+  async function railOf() {
+    g.document = {
+      createElement: (tag: string) => new Node(tag),
+      createTextNode: (value: string) => Object.assign(new Node('#text'), { text: value }),
+      documentElement: {},
+      activeElement: null,
+    };
+    g.DOMParser = class {
+      parseFromString() { return { querySelector: () => null, documentElement: { outerHTML: '<html></html>' } }; }
+    };
+    g.matchMedia = () => ({ matches: false, addEventListener: () => {} });
+    g.getComputedStyle = () => ({ getPropertyValue: () => '' });
+    g.requestAnimationFrame = () => 0;
+    const scenes = ['sc-001', 'sc-002', 'sc-003'].map((id, i) => ({
+      id,
+      offsetTop: i * 100,
+      offsetHeight: 100,
+      querySelector: () => ({ childNodes: [{ nodeType: 3, nodeValue: `INT. ROOM ${i + 1} - DAY` }] }),
+      scrollIntoView: () => {},
+    }));
+    const doc = {
+      body: { childElementCount: 3 },
+      querySelectorAll: () => scenes,
+      getElementById: (id: string) => scenes.find((s) => s.id === id) ?? null,
+      adoptedStyleSheets: [],
+    };
+    const reader = await import(`${join(UI, 'read.js')}?rove`);
+    const pane = new Node('section');
+    reader.mount(pane, { state: { script: { title: 'Field Station', previewHtml: '<html>scenes</html>' }, reducedMotion: true } });
+    const frame = pane.all('iframe')[0];
+    Object.assign(frame, {
+      contentDocument: doc,
+      contentWindow: { scrollY: 150, CSSStyleSheet: class { replaceSync() {} }, scrollTo: () => {} },
+      clientHeight: 500,
+    });
+    frame.fire('load');
+    const rail = pane.byClass('scene-rail')!;
+    return { rail, buttons: rail.all('button') };
+  }
+
+  test('the list is one Tab stop, and it is the scene the reader is in', async () => {
+    const { buttons } = await railOf();
+    expect(buttons.length).toBe(3);
+    expect(buttons.map((b) => b.tabIndex)).toEqual([-1, 0, -1]);
+    expect(buttons[1].getAttribute('aria-current')).toBe('true');
+  });
+
+  test('Up, Down, Home and End move the stop and the focus between scenes', async () => {
+    const { rail, buttons } = await railOf();
+    const press = (key: string) => {
+      let prevented = false;
+      const target = (g.document as { activeElement: Node }).activeElement ?? buttons[1];
+      rail.fire('keydown', { key, target, preventDefault: () => { prevented = true; } });
+      return prevented;
+    };
+    buttons[1].focus();
+    expect(press('ArrowDown')).toBe(true);
+    expect((g.document as { activeElement: unknown }).activeElement).toBe(buttons[2]);
+    expect(buttons.map((b) => b.tabIndex)).toEqual([-1, -1, 0]);
+    press('Home');
+    expect((g.document as { activeElement: unknown }).activeElement).toBe(buttons[0]);
+    expect(buttons.map((b) => b.tabIndex)).toEqual([0, -1, -1]);
+    press('End');
+    expect(buttons.map((b) => b.tabIndex)).toEqual([-1, -1, 0]);
+    press('ArrowUp');
+    expect((g.document as { activeElement: unknown }).activeElement).toBe(buttons[1]);
+    // Enter and Space are the button's own: the rail leaves them alone.
+    expect(press('Enter')).toBe(false);
+    expect(press(' ')).toBe(false);
   });
 });
 
@@ -7384,6 +7777,64 @@ describe('a refused file is no longer a dead end', () => {
       appVersion: '0.6.0', osVersion: 'x', context: 'C++ crashed on page 3+4',
     })).searchParams.get('body') ?? '';
     expect(body).toContain('C++ crashed on page 3+4');
+  });
+
+  test('the report carries no path at all, only its extension, whatever the engine said', () => {
+    // The engine's sentence can quote a path, and every part of one can name
+    // the person (their home folder) or the script: its file name, and the
+    // library folder the book sits in, which is named after the script too.
+    // The report goes to a public URL, so each whole path becomes <path>,
+    // keeping only the extension, which tells a bug report what kind of file.
+    const bodyOf = (context: string, home?: string) => parse(feedback.newIssueUrl({
+      appVersion: '0.6.0', osVersion: 'x', context, home,
+    })).searchParams.get('body') ?? '';
+
+    const library = bodyOf('could not write /Users/someone/Documents/Screepub/field-station/field-station.epub');
+    expect(library).not.toContain('field-station');
+    expect(library).not.toContain('someone');
+    expect(library).toContain('could not write <path>.epub');
+
+    const windows = bodyOf('cannot read C:\\Users\\someone\\Documents\\Screepub\\field-station\\field-station.epub, so stopped');
+    expect(windows).not.toContain('field-station');
+    expect(windows).not.toContain('someone');
+    expect(windows).toContain('cannot read <path>.epub, so stopped');
+
+    const mac = bodyOf("internal: ENOENT: no such file or directory, open '/Users/jdoe/Scripts/Night Shift v2.pdf'");
+    expect(mac).not.toContain('jdoe');
+    expect(mac).not.toContain('Night Shift');
+    expect(mac).toContain("open '<path>.pdf'");
+
+    const told = bodyOf('could not write /srv/people/jdoe/Library/Screepub/night/Night Shift.epub because the disk is full', '/srv/people/jdoe');
+    expect(told).toContain('could not write <path>.epub because the disk is full');
+
+    const tilde = bodyOf('cannot read ~/field-station/notes and gave up');
+    expect(tilde).toContain('cannot read <path> and gave up');
+
+    const linux = bodyOf('cannot read /home/jdoe/x.pdf.');
+    expect(linux).toContain('cannot read <path>.pdf.');
+
+    // A bare home folder, with nothing after it, is still not the user's name.
+    expect(bodyOf('home is /Users/jdoe')).not.toContain('jdoe');
+
+    // Prose with a slash in it is not a path, and a link is not mangled.
+    const prose = bodyOf('scanned and/or locked; see https://example.com/help');
+    expect(prose).toContain('scanned and/or locked; see https://example.com/help');
+  });
+
+  test('a long report is capped at about 2000 characters, footer kept', () => {
+    const body = parse(feedback.newIssueUrl({
+      appVersion: '0.6.0', osVersion: 'macOS 15.0', context: 'x'.repeat(10000),
+    })).searchParams.get('body') ?? '';
+    expect(body.length).toBeLessThanOrEqual(2000);
+    expect(body).toContain('Screepub 0.6.0');
+    expect(body).toContain('…');
+  });
+
+  test('the refusal screen hands the report the home folder the library probe learned', () => {
+    const convert = read('convert.js');
+    const report = convert.slice(convert.indexOf('newIssueUrl({'), convert.indexOf("'Report a bug'"));
+    expect(report).toContain('home: knownHome');
+    expect(convert).toMatch(/knownHome = answer\.home|knownHome = library\.home/);
   });
 
   test('the file manager is called what it is called, per platform', async () => {

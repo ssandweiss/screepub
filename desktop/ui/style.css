@@ -68,6 +68,12 @@
   unicode-range: U+0100-02BA, U+1E00-1E9F, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* The browser's own [hidden] { display: none } loses to any class rule that
+ * sets display, so a `.btn` built hidden (the release notes' Install button)
+ * still drew as an empty pill anyone could click. One rule for the whole
+ * window, important so no class can outrank it: hidden means hidden. */
+[hidden] { display: none !important; }
+
 html, body { height: 100%; }
 body {
   margin: 0;
@@ -108,6 +114,10 @@ body {
   background: var(--paper);
   box-sizing: border-box;
   padding: var(--space-7) 0 var(--space-10);
+  /* The query container Read and Settings fold their two columns on
+   * (surfaces.css). The block is the window less its 148px of margins, so
+   * a breakpoint on the window folded at the wrong width. */
+  container-type: inline-size;
 }
 
 /* Fixed to the window, so the paper moves under the binding the way it does
@@ -259,6 +269,8 @@ body {
   font-size: var(--text-note);
   line-height: 1.5;
   color: var(--alarm);
+  /* The engine's sentence can quote a long path with nowhere to break. */
+  overflow-wrap: anywhere;
 }
 
 /* Notes, as a sheet laid over the page. A real <dialog>, so Esc, the focus
@@ -291,7 +303,6 @@ body {
 }
 .sheet-over[open] { animation: sheet-rise var(--motion-state) var(--ease); }
 
-.surface[hidden] { display: none; }
 /* The panel takes focus so Tab can leave the tablist and reach the surface
  * even before it has a control in it. :focus-visible only, so a click never
  * draws a ring round the whole page. */
