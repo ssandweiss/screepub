@@ -352,3 +352,89 @@ describe('the real app.js and a flow, driven together', () => {
     }
   });
 });
+
+describe('a failed cleanup after a good install is not a failed update', () => {
+  // updateInstall closes the plugin's Update object whatever happened. The
+  // bundle is already swapped once downloadAndInstall resolves, so a close()
+  // that throws afterwards must not report a failure: that draws "Try again",
+  // which reinstalls a bundle already on disk.
+  function fakeUpdate(over: Record<string, unknown> = {}) {
+    const calls = { download: 0, close: 0 };
+    const update = {
+      version: '0.8.0',
+      currentVersion: '0.7.2',
+      downloadAndInstall: async (onEvent: (e: unknown) => void) => {
+        calls.download += 1;
+        onEvent({ event: 'Finished' });
+      },
+      close: async () => { calls.close += 1; throw new Error('resource already gone'); },
+      ...over,
+    };
+    return { update, calls };
+  }
+
+  async function quietly<T>(run: () => Promise<T>) {
+    const logged: unknown[][] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => { logged.push(args); };
+    try {
+      return { value: await run(), logged };
+    } finally {
+      console.error = original;
+    }
+  }
+
+  test('updateInstall resolves when only close() throws, and logs the close error', async () => {
+    const app = await import(join(UI, 'app.js'));
+    const { update, calls } = fakeUpdate();
+    const { logged } = await quietly(() => app.updateInstall(update, () => {}));
+    expect(calls).toEqual({ download: 1, close: 1 });
+    expect(logged.length).toBe(1);
+    expect(String(logged[0].at(-1))).toContain('resource already gone');
+  });
+
+  test('a download that fails still fails, and still closes', async () => {
+    const app = await import(join(UI, 'app.js'));
+    const { update, calls } = fakeUpdate({
+      downloadAndInstall: async () => { throw new Error('no network'); },
+    });
+    let message = '';
+    await quietly(() => app.updateInstall(update, () => {}).catch((e: Error) => { message = e.message; }));
+    expect(message).toBe('no network');
+    expect(calls.close).toBe(1);
+  });
+
+  test('through the flow: installed, retired, restarted, and installed once', async () => {
+    const app = await import(join(UI, 'app.js'));
+    const flowMod = await import(join(UI, 'update-flow.js'));
+    const { update, calls } = fakeUpdate();
+    let retired = 0;
+    let restarted = 0;
+    const s = store({ updateOptIn: 'true', updateAsked: 'true' });
+    const flow = flowMod.createUpdateFlow({
+      usable: () => true,
+      now: () => 1,
+      check: async () => null,
+      install: app.updateInstall,
+      busy: () => false,
+      whenIdle: async () => {},
+      restartReady: () => true,
+      restart: async () => { restarted += 1; },
+      retire: () => { retired += 1; },
+      currentVersion: '0.7.2',
+      storage: () => s,
+    });
+    const seen: any[] = [];
+    flow.subscribe((phase: unknown) => seen.push(phase));
+    flow.offerFound({ outcome: 'offer', version: '0.8.0', body: '', update });
+    await quietly(async () => {
+      await flow.start();
+      await flow.start(); // a second click must not reinstall
+    });
+    expect(seen.map((p) => p?.kind)).not.toContain('failed');
+    expect(seen.at(-1).kind).toBe('restarting');
+    expect(retired).toBe(1);
+    expect(restarted).toBe(1);
+    expect(calls.download).toBe(1);
+  });
+});

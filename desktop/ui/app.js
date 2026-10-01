@@ -529,12 +529,22 @@ export async function updateCheck() {
  *
  *  `close()` releases a resource held on the Rust side, so it runs whatever
  *  happened. The plugin does not relaunch on macOS; restartApp below does,
- *  once whenIdle above says the engine is quiet enough to leave. */
+ *  once whenIdle above says the engine is quiet enough to leave.
+ *
+ *  A close() that throws is logged, never thrown. After a good install the
+ *  bundle is already swapped, and reporting the cleanup as a failed update
+ *  would draw a "Try again" that reinstalls a bundle already on disk. After
+ *  a failed download, the download's own error is the one a reader needs,
+ *  and must not be replaced by the cleanup's. */
 export async function updateInstall(update, onProgress) {
   try {
     await update.downloadAndInstall((event) => onProgress?.(event));
   } finally {
-    await update.close?.();
+    try {
+      await update.close?.();
+    } catch (err) {
+      console.error('app.js: closing the Update object failed', err);
+    }
   }
 }
 
