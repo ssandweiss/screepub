@@ -8,9 +8,9 @@
 // and without the sidecar, must produce different CSS, and the value asserted
 // is one the defaults do not carry.
 import { afterAll, beforeAll, describe, test, expect } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import JSZip from 'jszip';
 import { libraryOutput } from '../src/library';
 import { writeAppSettings } from '../src/settings/app';
@@ -358,6 +358,10 @@ describe('a library conversion saves the settings it started from', () => {
     // The book never landed, so the settings it would have started from
     // must not be recorded as this script's own either.
     expect(existsSync(`${prefix}.screepub.json`)).toBe(false);
+    // Nor the book's own temp file: the write that failed must take its
+    // hidden `.<name>.<pid>.tmp` with it, or every failed conversion leaves
+    // a whole EPUB's worth of litter in the reader's library folder.
+    expect(readdirSync(dirname(prefix)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   }, 30000);
 
   test('a flag used on the very first --library conversion is not pinned: what gets saved is what the script started from', async () => {

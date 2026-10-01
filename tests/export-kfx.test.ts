@@ -14,8 +14,12 @@ import {
   listsKfxOutput,
   pluginTableHeader,
   KfxToolchainNotReadyError,
+  pluginInstalled,
+  debugRunner,
+  PLUGIN_LIST_TIMEOUT_MS,
+  PLUGIN_INSTALL_TIMEOUT_MS,
 } from '../src/export/kfx';
-import { calibreTool, CALIBRE_FORMAT_GUARDS } from '../src/export/calibre';
+import { calibreTool, CALIBRE_FORMAT_GUARDS, CalibreTimedOutError } from '../src/export/calibre';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-export-kfx-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
@@ -726,5 +730,53 @@ describe('installKfxPlugin', () => {
       expect(handler).toContain('SCREEPUB_RESULT');
       expect(handler, `${clause} does not report removed`).toContain("'removed': removed");
     }
+  });
+});
+
+// Nothing used to time out Calibre here, so a Kindle Previewer stuck on a
+// dialog held the window's turn forever. The real commands are never run:
+// a /bin/sh script that just sleeps stands in for each.
+describe('every Calibre spawn here has a timeout', () => {
+  function sleeper(): string {
+    const dir = mkdtempSync(join(SCRATCH, 'sleeper-'));
+    const tool = join(dir, 'calibre-tool');
+    writeFileSync(tool, '#!/bin/sh\nsleep 5\n');
+    chmodSync(tool, 0o755);
+    return tool;
+  }
+
+  test('the limits: a minute to list plugins, five to install one', () => {
+    expect(PLUGIN_LIST_TIMEOUT_MS).toBe(60 * 1000);
+    expect(PLUGIN_INSTALL_TIMEOUT_MS).toBe(5 * 60 * 1000);
+  });
+
+  test('a plugin listing that hangs reads as not installed, so the ladder degrades', async () => {
+    if (platform === 'win32') return;
+    const started = Date.now();
+    expect(await pluginInstalled(sleeper(), 200)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(4000);
+  });
+
+  test('an install that hangs is stopped and reported, never left running', async () => {
+    if (platform === 'win32') return;
+    const tool = sleeper();
+    const started = Date.now();
+    const result = await installKfxPlugin(debugRunner(200), tool);
+    expect(Date.now() - started).toBeLessThan(4000);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('was stopped');
+  });
+
+  test('a KFX conversion that hangs is stopped, and its scratch and temp folder go with it', async () => {
+    if (platform === 'win32') return;
+    const workDir = mkdtempSync(join(SCRATCH, 'kfx-hang-'));
+    const epub = join(workDir, 'book.epub');
+    writeFileSync(epub, 'fake epub bytes');
+    const tool = sleeper();
+    await expect(
+      toKfx(epub, undefined, { tool: () => tool, status: async () => READY, timeoutMs: 200 }),
+    ).rejects.toThrow(CalibreTimedOutError);
+    expect(existsSync(kfxScratchPath(epub))).toBe(false);
+    expect(existsSync(kfxSibling(epub))).toBe(false);
   });
 });

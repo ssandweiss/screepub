@@ -1,5 +1,5 @@
 import { afterAll, test, expect } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { DEFAULT_FORMAT_OPTIONS, type FormatOptions } from '../src/options';
@@ -108,4 +108,14 @@ test('every FormatOptions field has an override row', () => {
   const all = new Set(Object.keys(DEFAULT_FORMAT_OPTIONS));
   const covered = new Set(OVERRIDE_CASES.map((c) => c.field as string));
   expect([...all].filter((f) => !covered.has(f))).toEqual([]);
+});
+
+test('a sidecar write that cannot land leaves no temp file behind, and the error still surfaces', () => {
+  const dir = library();
+  const fountain = join(dir, 'Blocked.fountain');
+  // A DIRECTORY where the sidecar should be: the temp file writes fine,
+  // then the rename over a directory fails.
+  mkdirSync(sidecarPath(fountain));
+  expect(() => saveScriptSettings(DEFAULT_FORMAT_OPTIONS, fountain)).toThrow();
+  expect(readdirSync(dir)).toEqual([basename(sidecarPath(fountain))]);
 });

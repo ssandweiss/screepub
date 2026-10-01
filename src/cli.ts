@@ -3,7 +3,7 @@
 import { parseArgs } from 'node:util';
 import { existsSync } from 'node:fs';
 import { basename, delimiter, dirname, extname, join } from 'node:path';
-import { readFile, writeFile, rename } from 'node:fs/promises';
+import { readFile, writeFile, rename, rm } from 'node:fs/promises';
 // Inlined by `bun build --compile`, so the shipped binary reports the same
 // version as the tag that built it. release.sh checks the two agree.
 import pkg from '../package.json' with { type: 'json' };
@@ -380,14 +380,22 @@ let jsonMode = process.argv.includes('--json');
 
 /// Write to a temp file then rename into place, so a reader (e.g. the app's
 /// reader window mid-render) never observes a partially-written output.
+/// A write or rename that fails takes the temp file with it (a failed
+/// conversion used to leave a whole hidden EPUB in the library), and the
+/// original error is what the caller sees.
 async function writeFileAtomic(
   path: string,
   data: Uint8Array | string,
   enc?: BufferEncoding,
 ): Promise<void> {
   const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
-  await writeFile(tmp, data, enc);
-  await rename(tmp, path);
+  try {
+    await writeFile(tmp, data, enc);
+    await rename(tmp, path);
+  } catch (error) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 /** Print one line on stdout and WAIT for it to leave this process.

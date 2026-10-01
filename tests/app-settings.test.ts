@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appSettingsPath, readAppSettings, writeAppSettings } from '../src/settings/app';
@@ -79,6 +79,22 @@ describe('where the app settings file is', () => {
       '/home/ada/.config/screepub/settings.json',
     );
   });
+
+  test('a relative SCREEPUB_CONFIG_DIR is ignored, not resolved against wherever the engine started', () => {
+    // Launched from Finder the engine's working folder is `/`, so a relative
+    // value used to mean a settings folder at the root of the disk.
+    for (const relative of ['config', './config', '../config', '.']) {
+      expect(appSettingsPath('linux', { HOME, SCREEPUB_CONFIG_DIR: relative })).toBe(
+        '/home/ada/.config/screepub/settings.json',
+      );
+    }
+  });
+
+  test('an empty SCREEPUB_CONFIG_DIR is ignored', () => {
+    expect(appSettingsPath('linux', { HOME, SCREEPUB_CONFIG_DIR: '' })).toBe(
+      '/home/ada/.config/screepub/settings.json',
+    );
+  });
 });
 
 describe('reading app settings never throws', () => {
@@ -142,6 +158,41 @@ describe('writing app settings', () => {
     const path = join(dir, 'settings.json');
     writeAppSettings({ lastRoute: 'kindle' }, path);
     expect(readdirSync(dir)).toEqual(['settings.json']);
+  });
+
+  test('a write that cannot land leaves no temp file behind, and the error still surfaces', () => {
+    const dir = scratchDir('write');
+    // A DIRECTORY where the settings file should be: the temp file writes
+    // fine, then the rename over a directory fails.
+    const path = join(dir, 'settings.json');
+    mkdirSync(path, { recursive: true });
+    expect(() => writeAppSettings({ lastRoute: 'kindle' }, path)).toThrow();
+    expect(readdirSync(dir)).toEqual(['settings.json']);
+  });
+
+  // The owner's decision, 2026-10-01: saving over a settings file that is
+  // corrupt or unreadable REPLACES it with the new patch rather than
+  // refusing the save. Pinned so a change to that is a deliberate one.
+  test('saving over a corrupt settings file replaces it with the patch alone', () => {
+    const dir = scratchDir('write');
+    const path = join(dir, 'settings.json');
+    mkdirSync(dir, { recursive: true });
+    for (const corrupt of ['{"libraryPath": "/x", trunc', '[1,2]', 'null', '']) {
+      writeFileSync(path, corrupt);
+      expect(writeAppSettings({ lastRoute: 'kindle' }, path)).toEqual({ lastRoute: 'kindle' });
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ lastRoute: 'kindle' });
+    }
+  });
+
+  test('saving over a settings file that cannot be read replaces it too', () => {
+    if (process.platform === 'win32' || process.getuid?.() === 0) return; // chmod 000 does not stop root
+    const dir = scratchDir('write');
+    const path = join(dir, 'settings.json');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path, JSON.stringify({ libraryPath: '/x' }));
+    chmodSync(path, 0o000);
+    expect(writeAppSettings({ lastRoute: 'kindle' }, path)).toEqual({ lastRoute: 'kindle' });
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ lastRoute: 'kindle' });
   });
 
   test('returns exactly what was written', () => {
@@ -211,6 +262,45 @@ describe('the test-run guard: no test can reach the real settings file', () => {
     // test would wrongly pass. Checked independently against the real path.
     expect(stdout.trim()).not.toBe(REAL_SETTINGS_PATH);
     expect(stdout.trim()).toBe(appSettingsPath());
+  });
+
+  // The preload exactly as bunfig.toml loads it. (`bun -e "require(...)"`
+  // is no stand-in: on bun 1.3.14 a throw inside the required module exits
+  // 0 with no output at all.)
+  const PRELOAD_ONLY = [
+    'bun', '--preload', './tests/isolate-app-settings.ts', '-e', 'console.log(process.env.SCREEPUB_CONFIG_DIR)',
+  ];
+
+  test('the preload refuses a blank or relative value instead of running half guarded', async () => {
+    // The engine ignores both and reads the REAL settings file, and a set
+    // variable is never replaced by .env.test, so every bare spawn in the
+    // suite would inherit it. The preload has to stop the run.
+    for (const value of ['', '   ', 'relative/config']) {
+      const proc = Bun.spawn(
+        PRELOAD_ONLY,
+        { cwd: ROOT, stdout: 'pipe', stderr: 'pipe', env: { ...process.env, SCREEPUB_CONFIG_DIR: value } },
+      );
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      expect(exitCode).not.toBe(0);
+      expect(stdout).toBe('');
+      expect(stderr).toContain('SCREEPUB_CONFIG_DIR is set to');
+    }
+  });
+
+  test('the preload installs the guard when the variable is not set at all', async () => {
+    const env: Record<string, string | undefined> = { ...process.env };
+    delete env.SCREEPUB_CONFIG_DIR;
+    const proc = Bun.spawn(
+      PRELOAD_ONLY,
+      { cwd: ROOT, stdout: 'pipe', stderr: 'pipe', env },
+    );
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    expect(exitCode).toBe(0);
+    expect(stdout.trim()).toBe(TEST_SETTINGS_GUARD);
   });
 
   test('.env.test and the preload agree on the guard path', () => {

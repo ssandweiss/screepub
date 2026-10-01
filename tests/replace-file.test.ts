@@ -147,3 +147,46 @@ test('a clean-up that fails too does not hide why the copy failed', () => {
   expect((thrown as Error).message).toContain(dest);
   expect(readFileSync(dest, 'utf8')).toBe('old');
 });
+
+// Unplugging a reader right after "Sent" could leave a truncated book: the
+// rename can reach the disk before the copied bytes do. The copy is now
+// flushed to the device before the rename puts it in place. Whether bytes
+// reach the device cannot be observed from here, so the seam records WHEN
+// the flush happens: on the finished partial, before the old book is
+// replaced.
+test('the copy is flushed to the device before it replaces the old book', () => {
+  const dir = temp('replace');
+  const src = join(dir, 'a.azw3');
+  const dest = join(dir, 'b.azw3');
+  writeFileSync(src, 'the new book');
+  writeFileSync(dest, 'the old book');
+  const seen: { partial: string; destination: string }[] = [];
+  replaceFile(src, dest, {
+    sync: () => {
+      seen.push({
+        partial: readFileSync(partialPathFor(dest), 'utf8'),
+        destination: readFileSync(dest, 'utf8'),
+      });
+    },
+  });
+  expect(seen).toEqual([{ partial: 'the new book', destination: 'the old book' }]);
+  expect(readFileSync(dest, 'utf8')).toBe('the new book');
+  expect(readdirSync(dir).sort()).toEqual(['a.azw3', 'b.azw3']);
+});
+
+test('a flush that fails leaves the old book and takes the partial away', () => {
+  const dir = temp('replace');
+  const src = join(dir, 'a.azw3');
+  const dest = join(dir, 'b.azw3');
+  writeFileSync(src, 'the new book');
+  writeFileSync(dest, 'the old book');
+  expect(() =>
+    replaceFile(src, dest, {
+      sync: () => {
+        throw Object.assign(new Error('EIO: i/o error, fsync'), { code: 'EIO' });
+      },
+    }),
+  ).toThrow('EIO');
+  expect(readFileSync(dest, 'utf8')).toBe('the old book');
+  expect(readdirSync(dir).sort()).toEqual(['a.azw3', 'b.azw3']);
+});

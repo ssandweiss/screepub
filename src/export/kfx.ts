@@ -11,7 +11,18 @@ import { existsSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { platform } from 'node:process';
-import { calibreTool, runCalibre, CALIBRE_FORMAT_GUARDS, CalibreMissingError, CalibreFailedError } from './calibre';
+import {
+  calibreTool, runCalibre, runWithTimeout, CALIBRE_FORMAT_GUARDS,
+  CalibreMissingError, CalibreFailedError,
+} from './calibre';
+
+/** How long `calibre-customize --list-plugins` may take (normally about a
+ * second of Python startup) before the plugin reads as not installed. */
+export const PLUGIN_LIST_TIMEOUT_MS = 60 * 1000;
+
+/** How long the plugin install may take: two downloads and Calibre's own
+ * add_plugin, normally seconds, but on a slow connection more. */
+export const PLUGIN_INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
 
 export interface KfxStatus {
   calibre: boolean;
@@ -35,11 +46,17 @@ export function previewerPath(): string | null {
   return null;
 }
 
-async function pluginInstalled(customize: string): Promise<boolean> {
+/** Whether this Calibre has the KFX Output plugin. A listing that does not
+ * finish in time reads as "not installed": the ladder then degrades to AZW3
+ * rather than waiting on a Calibre that may never answer. Exported (marked
+ * internal) only so a test can give it a fake tool and a short timeout. */
+export async function pluginInstalled(
+  customize: string,
+  timeoutMs: number = PLUGIN_LIST_TIMEOUT_MS,
+): Promise<boolean> {
   // env: process.env, not left out: see runCalibre in calibre.ts.
-  const proc = Bun.spawn([customize, '--list-plugins'], { stdout: 'pipe', stderr: 'pipe', env: process.env });
-  const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
-  return code === 0 && listsKfxOutput(stdout);
+  const { code, stdout, timedOut } = await runWithTimeout([customize, '--list-plugins'], process.env, timeoutMs);
+  return !timedOut && code === 0 && listsKfxOutput(stdout);
 }
 
 /** Whether a `calibre-customize --list-plugins` listing holds the KFX Output
@@ -165,6 +182,9 @@ export class KfxToolchainNotReadyError extends Error {
 export interface KfxDeps {
   tool?: () => string | null;
   status?: () => Promise<KfxStatus>;
+  /** How long the conversion may run; CONVERSION_TIMEOUT_MS unless a test
+   * needs to see a timeout in milliseconds. */
+  timeoutMs?: number;
 }
 
 /** Convert an EPUB to KFX. Runs the same guard trio as the AZW3 recipe, from
@@ -207,7 +227,7 @@ export async function toKfx(
   const env = { ...process.env, TMPDIR: previewerTmp, TMP: previewerTmp, TEMP: previewerTmp };
   onStage?.('converting to KFX (Kindle Previewer can take ~20s to start)…');
   try {
-    await runCalibre(tool, [epub, scratch, ...CALIBRE_FORMAT_GUARDS], env);
+    await runCalibre(tool, [epub, scratch, ...CALIBRE_FORMAT_GUARDS], env, deps.timeoutMs);
     if (!existsSync(scratch)) {
       throw new CalibreFailedError('ebook-convert exited cleanly but produced no .kfx');
     }
@@ -349,18 +369,18 @@ export interface KfxInstallResult {
   removed?: string[];
 }
 
-type DebugRunner = (argv: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
+type DebugRunner = (
+  argv: string[],
+) => Promise<{ code: number; stdout: string; stderr: string; timedOut?: boolean }>;
 
-const realDebugRun: DebugRunner = async (argv) => {
+/** The real runner: spawns calibre-debug and stops it, children and all, if
+ * it is still running after `timeoutMs`. Exported (marked internal) so a
+ * test can hand it a short timeout and a fake tool. */
+export function debugRunner(timeoutMs: number = PLUGIN_INSTALL_TIMEOUT_MS): DebugRunner {
   // env: process.env, not left out: see runCalibre in calibre.ts.
-  const proc = Bun.spawn(argv, { stdout: 'pipe', stderr: 'pipe', env: process.env });
-  const [code, stdout, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  return { code, stdout, stderr };
-};
+  return (argv) => runWithTimeout(argv, process.env, timeoutMs);
+}
+
 
 /**
  * Install (or update to) the current KFX Output plugin, using Calibre's own
@@ -369,13 +389,21 @@ const realDebugRun: DebugRunner = async (argv) => {
  * caller down with it.
  */
 export async function installKfxPlugin(
-  run: DebugRunner = realDebugRun,
+  run: DebugRunner = debugRunner(),
   debugTool: string | null = calibreTool('calibre-debug'),
 ): Promise<KfxInstallResult> {
   if (!debugTool) {
     return { ok: false, reason: "Calibre was not found, and the plugin lives inside it." };
   }
-  const { code, stdout, stderr } = await run([debugTool, '-c', INSTALL_SNIPPET]);
+  const { code, stdout, stderr, timedOut } = await run([debugTool, '-c', INSTALL_SNIPPET]);
+  if (timedOut) {
+    // Whatever it printed is not an answer: it was cut off. Whether a fork
+    // had already been cleared cannot be known, so nothing is claimed.
+    return {
+      ok: false,
+      reason: 'Calibre was still installing the plugin after a long wait, so it was stopped. Check the internet connection, then try again.',
+    };
+  }
   // The result LINE decides, not the exit code: calibre-debug exits 0 for a
   // snippet that caught its own exception, so a bare exit code would read a
   // reported failure as success.

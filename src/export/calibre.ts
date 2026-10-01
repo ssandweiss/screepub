@@ -76,6 +76,92 @@ export class CalibreFailedError extends Error {
   }
 }
 
+/** How long a conversion may run before it is stopped. A KFX build takes
+ * 20 to 40 seconds and a long script more, so this is generous: it is not a
+ * performance budget, only the point past which the run is plainly stuck
+ * (Kindle Previewer waiting on a first-run dialog nobody can see, say) and
+ * the book's turn in the window has to come back. */
+export const CONVERSION_TIMEOUT_MS = 10 * 60 * 1000;
+
+export class CalibreTimedOutError extends CalibreFailedError {
+  constructor(tool: string, timeoutMs: number) {
+    super('timed out');
+    // Its own sentence, not CalibreFailedError's "ebook-convert failed:"
+    // prefix, which would name the tool twice. Still a CalibreFailedError,
+    // so every caller that reports a failed conversion reports this one the
+    // same way (export-failed, send-failed or route-failed, by verb).
+    this.message =
+      `${basename(tool)} was still running after ${durationInWords(timeoutMs)}, so it was stopped. ` +
+      'If Kindle Previewer or Calibre opened a window, close it and try again.';
+    this.name = 'CalibreTimedOutError';
+  }
+}
+
+/** "10 minutes", "60 seconds", "300 ms": whichever reads plainly. */
+export function durationInWords(ms: number): string {
+  if (ms >= 60_000 && ms % 60_000 === 0) {
+    const minutes = ms / 60_000;
+    return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  }
+  if (ms >= 1000 && ms % 1000 === 0) {
+    const seconds = ms / 1000;
+    return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  }
+  return `${ms} ms`;
+}
+
+export interface TimedRun {
+  code: number;
+  stdout: string;
+  stderr: string;
+  /** True when the run was stopped for outliving its timeout. */
+  timedOut: boolean;
+}
+
+/** Spawn `argv`, collect its output, and stop it if it is still running
+ * after `timeoutMs`. Every Calibre spawn goes through here, so none of them
+ * can hold a caller forever.
+ *
+ * Stopping has to reach the CHILDREN too: what actually hangs is Kindle
+ * Previewer, which ebook-convert's plugin starts, and a grandchild left
+ * alive also keeps the output pipes open, so the reads below would never
+ * finish either. On macOS and Linux the run gets a process group of its own
+ * (`detached`) and the whole group is killed; Windows has no process groups
+ * to signal, so there only the tool itself is stopped. */
+export async function runWithTimeout(
+  argv: string[],
+  env: Record<string, string | undefined>,
+  timeoutMs: number,
+): Promise<TimedRun> {
+  const ownGroup = process.platform !== 'win32';
+  const proc = Bun.spawn(argv, { stdout: 'pipe', stderr: 'pipe', env, detached: ownGroup });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try {
+      if (ownGroup) process.kill(-proc.pid, 'SIGKILL');
+      else proc.kill('SIGKILL');
+    } catch {
+      // Already gone between the timer firing and the kill.
+      try {
+        proc.kill('SIGKILL');
+      } catch {
+        // Nothing left to stop.
+      }
+    }
+  }, timeoutMs);
+  try {
+    const [code, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    return { code, stdout, stderr, timedOut };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Exported because export/kfx.ts runs the same tool with the same guards.
  *  `env` replaces the child's environment when given (kfx.ts uses it to
  *  hand Kindle Previewer a temp folder of its own); omitted, the child gets
@@ -92,9 +178,10 @@ export async function runCalibre(
   tool: string,
   args: string[],
   env: Record<string, string | undefined> = process.env,
+  timeoutMs: number = CONVERSION_TIMEOUT_MS,
 ): Promise<void> {
-  const proc = Bun.spawn([tool, ...args], { stdout: 'pipe', stderr: 'pipe', env });
-  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+  const { code, stderr, timedOut } = await runWithTimeout([tool, ...args], env, timeoutMs);
+  if (timedOut) throw new CalibreTimedOutError(tool, timeoutMs);
   if (code !== 0) throw new CalibreFailedError(stderr.trim() || `exit ${code}`);
 }
 
@@ -118,6 +205,9 @@ export function azw3ScratchPath(epub: string): string {
  * real Calibre sits at a fixed path ahead of PATH (see kfx.ts's KfxDeps). */
 export interface Azw3Deps {
   tool?: () => string | null;
+  /** How long the conversion may run; CONVERSION_TIMEOUT_MS unless a test
+   * needs to see a timeout in milliseconds. */
+  timeoutMs?: number;
 }
 
 /** Convert an EPUB to AZW3 next to it (~1s). Always converts: whether an
@@ -132,7 +222,7 @@ export async function toAzw3(epub: string, deps: Azw3Deps = {}): Promise<string>
   const azw3 = azw3Sibling(epub);
   const scratch = azw3ScratchPath(epub);
   try {
-    await runCalibre(tool, [epub, scratch, ...CALIBRE_FORMAT_GUARDS]);
+    await runCalibre(tool, [epub, scratch, ...CALIBRE_FORMAT_GUARDS], process.env, deps.timeoutMs);
     if (!existsSync(scratch)) {
       throw new CalibreFailedError('ebook-convert exited cleanly but produced no .azw3');
     }

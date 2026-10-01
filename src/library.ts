@@ -7,9 +7,10 @@
 // writes beside its input, which is what a command-line tool is expected to
 // do and what existing scripts already rely on.
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmdirSync } from 'node:fs';
 import { basename, dirname, extname, join, posix, resolve, win32 } from 'node:path';
-import { appSettingsPath, homeFolder, readAppSettings } from './settings/app';
+import { absoluteEnvFolder, appSettingsPath, homeFolder, readAppSettings } from './settings/app';
+import { copyFileAtomicSync, writeFileAtomicSync } from './atomic-write';
 
 /** Names this folder's script, so a second PDF with the same stem cannot
  * quietly overwrite the first one's book. One file per script folder.
@@ -66,14 +67,15 @@ function xdgDocuments(home: string, env: Env): string | null {
   return line === undefined ? null : asDocuments(line.slice(line.indexOf('=') + 1));
 }
 
-/** SCREEPUB_LIBRARY, trimmed, or `null` when it is unset or blank. The one
- * rule for whether the env override counts as "set", shared by
+/** SCREEPUB_LIBRARY, resolved, or `null` when it is unset, blank or
+ * relative (a relative value would land the library under the engine's
+ * working folder, `/` when launched from Finder; see absoluteEnvFolder).
+ * The one rule for whether the env override counts as "set", shared by
  * `libraryRoot` (which honours it) and by `app-settings` (which reports it
  * as `fromEnv`), so the two can never disagree over a value that is really
  * just whitespace. */
 export function envLibraryOverride(env: Env): string | null {
-  const trimmed = (env.SCREEPUB_LIBRARY ?? '').trim();
-  return trimmed === '' ? null : trimmed;
+  return absoluteEnvFolder(env.SCREEPUB_LIBRARY);
 }
 
 /** `value`, resolved, when it is absolute for `platform`; `null` otherwise.
@@ -154,7 +156,7 @@ export function libraryRoot(
   settingsPath?: string,
 ): string {
   const override = envLibraryOverride(env);
-  if (override !== null) return resolve(override);
+  if (override !== null) return override;
 
   // The chosen folder wins over the platform default, but only when it is
   // usable: chosenLibraryPath is the one place that decides "usable".
@@ -225,9 +227,26 @@ function folderFor(source: string, root: string): string {
 /** The same folder, created and marked as this script's. */
 function scriptFolder(source: string, root: string): string {
   const folder = folderFor(source, root);
+  const made = !existsSync(folder);
   mkdirSync(folder, { recursive: true });
   if (recordedSource(folder) !== source) {
-    writeFileSync(join(folder, SOURCE_FILE), `${JSON.stringify({ source }, null, 2)}\n`);
+    // Temp file then rename: a marker cut off part way would name no
+    // source, and this script's next conversion would leave the folder (and
+    // the book and tuning in it) for a new hashed one. For the same reason
+    // a folder made just now goes again when its marker cannot be written:
+    // left empty and unmarked, it would read as someone else's next time.
+    try {
+      writeFileAtomicSync(join(folder, SOURCE_FILE), `${JSON.stringify({ source }, null, 2)}\n`);
+    } catch (error) {
+      if (made) {
+        try {
+          rmdirSync(folder);
+        } catch {
+          // Not empty after all, or already gone: leave it.
+        }
+      }
+      throw error;
+    }
   }
   return folder;
 }
@@ -275,6 +294,9 @@ export function adoptSidecar(input: string, output: string): boolean {
   const existing = join(dirname(source), `${stemOf(source)}.screepub.json`);
   const landing = `${output}.screepub.json`;
   if (existsSync(landing) || !existsSync(existing)) return false;
-  copyFileSync(existing, landing);
+  // Temp file then rename: a sidecar cut off part way would already be "in
+  // the library", so it would block every later adoption and the tuning
+  // would be lost.
+  copyFileAtomicSync(existing, landing);
   return true;
 }

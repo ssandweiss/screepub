@@ -1,3 +1,5 @@
+import { absoluteEnvFolder } from '../src/settings/app';
+
 // Preloaded before every test file by bunfig.toml's [test] section. From
 // piece C onward the engine reads the app settings file on ordinary code
 // paths (src/library.ts's libraryRoot, and soon every conversion), so a
@@ -52,6 +54,23 @@
 // disabled.
 export const TEST_SETTINGS_GUARD = '/dev/null/screepub-test-guard';
 
-if ((process.env.SCREEPUB_CONFIG_DIR ?? '').trim() === '') {
+//
+// A value that is SET but blank or relative is refused outright. The engine
+// ignores both (absoluteEnvFolder in src/settings/app.ts) and reads the REAL
+// settings file instead, and because the variable is set, .env.test never
+// replaced it: every bare Bun.spawn in the suite would inherit it and reach
+// the real file, and nothing this preload does to process.env can reach
+// those children. So the run stops here, saying why, rather than carry on
+// half guarded. (Measured: with SCREEPUB_CONFIG_DIR= in the shell, the
+// "spawned CLI child" test in tests/app-settings.test.ts saw the real path.)
+const startingValue = process.env.SCREEPUB_CONFIG_DIR;
+if (startingValue !== undefined && absoluteEnvFolder(startingValue) === null) {
+  throw new Error(
+    `SCREEPUB_CONFIG_DIR is set to ${JSON.stringify(startingValue)}, which the engine ignores ` +
+      'in favour of the real settings file. Unset it, or point it at an absolute folder, ' +
+      'then run bun test again.',
+  );
+}
+if (startingValue === undefined) {
   process.env.SCREEPUB_CONFIG_DIR = TEST_SETTINGS_GUARD;
 }

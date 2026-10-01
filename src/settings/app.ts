@@ -8,9 +8,10 @@
 // movable (a user can point SCREEPUB_LIBRARY, or later a setting, somewhere
 // else), and a file that recorded where to find the library could not
 // itself live inside the thing it locates.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
+import { dirname, isAbsolute, join, posix, resolve, win32 } from 'node:path';
+import { writeFileAtomicSync } from '../atomic-write';
 
 type Env = Record<string, string | undefined>;
 
@@ -30,7 +31,22 @@ export function homeFolder(env: Env): string {
   return env.HOME || env.USERPROFILE || homedir();
 }
 
-/** Folder + 'settings.json'. SCREEPUB_CONFIG_DIR wins everywhere.
+/** An environment variable naming a folder, as an absolute path, or `null`
+ * when it is unset, blank or relative. A relative value would resolve
+ * against the engine's working folder, which is `/` when the app was
+ * launched from Finder, so it is treated as unset rather than honoured
+ * halfway: the same rule a stored libraryPath gets (library.ts's
+ * resolvedIfAbsolute). The HOST's path rules, not a platform parameter's:
+ * the value comes from this process's own environment. The one copy of
+ * that rule, for SCREEPUB_CONFIG_DIR here and SCREEPUB_LIBRARY in
+ * library.ts. */
+export function absoluteEnvFolder(raw: string | undefined): string | null {
+  const value = (raw ?? '').trim();
+  return value !== '' && isAbsolute(value) ? resolve(value) : null;
+}
+
+/** Folder + 'settings.json'. SCREEPUB_CONFIG_DIR wins everywhere, when it
+ * is an absolute path (see absoluteEnvFolder).
  *
  * Platform and env are parameters, not read from the host, for the same
  * reason `src/library.ts`'s `libraryRoot` takes them: it is the only way a
@@ -40,8 +56,8 @@ export function appSettingsPath(
   platform: NodeJS.Platform = process.platform,
   env: Env = process.env,
 ): string {
-  const override = (env.SCREEPUB_CONFIG_DIR ?? '').trim();
-  if (override !== '') return join(resolve(override), 'settings.json');
+  const override = absoluteEnvFolder(env.SCREEPUB_CONFIG_DIR);
+  if (override !== null) return join(override, 'settings.json');
 
   // The PLATFORM's own path rules, not the host's, same as libraryRoot: a
   // path computed for win32 while running on posix (or back) has to use
@@ -87,11 +103,17 @@ export function readAppSettings(path: string = appSettingsPath()): AppSettings {
 
 /** Reads, shallow-merges `patch` over what is there (unknown keys kept, so a
  * write from one piece can never drop a key that belongs to the other),
- * writes atomically (temp file in the same folder, then rename, the same
- * discipline `src/settings/sidecar.ts` uses), and creates the folder.
+ * writes atomically (temp file in the same folder, then rename: see
+ * src/atomic-write.ts), and creates the folder.
  *
  * A key set to `undefined` in `patch` is removed rather than written as
  * `null`, so callers can delete a key without knowing the rest of the file.
+ *
+ * A file that is corrupt or unreadable reads as `{}` (readAppSettings), so
+ * saving over it REPLACES it with the patch alone and whatever else it held
+ * is gone. Intended: the owner chose replace over refusing the save on
+ * 2026-10-01, so a damaged file heals on the next save instead of blocking
+ * every save after it. tests/app-settings.test.ts pins this.
  *
  * The read and the write are not one atomic operation, so two engine calls
  * landing at the same moment (a route saving `lastRoute` while an
@@ -117,9 +139,7 @@ export function writeAppSettings(
 
   const folder = dirname(path);
   if (!existsSync(folder)) mkdirSync(folder, { recursive: true });
-  const tmp = join(folder, `.${basename(path)}.${process.pid}.tmp`);
-  writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`);
-  renameSync(tmp, path);
+  writeFileAtomicSync(path, `${JSON.stringify(merged, null, 2)}\n`);
 
   return merged;
 }

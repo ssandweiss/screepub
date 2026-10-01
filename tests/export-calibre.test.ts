@@ -12,7 +12,10 @@ import {
   isCalibreAvailable,
   toAzw3,
   toKepub,
+  runCalibre,
+  CONVERSION_TIMEOUT_MS,
   CalibreFailedError,
+  CalibreTimedOutError,
   CalibreMissingError,
 } from '../src/export/calibre';
 import { convertFountain } from '../src/convert';
@@ -260,3 +263,59 @@ withCalibre('toKepub names its output .kepub.epub AND emits koboSpan markup', as
   const texts = await Promise.all(entries.map((f) => f.async('string')));
   expect(texts.some((t) => t.includes('koboSpan'))).toBe(true);
 }, 120_000);
+
+// A Calibre that never finishes (Kindle Previewer waiting on a first-run
+// dialog nobody can see) used to hold the book's turn in the window
+// forever. These fakes stand in for it: a script that starts a CHILD that
+// sleeps, records the child's pid, and waits on it, the way ebook-convert
+// waits on Kindle Previewer.
+function hangingTool(): { tool: string; childPid: string } {
+  const dir = mkdtempSync(join(SCRATCH, 'hang-'));
+  const tool = join(dir, 'ebook-convert');
+  const childPid = join(dir, 'child.pid');
+  writeFileSync(tool, `#!/bin/sh\nsleep 30 &\necho $! > "${childPid}"\nwait\n`);
+  chmodSync(tool, 0o755);
+  return { tool, childPid };
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test('a conversion is given ten minutes, not forever', () => {
+  expect(CONVERSION_TIMEOUT_MS).toBe(10 * 60 * 1000);
+});
+
+test('a Calibre run that outlives its timeout is stopped, children and all, with a clear error', async () => {
+  if (platform === 'win32') return; // the fake tool is a /bin/sh script
+  const { tool, childPid } = hangingTool();
+  const started = Date.now();
+  const run = runCalibre(tool, [], process.env, 300);
+  await expect(run).rejects.toThrow(CalibreTimedOutError);
+  await expect(run).rejects.toThrow(CalibreFailedError);
+  await expect(run).rejects.toThrow('still running after');
+  expect(Date.now() - started).toBeLessThan(10_000);
+  // The grandchild is what actually hangs in real life (Kindle Previewer
+  // under Calibre's plugin), so it must not outlive the stop either.
+  const pid = Number(readFileSync(childPid, 'utf8').trim());
+  await Bun.sleep(50);
+  expect(alive(pid)).toBe(false);
+});
+
+test('toAzw3 that times out leaves no scratch behind and keeps the .azw3 already there', async () => {
+  if (platform === 'win32') return;
+  const { tool } = hangingTool();
+  const epub = join(mkdtempSync(join(SCRATCH, 'azw3-hang-')), 'book.epub');
+  writeFileSync(epub, 'fake epub bytes');
+  writeFileSync(azw3Sibling(epub), 'an older conversion');
+
+  await expect(toAzw3(epub, { tool: () => tool, timeoutMs: 300 })).rejects.toThrow(CalibreTimedOutError);
+
+  expect(existsSync(azw3ScratchPath(epub))).toBe(false);
+  expect(readFileSync(azw3Sibling(epub), 'utf8')).toBe('an older conversion');
+});

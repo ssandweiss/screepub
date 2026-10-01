@@ -1,10 +1,11 @@
-import { afterAll, describe, test, expect } from 'bun:test';
+import { afterAll, describe, test, expect, spyOn } from 'bun:test';
+import * as fs from 'node:fs';
 import {
   chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, win32 } from 'node:path';
-import { adoptSidecar, libraryOutput, libraryRoot } from '../src/library';
+import { adoptSidecar, envLibraryOverride, libraryOutput, libraryRoot } from '../src/library';
 import { writeAppSettings } from '../src/settings/app';
 import { TEST_SETTINGS_GUARD } from './isolate-app-settings';
 
@@ -125,6 +126,16 @@ describe('where the library is', () => {
   test('SCREEPUB_LIBRARY wins on every platform, and that is the test seam', () => {
     for (const platform of ['darwin', 'win32', 'linux'] as NodeJS.Platform[]) {
       expect(guardedRoot(platform, { HOME, SCREEPUB_LIBRARY: '/tmp/lib' })).toBe('/tmp/lib');
+    }
+  });
+
+  test('a relative override is not a library: it would resolve against the engine\'s working folder', () => {
+    // Launched from Finder that folder is `/`, so `Screepub` used to mean a
+    // library at the root of the disk. Same rule as a stored libraryPath.
+    for (const relative of ['lib', './lib', '../lib', '.']) {
+      expect(guardedRoot('linux', { HOME, SCREEPUB_LIBRARY: relative }))
+        .toBe('/home/ada/Documents/Screepub');
+      expect(envLibraryOverride({ SCREEPUB_LIBRARY: relative })).toBeNull();
     }
   });
 
@@ -479,6 +490,62 @@ describe('tuning follows the script into the library', () => {
     const output = libraryOutput(join(scripts, 'Draft.pdf'), root);
     expect(adoptSidecar(join(scripts, 'Draft.pdf'), output)).toBe(false);
     expect(existsSync(`${output}.screepub.json`)).toBe(false);
+  });
+});
+
+// A write that dies part way (a full disk, the engine killed) used to leave
+// half a file under the real name. For source.json that orphans the folder:
+// a truncated marker names no source, so the script's next conversion goes
+// to a NEW hashed folder and its book and tuning are stranded. For an
+// adopted sidecar it loses the tuning: a truncated sidecar already "in the
+// library" blocks adoption forever. Both now write a temp file and rename.
+describe('a write that dies part way leaves nothing half written', () => {
+  /** Makes the next write or copy put HALF its bytes down, then fail the
+   * way a full disk does. */
+  function diesHalfWay<K extends 'writeFileSync' | 'copyFileSync'>(name: K) {
+    const real = { writeFileSync: fs.writeFileSync, copyFileSync: fs.copyFileSync };
+    const spy = spyOn(fs, name as 'writeFileSync').mockImplementation(((target: fs.PathOrFileDescriptor, dataOrDest: unknown) => {
+      spy.mockRestore();
+      if (name === 'copyFileSync') {
+        const bytes = fs.readFileSync(target as string);
+        real.writeFileSync(dataOrDest as string, bytes.subarray(0, Math.floor(bytes.length / 2)));
+      } else {
+        const text = String(dataOrDest);
+        real.writeFileSync(target, text.slice(0, Math.floor(text.length / 2)));
+      }
+      throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+    }) as never);
+    return spy;
+  }
+
+  test('source.json: the failed conversion leaves no marker, and the next one gets the same folder', () => {
+    const root = scratch('lib');
+    const scripts = scratch('scripts');
+    writeFileSync(join(scripts, 'Draft.pdf'), 'not really a pdf');
+
+    diesHalfWay('writeFileSync');
+    expect(() => libraryOutput(join(scripts, 'Draft.pdf'), root)).toThrow('ENOSPC');
+    // Not even the folder: left empty and unmarked, it would read as some
+    // other script's, and the retry would go to a hashed folder instead.
+    expect(readdirSync(root)).toEqual([]);
+
+    // Not stranded: the retry claims the plain folder, not a hashed one.
+    expect(libraryOutput(join(scripts, 'Draft.pdf'), root)).toBe(join(root, 'Draft', 'Draft'));
+  });
+
+  test('adopted sidecar: the failed copy leaves nothing, and the next conversion adopts it', () => {
+    const root = scratch('lib');
+    const scripts = scratch('scripts');
+    writeFileSync(join(scripts, 'Draft.pdf'), 'not really a pdf');
+    writeFileSync(join(scripts, 'Draft.screepub.json'), '{"cueIndentPct": 41}');
+    const output = libraryOutput(join(scripts, 'Draft.pdf'), root);
+
+    diesHalfWay('copyFileSync');
+    expect(() => adoptSidecar(join(scripts, 'Draft.pdf'), output)).toThrow('ENOSPC');
+    expect(readdirSync(dirname(output))).toEqual(['source.json']);
+
+    expect(adoptSidecar(join(scripts, 'Draft.pdf'), output)).toBe(true);
+    expect(JSON.parse(readFileSync(`${output}.screepub.json`, 'utf8'))).toEqual({ cueIndentPct: 41 });
   });
 });
 
