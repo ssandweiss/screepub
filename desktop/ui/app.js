@@ -231,6 +231,48 @@ function workEnded() {
   settle();
 }
 
+/** What every engine call is told once an update has been installed. */
+export const UPDATED_MESSAGE = 'Screepub has been updated. Restart it to keep going.';
+
+// The shells whose bundle an update has already swapped (retireEngine).
+// Keyed on the shell object rather than a bare flag: a window has one
+// __TAURI__ for its whole life, so in the app the two are the same thing,
+// but this module is imported once per bun test process and shared by
+// every test that stubs its own shell, and one test's install must not
+// refuse the next test's calls.
+const retiredShells = new WeakSet();
+
+/** The shell, or undefined outside one. Never throws, unlike tauri(),
+ *  which needs a `window` to exist. */
+function shellNow() {
+  return typeof window === 'undefined' ? undefined : window.__TAURI__;
+}
+
+/** An update has been installed: refuse every engine call from now on.
+ *
+ *  tauri-plugin-updater moves the new bundle into this app's own path
+ *  inside downloadAndInstall, and the shell finds the engine there afresh
+ *  on every spawn. So from here on, any call this window starts runs the
+ *  NEW engine with THIS window's argv and JSON expectations: a renamed flag
+ *  is refused as usage, a changed answer could be misread. Calls already
+ *  running finish; they were spawned from the old bundle.
+ *
+ *  Every call is refused, not only the counted ones. Counting is about
+ *  whether a restart should wait for a call, and the hazard here is the
+ *  contract, which a read like `routes` or `kfx-status` carries just as a
+ *  write does. The Send page shows the refusal where its routes would be,
+ *  which is the right thing to tell a reader; the KFX probe draws nothing
+ *  on a failure. */
+export function retireEngine() {
+  const shell = shellNow();
+  if (shell !== null && typeof shell === 'object') retiredShells.add(shell);
+}
+
+function engineRetired() {
+  const shell = shellNow();
+  return shell !== null && typeof shell === 'object' && retiredShells.has(shell);
+}
+
 /** Run the engine and parse its one line of stdout, counted while it runs
  *  (countsTowardBusy names the read-only calls this skips). See
  *  runEngineOnce for what the answer means.
@@ -240,6 +282,8 @@ function workEnded() {
  *  very next line after calling this, with no moment in between where
  *  neither is counted. */
 export async function runEngine(args) {
+  // Refused before anything is counted: a refused call is no work.
+  if (engineRetired()) throw new Error(UPDATED_MESSAGE);
   const counted = countsTowardBusy(args);
   if (counted) inFlight += 1;
   try {

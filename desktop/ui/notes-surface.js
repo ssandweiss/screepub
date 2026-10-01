@@ -81,7 +81,20 @@ export function notesView(phase, state) {
   // while 'failed': a manual check is exactly how someone stuck on a
   // failure finds out whether a newer fix has since shipped.
   const checkDisabled = phase.kind === 'downloading' || phase.kind === 'installing'
-    || phase.kind === 'waiting' || phase.kind === 'restarting' || phase.kind === 'installed';
+    || phase.kind === 'waiting' || phase.kind === 'stalled' || phase.kind === 'restarting'
+    || phase.kind === 'installed';
+  if (phase.kind === 'stalled') {
+    // The wait for the engine was given up (update.js, RESTART_WAIT_CAP_MS).
+    // The bundle is swapped, so the one button left restarts; it installs
+    // nothing.
+    return {
+      say: `Screepub ${version} is installed, but something is still running. `
+        + 'Restart when you are ready.',
+      body: { text: body, hidden: !body },
+      install: { text: updateLabel(phase), hidden: false, disabled: false },
+      checkDisabled,
+    };
+  }
   return {
     say: phase.kind === 'failed' ? phase.message : updateLabel(phase),
     body: { text: body, hidden: !body },

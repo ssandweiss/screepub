@@ -7,21 +7,24 @@
 // factory so a test can hand it fakes; the window uses `flow`, at the bottom.
 import {
   updaterReady, updateCheck, updateInstall, engineBusy, whenIdle, restartReady, restartApp,
+  retireEngine,
 } from './app.js';
 import {
   updatesPossible, runCheck, rememberAnswer, rememberedOffer, rememberFound, forgetFound,
-  installAndRestart,
+  installAndRestart, restartInstalled,
 } from './update.js';
 import { RELEASE } from './notes.js';
 
-/** 'restarting' and 'installed' are final: the process is on its way out, or
- *  there is nothing left for a second click to do. start() below calls this
+/** 'restarting', 'installed' and 'stalled' are final: the process is on its
+ *  way out, or there is nothing left for a second click to do but restart
+ *  ('stalled', which start() answers with restartNow, never a reinstall). start() below calls this
  *  once, right after installAndRestart returns. A failure caught before
  *  installAndRestart could run at all never reaches it: nothing was
  *  returned to ask about, so that path always counts as non-final and
  *  resets `running` directly. */
 function isFinalOutcome(outcome) {
-  return outcome?.outcome === 'restarting' || outcome?.outcome === 'installed';
+  return outcome?.outcome === 'restarting' || outcome?.outcome === 'installed'
+    || outcome?.outcome === 'stalled';
 }
 
 export function createUpdateFlow(deps) {
@@ -29,6 +32,7 @@ export function createUpdateFlow(deps) {
   let offer = null;
   let running = false;
   let booted = false;
+  let restarting = false;
   const listeners = new Set();
 
   /** Call a listener without letting it take anything else down. One
@@ -95,6 +99,15 @@ export function createUpdateFlow(deps) {
     // somebody asked.
   }
 
+  /** The reader's answer to "Restart now": the wait was given up, the bundle
+   *  is already swapped, so a click restarts and installs nothing. Once:
+   *  a second click while the first restart is under way does nothing. */
+  async function restartNow() {
+    if (restarting) return;
+    restarting = true;
+    await restartInstalled({ version: phase.version, restart: deps.restart, emit: setPhase });
+  }
+
   async function launchCheck() {
     const result = await runCheck({
       manual: false, storage: deps.storage(), now: deps.now(), check: deps.check,
@@ -145,6 +158,7 @@ export function createUpdateFlow(deps) {
 
     /** The one run. A second call while it is under way does nothing. */
     async start() {
+      if (phase?.kind === 'stalled') return restartNow();
       if (running || offer === null) return;
       running = true;
       const attempted = offer;
@@ -175,6 +189,8 @@ export function createUpdateFlow(deps) {
           whenIdle: deps.whenIdle,
           restartReady: deps.restartReady,
           restart: deps.restart,
+          retire: deps.retire,
+          waitCap: deps.waitCap,
           onPhase: setPhase,
         });
       } catch (err) {
@@ -249,5 +265,6 @@ export const flow = createUpdateFlow({
   whenIdle,
   restartReady,
   restart: restartApp,
+  retire: retireEngine,
   currentVersion: RELEASE.version,
 });

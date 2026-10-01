@@ -27,12 +27,30 @@
 //     touched zero — it means the engine has been quiet for a while
 //     (ENGINE_QUIET_MS in app.js), long enough to cover an awaited chain like
 //     settings-then-export-then-send.
+//   * The swap happens INSIDE downloadAndInstall: once it resolves, the new
+//     bundle is already at the running app's own path, and the shell finds
+//     the engine there afresh on every spawn. From that moment any engine
+//     call this window starts runs the NEW engine with this window's argv
+//     and JSON expectations, so installAndRestart retires the engine
+//     (app.js, retireEngine) the moment the install succeeds. And the wait
+//     for quiet is capped (RESTART_WAIT_CAP_MS): an engine call that never
+//     ends must not hold the restart on 'waiting' forever, so past the cap
+//     the reader is offered "Restart now" and chooses.
 import { pickUpdate, shouldCheck } from './update-compare.js';
 
 const OPT_IN = 'updateOptIn';
 const ASKED = 'updateAsked';
 const STAMP = 'updateLastChecked';
 const FOUND = 'updateFound';
+
+/** How long a restart waits for the engine to go quiet before it stops
+ *  waiting and hands the choice to the reader ("Restart now"). Two minutes
+ *  covers any conversion or copy this app makes in ordinary use; a call
+ *  still running after that is most likely stuck (Kindle Previewer hung, a
+ *  dialog left open), and the shell lets a running engine finish rather
+ *  than kill it (desktop/src-tauri/src/sidecar.rs), so this window does not
+ *  kill it either. */
+export const RESTART_WAIT_CAP_MS = 120_000;
 
 /** Whether this build can be updated at all where it is running.
  *
@@ -126,6 +144,8 @@ export function updateLabel(phase) {
       return 'Installing…';
     case 'waiting':
       return 'Restarting after this finishes…';
+    case 'stalled':
+      return 'Restart now';
     case 'restarting':
       return 'Restarting…';
     case 'failed':
@@ -149,7 +169,8 @@ export function updateLabel(phase) {
  *  cursor). */
 export function labelActionable(phase) {
   if (phase?.kind === 'offer') return !phase.retrying;
-  return phase?.kind === 'failed';
+  // 'stalled' is the wait given up: a click restarts (restartInstalled).
+  return phase?.kind === 'failed' || phase?.kind === 'stalled';
 }
 
 /** What to tell someone when the bundle has been swapped and this build
@@ -159,6 +180,36 @@ export function labelActionable(phase) {
  *  working restart, the window does that instead and nobody reads this. */
 export function installedLine(version) {
   return `Update installed. Quit and reopen Screepub to use ${version}.`;
+}
+
+/** Restart into the bundle already on disk, saying so through `emit`.
+ *
+ *  The one place a restart is asked for: the end of installAndRestart, and
+ *  a click on "Restart now" once the wait was given up (update-flow.js).
+ *  A refused restart is NOT a failed update. The bundle is already swapped,
+ *  and the realistic cause is a build that never got process:allow-restart;
+ *  reporting it as a failure would draw a "Try again" that reinstalls a
+ *  bundle already on disk, in a loop. It falls back to the same honest line
+ *  a build without the plugin at all shows. Returns 'restarting' or
+ *  'installed'. */
+export async function restartInstalled({ version, restart, emit }) {
+  emit({ kind: 'restarting', version });
+  try {
+    await restart();
+  } catch {
+    emit({ kind: 'installed', version });
+    return 'installed';
+  }
+  return 'restarting';
+}
+
+/** True if `promise` settles within `ms`, false once `ms` has passed. The
+ *  timer is cleared when the promise wins, so a restart that went ahead
+ *  leaves nothing behind to fire later. */
+function settlesWithin(promise, ms) {
+  let timer;
+  const cap = new Promise((resolve) => { timer = setTimeout(() => resolve(false), ms); });
+  return Promise.race([promise.then(() => true), cap]).finally(() => clearTimeout(timer));
 }
 
 /** Run a check, or decline to.
@@ -225,12 +276,16 @@ export async function runCheck({ manual, storage, now, check }) {
  *  answer with a newer version and a real body) — the caller has no other
  *  way to learn what a failed or finished attempt was actually for.
  *    restarting  the restart was asked for (the process is on its way out)
+ *    stalled     the bundle is swapped, but the engine was not quiet within
+ *                `waitCap`; the phase offers "Restart now" and the reader
+ *                chooses
  *    installed   the bundle is swapped but this build cannot restart itself,
  *                or its restart was refused
  *    current     a fresh check found nothing newer after all
  *    error       something failed; `message` is for a person */
 export async function installAndRestart({
   offer, storage, now, check, install, busy, whenIdle, restartReady, restart, onPhase,
+  retire = () => {}, waitCap = RESTART_WAIT_CAP_MS,
 }) {
   // A real download reports its progress in network chunks, thousands of
   // them for a bundle this size. Only the reader's own words change when the
@@ -282,6 +337,9 @@ export async function installAndRestart({
       }
       emit({ kind: 'downloading', version, received, total, body });
     });
+    // The bundle on disk is the new one now (see the header): no new engine
+    // call from this window, whatever happens next.
+    retire();
     if (!restartReady()) {
       emit({ kind: 'installed', version });
       return { outcome: 'installed', version, offer: result };
@@ -290,20 +348,14 @@ export async function installAndRestart({
     // Kindle, a settings file half written. Say why the restart is waiting
     // rather than sitting on "Installing…" with no reason given.
     if (busy()) emit({ kind: 'waiting', version });
-    await whenIdle();
-    emit({ kind: 'restarting', version });
-    try {
-      await restart();
-    } catch {
-      // The bundle is ALREADY SWAPPED at this point: the realistic cause is
-      // a build that never got process:allow-restart, not a failed update.
-      // Reporting this as a failure would draw a "Try again" that reinstalls
-      // a bundle already on disk, in a loop. Fall back to the same honest
-      // line a build without the plugin at all shows.
-      emit({ kind: 'installed', version });
-      return { outcome: 'installed', version, offer: result };
+    if (!(await settlesWithin(whenIdle(), waitCap))) {
+      // Still not quiet: say so and let the reader choose, rather than sit
+      // on 'waiting' for as long as a stuck call takes.
+      emit({ kind: 'stalled', version });
+      return { outcome: 'stalled', version, offer: result };
     }
-    return { outcome: 'restarting', version, offer: result };
+    const outcome = await restartInstalled({ version, restart, emit });
+    return { outcome, version, offer: result };
   } catch (err) {
     const message = String(err?.message ?? err);
     emit({ kind: 'failed', version: result?.version ?? null, message });
