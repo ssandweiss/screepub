@@ -1,5 +1,61 @@
 # QA on a Mac: the gate nothing else can pass
 
+## QA for the identifier release (F2)
+
+Written 2026-10-01 for the release that hands the Mac over from the Swift
+app to the window (plan
+`docs/superpowers/plans/2026-10-01-f2-handover-amendment.md`). Everything
+in this release is about ONE thing: an installed app becomes the window
+without anyone reinstalling. Run it after the release is published, not
+before: the old updater reads the real release page.
+
+### [claude] after the tag, before anyone updates
+
+- [ ] **Do:** list the release's assets. **See:** exactly one `.dmg`, named
+  `Screepub-macOS.dmg`; `latest.json`; `Screepub-macOS.app.tar.gz` and its
+  `.sig`. **Fail:** a second `.dmg`, or any `Screepub-Desktop-` name.
+- [ ] **Do:** download the image and run
+  `bun tools/verify-signing.ts --dmg Screepub-macOS.dmg --expect handover`.
+  **See:** it passes: an installed Swift app would INSTALL this. **Fail:**
+  anything else. Stop here; nobody updates until this is green.
+- [ ] **Do:** `tools/check-tap.sh`. **See:** the formula serves the new
+  version and the cask is deprecated. **Fail:** either one.
+
+### [hands] the Swift app updates itself into the window
+
+- [ ] **Do:** open the Swift app (`/Applications/Screepub.app`, 0.7.x) and
+  Check for Updates. **See:** it finds the new version, downloads, installs
+  and relaunches. The app that opens is the window: Convert, Read, Tune,
+  Send. **Fail:** "failed signature verification" (that was the right
+  answer before this release and the wrong one now), or it relaunches into
+  the old app.
+- [ ] **Do:** look in `/Applications`. **See:** `Screepub.app`, now the
+  window. **Fail:** a second copy, or a `.staged` / `.old-` leftover.
+- [ ] **Do:** convert a script, then send it to the Kindle over USB.
+  **See:** it works; macOS may ask once for access to removable volumes.
+  **Fail:** the copy fails after you allowed access.
+- [ ] Known and accepted: anything you tuned in the Swift app starts from
+  the defaults once. Books are untouched.
+
+### [hands] the window updates itself and keeps its name
+
+- [ ] **Do:** open `Screepub Desktop.app` and let it update (Settings, or
+  the update label). **See:** it installs and restarts. **Fail:** an error,
+  or it stays on the old version.
+- [ ] Known and accepted, all four once: it asks the "check for updates
+  automatically?" question again; macOS asks again for drive access; Finder
+  still calls it "Screepub Desktop"; and you now have two copies of the
+  same app. **Do:** delete `Screepub Desktop.app`. **See:** `Screepub.app`
+  still opens and still updates.
+
+### [hands] Homebrew
+
+- [ ] **Do:** `brew info --cask screepub`. **See:** it says the cask is
+  deprecated. `brew install screepub` (the command-line formula) still
+  installs the new version.
+
+---
+
 ## QA for 0.7.3
 
 Written 2026-09-24, from `origin/main` at 9e79a29, for the release after
@@ -872,6 +928,10 @@ the app disagree, which is worth knowing.
 
 ## 4. Where your files went, and this one matters
 
+(From the identifier release on there is one app, the window, and it
+writes one folder per script. The flat files below are what an old Swift
+install left behind; nothing reads them.)
+
 **Your books now live in `~/Documents/Screepub`, and the two apps use it
 differently:**
 
@@ -890,6 +950,11 @@ dropped. Everything should be in the library.
 ---
 
 ## 5. Both apps installed at once
+
+**HISTORY from the identifier release on.** Everything below describes
+two apps with different identifiers. Since that release the window carries
+the Swift app's identifier, and the old updater is supposed to INSTALL it:
+see "QA for the identifier release" at the top of this page.
 
 **OBSERVED 2026-09-21, and it behaved.** This section used to say "nobody
 has tried it" and "the refusal has only been reasoned about, never
