@@ -12,11 +12,16 @@ import {
 const WORKFLOWS = '.github/workflows';
 const read = (p: string) => readFileSync(p, 'utf8');
 
-const MACOS_ASSETS = [
-  'Screepub-macOS.dmg',
+/** The Mac command-line tarballs: what the release job uploads, and what
+ *  the Homebrew formula serves. */
+const MACOS_CLI_ASSETS = [
   'screepub-cli-macos-arm64.tar.gz',
   'screepub-cli-macos-x64.tar.gz',
 ];
+/** Every Mac download by name. The image was the Swift app's until the
+ *  identifier release and is the window's since (owner, 2026-10-01); the
+ *  name did not change, on purpose. */
+const MACOS_ASSETS = ['Screepub-macOS.dmg', ...MACOS_CLI_ASSETS];
 
 describe('the macOS release path is untouched by the cross-platform builder', () => {
   test('the cross builder emits no macOS artifact, by name or by target', () => {
@@ -42,12 +47,17 @@ describe('the macOS release path is untouched by the cross-platform builder', ()
     expect(sh).toContain('notarytool submit');
   });
 
-  test('tools/bump-tap.sh still names exactly the macOS assets, and nothing else', () => {
+  test('tools/bump-tap.sh bumps the formula\'s two tarballs and only deprecates the cask', () => {
     // The Homebrew tap serves the macOS CLI. It must not learn about the
     // Linux or Windows artifacts: brew has no business installing either,
     // and tap-freshness.yml would go red on a formula it cannot audit.
+    // The CASK was retired at the identifier release: never bumped again,
+    // so the script reads no image digest and rewrites no cask version.
     const sh = read('tools/bump-tap.sh');
-    for (const name of MACOS_ASSETS) expect(sh).toContain(name);
+    for (const name of MACOS_CLI_ASSETS) expect(sh).toContain(name);
+    expect(sh).not.toContain('Screepub-macOS.dmg');
+    expect(sh).not.toMatch(/s\|\^  version/);
+    expect(sh).toContain('deprecate! date:');
     expect(sh.toLowerCase()).not.toContain('linux');
     expect(sh.toLowerCase()).not.toContain('windows');
     for (const t of TARGETS) expect(sh).not.toContain(t.archiveName);
@@ -83,6 +93,21 @@ const workflow = (file: string): Workflow =>
   Bun.YAML.parse(read(join(WORKFLOWS, file))) as Workflow;
 
 const runText = (job: Job): string => (job.steps ?? []).map((s) => s.run ?? '').join('\n');
+
+/** The files a job's `gh release upload` commands name, read from the
+ *  commands: comment lines dropped, backslash continuations joined, flags
+ *  and the "$TAG" operand skipped, paths reduced to their file name. */
+const uploadedBy = (job: Job): string[] => {
+  const code = runText(job).split('\n').filter((l) => !/^\s*#/.test(l)).join('\n').replace(/\\\n/g, ' ');
+  const files: string[] = [];
+  for (const m of code.matchAll(/gh release upload\s+([^\n]+)/g)) {
+    for (const tok of m[1]!.split(/\s+/)) {
+      if (!tok || tok.startsWith('-') || tok.startsWith('"$')) continue;
+      files.push(tok.replace(/^.*\//, ''));
+    }
+  }
+  return files;
+};
 
 describe('ci.yml cross-compiles on every push', () => {
   const ci = workflow('ci.yml');
@@ -129,10 +154,16 @@ describe('release.yml ships the cross-platform artifacts', () => {
     expect(needs('tap-check')).toEqual(['tap']);
   });
 
-  test('the macOS release job still builds, signs and uploads exactly its three assets', () => {
+  test('the macOS release job uploads exactly the two CLI tarballs, and no image', () => {
+    // Read off the `gh release upload` commands themselves: a name in a
+    // comment is not an upload. (The first version of this check grepped the
+    // whole step and passed on a comment that NAMES the Swift image.)
     const text = runText(rel.jobs['release']!);
     expect(text).toContain('app/release.sh');
-    for (const name of MACOS_ASSETS) expect(text).toContain(`app/dist/${name}`);
+    expect(uploadedBy(rel.jobs['release']!).sort()).toEqual([...MACOS_CLI_ASSETS].sort());
+    // The frozen Swift updater takes the first .dmg on a release; the
+    // window's image (from app-upload) must be the only one.
+    expect(uploadedBy(rel.jobs['release']!).some((f) => f.endsWith('.dmg'))).toBe(false);
     // And it has NOT quietly become responsible for the new ones.
     for (const t of TARGETS) expect(text).not.toContain(t.archiveName);
   });
@@ -535,16 +566,17 @@ describe('release.yml ships the cross-platform artifacts', () => {
     expect(text).not.toMatch(/SHA256SUMS(?!-app)/);
   });
 
-  test('the SwiftUI release path is untouched', () => {
+  test('the Swift release path builds the CLI and publishes none of the Swift app', () => {
     const release = runText(rel.jobs['release']!);
     expect(release).toContain('app/release.sh');
-    for (const name of MACOS_ASSETS) expect(release).toContain(`app/dist/${name}`);
-    // The new jobs must not touch the Swift artifacts or the tap.
+    for (const name of MACOS_CLI_ASSETS) expect(release).toContain(`app/dist/${name}`);
+    expect(uploadedBy(rel.jobs['release']!)).not.toContain('Screepub-macOS.dmg');
+    // The new jobs must not touch the Swift build, the CLI or the tap.
     for (const jobName of ['app-bundles', 'app-upload']) {
       const text = runText(rel.jobs[jobName]!);
       expect(text).not.toContain('app/release.sh');
       expect(text).not.toContain('bump-tap');
-      for (const name of MACOS_ASSETS) expect(text).not.toContain(name);
+      for (const name of MACOS_CLI_ASSETS) expect(text).not.toContain(name);
     }
     expect(needs('tap')).toEqual(['release']);
     expect(needs('tap-check')).toEqual(['tap']);

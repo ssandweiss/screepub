@@ -263,12 +263,13 @@ jobs:
           cp "docs/releases/$VERSION.md" "$NOTES"
           {
             printf '\n\n---\n\n'
-            printf '%s\n\n' "Notarized universal build for macOS 14+ (Apple Silicon and Intel)."
-            printf '%s\n\n' "**Install:** download \`Screepub-macOS.dmg\`, open it, drag Screepub to Applications, and double-click."
-            printf '%s\n' "SHA-256:"
+            # Since the identifier release the Mac app is the window's
+            # image, uploaded by app-upload; this job publishes none. Its
+            # checksum is in SHA256SUMS-app beside it.
+            printf '%s\n\n' "**Mac:** download \`Screepub-macOS.dmg\` (notarized, universal, macOS 13 or later), open it, drag Screepub to Applications, and double-click. Its SHA-256 is in \`SHA256SUMS-app\`."
+            printf '%s\n' "Command-line tool for macOS, SHA-256:"
             printf '\n```\n'
             shasum -a 256 \
-              app/dist/Screepub-macOS.dmg \
               app/dist/screepub-cli-macos-arm64.tar.gz \
               app/dist/screepub-cli-macos-x64.tar.gz | sed 's|app/dist/||'
             printf '```\n'
@@ -285,8 +286,12 @@ jobs:
             gh release edit "$TAG" --title "Screepub $VERSION" --notes-file "$NOTES"
           fi
 
+          # NOT app/dist/Screepub-macOS.dmg: that is the Swift app, still
+          # built by app/release.sh (which also builds these two tarballs)
+          # until the CLI move, and never published again. The window's
+          # image of the same name comes from app-upload, and the frozen
+          # Swift updater must find exactly one .dmg.
           gh release upload "$TAG" \
-            app/dist/Screepub-macOS.dmg \
             app/dist/screepub-cli-macos-arm64.tar.gz \
             app/dist/screepub-cli-macos-x64.tar.gz \
             --clobber
@@ -294,8 +299,10 @@ jobs:
           gh release edit "$TAG" --draft=false ${PRE[@]+"${PRE[@]}"}
 
       # The fallback for when the `tap` job below cannot run (no TAP_TOKEN)
-      # or fails: the three SHAs, somewhere a person can copy from, so the
-      # bump is paste-and-commit rather than download-and-hash.
+      # or fails: the two SHAs, somewhere a person can copy from, so the
+      # bump is paste-and-commit rather than download-and-hash. The CASK
+      # was retired at the identifier release and is never bumped again;
+      # tools/bump-tap.sh adds its deprecation notice once.
       - name: Tap bump crib sheet
         env:
           VERSION: ${{ github.ref_name }}
@@ -305,14 +312,11 @@ jobs:
           # Plain command substitution and no arrays: this job runs on
           # macos-15, whose bash is 3.2, and a bash-3.2 array trap has
           # already killed one release here after notarization.
-          DMG="$(shasum -a 256 app/dist/Screepub-macOS.dmg | cut -d' ' -f1)"
           ARM="$(shasum -a 256 app/dist/screepub-cli-macos-arm64.tar.gz | cut -d' ' -f1)"
           X64="$(shasum -a 256 app/dist/screepub-cli-macos-x64.tar.gz | cut -d' ' -f1)"
           {
             printf '## Bump ssandweiss/homebrew-tap to %s\n\n' "$V"
-            printf '`Casks/screepub.rb`\n\n```ruby\n'
-            printf '  version "%s"\n  sha256 "%s"\n' "$V" "$DMG"
-            printf '```\n\n`Formula/screepub.rb` (the tag is literal in BOTH urls)\n\n```ruby\n'
+            printf '`Formula/screepub.rb` (the tag is literal in BOTH urls)\n\n```ruby\n'
             printf '    url ".../download/v%s/screepub-cli-macos-arm64.tar.gz"\n    sha256 "%s"\n' "$V" "$ARM"
             printf '    url ".../download/v%s/screepub-cli-macos-x64.tar.gz"\n    sha256 "%s"\n' "$V" "$X64"
             printf '```\n'
@@ -719,9 +723,10 @@ jobs:
       # anchor, the chain and the team and not notarization, which is how
       # it got through the v0.6.0 gate. A PERSON cares: a browser
       # download carries the quarantine attribute and Gatekeeper assesses
-      # the image when they double-click it. Screepub-macOS.dmg has never
-      # done that to anyone, because app/release.sh notarizes and staples
-      # the container, and this is that same sequence.
+      # the image when they double-click it. The Swift app's image never
+      # did that to anyone, because app/release.sh notarizes and staples
+      # the container, and this is that same sequence. Since the identifier
+      # release this image IS Screepub-macOS.dmg, the one people download.
       #
       # BEFORE the smoke step on purpose, so the bytes that get mounted
       # and executed below are the bytes that ship. The per-leg

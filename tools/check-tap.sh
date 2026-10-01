@@ -34,21 +34,22 @@ fetch() { gh api "repos/$TAP/contents/$1" -q .content | base64 -d; }
 CASK="$(fetch Casks/screepub.rb)"
 FORMULA="$(fetch Formula/screepub.rb)"
 
-# The cask carries an explicit `version`. The formula deliberately has none
-# (it audits as redundant), so its version is literal in both urls, and
-# both must agree.
-CASK_V="$(printf '%s\n' "$CASK" \
-  | sed -n 's/^[[:space:]]*version "\([^"]*\)".*/\1/p' | head -1)"
+# The CASK was retired at the identifier release (owner, 2026-10-01): it is
+# never bumped again, so its version is not compared. What must hold is
+# that it says so: a cask that is frozen and NOT deprecated serves an old
+# app to anyone who installs it, silently, which is the failure this file
+# exists to catch. The formula deliberately has no `version` (it audits as
+# redundant), so its version is literal in both urls, and both must agree.
 FORMULA_V="$(printf '%s\n' "$FORMULA" \
   | sed -n 's|.*/releases/download/v\([^/]*\)/.*|\1|p' | sort -u)"
 
 echo "newest release: $VERSION"
-echo "cask pins:      ${CASK_V:-<none found>}"
+echo "cask:           $(printf '%s\n' "$CASK" | grep -q '^  deprecate! ' && echo 'retired (deprecated)' || echo 'NOT deprecated')"
 echo "formula pins:   $(printf '%s' "$FORMULA_V" | tr '\n' ' ')"
 
 FAIL=0
-if [ "$CASK_V" != "$VERSION" ]; then
-  echo "::error::the cask pins ${CASK_V:-nothing} but the newest release is $VERSION"
+if ! printf '%s\n' "$CASK" | grep -q '^  deprecate! '; then
+  echo "::error::the cask is frozen but carries no deprecate! stanza, so brew serves an old app without saying so"
   FAIL=1
 fi
 if [ "$(printf '%s\n' "$FORMULA_V" | grep -c .)" -ne 1 ]; then
@@ -78,12 +79,11 @@ check_sha() { # <asset> <human name> <file contents>
     FAIL=1
   fi
 }
-check_sha "Screepub-macOS.dmg"              "the cask"    "$CASK"
 check_sha "screepub-cli-macos-arm64.tar.gz" "the formula" "$FORMULA"
 check_sha "screepub-cli-macos-x64.tar.gz"   "the formula" "$FORMULA"
 
 if [ "$FAIL" -ne 0 ]; then
-  echo "::notice::Bump https://github.com/$TAP — tools/bump-tap.sh does it, and the release run's summary carries the three SHAs. See docs/release-secrets.md."
+  echo "::notice::Bump https://github.com/$TAP — tools/bump-tap.sh does it (and deprecates the cask once), and the release run's summary carries the two SHAs. See docs/release-secrets.md."
   exit 1
 fi
 echo "The tap serves $VERSION, with matching checksums."
