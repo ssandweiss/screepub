@@ -2822,6 +2822,171 @@ describe('the real flow and the real runEngine, driven together end to end', () 
   });
 });
 
+describe('the scene list is one Tab stop, walked with the arrow keys', () => {
+  // One Tab stop per scene put ninety stops between the tabs and the script.
+  // The list is now one stop with a roving tabindex, the pattern frame.js's
+  // tablist uses: Up/Down/Home/End move between scenes, Enter and Space are
+  // the buttons' own, and the stop is the scene the reader is in.
+  type Rove = {
+    railStep: (key: string, at: number, count: number) => number | null;
+  };
+
+  test('railStep moves one scene, or to an end, and stops at the ends', async () => {
+    const { railStep } = (await import(join(UI, 'read.js'))) as Rove;
+    expect(railStep('ArrowDown', 0, 3)).toBe(1);
+    expect(railStep('ArrowDown', 2, 3)).toBe(2);
+    expect(railStep('ArrowUp', 1, 3)).toBe(0);
+    expect(railStep('ArrowUp', 0, 3)).toBe(0);
+    expect(railStep('Home', 2, 3)).toBe(0);
+    expect(railStep('End', 0, 3)).toBe(2);
+    expect(railStep('Enter', 0, 3)).toBeNull();
+    expect(railStep('ArrowRight', 0, 3)).toBeNull();
+    expect(railStep('ArrowDown', 0, 0)).toBeNull();
+  });
+
+  // A document just big enough for the reader to draw a ready script into,
+  // load it, build its rail and mark a scene.
+  class Node {
+    kids: Node[] = [];
+    parent: Node | null = null;
+    attrs = new Map<string, string>();
+    handlers = new Map<string, Array<(event: unknown) => unknown>>();
+    className = '';
+    hidden = false;
+    disabled = false;
+    text = '';
+    tabIndex = 0;
+    [key: string]: unknown;
+    constructor(readonly tag: string) {}
+    append(...nodes: (Node | string | null | undefined)[]) {
+      for (const n of nodes) {
+        if (n == null) continue;
+        const node = typeof n === 'string' ? Object.assign(new Node('#text'), { text: n }) : n;
+        node.parent = this;
+        this.kids.push(node);
+      }
+    }
+    get firstChild() { return this.kids[0] ?? null; }
+    removeChild(node: Node) { this.kids.splice(this.kids.indexOf(node), 1); node.parent = null; return node; }
+    get textContent(): string { return this.tag === '#text' ? this.text : this.kids.map((k) => k.textContent).join(''); }
+    set textContent(value: string) { this.kids = []; this.append(value); }
+    setAttribute(name: string, value: string) {
+      this.attrs.set(name, value);
+      if (name === 'tabindex') this.tabIndex = Number(value);
+    }
+    getAttribute(name: string) { return this.attrs.get(name) ?? null; }
+    removeAttribute(name: string) { this.attrs.delete(name); }
+    addEventListener(type: string, fn: (event: unknown) => unknown) {
+      this.handlers.set(type, [...(this.handlers.get(type) ?? []), fn]);
+    }
+    fire(type: string, event: Record<string, unknown> = {}) {
+      for (const fn of this.handlers.get(type) ?? []) fn({ target: this, ...event });
+    }
+    focus() { (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement = this; }
+    get classList() {
+      const self = this;
+      const parts = () => self.className.split(' ').filter(Boolean);
+      return {
+        toggle(cls: string, force?: boolean) {
+          const want = force ?? !parts().includes(cls);
+          self.className = parts().filter((c) => c !== cls).concat(want ? [cls] : []).join(' ');
+          return want;
+        },
+        contains: (cls: string) => parts().includes(cls),
+        add: (cls: string) => { if (!parts().includes(cls)) self.className = parts().concat(cls).join(' '); },
+        remove: (cls: string) => { self.className = parts().filter((c) => c !== cls).join(' '); },
+      };
+    }
+    all(tag: string): Node[] { return this.kids.flatMap((k) => (k.tag === tag ? [k, ...k.all(tag)] : k.all(tag))); }
+    byClass(cls: string): Node | null {
+      for (const k of this.kids) {
+        if (k.className.split(' ').includes(cls)) return k;
+        const found = k.byClass(cls);
+        if (found) return found;
+      }
+      return null;
+    }
+  }
+  const g = globalThis as unknown as Record<string, unknown>;
+  const saved: Record<string, unknown> = {};
+  const GLOBALS = ['document', 'DOMParser', 'matchMedia', 'getComputedStyle', 'requestAnimationFrame'];
+  beforeEach(() => { for (const k of GLOBALS) saved[k] = g[k]; });
+  afterEach(() => { for (const k of GLOBALS) { if (saved[k] === undefined) delete g[k]; else g[k] = saved[k]; } });
+
+  /** Mounts the reader on a three-scene script, scrolled into the second
+   *  scene, and loads the frame. Hands back the rail's buttons. */
+  async function railOf() {
+    g.document = {
+      createElement: (tag: string) => new Node(tag),
+      createTextNode: (value: string) => Object.assign(new Node('#text'), { text: value }),
+      documentElement: {},
+      activeElement: null,
+    };
+    g.DOMParser = class {
+      parseFromString() { return { querySelector: () => null, documentElement: { outerHTML: '<html></html>' } }; }
+    };
+    g.matchMedia = () => ({ matches: false, addEventListener: () => {} });
+    g.getComputedStyle = () => ({ getPropertyValue: () => '' });
+    g.requestAnimationFrame = () => 0;
+    const scenes = ['sc-001', 'sc-002', 'sc-003'].map((id, i) => ({
+      id,
+      offsetTop: i * 100,
+      offsetHeight: 100,
+      querySelector: () => ({ childNodes: [{ nodeType: 3, nodeValue: `INT. ROOM ${i + 1} - DAY` }] }),
+      scrollIntoView: () => {},
+    }));
+    const doc = {
+      body: { childElementCount: 3 },
+      querySelectorAll: () => scenes,
+      getElementById: (id: string) => scenes.find((s) => s.id === id) ?? null,
+      adoptedStyleSheets: [],
+    };
+    const reader = await import(`${join(UI, 'read.js')}?rove`);
+    const pane = new Node('section');
+    reader.mount(pane, { state: { script: { title: 'Field Station', previewHtml: '<html>scenes</html>' }, reducedMotion: true } });
+    const frame = pane.all('iframe')[0];
+    Object.assign(frame, {
+      contentDocument: doc,
+      contentWindow: { scrollY: 150, CSSStyleSheet: class { replaceSync() {} }, scrollTo: () => {} },
+      clientHeight: 500,
+    });
+    frame.fire('load');
+    const rail = pane.byClass('scene-rail')!;
+    return { rail, buttons: rail.all('button') };
+  }
+
+  test('the list is one Tab stop, and it is the scene the reader is in', async () => {
+    const { buttons } = await railOf();
+    expect(buttons.length).toBe(3);
+    expect(buttons.map((b) => b.tabIndex)).toEqual([-1, 0, -1]);
+    expect(buttons[1].getAttribute('aria-current')).toBe('true');
+  });
+
+  test('Up, Down, Home and End move the stop and the focus between scenes', async () => {
+    const { rail, buttons } = await railOf();
+    const press = (key: string) => {
+      let prevented = false;
+      const target = (g.document as { activeElement: Node }).activeElement ?? buttons[1];
+      rail.fire('keydown', { key, target, preventDefault: () => { prevented = true; } });
+      return prevented;
+    };
+    buttons[1].focus();
+    expect(press('ArrowDown')).toBe(true);
+    expect((g.document as { activeElement: unknown }).activeElement).toBe(buttons[2]);
+    expect(buttons.map((b) => b.tabIndex)).toEqual([-1, -1, 0]);
+    press('Home');
+    expect((g.document as { activeElement: unknown }).activeElement).toBe(buttons[0]);
+    expect(buttons.map((b) => b.tabIndex)).toEqual([0, -1, -1]);
+    press('End');
+    expect(buttons.map((b) => b.tabIndex)).toEqual([-1, -1, 0]);
+    press('ArrowUp');
+    expect((g.document as { activeElement: unknown }).activeElement).toBe(buttons[1]);
+    // Enter and Space are the button's own: the rail leaves them alone.
+    expect(press('Enter')).toBe(false);
+    expect(press(' ')).toBe(false);
+  });
+});
+
 describe('the Read surface', () => {
   const reader = read('read.js');
 

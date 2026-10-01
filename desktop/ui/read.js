@@ -271,6 +271,19 @@ export function railCount(total) {
   return total === 1 ? '1 scene' : `${total} scenes`;
 }
 
+/** Where a key moves the scene list's one keyboard stop, from scene `at` of
+ *  `count`: Up and Down one scene, Home and End to the ends, stopping at
+ *  them rather than wrapping, since this is a list and not a ring. Null for
+ *  any other key: Enter and Space belong to the button itself. */
+export function railStep(key, at, count) {
+  if (!(count > 0)) return null;
+  if (key === 'ArrowDown') return Math.min(at + 1, count - 1);
+  if (key === 'ArrowUp') return Math.max(at - 1, 0);
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  return null;
+}
+
 export const NO_SCENES = 'No scene headings in this script.';
 
 /** Where the reader is, as a scene and a fraction into it — never as a pixel
@@ -426,7 +439,7 @@ function draw() {
       indexButton),
   );
 
-  rail = el('nav', { class: 'scene-rail', 'aria-label': 'Scenes' });
+  rail = el('nav', { class: 'scene-rail', 'aria-label': 'Scenes', onkeydown: onRailKey });
   frame = el('iframe', {
     class: 'script-frame',
     title: script.title,
@@ -658,6 +671,9 @@ function buildRail(doc) {
     const button = el('button', {
       type: 'button',
       class: 'scene-link',
+      // One stop for the whole list (setRailStop): the rest are reached
+      // with the arrow keys, the way the tablist's are.
+      tabindex: '-1',
       onclick: () => target?.scrollIntoView({
         behavior: ctx.state.reducedMotion ? 'auto' : 'smooth',
         block: 'start',
@@ -671,6 +687,25 @@ function buildRail(doc) {
     railButtons.set(entry.id, button);
     rail.append(button);
   }
+  setRailStop([...railButtons.values()][0]);
+}
+
+/** Make `stop` the scene list's one Tab stop. */
+function setRailStop(stop) {
+  for (const button of railButtons.values()) button.tabIndex = button === stop ? 0 : -1;
+}
+
+/** Up, Down, Home and End on the scene list: move the stop and the focus.
+ *  railStep decides where; this only applies it. */
+function onRailKey(event) {
+  const buttons = [...railButtons.values()];
+  const at = buttons.indexOf(event.target);
+  if (at === -1) return;
+  const next = railStep(event.key, at, buttons.length);
+  if (next === null) return;
+  event.preventDefault();
+  setRailStop(buttons[next]);
+  buttons[next].focus();
 }
 
 /** Mark the scene the reader is in, and keep that mark inside the rail's own
@@ -687,6 +722,10 @@ function markCurrent() {
   if (button === undefined) return;
   button.classList.add('scene-link-on');
   button.setAttribute('aria-current', 'true');
+  // The stop follows the scene being read, so Tab lands where the reader
+  // is. Not while the keyboard is walking the list: the stop is where the
+  // focus is then, and taking it away would strand the focus off the stop.
+  if (![...railButtons.values()].includes(document.activeElement)) setRailStop(button);
   if (button.offsetTop < rail.scrollTop) rail.scrollTop = button.offsetTop;
   const past = button.offsetTop + button.offsetHeight - rail.clientHeight;
   if (past > rail.scrollTop) rail.scrollTop = past;
