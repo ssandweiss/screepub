@@ -184,6 +184,35 @@ Branch `worktree-f2-identifier`, rebased onto main after the batch lands
     the update question once. This is handover step 13 and the only test
     that matters.
 
+## Found while building F2 (2026-10-01, later)
+
+Steps 1 to 3 are built (commit "F2: the window takes the Swift app's
+identity"). Steps 4 and 5 wait on decisions 2 and 2b, because they decide
+what the README, site and verification ledger must say, and those are the
+other session's files. Three things the steps above did not know:
+
+- **The tap job would race the image.** `tap` is `needs: release`, and
+  `tools/bump-tap.sh` reads `Screepub-macOS.dmg`'s digest off the
+  published release. Today the release job uploads that image itself. After
+  F2 the image comes from `app-upload`, which runs later, so a kept cask
+  needs `tap` to wait on `app-upload` too, or `bump-tap.sh` finds no image
+  and the tap goes red. A retired cask makes this moot.
+- **Swift users can be told "no update" for a day.** The release job makes
+  the release public before `app-upload` attaches the image. A Swift app
+  that checks in that gap finds no `.dmg`, throws, and has already stamped
+  its last-check time (the release job's own comment describes this), so
+  it waits 24 hours. Accepted rather than fixed: making `app-upload`
+  publish would break the rule that a failing bundle leg can never strand
+  the release in draft. It costs a day, once, for whoever is unlucky.
+- **The window claims macOS 10.13 and cannot run below 13.0.** The
+  installed window's `LSMinimumSystemVersion` is `10.13` (Tauri's default),
+  but its engine's `LC_BUILD_VERSION` says `minos 13.0` (bun's floor;
+  measured with `otool -l` on `Screepub Desktop.app`). On macOS 11 or 12
+  the window opens and every conversion fails. The fix is
+  `bundle.macOS.minimumSystemVersion: "13.0"`; it is independent of F2 and
+  goes on its own branch. The release notes' "macOS 14+" line was the
+  Swift app's floor and should say 13 once the window is the download.
+
 ## The CLI move (release N+2)
 
 The two macOS CLI tarballs need a builder that does not live in `app/`. The
