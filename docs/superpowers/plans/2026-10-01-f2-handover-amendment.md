@@ -251,8 +251,10 @@ Acceptance criteria 11 to 15 of the spec, re-checked against today:
 - **14, `CLAUDE.md`'s `format-defaults.json` invariant** loses kit-check
   and names the pins that remain.
 - **15, one reviewable commit.** `git rm -r app/`; `ci.yml`'s `app` job
-  and `weekly-toolchain.yml` (Swift-only, deleted whole) go; no workflow
-  references a Swift job. Suite green.
+  goes, and so does `weekly-toolchain.yml`'s Swift job; no workflow
+  references a Swift job. Suite green. (`weekly-toolchain.yml` was
+  Swift-only on 2026-10-01, but the other session's second batch adds a
+  weekly Calibre job to it, so F3 removes the Swift job, not the file.)
 
 The F3 branch can be prepared any time and held; it merges only after
 N+1 has shipped and N+2 has proven the CLI move.
