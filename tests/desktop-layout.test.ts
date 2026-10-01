@@ -3,6 +3,15 @@
 // the scene index a slot of its own, and Settings gives the preview the
 // room. These read the stylesheets rule by rule, with comments stripped, so
 // a selector or a value named in a comment can never satisfy a test.
+//
+// Where things land (the brads at 44, the block's edges and cap, Convert's
+// 820 column, Read's 218 slot and 706 script, Settings' 420 column and its
+// pinned preview, the folds at 900) is MEASURED in headless Chrome by
+// tests/desktop-layout-measured.test.ts. What stays here is what that test
+// cannot see: the tokens, the exact fold line, the narrow-window and
+// short-window rules, states it does not visit, the brand's copy of the
+// frame, colours, wrapping and [hidden]. These also run where Chrome does
+// not (Linux CI).
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -70,13 +79,15 @@ describe('the two-column surfaces fold on the block, not the window', () => {
     expect(surfaces).not.toMatch(/@media[^{]*\((max|min)-width: 90[01]px\)/);
   });
 
-  test('two-column Settings never gives the preview less than 420', () => {
+  test('Read and Settings fold on the 880 line, so two-column Settings never gives the preview less than 420', () => {
+    // The measured test sees a 1132 block two-column and a 752 one folded;
+    // only this pins where between them the line falls.
     const settings = 420;
     const gap = 32; // --space-7, 2rem
-    expect(ruleBlock(surfaces, '.tune-split')).toContain(`grid-template-columns: ${settings}px minmax(0, 1fr)`);
-    expect(ruleBlock(surfaces, '.tune-split')).toContain('gap: var(--space-7)');
     expect(FOLD - settings - gap).toBeGreaterThanOrEqual(420);
-    expect(containerBlocks(surfaces, NARROW)).toContain('.tune-split { grid-template-columns: 1fr; }');
+    const narrow = containerBlocks(surfaces, NARROW);
+    expect(narrow).toContain('.tune-split { grid-template-columns: 1fr; }');
+    expect(narrow).toContain('.reader { grid-template-columns: minmax(0, 1fr); }');
   });
 });
 
@@ -98,29 +109,9 @@ describe('the page fills the window (frame B)', () => {
     }
   });
 
-  test('the page is not capped: its sides are the binding and the right margin', () => {
-    const page = ruleBlock(style, '.page');
-    expect(page).not.toContain('max-width');
-    expect(page).toContain('padding: 0 var(--page-right) 0 var(--binding-margin)');
-  });
-
-  test('the sheet is one block, capped and centred, with no side padding of its own', () => {
-    const sheet = ruleBlock(style, '.sheet');
-    expect(sheet).toContain('max-width: var(--block-max)');
-    expect(sheet).toContain('margin: 0 auto');
-    expect(sheet).toContain('padding: var(--space-7) 0 var(--space-10)');
-  });
-
-  test('the brads are placed from the window’s left edge', () => {
-    const rail = ruleBlock(style, '.rail');
-    expect(rail).not.toContain('max-width');
-    expect(rail).not.toContain('translateX');
-    expect(rail).toMatch(/left:\s*0;/);
-    expect(ruleBlock(style, '.rail svg')).toContain('left: var(--hole-center)');
-  });
-
-  test('the foot and the dead-engine line sit on the block’s right edge', () => {
-    expect(ruleBlock(style, '.rev-foot')).toMatch(/right:\s*0;/);
+  test('the dead-engine line sits on the block’s right edge', () => {
+    // The measured test sees the foot; the window never shows this line
+    // there, because its engine stand-in never dies.
     expect(ruleBlock(style, '.engine-fault')).toMatch(/right:\s*0;/);
   });
 
@@ -154,24 +145,11 @@ describe('the brand draws the same frame the window uses', () => {
   });
 });
 
-describe('Convert keeps a column of its own inside the wide block', () => {
-  test('the drop area, the progress, the result and a refusal stop at 820 wide, centred', () => {
-    const rule = ruleBlock(windowCss('surfaces.css'), '#surface-convert');
-    expect(rule).toContain('max-width: 820px');
-    expect(rule).toContain('margin-left: auto');
-    expect(rule).toContain('margin-right: auto');
-  });
-});
-
 describe('Read gives the scene index a slot of its own', () => {
   const surfaces = windowCss('surfaces.css');
 
-  test('the reader is two columns: the index slot, then the script at today’s width', () => {
-    const reader = ruleBlock(surfaces, '.reader');
-    expect(reader).toContain('display: grid');
-    expect(reader).toContain('grid-template-columns: 218px minmax(0, 706px)');
-  });
-
+  // The measured test opens the index (the window's default) and measures
+  // it; these guard the SHUT index, which it never draws.
   test('the index keeps its slot open or shut, so the script never moves', () => {
     const rail = ruleBlock(surfaces, '.scene-rail');
     expect(rail).toContain('grid-column: 1');
@@ -180,19 +158,12 @@ describe('Read gives the scene index a slot of its own', () => {
     expect(ruleBlock(surfaces, '.script-stage')).toContain('grid-column: 2');
   });
 
-  test('open, it is simply shown: no slide out of the margin, no shadow over the page', () => {
-    const open = ruleBlock(surfaces, '.reader.index-open .scene-rail');
-    expect(open).toContain('opacity: 1');
-    expect(open).toContain('visibility: visible');
-    expect(open).not.toContain('translateX(-100%)');
-    expect(open).not.toContain('box-shadow');
+  test('open, it casts no shadow over the page', () => {
+    expect(ruleBlock(surfaces, '.reader.index-open .scene-rail')).not.toContain('box-shadow');
   });
 
-  test('in a narrow block the index goes above the script, and a shut one takes no room', () => {
-    const narrow = containerBlocks(surfaces, NARROW);
-    expect(narrow).toContain('.reader { grid-template-columns: minmax(0, 1fr); }');
-    expect(narrow).toContain('.reader:not(.index-open) .scene-rail { display: none; }');
-    expect(narrow).toContain('.script-stage { grid-column: 1; grid-row: 2; }');
+  test('in a narrow block a shut index takes no room above the script', () => {
+    expect(containerBlocks(surfaces, NARROW)).toContain('.reader:not(.index-open) .scene-rail { display: none; }');
   });
 
   test('a short window only grows the rail when it is still beside the script, not stacked above it', () => {
@@ -202,32 +173,6 @@ describe('Read gives the scene index a slot of its own', () => {
     const short = mediaBlocks(surfaces, '(max-height: 560px)');
     expect(short).toContain(`@container (min-width: ${FOLD}px) {`);
     expect(containerBlocks(short, `(min-width: ${FOLD}px)`)).toContain('.scene-rail { max-height: 62vh; }');
-  });
-});
-
-describe('Settings gives the preview the room', () => {
-  const surfaces = windowCss('surfaces.css');
-
-  test('the settings take a fixed 420 and the preview everything else', () => {
-    expect(ruleBlock(surfaces, '.tune-split')).toContain('grid-template-columns: 420px minmax(0, 1fr)');
-  });
-
-  test('the preview stays pinned and runs the window’s height', () => {
-    expect(ruleBlock(surfaces, '.tune-preview')).toContain('position: sticky');
-    const frame = ruleBlock(surfaces, '.tune-preview-frame');
-    expect(frame).toContain('height: calc(100vh - var(--space-5) - var(--space-7) - var(--space-9))');
-    expect(frame).not.toContain('62vh');
-  });
-
-  test('in a narrow block it is still one column, with the preview unpinned', () => {
-    const narrow = containerBlocks(surfaces, NARROW);
-    expect(narrow).toContain('.tune-split { grid-template-columns: 1fr; }');
-    expect(narrow).toContain('.tune-preview { position: static; }');
-  });
-
-  test('the preview frame’s border sits inside its column', () => {
-    // width: 100% plus a 1px border overhung the block by 2px (measured live, 2026-09-29).
-    expect(ruleBlock(surfaces, '.tune-preview-frame')).toContain('box-sizing: border-box');
   });
 });
 
