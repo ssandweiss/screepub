@@ -763,8 +763,8 @@ describe('the app downloads are described where a reader meets them', () => {
   const ledger = read('docs/verification-ledger.md');
   const rel = workflow('release.yml');
   const VERSION = '0.6.0';
-  /** The SwiftUI app's DMG: the first of the macOS release assets. */
-  const SWIFT_DMG = MACOS_ASSETS[0]!;
+  /** The one Mac download: the window's image since the identifier release. */
+  const MAC_DMG = MACOS_ASSETS[0]!;
 
   // The names are DERIVED, not restated: release.yml's matrix says which
   // OS/arch legs run, and BUNDLE_KINDS says what each leg is named. So a
@@ -821,7 +821,7 @@ describe('the app downloads are described where a reader meets them', () => {
 
   test('the README install table has a row for every file the release uploads', () => {
     for (const name of published.keys()) row(name);
-    row(SWIFT_DMG);
+    row(MAC_DMG);
   });
 
   test('no page offers a bundle the release does not carry', () => {
@@ -883,11 +883,10 @@ describe('the app downloads are described where a reader meets them', () => {
     // The Mac window: installed by a person on Apple Silicon, never on Intel.
     expect(person).toContain('/Applications');
     expect(person).toContain('Apple Silicon');
-    const mac = row('Screepub-Desktop-macOS-universal.dmg');
+    const mac = row(MAC_DMG);
     expect(mac).toContain(VERIFIED);
     expect(mac).toContain('Apple Silicon');
     expect(mac).toContain('Intel');
-    expect(row(SWIFT_DMG)).toContain(VERIFIED);
     // And the README sends a reader to the ledger itself.
     expect(install).toContain('docs/verification-ledger.md');
   });
@@ -920,19 +919,26 @@ describe('the app downloads are described where a reader meets them', () => {
     expect(/not signed|unsigned/.test(lower)).toBe(true);
   });
 
-  test('the site and the README offer the SwiftUI DMG as the Mac download', () => {
-    // Two Mac downloads: the pages say which one most people want. The
-    // site's three buttons, and the README's one, point at the SwiftUI DMG
-    // until the identifier release moves the Screepub name to the window;
-    // the buttons switch then, on both pages together.
-    const LATEST_SWIFT = `https://github.com/ssandweiss/screepub/releases/latest/download/${SWIFT_DMG}`;
-    expect(site).toContain(SWIFT_DMG);
-    expect(site.toLowerCase()).toContain('supported');
+  test('the site and the README offer one Mac download, the window\'s image', () => {
+    // One Mac app since the identifier release. The site's three buttons and
+    // the README's one kept their URL across it: the name moved to the
+    // window's image, so they serve the window with no edit. The old
+    // Desktop name 404s, so no page may link it, and the pages say the
+    // macOS floor the window really has (13; 14 was the Swift app's).
+    const LATEST_MAC = `https://github.com/ssandweiss/screepub/releases/latest/download/${MAC_DMG}`;
+    expect(site).toContain(MAC_DMG);
     const buttons = [...site.matchAll(/<a class="btn[^"]*" href="([^"]+)"/g)].map((m) => m[1]);
-    expect(buttons).toEqual(Array(3).fill(LATEST_SWIFT));
+    expect(buttons).toEqual(Array(3).fill(LATEST_MAC));
     const top = readme.slice(0, readme.indexOf('\n## '));
-    expect(top).toContain(`href="${LATEST_SWIFT}"`);
-    expect(top).not.toContain('Screepub-Desktop-macOS-universal.dmg');
+    expect(top).toContain(`href="${LATEST_MAC}"`);
+    for (const text of [readme, site, developers]) {
+      expect(text).not.toContain('Screepub-Desktop-macOS-universal.dmg');
+      expect(text).not.toContain('Screepub Desktop');
+      expect(text).not.toMatch(/macOS 14/);
+    }
+    for (const text of [install, site]) {
+      expect(text.replace(/\s+/g, ' ')).toContain('macOS 13 or later');
+    }
   });
 
   test('nothing anywhere promises an AppImage, winget or the AUR', () => {
@@ -943,12 +949,13 @@ describe('the app downloads are described where a reader meets them', () => {
       expect(lower).not.toContain('winget');
       expect(lower).not.toContain('aur ');
     }
-    // The Homebrew cask installs the SwiftUI app, never the window: no
-    // sentence that names brew may name the window's download.
-    const sentences = readme.replace(/\s+/g, ' ').split(/(?<=[.:])\s/);
-    for (const s of sentences.filter((x) => x.includes('brew install'))) {
-      expect(s).not.toContain('Desktop');
+    // The Homebrew cask is retired (deprecated at the identifier release),
+    // so no page tells a reader to install it. The formula, which installs
+    // the command-line converter, is still offered.
+    for (const text of [readme, developers, site]) {
+      expect(text).not.toContain('--cask');
     }
+    expect(readme).toContain('brew install --formula ssandweiss/tap/screepub');
   });
 });
 

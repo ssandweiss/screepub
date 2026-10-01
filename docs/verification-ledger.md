@@ -6,14 +6,16 @@ thing, and the README, the site (screepub.com) and the release notes say no
 more than this page does. `tests/site.test.ts` and
 `tests/release-artifacts.test.ts` hold the README and the site to it.
 
-The window is the Tauri app in `desktop/` (*Screepub Desktop* on a Mac). The
-older Mac app is the frozen Swift app, still the site's Mac download and the
-Homebrew cask.
+The window is the Tauri app in `desktop/`: Screepub on every platform, and
+on a Mac the one app, `Screepub-macOS.dmg`. The older Mac app is the frozen
+Swift app. It is no longer published, and its own updater, where it is
+switched on, installs the window in its place.
 
 **Verified on a real machine, by a person**
 
-- **The older Mac app**: installed from its notarized download and used to
-  convert scripts and send them to a Kindle, over USB and by email.
+- **The older Mac app**, before it retired: installed from its notarized
+  download, converting scripts and sending them to a Kindle, over USB and by
+  email.
 - **The window on a Mac, from a release.** The owner's Mac updated the window
   from 0.7.2 to 0.7.3 through its own updater: a bundle that `release.yml`
   built, signed and notarized, downloaded, checked and installed by the
@@ -53,9 +55,10 @@ Homebrew cask.
   the update manifest (`latest.json`, Mac only) is read back from GitHub
   after it is published. For the universal `.dmg`, only the ARM half runs:
   the job prints a notice saying so.
-- Weekly: the Homebrew cask and the update manifest still match the newest
-  release, and the older Mac app's AZW3 and KEPUB checks still pass against
-  Calibre's newest version.
+- Weekly: the Homebrew formula and the update manifest still match the
+  newest release, the retired Homebrew cask still says it is deprecated, and
+  the older Mac app's AZW3 and KEPUB checks still pass against Calibre's
+  newest version.
 
 **Verified by nobody**
 
@@ -70,6 +73,9 @@ Homebrew cask.
   verified: the 0.7.3 pass converted a script dropped on the window.
 - The window restarting itself after an update, from 0.7.3 on: written and
   tested in code, not yet recorded by a person.
+- The move to one Mac app, by a person: the older Mac app updating itself
+  into the window, and a *Screepub Desktop* install updating into Screepub.
+  Both are written and tested in code.
 - Kobo, tolino and reMarkable on real hardware. They are tested against
   injected mounts and a stub tablet.
 - Any e-reader connected on Linux or Windows.

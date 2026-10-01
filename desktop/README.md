@@ -7,10 +7,12 @@ knowledge, formatting rules, settings and send routes are all in `src/`
 (TypeScript), where the CLI and the window share one implementation and one
 test suite. See [ADR 2026-09-12](../docs/adr/2026-09-12-cross-platform-tauri.md).
 
-It ships for macOS (one universal `.dmg`, *Screepub Desktop*), Windows (an
+It ships for macOS (one universal `.dmg`, `Screepub-macOS.dmg`), Windows (an
 NSIS installer) and Linux (`.deb` and `.rpm`), built by `release.yml` on
-every tag. Who has checked which of these, and how far:
-[the verification ledger](../docs/verification-ledger.md). Dated measurements
+every tag. On a Mac it is `Screepub.app` with the identifier
+`com.darkwell.screepub`, the identity the older Swift Mac app had, so that
+app's own updater installs the window in its place. Who has checked which
+of these, and how far: [the verification ledger](../docs/verification-ledger.md). Dated measurements
 and transcripts from building it: [desktop build notes](../docs/history/desktop-build-notes.md).
 
 ## Build and run
@@ -38,7 +40,7 @@ Installable bundles are built by `bun tools/build-app-bundle.ts`, which calls
     bun tools/build-sidecar.ts --universal       # both slices, then lipo
     cd desktop/src-tauri
     cargo tauri build --target universal-apple-darwin \
-      --bundles app,dmg --config tauri.transition.conf.json
+      --bundles app,dmg
 
 Bun compiles one architecture at a time, so the universal sidecar is a lipo
 of two real builds. `--universal` builds both, fuses them, and checks the
@@ -102,21 +104,16 @@ There is no Cancel during a conversion. Killing a running engine needs a kill
 handle the window can reach, which is a third command, and the owner decided
 against it.
 
-## Two config overlays
+## The updater overlay
 
-- **`tauri.transition.conf.json`** is exactly `{"productName": "Screepub
-  Desktop"}`, so the window and the older Swift Mac app can both be
-  installed. Only release.yml's macOS leg passes it. Tauri's config schema
-  rejects any extra key, so this note lives here rather than in the file.
-  The identifier release (piece F of the retirement) deletes the overlay, and
-  the window takes the `Screepub.app` name.
-- **`tauri.updater.conf.json`** holds exactly
-  `bundle.createUpdaterArtifacts: true`, passed by
-  `bun tools/build-app-bundle.ts --updater`, which only release.yml's macOS leg
-  uses. It is not in `tauri.conf.json` because tauri-cli then signs the
-  updater archive itself and fails the whole bundle when
-  `TAURI_SIGNING_PRIVATE_KEY` is unset, which it is on every push build and
-  on your machine.
+**`tauri.updater.conf.json`** holds exactly
+`bundle.createUpdaterArtifacts: true`, passed by
+`bun tools/build-app-bundle.ts --updater`, which only release.yml's macOS leg
+uses. It is not in `tauri.conf.json` because tauri-cli then signs the
+updater archive itself and fails the whole bundle when
+`TAURI_SIGNING_PRIVATE_KEY` is unset, which it is on every push build and on
+your machine. It is the only overlay: every platform builds under the name
+in `tauri.conf.json`.
 
 `serde_json` is in `Cargo.toml` only because `tauri::generate_context!` embeds
 the updater's config as `serde_json` values. No `.rs` file may name it;

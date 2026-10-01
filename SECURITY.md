@@ -9,9 +9,9 @@ Report it privately through GitHub:
 That opens a draft advisory only you and the maintainer can see.
 
 Please include your operating system and its version (macOS, Windows or
-Linux), which app (the Mac app, the window, or the command line), the
-Screepub version (the version stamp at the foot of the window, Screepub >
-About in the Mac app, or `screepub --version`), and, if a specific file
+Linux), which Screepub (the app or the command line), the Screepub version
+(the version stamp at the foot of the app's window, or `screepub --version`),
+and, if a specific file
 triggers it, how to build a PDF that reproduces the problem. **Don't attach a
 confidential script.** If a real one is the only reproducer, say so and we'll
 work out a way to narrow it down without you sending it.
@@ -37,11 +37,12 @@ producer, an agency, or a stranger, and Screepub opens it.
   index, and checking for or installing an update if you switched that on.
   The [README](README.md#your-script-stays-on-your-machine) lists each one.
   A way to make it do anything else is a real finding.
-- **The update path.** The window installs an update only after checking its
-  signature against a key built into the app; the Mac app checks the Apple
-  Developer ID signature and the version before it replaces itself. A way to
-  get either to install something else is a real finding.
-- **Signing and entitlement weaknesses.** In the Mac app, the engine is
+- **The update path.** The app installs an update only after checking its
+  signature against a key built into the app. The older Mac app, retired but
+  still on some Macs, checks the Apple Developer ID signature and the version
+  before it replaces itself with the current app. A way to get either to
+  install something else is a real finding.
+- **Signing and entitlement weaknesses.** The Mac command-line converter is
   signed with JIT entitlements because Bun needs them
   (`app/screepub-engine.entitlements`). If those are exploitable beyond what
   Bun requires, we want to know.

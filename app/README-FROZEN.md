@@ -3,9 +3,9 @@
 If you found this directory while cleaning up: **not yet, and the reasons are
 specific.** Each one below is checkable rather than a matter of taste.
 
-Frozen means: maintained for bug compatibility only. Fix a defect a shipping
-user hits. Do not write new Swift against `ScreepubKit`, do not add a file,
-do not port a feature *into* this directory. New behaviour goes in `src/`
+Frozen means: maintained for bug compatibility only. Fix a defect a user
+still running it hits. Do not write new Swift against `ScreepubKit`, do not
+add a file, do not port a feature *into* this directory. New behaviour goes in `src/`
 (the engine) and is driven from `desktop/` (the Tauri window).
 
 ## Who decided this, and where
@@ -26,21 +26,24 @@ do not port a feature *into* this directory. New behaviour goes in `src/`
 
 `desktop/`: a Tauri window over the same engine in `src/`, plus the
 `screepub` CLI. It ships on every tag for macOS, Windows and Linux, and on a
-Mac it is signed, notarized and updates itself.
+Mac it is signed, notarized and updates itself. Since the identifier release
+it is `Screepub.app` with this app's identifier, `com.darkwell.screepub`, and
+`Screepub-macOS.dmg` is its image.
 
 ## Why it is still here
 
-**1. It is still what Mac users are given.** `Screepub-macOS.dmg` is the
-README's and the site's Mac download, `brew install --cask
-ssandweiss/tap/screepub` installs it, and `app/release.sh` signs and
-notarizes it on every tag. The identifier release, which gives the window
-the `com.darkwell.screepub` identifier and the Screepub name, is planned and
-has not happened. Deleting this directory first leaves Mac users with a dead
-download button and a dead cask.
+**1. Its users are still crossing over.** This app is no longer published
+and the Homebrew cask is retired, but copies of it are still installed. Its
+own updater, where it is switched on, finds the window's
+`Screepub-macOS.dmg` on the newest release and installs it in its place.
+F3 waits one release after the identifier release, so a handover that goes
+wrong still has this source to fix it from. `app/release.sh` also still
+builds and signs the Mac command-line archives that the Homebrew formula
+serves, until that build moves out of this directory.
 
-**2. Its `kit-check` is the only test of its own Swift code.** While the app
-ships, its behaviour is worth asserting. The sections that matter most for
-the retirement cover `ResultActions.swift` (the send menu),
+**2. Its `kit-check` is the only test of its own Swift code.** While copies
+of the app are still installed, its behaviour is worth asserting. The
+sections that matter most for the retirement cover `ResultActions.swift` (the send menu),
 `UpdateCheck.swift` and `UpdateInstall.swift` (its updater), and
 `AppleBooks.swift`. `docs/retired-coverage.md` records, section by section,
 what the window and `src/` now do in their place and what was decided as
@@ -73,19 +76,21 @@ On three gates, stated in full in the spec:
 2. **Every feature this app has is ported, or named in
    `docs/releases/<version>.md` as a thing that went away.** In progress:
    `docs/retired-coverage.md` tracks each one.
-3. **A Mac user can get the new app where they get this one**: the Homebrew
-   cask points at the window's download and someone has installed it through
-   `brew`. Not met; this is the identifier release.
+3. **A Mac user can get the new app where they get this one.** Met at the
+   identifier release: the download button, the README and this app's own
+   updater all give the window. The Homebrew cask is retired rather than
+   pointed at the window (owner's decision, 2026-10-01).
 
-Then F2 (the identifier release: the window takes this app's identifier,
+F2, the identifier release, is done: the window took this app's identifier,
 and this app's own updater carries its users across, as
-`docs/adr/2026-09-20-swift-app-migrates-itself.md` decides), and only after
-a release cycle, F3 (delete, with the reference sweep in
-`tools/app-references.json`).
+`docs/adr/2026-09-20-swift-app-migrates-itself.md` decides. F3 (delete, with
+the reference sweep in `tools/app-references.json`) comes after a release
+cycle.
 
 ## Meanwhile
 
 CI builds this directory and runs `kit-check` (`.github/workflows/ci.yml`,
 the `app` job), and `weekly-toolchain.yml` runs its Calibre checks every
-Monday. Both are coverage for a shipping app. They go when the directory
-goes.
+Monday. Both cover an app that is still installed on some Macs, and a
+directory that still builds the Mac command-line archives. They go when the
+directory goes.

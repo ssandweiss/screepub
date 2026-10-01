@@ -21,10 +21,6 @@ see [Influencing this list](#influencing-this-list).
   are greyscale, so a colour image reads as black and white on a Kindle, and
   a script padded with full-page photographs makes a file too large to email
   to a `@kindle.com` address.
-- **One Screepub on the Mac.** Two Mac apps ship today: the older Mac app
-  and the newer window, *Screepub Desktop*. The identifier release gives the
-  window the Screepub name and moves Mac users across, and the older app
-  retires.
 - **Sending from the Convert page.** Sending a book is its own Send tab
   today. Folding it into Convert puts "send it to my reader" right beside the
   book you just made.

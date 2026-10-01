@@ -7,16 +7,13 @@ v3.0 or later: see [`LICENSE`](LICENSE).
 
 - **The conversion engine** is compiled into a single binary, so every
   download embeds the JavaScript libraries below. It ships as the
-  command-line archives (macOS, Linux, Windows), as `screepub-engine` inside
-  the window's bundles, and inside the Mac app.
-- **The window** (*Screepub Desktop* on a Mac; the `.dmg`, the Windows
-  installer, the `.deb` and the `.rpm`) also carries Rust crates, Tauri and
+  command-line archives (macOS, Linux, Windows) and as `screepub-engine`
+  inside the window's bundles.
+- **The window** (the app: the Mac `.dmg`, the Windows installer, the `.deb`
+  and the `.rpm`) also carries Rust crates, Tauri and
   its plugins chief among them (see [The window's Rust crates](#the-windows-rust-crates)),
   and the two typefaces below. This file travels inside each bundle beside
   `LICENSE`.
-- **The Mac app** (`Screepub.app`, from `Screepub-macOS.dmg`) links only
-  Apple's system frameworks besides the engine, and carries this file in
-  its `Contents/Resources/` folder.
 - **The command-line archives** hold only the binary; this file is their
   notice.
 
@@ -128,7 +125,8 @@ record, and each crate's licence text is in its published source.
 ## KFX Output plugin for Calibre 2.12.0: GPL-3.0 (aggregated, not linked)
 
 Copyright John Howell (jhowell), with a Traditional-Chinese rendering fix by
-lcandy2. Carried inside the Mac app only, as an unmodified zip
+lcandy2. Carried only inside the older Mac app, which is no longer
+published, as an unmodified zip
 (`KFXKit_KFXKit.bundle/Vendor/KFX_Output_plugin.zip`, full GPL-3 text beside
 it), and installed into **your own copy of Calibre** only when you choose to,
 where it runs as part of Calibre, a separate GPL-3 program. It is never

@@ -29,6 +29,12 @@ tar -xzf screepub-cli-linux-x64.tar.gz
 ./screepub script.pdf
 ```
 
+On a Mac, Homebrew installs the same converter and keeps it current:
+
+```bash
+brew install --formula ssandweiss/tap/screepub
+```
+
 The Mac archives are signed and notarized. `SHA256SUMS` on the release page
 covers the Linux and Windows archives. The Windows build is unsigned, so
 SmartScreen warns the first time it runs: choose **More info**, then **Run
@@ -88,7 +94,7 @@ own path. The `source.json` in each folder records which PDF it came from. A
 `<stem>.screepub.json` sitting beside the PDF from an earlier conversion is
 copied in the first time that script reaches the library.
 
-The older Mac app writes flat into the same default folder
+Books made by the older Mac app sit flat in the same default folder
 (`<folder>/<stem>.epub`). The window leaves those books alone.
 
 `screepub app-settings --set '{"libraryPath": "/some/folder"}'` chooses a

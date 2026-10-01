@@ -28,10 +28,8 @@ that same page in your browser.
 
 Under *Send-to-Kindle E-Mail Settings*, each device has an address like
 `yourname_a1b2c3@kindle.com`. That's where you send scripts. You can edit the
-part before the `@` to something memorable. The window does not keep this
-address: you type it into the message yourself (see below). The older Mac app
-has a field for it in its Settings (⌘,) and offers to copy it after each
-conversion.
+part before the `@` to something memorable. Screepub does not keep this
+address: you type it into the message yourself (see below).
 
 ## 2. Approve the address you send *from*
 
@@ -60,8 +58,7 @@ attach from any mail app.
 > Send the **EPUB**, not the MOBI or AZW3: Amazon does not accept those by
 > email. The Send page's two saves are named for what each file is for:
 > **Save the EPUB…** is the one for email, and **Save a Kindle file…** is for
-> copying to a Kindle by hand over USB. The older Mac app's **Save a Copy…**
-> saves EPUB for the same reason.
+> copying to a Kindle by hand over USB.
 
 ## What Amazon receives
 

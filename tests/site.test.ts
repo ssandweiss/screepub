@@ -125,8 +125,10 @@ describe('"Every download" links version-free names, each with a status', () => 
     const os: BundleOs = row.os!.startsWith('ubuntu') ? 'linux' : row.os!.startsWith('macos') ? 'macos' : 'windows';
     for (const kind of kindsForOs(os)) bundles.set(kind.releasedName('0.0.0', row.arch as BundleArch), os);
   }
-  const SWIFT_DMG = 'Screepub-macOS.dmg';
-  const files = [SWIFT_DMG, ...bundles.keys()];
+  // One Mac download since the identifier release: the window's image,
+  // which the derivation above already finds.
+  const MAC_DMG = 'Screepub-macOS.dmg';
+  const files = [...bundles.keys()];
 
   /** The table row that offers `file`. */
   const row = (file: string): string => {
@@ -196,11 +198,12 @@ describe('"Every download" links version-free names, each with a status', () => 
     expect(person).toMatch(/Each Mac that ran\s+these is Apple Silicon/);
     // The page sends a reader to the ledger itself.
     expect(downloads).toContain('docs/verification-ledger.md');
-    const mac = row('Screepub-Desktop-macOS-universal.dmg');
+    const mac = row(MAC_DMG);
     expect(mac).toContain(VERIFIED);
     expect(mac).toContain('Apple Silicon');
     expect(mac).toContain('Intel');
-    expect(row(SWIFT_DMG)).toContain(VERIFIED);
+    // The pre-identifier-release name 404s now; no page may link it.
+    expect(site).not.toContain('Screepub-Desktop-macOS-universal.dmg');
   });
 
   test('the sentence the status column replaced is gone', () => {

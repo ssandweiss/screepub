@@ -96,11 +96,6 @@
       "category": "doc",
       "breaks": "A live instruction to the notes author: edit app/Sources/ScreepubApp/ReaderRail.swift when a bullet announces a UI change. Not a record — a procedure that would tell someone to edit a deleted file."
     },
-    "docs/release-secrets.md": {
-      "refs": 2,
-      "category": "doc",
-      "breaks": "Says app/release.sh computes the three SHAs the tap bump needs, and names Screepub-macOS.dmg among the re-uploaded assets."
-    },
     "docs/retired-coverage.md": {
       "refs": 55,
       "category": "note",

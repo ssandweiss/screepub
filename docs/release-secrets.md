@@ -109,7 +109,7 @@ What holds this together, in the order it runs:
 - The macOS leg runs `tools/build-app-bundle.ts --updater`, which refuses
   to START without the private key rather than failing after the full
   universal build, then publishes
-  `Screepub-Desktop-macOS-universal.app.tar.gz` and its `.sig`.
+  `Screepub-macOS.app.tar.gz` and its `.sig`.
 - `app-upload` writes `latest.json` from what arrived
   (`tools/build-update-manifest.ts`) and uploads it LAST, so nothing it
   names is ever missing when it is read.
@@ -142,12 +142,13 @@ gh workflow run release.yml --ref v0.4.2
 gh run watch --exit-status
 ```
 
-Green job → the existing GitHub Release for that tag gets its three
-assets re-uploaded (`Screepub-macOS.dmg`, universal, plus
-`screepub-cli-macos-arm64.tar.gz` and `screepub-cli-macos-x64.tar.gz`):
-the publish step is idempotent (`gh release upload --clobber`), so this
-rebuilds and re-notarizes the real release rather than minting a fake
-one. Nothing to delete afterward.
+Green run → the existing GitHub Release for that tag gets its assets
+re-uploaded (the window's `Screepub-macOS.dmg`, universal, from
+`app-upload`, and `screepub-cli-macos-arm64.tar.gz` and
+`screepub-cli-macos-x64.tar.gz` from the `release` job): every upload step
+is idempotent (`gh release upload --clobber`), so this rebuilds and
+re-notarizes the real release rather than minting a fake one. Nothing to
+delete afterward.
 
 Then do the real acceptance test: download the DMG on a **different Mac**,
 open it, drag to Applications, double-click, and convert a PDF — that's
@@ -235,22 +236,21 @@ See `homebrew-tap/Formula/screepub.rb` for the working form.
 
 ### Bumping the tap by hand
 
-Three SHAs are needed. `app/release.sh` already computes all three at
-release time (it prints them to stdout, where nothing catches them — see
-the automation note below). To get them after the fact:
+Two SHAs are needed, one per command-line tarball. The cask is retired
+(deprecated at the identifier release) and is never bumped again. The
+release's "Tap bump crib sheet" step writes both SHAs into the run's
+summary. To get them after the fact:
 
 ```bash
-gh release download vX.Y.Z --dir /tmp/tap && shasum -a 256 /tmp/tap/*
+gh release download vX.Y.Z --dir /tmp/tap --pattern 'screepub-cli-macos-*.tar.gz' && shasum -a 256 /tmp/tap/*
 ```
 
-Then edit `homebrew-tap/Formula/screepub.rb` (two urls, two SHAs) and
-`homebrew-tap/Casks/screepub.rb` (version, DMG SHA), and verify before
-pushing:
+Then edit `homebrew-tap/Formula/screepub.rb` (two urls, two SHAs), leave
+`homebrew-tap/Casks/screepub.rb` alone, and verify before pushing:
 
 ```bash
-brew style Formula/screepub.rb Casks/screepub.rb
+brew style Formula/screepub.rb
 brew audit --strict --formula ssandweiss/tap/screepub
-brew audit --strict --cask ssandweiss/tap/screepub
 ```
 
 Note `brew audit` reads the TAPPED clone at
@@ -265,7 +265,8 @@ honest:
 
 - **The bumper: `release.yml`'s `tap` job, running `tools/bump-tap.sh`.**
   `needs: release`, so it cannot start before the assets exist. It clones
-  the tap, rewrites the cask's version and DMG SHA and the formula's two
+  the tap, leaves the retired cask alone (adding Homebrew's `deprecate!`
+  stanza once, if it is missing), rewrites the formula's two
   urls and two SHAs, runs `brew style`, and commits. Checksums come from
   the digests GitHub reports per asset, so nothing is downloaded and
   nothing is re-hashed. Prereleases are skipped: a hyphen in the tag must
@@ -276,14 +277,15 @@ honest:
   manual path intact.
 
 - **The floor: `release.yml`'s "Tap bump crib sheet" step**, writing the
-  version and all three SHAs into `$GITHUB_STEP_SUMMARY`. This is the
+  version and both formula SHAs into `$GITHUB_STEP_SUMMARY`. This is the
   fallback for a missing token or a failed bump, so the hand edit is
   paste-and-commit rather than a download-and-hash chore.
 
 - **The alarm, in two places, both running `tools/check-tap.sh`.** It
   reads the tap's cask and formula STRAIGHT FROM GITHUB and fails when
-  either pins something other than the newest release, or carries a SHA
-  that does not match that release's assets. No secret needed, both repos
+  the formula pins something other than the newest release or carries a
+  SHA that does not match that release's assets, or when the cask is not
+  marked deprecated. No secret needed, both repos
   being public.
 
   - `release.yml`'s **`tap-check`** job, `needs: tap`, is the per-release

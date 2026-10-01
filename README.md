@@ -59,7 +59,7 @@ size and still holds its shape.
 | iPhone, iPad, Mac (Apple Books) | Added to Books on a Mac, then synced through iCloud | Verified |
 | Kobo | EPUB (or KEPUB) over USB | Built and tested in code, never on a real device |
 | tolino | EPUB into the device's `Books` folder | Built and tested in code, never on a real device |
-| reMarkable | The EPUB over its USB web interface (the older Mac app sends the original PDF) | Built and tested in code, never on a real device |
+| reMarkable | The EPUB over its USB web interface | Built and tested in code, never on a real device |
 
 **How well a Kindle keeps a scene together depends on the file.** A script
 emailed to your Kindle, or copied over USB as KFX, keeps a scene heading and a
@@ -83,24 +83,20 @@ the most useful thing you can send:
 
 ## Install
 
-Two Mac apps ship today. **Most people want `Screepub-macOS.dmg`**: the Mac
-app, signed and notarized by Apple, and the one the download button gives you
-(or `brew install --cask ssandweiss/tap/screepub`). It needs macOS 14 or
-later. The newer window, `Screepub-Desktop-macOS-universal.dmg`, installs as
-*Screepub Desktop* beside it, runs on Windows and Linux too, and on a Mac can
-update itself. A planned release gives the window the Screepub name and
-retires the older Mac app.
+**On a Mac, download `Screepub-macOS.dmg`**: the Mac app, signed and
+notarized by Apple, one file for Apple Silicon and Intel, for macOS 13 or
+later. It is the file the download button gives you, and it updates itself.
+The same app runs on Windows and Linux.
 
 | Computer | File | Status |
 | --- | --- | --- |
-| Mac | `Screepub-macOS.dmg` | Verified by a person |
-| Mac, the newer window | `Screepub-Desktop-macOS-universal.dmg` | Verified by a person on an Apple Silicon Mac. Never run on an Intel Mac |
+| Mac | `Screepub-macOS.dmg` | Verified by a person on an Apple Silicon Mac. Never run on an Intel Mac |
 | Windows, 64-bit | `Screepub-windows-x64-setup.exe` | Built and checked automatically. Never installed by a person yet |
 | Linux: Debian, Ubuntu | `Screepub-linux-amd64.deb` | Built and checked automatically. Never installed by a person yet |
 | Linux: Fedora, openSUSE | `Screepub-linux-x86_64.rpm` | Built and checked automatically. Never installed by a person yet |
 
 Every file is on the [latest release](https://github.com/ssandweiss/screepub/releases/latest).
-`SHA256SUMS-app` there covers these four files of the window, and `SHA256SUMS`
+`SHA256SUMS-app` there covers these four files, and `SHA256SUMS`
 covers the command-line downloads. Reports from Windows and Linux are welcome:
 [open an issue](https://github.com/ssandweiss/screepub/issues/new/choose).
 Who has checked what, in full: [the verification ledger](docs/verification-ledger.md).
@@ -117,7 +113,8 @@ gives a drive no name to recognise it by. On Windows and Linux the window does
 not update itself: download each new version by hand.
 
 There is also a command-line converter for macOS, Linux and Windows:
-[for developers](docs/developers.md#install-the-command-line-converter).
+[for developers](docs/developers.md#install-the-command-line-converter). On a
+Mac, Homebrew installs it too: `brew install --formula ssandweiss/tap/screepub`.
 
 ## Your script stays on your machine
 
@@ -141,9 +138,7 @@ Screepub reaches the network only when you ask it to:
 - **Updates, only if you say yes.** The window asks once; with your yes, it
   checks GitHub at most once a day, and **Check for updates** checks once.
   An update downloads only when you choose to install it, and its signature
-  is checked before anything is replaced. The older Mac app's check is off
-  until you turn it on, and sends GitHub nothing but its name and version.
-  Self-update is Mac only.
+  is checked before anything is replaced. Self-update is Mac only.
 - **The Windows installer** may fetch Microsoft's WebView2 runtime once.
 
 On a Mac the Send page can also hand a book to another app and stop there:

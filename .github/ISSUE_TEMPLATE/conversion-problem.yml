@@ -54,8 +54,7 @@ body:
     attributes:
       label: Which Screepub?
       options:
-        - The Mac app (Screepub)
-        - The window (Screepub Desktop on a Mac, or Screepub on Windows and Linux)
+        - The app (Screepub, on a Mac, Windows or Linux)
         - The command line (screepub)
     validations:
       required: true
@@ -63,7 +62,7 @@ body:
     id: versions
     attributes:
       label: Screepub and system versions
-      description: The window shows its version at the foot of the page; the Mac app under Screepub > About; the command line with `screepub --version`.
+      description: The app shows its version at the foot of the page; the command line with `screepub --version`.
       placeholder: Screepub 0.7.4, macOS 15.6
     validations:
       required: true

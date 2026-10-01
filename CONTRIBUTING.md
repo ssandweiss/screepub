@@ -6,8 +6,8 @@ scripts on devices nobody here owns.
 ## Reporting a bug
 
 [Open an issue](https://github.com/ssandweiss/screepub/issues/new/choose).
-Say which computer (Mac, Windows or Linux) and which app: the Mac app, the
-window (*Screepub Desktop* on a Mac), or the command line. For a conversion
+Say which computer (Mac, Windows or Linux) and which Screepub: the app or
+the command line. For a conversion
 problem, the useful details are what the PDF was written in (Final Draft,
 Highland, Fade In, Celtx, WriterDuet…), what came out wrong, and what you
 expected.
@@ -49,8 +49,8 @@ library and the architecture.
 `epubcheck` (`brew install epubcheck`) validates output and is worth running
 after any change to the EPUB or CSS builders.
 
-**The older Mac app** (`app/`) is frozen: bug fixes only, no new features
-(see [app/README-FROZEN.md](app/README-FROZEN.md)). Its own checks need
+**The older Mac app** (`app/`) is retired and frozen: no new features, and
+it is no longer published (see [app/README-FROZEN.md](app/README-FROZEN.md)). Its own checks need
 Xcode Command Line Tools on a Mac:
 
 ```bash
@@ -100,9 +100,9 @@ screenshot.** Some tests skip themselves when it's absent; that's expected.
 - **Every `v*` tag** (`release.yml`): the release. It signs and notarizes the
   Mac downloads, builds every bundle and archive, checks each one before
   uploading, and publishes the window's update manifest.
-- **Weekly**: the Homebrew cask and the update manifest still match the
-  newest release, and the frozen Mac app's checks still pass against
-  Calibre's newest version.
+- **Weekly**: the Homebrew formula and the update manifest still match the
+  newest release, the retired Homebrew cask still says it is deprecated, and
+  the frozen Mac app's checks still pass against Calibre's newest version.
 
 ## Licensing of contributions
 
