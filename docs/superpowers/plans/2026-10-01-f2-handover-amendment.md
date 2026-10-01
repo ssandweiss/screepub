@@ -256,3 +256,33 @@ Acceptance criteria 11 to 15 of the spec, re-checked against today:
 
 The F3 branch can be prepared any time and held; it merges only after
 N+1 has shipped and N+2 has proven the CLI move.
+
+**The per-file list already exists**: `tools/app-references.json` (66 rows,
+425 references on 2026-10-01 after the batch), each with a "breaks" note
+saying what it is. F3 drives every row to zero and deletes the file's rows
+as it goes. Most are provenance comments (`note`) and doc lines. The ones
+that need thought, from those notes:
+
+- `tests/theme-colors.ts` opens `Theme.swift` for its CONTENT, and
+  `tests/brand-tokens.test.ts` imports it. The comparison is already
+  `skipIf` the Swift file is missing; the parser and helpers it shares must
+  stay or move, not vanish.
+- `tests/verify-signing.test.ts` pins `tools/verify-signing.ts`'s
+  requirement strings clause by clause against `UpdateInstall.swift`. After
+  F3 the strings have no upstream: they become this repository's own
+  definition, with the Swift quoted in a comment as history. Keep the tool:
+  installed Swift apps in the wild still demand exactly those strings.
+- `tests/update-compare.test.ts` mirrors kit-check lines 774 to 812 pair
+  for pair. The assertions stay; the "mirror" framing becomes a comment.
+- `tests/release-artifacts.test.ts` READS `app/release.sh` (about eight
+  tests). Most of them change at N+2 with the CLI move, not at F3.
+- `tap-freshness.yml` has no textual reference and is invisible to the
+  sweep (its row is `tools/check-tap.sh`): re-check it by hand.
+- `retired-coverage.md` (55 references) is the gate-2 record. Every `port`
+  row is built as of 2026-10-01 (the last, `update-error-descriptions`, was
+  re-audited that day). It stays as history with its app/ paths, which means
+  the sweep must learn to exclude it, the way it excludes docs/superpowers/;
+  or it moves under docs/superpowers/. Owner's choice, small.
+- `tests/app-references.test.ts` itself: criterion 11 says the inventory is
+  EMPTY when F3 is done. The test then has nothing to pin and should go
+  with the directory, or stay as a guard that `app/` never comes back.
