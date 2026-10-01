@@ -1,10 +1,12 @@
 # Screepub
 
-Screenplay PDF → Fountain → reflowable EPUB3/MOBI, with a SwiftUI Mac app
-that converts and sends to e-readers (Kindle first; Kobo/tolino via USB
-volume signatures, reMarkable via its USB web interface — see
-ScreepubKit's Device.swift/RemarkableDevice.swift). Engine is
-Bun/TypeScript; the app shells out to it as a compiled sidecar.
+Screenplay PDF → Fountain → reflowable EPUB3/MOBI, with a Tauri desktop
+window (`desktop/`, Mac, Windows and Linux) that converts and sends to
+e-readers (Kindle first; Kobo/tolino via USB volume signatures, reMarkable
+via its USB web interface: see `src/device/`). Engine is Bun/TypeScript;
+the window shells out to it as a compiled sidecar. The older SwiftUI Mac
+app is FROZEN, not deleted: it still builds and its checks still run in CI
+until piece F3 removes it (docs/superpowers/specs/2026-09-14-retire-swiftui-design.md).
 
 ## Commands
 
@@ -12,8 +14,10 @@ Bun/TypeScript; the app shells out to it as a compiled sidecar.
 bun test                    # engine suite (integration tests need fixtures/)
 bunx tsc --noEmit           # typecheck
 bun src/cli.ts <pdf>        # convert (see --help; --json is the app contract)
-app/build-app.sh            # engine sidecar + SwiftUI app → app/dist/Screepub.app
-(cd app && swift run -c release kit-check)   # Swift-side behavior checks
+bun tools/build-sidecar.ts --host   # compile the engine for this machine (before cargo)
+(cd desktop/src-tauri && cargo run)   # the window; bundles via tools/build-app-bundle.ts
+app/build-app.sh            # FROZEN Swift app: sidecar + SwiftUI app
+(cd app && swift run -c release kit-check)   # FROZEN Swift app's behavior checks (CI, until F3)
 epubcheck <out.epub>        # validate output (brew-installed)
 bun tools/capture-screens.ts   # retake README + site pictures (needs Chrome; macOS)
 bun tools/review-screens.ts --out <page.html>   # which pictures changed, old beside new
@@ -46,13 +50,19 @@ bun tools/bump-version.ts <version>   # release bump: all 4 version files + desk
 - `src/epub/` + `src/mobi/` — fountain-js tokens → EPUB3 (jszip) / MOBI 6
   (hand-built PalmDB container for dependency-free USB sideload).
 - `src/options.ts` — FormatOptions, the single knob surface: CLI
-  `--options file.json` ↔ app `FormatSettings`. Defaults are pinned to
+  `--options file.json` ↔ the window's Settings page. Defaults are pinned to
   root `format-defaults.json` by BOTH suites (options.test.ts,
   kit-check) — change all three together or a suite fails.
 - `src/convert.ts` — orchestration + scanned/non-screenplay guards.
-- `app/` — SwiftPM (NO Xcode project; CommandLineTools only, so no
-  XCTest/swift-testing — `kit-check` executable instead). ScreepubKit =
-  logic, ScreepubApp = script-page-themed UI (Theme.swift).
+- `src/device/` + `src/export/` — device detection, USB copy, and every
+  send route (Calibre and KFX builds, Books, Mail, Send to Kindle). The
+  engine owns ALL of it.
+- `desktop/` — the Tauri window. **No logic lives there**: the Rust shell
+  spawns the engine sidecar and renders the JSON it prints, and the UI is
+  static files with no bundler. See desktop/README.md and ADR 2026-09-12.
+- `app/` — the FROZEN SwiftPM app (NO Xcode project; CommandLineTools only,
+  so no XCTest/swift-testing, `kit-check` executable instead). Don't build
+  new features there.
 
 ## Non-negotiable invariants
 
@@ -78,7 +88,7 @@ bun tools/bump-version.ts <version>   # release bump: all 4 version files + desk
   css.ts, and docs/device-map.md §6 for what each renderer honors.
 - **Kindles never index sideloaded EPUBs.** USB = AZW3 via Calibre's
   ebook-convert (with flags that stop Calibre re-breaking scenes and
-  stripping div margins — see EbookConvert.swift) or the engine's MOBI.
+  stripping div margins — see src/export/calibre.ts) or the engine's MOBI.
   **2026-07-29: sideloaded KFX renders with Enhanced Typesetting** — keeps
   hold, and it indexes — so KFX (Calibre + jhowell's KFX Output plugin +
   Kindle Previewer) beats AZW3 whenever that toolchain is present. The
@@ -127,7 +137,8 @@ bun tools/bump-version.ts <version>   # release bump: all 4 version files + desk
   was inert. Synthetic fixtures cannot answer that question.
 - **Rebuild `torture.pdf` before any device pass.** A stale build once put
   an already-fixed defect in front of a reviewer and nearly cost a verdict.
-- After engine changes, rebuild the app bundle (it embeds the sidecar).
+- After engine changes, rebuild the sidecar before running the window
+  (`bun tools/build-sidecar.ts --host`): it embeds the engine.
 
 ## Context
 

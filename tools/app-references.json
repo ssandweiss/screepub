@@ -27,9 +27,9 @@
       "breaks": "Ignores app/build/, app/dist/, app/.build/ — the SwiftPM and release output paths."
     },
     "CLAUDE.md": {
-      "refs": 16,
+      "refs": 7,
       "category": "doc",
-      "breaks": "The architecture section, both Swift build commands, and the format-defaults.json invariant that says BOTH options.test.ts and kit-check pin it (F3 acceptance criterion 14 rewrites that sentence)."
+      "breaks": "The architecture section's FROZEN app/ bullet, both Swift build commands (labelled frozen since 2026-09-30, when the intro and architecture were moved to the Tauri window and the count fell from 16), and the format-defaults.json invariant that says BOTH options.test.ts and kit-check pin it (F3 acceptance criterion 14 rewrites that sentence)."
     },
     "CONTRIBUTING.md": {
       "refs": 8,

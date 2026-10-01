@@ -21,7 +21,7 @@ Every route a converted script can travel, and what each demands of a Mac app.
 | # | Method | Offline | Mac-side detection | What the app must do |
 |---|--------|---------|--------------------|----------------------|
 | T1 | **USB mass storage** | yes | volume signature under `/Volumes` (never VID/PID alone: Linux-gadget chips collide, e.g. `0x0525/0xA4A5` is shared by ~8 brands) | copy file into the device's expected folder; eject matters on devices that index on unplug (Kobo) |
-| T2 | **USB MTP** | yes | never mounts; IOKit/libusb enumeration only (e.g. Kindle VID `0x1949` with non-MSC interface) | macOS has no native MTP. Either link libmtp (Calibre does, `devices/mtp/unix`; Swift precedent exists) or hand off to a helper (Amazon Kindle USB File Manager, OpenMTP) |
+| T2 | **USB MTP** | yes | never mounts; IOKit/libusb enumeration only (e.g. Kindle VID `0x1949` with non-MSC interface) | macOS has no native MTP. Either link libmtp (Calibre does, `devices/mtp/unix`; Swift precedent exists) or hand off to a helper (Amazon Kindle USB File Manager, OpenMTP). **Since 2026-09-30: pure-Rust `mtp-rs` covers Mac, Windows and Linux with no C library; see §7** |
 | T3 | **USB-Ethernet web upload** | yes | tablet is a CDC-ECM/RNDIS gadget; Mac gets `10.11.99.2/29`, device serves HTTP at `10.11.99.1` | reMarkable only. `GET /documents/` then `POST /upload` (multipart, field `file`). The GET is required: upload lands in the last-listed folder |
 | T4 | **LAN web upload** | LAN-only (no internet, but needs shared Wi-Fi + app open on device) | probe a known port: Boox `:8085/api/device`, Supernote `:8089/` | POST multipart to the device's endpoint; discovery is /24 scan or user-pasted URL/QR (no mDNS on either) |
 | T5 | **Vendor cloud ingest** | no | n/a (browser or vendor app) | Send-to-Kindle web (200 MB) / email (50 MB, approved-sender silent-drop trap) / Mac app; tolino webreader (25 GB); Send-to-PocketBook email; PocketBook Cloud; Kobo Dropbox/GDrive sync (model-gated). App can only open URLs, reveal files, or `open -a` a vendor app |
@@ -95,7 +95,8 @@ Screepub needs: (a) keep the MSC volume path (correct today); (b) something
 for MTP Kindles: IOKit detection of VID `0x1949` non-MSC + guided handoff to
 Amazon's Kindle USB File Manager (bundled with Send to Kindle for Mac since
 Nov 2024, macOS 12+) or OpenMTP, or a libmtp route of our own; (c) keep STK
-affordances as the online path.
+affordances as the online path. For (b), §7 (2026-09-30) replaces "a libmtp
+route of our own" with a pure-Rust helper, now that the window is Tauri.
 
 ### 2.2 Kobo (~10% global, ~45% Canada)
 
@@ -359,7 +360,8 @@ What the map says we are missing, tiered by leverage:
 7. **MTP-era Kindle guidance:** detect VID `0x1949` non-MSC via IOKit and
    show a guided handoff (Amazon Kindle USB File Manager / OpenMTP) instead
    of silence. Every Kindle sold since Oct 2024 is invisible to our volume
-   scan today.
+   scan today. (The handoff is still the cheap first step; §7 is the real
+   route.)
 8. **AirDrop button** for iPhone -> Apple Books (offline, native,
    `NSSharingService`).
 9. **KEPUB generation** via bundled `kepubify` for Kobo-branded devices only
@@ -380,7 +382,10 @@ What the map says we are missing, tiered by leverage:
     user-supplied IP.
 13. **libmtp linkage (T2):** the only true USB route for the whole Android
     e-ink world + MTP Kindles/Nooks. One native dependency to notarize;
-    decide only if 10-12 prove insufficient.
+    decide only if 10-12 prove insufficient. **Superseded 2026-09-30 by
+    §7:** a pure-Rust library removes the native dependency, and MTP is
+    the only offline route to KFX on a new Kindle, which 10-12 cannot
+    reach at all. That moves it out of "only if 10-12 fail".
 
 **Registry corrections to carry into docs/formatting-options-log.md:**
 
@@ -443,3 +448,104 @@ lost. Not in that list: the **fw 5.12.3** widows/orphans threshold, which
 comes from jhowell's device-test reporting rather than any Amazon artifact
 — treat the exact version as approximate; the dated artifacts are Previewer
 3.35 and 3.36.
+
+---
+
+## 7. MTP Kindles from the Tauri window (researched 2026-09-30)
+
+Research only. Nothing below has been built or run here, and nobody on the
+project has a 2024-or-newer Kindle to run it on.
+
+**Why it matters.** Every Kindle sold since Oct 2024 is MTP-only (§2.1), so
+the engine's volume scan never sees it and the README sends those owners
+to email. Email cannot carry KFX (§2.1: KFX is USB-only), so today a new
+Kindle can never get the Enhanced Typesetting output. MTP is the only
+offline route to it, and the only one where the script never leaves the
+machine. It is not a Mac-only gap either: on Windows an MTP Kindle shows
+in Explorer with no drive letter, so a plain file copy cannot reach it
+there. Linux was not investigated.
+
+**The library: `mtp-rs`** (github.com/vdavid/mtp-rs, crates.io `mtp-rs`).
+
+- MIT OR Apache-2.0. Pure Rust over `nusb` on Mac and Linux, with no
+  libmtp, no libusb and no FFI. On Windows it drives the system's own WPD
+  COM stack behind the same API, with no driver install.
+- Active: v0.32.0 on 2026-08-28, 42 releases since 2026-02-20. A
+  ready-made CLI ships beside it (`mtp-rs-cli`).
+- Its tested-devices table lists the **Kindle Paperwhite 12 (2024)** as
+  "Full support". That came from PR #2 (merged 2026-04-01), which sends
+  `OpenSession` with transaction id 0 as the PTP spec says; the PR notes
+  Kindles reject it otherwise, where Android phones tolerated the old
+  behavior. The contributor confirmed it on a real Paperwhite on
+  2026-04-17. The report does not say which host OS.
+- Its Windows path was verified on a Pixel 9 Pro XL, not on a Kindle.
+
+**The Mac catch: `ptpcamerad`.** macOS's camera-import daemon claims
+MTP/PTP devices the moment they connect and holds them exclusively, so
+every other app is locked out. No library gets around this; it is the
+same wall for libmtp. `mtp-rs` reports it as `Error::is_exclusive_access()`,
+and IORegistry's `UsbExclusiveOwner` names the holding process. Other
+holders: Android File Transfer's agent, and any open Calibre or OpenMTP
+(Calibre's forum: one program per MTP device at a time on Mac and Linux).
+
+Shipped precedent: **Cmdr** (github.com/vdavid/cmdr), a Tauri file manager
+by the same author. It runs `launchctl disable user/<uid>/com.apple.ptpcamerad`
+plus `pkill -9 ptpcamerad` when an MTP device connects, `launchctl enable`
+when it disconnects, and `enable` unconditionally at startup to recover
+from a crash. No password prompt, and a toast tells the user it paused the
+daemon. Cmdr is source-available, NOT open source: take the idea, not the
+code. Screepub could hold the pause for the length of one copy only, and
+restore it in a `finally` and again at engine start. The cost to say in
+the UI: while paused, Photos and Image Capture cannot import from a camera
+or phone. This is Screepub touching a system service, however briefly, so
+it is a product decision, not an implementation detail.
+
+**Where it goes.** Not in the Tauri shell: `desktop/` holds no logic, and
+the engine owns every route (desktop/README.md). The fit is a small Rust
+helper binary on `mtp-rs`, shipped as a second sidecar beside the engine
+and called from `src/device/` the way `src/export/` calls Calibre. Roughly
+two verbs: list MTP devices as JSON (vendor, product, serial, model, or
+who holds exclusive access), and put a file at a device path. One more
+signed binary in the bundle and no dylibs; the universal Mac build would
+lipo two slices, as the engine does.
+
+**Kindle behavior to copy, from GPL-3 tools** (behavior reference;
+Screepub's AGPL-3.0-or-later can use GPL-3 code, but a clean reading is
+enough):
+
+- **sync2kindle** (github.com/rupor-github/sync2kindle, Go, Kindle-only
+  sideloading). Added Mac MTP on 2026-08-01, tested by its author on a
+  Paperwhite 12 under macOS 26.6. Books go under `documents/` (its default
+  is `documents/mybooks`). For EBOK-type books it extracts cover thumbnails
+  into `system/thumbnails`, and it copies `.apnx` and `.sdr` alongside.
+  Its Mac driver deliberately never calls `LIBMTP_Release_Device` because
+  "explicit libmtp release can leave some Kindles unusable until
+  re-plugged". That is libmtp behavior; whether closing an `mtp-rs`
+  session does the same is untested and worth watching for.
+- **Calibre's Kindle MTP driver**: 7.25 imports KFX from MTP Kindles, 8.7
+  generates APNX page-number files for them, 8.10 fixed where those land.
+  APNX is MOBI/AZW3 only, never KFX (§2.1).
+
+**Rejected.** `libmtp-rs`/`libmtp-sys` (unmaintained since 2020, and it
+would put LGPL libmtp and libusb dylibs in the bundle). `mtpkit` (one
+release, LGPL, no public repository). `winmtp` (Windows-only WPD, which
+`mtp-rs` already uses). `swift-mtp` (MIT, a clean libmtp wrapper, but
+Swift) and `SwiftMTP-dev` (Swift, pre-alpha, one device ever transferred
+a file). Amazon's USB File Manager and OpenMTP stay as the handoff
+fallback in §5 item 7.
+
+**Unproven.**
+
+- The whole route on a real 2024+ Kindle from a Mac, with Screepub's files.
+- That sideloaded KFX over MTP gets Enhanced Typesetting and indexes. The
+  format-not-route rule (registry §8b) predicts yes, and sync2kindle lists
+  `.kfx` as supported over MTP, but our KFX verdict was measured on a
+  mass-storage Kindle.
+- The Windows path on a Kindle.
+- Cmdr's `ptpcamerad` pause, which we have only read.
+
+**Cheapest first test** when a 2024+ Kindle is at hand: install
+`mtp-rs-cli`, pause `ptpcamerad` by hand, push a Screepub KFX into
+`documents/`, and check it opens with Enhanced Typesetting and appears in
+the library. That answers the first two unproven items before any code is
+written.
