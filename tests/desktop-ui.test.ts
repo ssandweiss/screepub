@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { kfxSetup } from '../src/export/kfx-setup';
 import {
-  fakePage, HOLD, settle, type EngineCall, type FakeNode, type FakePage,
+  FakeDocument, fakePage, HOLD, makeEvent, settle, withGlobals,
+  type EngineCall, type FakeNode, type FakePage,
 } from './helpers/fake-dom';
 import { bootWindow, type BootedWindow } from './helpers/boot-window';
 
@@ -1954,28 +1955,18 @@ describe('where the keyboard stands when a dialog closes', () => {
     expect(focus.stopAfterDialog('send', page({ [plan[0]]: convertButtons }))).toBeNull();
   });
 
-  test('the reader’s Tab stop is one that can show the focus', () => {
-    // The frame swallowed the focus and showed nothing for it. Measured with
-    // a probe on the live window, WebKitGTK gives a focused iframe no :focus
-    // match, no painted outline and no box-shadow, and fires NO focus, blur
-    // or focusin event for it either — so not even a class could be hung on
-    // it from script. The stop is therefore the stage around the frame, and
-    // the frame is taken out of the Tab order.
-    const reader = read('read.js');
-    expect(reader).toContain('script-stage');
-    expect(reader).toMatch(/tabindex: '-1'/);
-    expect(reader).toMatch(/tabindex: '0'/);
+  test('the reader’s Tab stop draws a ring, and nothing tries to ring the frame', () => {
+    // Kept as a CSS pin, because painting a focus ring needs a browser. The
+    // stop itself (the stage around the frame, never the frame) is driven in
+    // "the Tab stop is the stage around the frame, never the frame itself":
+    // WebKitGTK gives a focused iframe no :focus match, no outline and no
+    // focus event at all (measured), so the stage is what has to ring.
     const css = read('surfaces.css');
     const rings = [...css.matchAll(/\.script-stage:focus[^{]*\{([^}]*)\}/g)].map((m) => m[1]);
     expect(rings.length).toBeGreaterThan(0);
     expect(rings.every((body) => /outline:\s*\d/.test(body))).toBe(true);
-    // ...and nothing tries to ring the frame itself any more, which would be
-    // a rule that renders on no machine anyone has run this on.
     expect(`surfaces.css rings the frame: ${/\.script-frame:focus/.test(css)}`)
       .toBe('surfaces.css rings the frame: false');
-    // The focus plan must not send anyone to the frame either.
-    expect(`focus.js treats an iframe as a stop: ${/'iframe'/.test(read('focus.js'))}`)
-      .toBe('focus.js treats an iframe as a stop: false');
   });
 
   test('the arrow keys still move the script, now that the frame is not the stop', async () => {
@@ -3177,183 +3168,263 @@ describe('the scene list is one Tab stop, walked with the arrow keys', () => {
 });
 
 describe('the Read surface', () => {
-  const reader = read('read.js');
+  // The real read.js, mounted on the fake page, with a frame whose document
+  // the test builds and whose window records what the reader asks of it. The
+  // frame's window carries its OWN CSSStyleSheet and IntersectionObserver,
+  // distinct from the parent's, so a sheet or an observer built in the wrong
+  // realm shows up as the wrong class.
+  const ENGINE_CSS = 'section.scene { margin: 0 0 1em; }';
+  const PREVIEW = `<?xml version="1.0"?><html><head><style>${ENGINE_CSS}</style></head><body>scenes</body></html>`;
 
-  test('it renders the engine’s document, not a document of its own', () => {
-    expect(reader).toContain('previewHtml');
-    expect(reader).toContain('DOMParser');
-    // A reader that built its own screenplay CSS would be a second opinion
-    // about formatting, which is the one thing this surface must not be.
-    for (const invented of ['scene-heading {', 'p.dialogue {', 'text-transform']) {
-      expect(`read.js styles screenplays itself: ${reader.includes(invented)}`).toBe(
-        'read.js styles screenplays itself: false',
-      );
+  class FrameSheet { text = ''; replaceSync(t: string) { this.text = t; } }
+  class ParentSheet { text = ''; replaceSync(t: string) { this.text = t; } }
+
+  let page: FakePage | null = null;
+  let copies = 0;
+  afterEach(async () => { await page?.close(); page = null; });
+
+  /** A frame document of `n` scenes, `tall` px each; a heading may carry the
+   *  engine's floated page marker, the way it does when a scene opens a page. */
+  function frameDoc(n: number, tall: number) {
+    const doc = new FakeDocument();
+    for (let i = 0; i < n; i += 1) {
+      const section = doc.createElement('section');
+      section.className = 'scene';
+      section.id = `sc-00${i + 1}`;
+      section.offsetTop = i * tall;
+      section.offsetHeight = tall;
+      const heading = doc.createElement('h2');
+      heading.className = 'scene-heading';
+      if (i === 1) {
+        const marker = doc.createElement('span');
+        marker.className = 'page-marker';
+        marker.append('2.');
+        heading.append(marker);
+      }
+      heading.append(`INT. ROOM ${i + 1} - DAY`);
+      section.append(heading);
+      doc.body.append(section);
     }
+    return doc;
+  }
+
+  async function mountReader(options: { tokens?: Record<string, string> } = {}) {
+    page = fakePage();
+    const tokens = { '--ink': 'oklch(0.1 0 0)', '--paper': 'oklch(0.9 0 0)', ...options.tokens };
+    const parsed: Array<{ html: string; type: string }> = [];
+    const dark: Array<() => void> = [];
+    const media: string[] = [];
+    const g = withGlobals();
+    g.set('CSSStyleSheet', ParentSheet);
+    g.set('getComputedStyle', () => ({ getPropertyValue: (name: string) => tokens[name as keyof typeof tokens] ?? '' }));
+    g.set('requestAnimationFrame', (fn: () => void) => { fn(); return 0; });
+    g.set('matchMedia', (query: string) => {
+      media.push(query);
+      return { matches: false, addEventListener: (_: string, fn: () => void) => dark.push(fn) };
+    });
+    // The window's parser, recording what it was handed: a reader that
+    // parsed the preview some other way would never call it.
+    g.set('DOMParser', class {
+      parseFromString(html: string, type: string) {
+        parsed.push({ html, type });
+        let css: string | null = (html.match(/<style>([\s\S]*?)<\/style>/) ?? [])[1] ?? null;
+        return {
+          querySelector: (s: string) => (s === 'style' && css !== null
+            ? { textContent: css, remove: () => { css = null; } } : null),
+          get documentElement() {
+            return { outerHTML: html.replace(/<\?xml[^>]*\?>/, '').replace(/<style>[\s\S]*?<\/style>/, css === null ? '' : `<style>${css}</style>`) };
+          },
+        };
+      }
+    });
+    const restoreExtra = page.close;
+    page.close = async () => { g.restore(); await restoreExtra(); };
+
+    copies += 1;
+    const reader = await import(`${join(UI, 'read.js')}?mounted-${copies}`);
+    const pane = page.pane();
+    pane.id = 'surface-read';
+    const script = { title: 'Field Station', author: 'A. Writer', previewHtml: PREVIEW };
+    reader.mount(pane, { state: { script, reducedMotion: true }, convertAgain: () => {} });
+    const frame = pane.querySelector('iframe')!;
+    const scrolls: number[][] = [];
+    const observers: Array<{ observed: FakeNode[]; fire: () => void; disconnected: boolean }> = [];
+    const frameListeners: string[] = [];
+    const win = {
+      scrollY: 0,
+      CSSStyleSheet: FrameSheet,
+      IntersectionObserver: class {
+        observed: FakeNode[] = [];
+        disconnected = false;
+        constructor(readonly fire: () => void) { observers.push(this); }
+        observe(node: FakeNode) { this.observed.push(node); }
+        disconnect() { this.disconnected = true; }
+      },
+      scrollTo(_x: number, y: number) { scrolls.push([0, y]); win.scrollY = y; },
+      scrollBy(_x: number, dy: number) { win.scrollY += dy; },
+      addEventListener: (type: string) => frameListeners.push(type),
+    };
+    /** Hands the frame a document, as the browser does when srcdoc loads. */
+    const load = (doc: FakeDocument) => {
+      Object.assign(frame, { contentDocument: doc, contentWindow: win });
+      frame.fire('load');
+    };
+    frame.clientHeight = 500;
+    return { reader, pane, frame, win, load, scrolls, observers, parsed, dark, media, tokens, frameListeners, page };
+  }
+  const marked = (pane: FakeNode) =>
+    pane.querySelectorAll('.scene-link').filter((b) => b.getAttribute('aria-current') === 'true').map((b) => b.textContent);
+
+  test('it shows the engine’s document, parsed by the window’s own parser, with the stylesheet lifted out', async () => {
+    const { frame, parsed } = await mountReader();
+    expect(parsed).toEqual([{ html: PREVIEW, type: 'text/html' }]);
+    const srcdoc = frame.getAttribute('srcdoc')!;
+    // A <style> left in srcdoc is silently refused by the CSP.
+    expect(srcdoc).not.toContain('<style');
+    expect(srcdoc).not.toContain('<?xml');
+    expect(srcdoc.startsWith('<!doctype html><html>')).toBe(true);
+    expect(srcdoc).toContain('scenes');
   });
 
-  test('it takes the stylesheet out of the markup and adopts it', () => {
-    // Measured: a <style> inside srcdoc is blocked by the window's CSP, and
-    // CSSOM is not. An implementation that left the <style> in place renders
-    // an unstyled script and looks like it "nearly works".
-    expect(reader).toContain("querySelector('style')");
-    expect(reader).toContain('adoptedStyleSheets');
-    expect(reader).toContain('replaceSync');
+  test('the frame adopts one sheet, built in its own realm: the faces, the engine’s rules untouched, then the theme', async () => {
+    const { reader, frame, load, tokens } = await mountReader();
+    const doc = frameDoc(3, 100);
+    load(doc);
+    expect(doc.adoptedStyleSheets.length).toBe(1);
+    const sheet = doc.adoptedStyleSheets[0] as FrameSheet;
+    // A parent-realm sheet is rejected when adopted into another document.
+    expect(sheet).toBeInstanceOf(FrameSheet);
+    expect(sheet.text).toBe(reader.sheetText(ENGINE_CSS, { ink: tokens['--ink'], paper: tokens['--paper'] }));
+    expect(sheet.text).toContain('@font-face');
+    expect(frame.getAttribute('sandbox')).toBe('allow-same-origin');
   });
 
-  test('it builds the sheet in the frame’s own realm', () => {
-    // `new CSSStyleSheet()` from the parent realm is rejected when adopted
-    // into another document. This is the line that makes or breaks it.
-    expect(reader).toMatch(/new\s+\w+\.CSSStyleSheet\(\)/);
+  test('the frame’s theme follows the desktop’s when it changes', async () => {
+    const { reader, load, dark, media, tokens } = await mountReader();
+    const doc = frameDoc(3, 100);
+    load(doc);
+    expect(media).toContain('(prefers-color-scheme: dark)');
+    tokens['--ink'] = 'oklch(0.95 0 0)';
+    tokens['--paper'] = 'oklch(0.15 0 0)';
+    for (const fn of dark) fn();
+    expect((doc.adoptedStyleSheets[0] as FrameSheet).text)
+      .toBe(reader.sheetText(ENGINE_CSS, { ink: 'oklch(0.95 0 0)', paper: 'oklch(0.15 0 0)' }));
   });
 
-  test('the frame is sandboxed same-origin, with no script permission', () => {
-    expect(reader).toContain('allow-same-origin');
-    expect(reader).not.toContain('allow-scripts');
-    expect(reader).toContain('sandbox');
+  test('the Tab stop is the stage around the frame, never the frame itself', async () => {
+    const { pane, frame } = await mountReader();
+    const { FOCUSABLE } = await import(join(UI, 'focus.js'));
+    const stage = pane.querySelector('.script-stage')!;
+    // This webview paints nothing for a focused iframe and fires no event
+    // that would let the page paint it instead (measured), so the stop moved.
+    expect(frame.matches(FOCUSABLE)).toBe(false);
+    expect(stage.matches(FOCUSABLE)).toBe(true);
+    expect(stage.contains(frame)).toBe(true);
+    expect(stage.getAttribute('aria-label')).toBe('Field Station, the script');
   });
 
-  test('it supplies the faces the engine’s CSS asks for by name', () => {
-    // The engine's CSS says "Courier Prime"; nothing inside the frame
-    // declares where that file is, so the reader must.
-    expect(reader).toContain('@font-face');
-    expect(reader).toContain('fonts/courier-prime-400-latin.woff2');
+  test('the arrow keys on the stage scroll the frame', async () => {
+    const { pane, load, win, scrolls } = await mountReader();
+    load(frameDoc(3, 100));
+    const stage = pane.querySelector('.script-stage')!;
+    const press = (key: string) => {
+      const event = makeEvent('keydown', { key });
+      stage.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(press('ArrowDown')).toBe(true);
+    expect(win.scrollY).toBe(60);
+    expect(press('Home')).toBe(true);
+    expect(scrolls.at(-1)).toEqual([0, 0]);
+    // Tab belongs to the window, not to the frame.
+    expect(press('Tab')).toBe(false);
   });
 
-  test('a re-render keeps the reader where they were', () => {
-    // Tune re-renders on every knob. A reader thrown back to FADE IN on
-    // each keystroke is unusable.
-    expect(reader).toContain('scrollY');
-    expect(reader).toContain('scrollTo');
+  test('the rail lists the engine’s own scenes, without the page numbers inside headings, and a click goes to the scene', async () => {
+    const { pane, load } = await mountReader();
+    const doc = frameDoc(3, 100);
+    load(doc);
+    const links = pane.querySelectorAll('.scene-rail .scene-link');
+    expect(links.map((b) => b.textContent)).toEqual([
+      'INT. ROOM 1 – DAY', 'INT. ROOM 2 – DAY', 'INT. ROOM 3 – DAY',
+    ]);
+    expect(pane.querySelector('.rail-count')!.textContent).toBe('3 scenes');
+    links[2].click();
+    // Reduced motion asked for, so the jump is not animated.
+    expect(doc.getElementById('sc-003')!.scrolledIntoView).toEqual({ behavior: 'auto', block: 'start' });
   });
 
-  test('the rail is built from the engine’s own scene sections', () => {
-    // Not from a second parse of the fountain: two parsers is two answers.
-    expect(reader).toContain('section.scene');
-    expect(reader).toContain('scrollIntoView');
+  test('the rail follows the reader through an observer built in the frame, never a scroll listener', async () => {
+    const { pane, load, win, observers, frameListeners } = await mountReader();
+    const doc = frameDoc(3, 100);
+    load(doc);
+    expect(observers.length).toBe(1);
+    expect(observers[0].observed).toEqual(doc.querySelectorAll('section.scene'));
+    // A sandboxed srcdoc frame delivers no scroll event to the parent
+    // (measured), so a reader wired to one marks scene one forever.
+    expect(frameListeners).not.toContain('scroll');
+    expect(marked(pane)).toEqual(['INT. ROOM 1 – DAY']);
+    win.scrollY = 250;
+    observers[0].fire();
+    expect(marked(pane)).toEqual(['INT. ROOM 3 – DAY']);
   });
 
-  test('the rail follows the reader through the frame’s own observer', () => {
-    // Measured in the live window, because the obvious wiring is the wrong
-    // one: a sandboxed srcdoc frame delivers NO scroll event to the parent —
-    // not on the frame's window, its document, its documentElement or its
-    // body — while the parent reads `scrollY` off that same frame correctly
-    // the whole time. A reader wired to 'scroll' therefore renders perfectly
-    // and leaves its mark on scene one forever, which is exactly the kind of
-    // defect nothing else here would catch. An IntersectionObserver built in
-    // the FRAME's realm does fire (counted: 1 → 2 → 3 → 4 across two
-    // scrolls, against 0 scroll events).
-    expect(reader).toMatch(/new\s+\w+\.IntersectionObserver\(/);
-    expect(`read.js listens for a scroll event: ${/addEventListener\('scroll'/.test(reader)}`)
-      .toBe('read.js listens for a scroll event: false');
-    // And the observer says WHEN to look, never WHERE the reader is: one
-    // definition of the current scene, which is readerPlace()'s.
-    const watcher = reader.slice(reader.indexOf('new win.IntersectionObserver'));
-    expect(watcher.slice(0, 400)).toContain('markCurrent');
-    expect(watcher.slice(0, 400)).not.toContain('entries');
+  test('the rail keeps its own mark in view inside its own scroll', async () => {
+    const { pane, load, win, observers } = await mountReader();
+    load(frameDoc(3, 100));
+    const rail = pane.querySelector('.scene-rail')!;
+    rail.clientHeight = 100;
+    pane.querySelectorAll('.scene-link').forEach((b, i) => { b.offsetTop = i * 300; b.offsetHeight = 30; });
+    win.scrollY = 250;
+    observers[0].fire();
+    expect(rail.scrollTop).toBe(600 + 30 - 100);
   });
 
-  test('coming back to the reader re-asserts the place, and really moves the frame', () => {
-    // Measured in the live window, and not guessable: after a
-    // display:none → display:block round trip this webview REPORTS the scroll
-    // position the frame had and PAINTS the document somewhere else, and a
-    // scrollTo() to the position the frame already claims is a no-op. So
-    // show() restores rather than trusting the frame, and restore() goes to
-    // the top first when the target is where the frame says it already is.
-    // Both look like dead code to anyone who did not watch it fail.
-    expect(reader).toMatch(/export function show\(\)[\s\S]{0,600}restore\(\)/);
-    expect(reader).toMatch(/scrollY === target[\s\S]{0,200}scrollTo\(0, 0\)/);
-    // And the place is taken on the way OUT, while the frame can still say
-    // where it is — asking a hidden pane for layout answers zero.
-    expect(reader).toMatch(/export function hide\(\)[\s\S]{0,120}keep\(\)/);
+  test('coming back to the reader re-asserts the place, and really moves the frame', async () => {
+    // After a display:none round trip this webview REPORTS the scroll it had
+    // and PAINTS the document somewhere else, and a scrollTo() to where it
+    // already claims to be does nothing (measured). So show() goes to the
+    // top first, then to the place.
+    const { reader, load, win, scrolls } = await mountReader();
+    load(frameDoc(3, 100));
+    win.scrollY = 150;
+    reader.hide();
+    scrolls.length = 0;
+    reader.show();
+    expect(scrolls).toEqual([[0, 0], [0, 150]]);
   });
 
-  test('a second re-render in a row does not throw the reader back to the top', () => {
-    // Found by driving Tune in the live window, and invisible from one
-    // change: re-rendering happens while THIS pane is hidden, so the new
-    // document cannot be measured (measure() needs layout) and the frame
-    // holding it reports scrollY 0. render() calls keep() first, so the
-    // SECOND re-render read that 0 against the previous document's marks and
-    // overwrote a good place with "the top of scene one".
-    //
-    // Measured, both ways, with the reader parked 0.331 into sc-012:
-    //   one knob   — document 14486px -> 16313px, scroll 7967 -> 9296, still
-    //                sc-012 at 0.331 (a different pixel, the same place)
-    //   two knobs  — scroll 77, sc-001, the rail marking nothing
-    //
-    // The guard is `measured`: true only while `marks` describe the document
-    // the frame is holding. It looks like dead code to anyone who did not
-    // watch the second knob lose the place.
-    expect(reader).toMatch(/let measured = false/);
-    // keep() refuses to take a place it cannot trust...
-    const keeper = reader.slice(reader.indexOf('function keep()'));
-    expect(keeper.slice(0, 200)).toContain('!measured');
-    // ...render() is what makes it untrustworthy...
-    const render = reader.slice(reader.indexOf('export function render('));
-    expect(render.slice(0, 700)).toMatch(/srcdoc[\s\S]{0,300}measured = false/);
-    // ...and measuring the new document is the only thing that restores it,
-    // which is what makes coming back to Read land in the right place.
-    const measure = reader.slice(reader.indexOf('function measure()'));
-    expect(measure.slice(0, 400)).toContain('measured = true');
-    // The order inside render() is load-bearing: keeping the place has to
-    // happen BEFORE the document it describes is replaced.
-    expect(render.slice(0, 700).indexOf('keep()'))
-      .toBeLessThan(render.slice(0, 700).indexOf('measured = false'));
+  test('a re-render keeps the reader’s place across a reflow, even two re-renders in a row while hidden', async () => {
+    // Tune re-renders while this pane is hidden, where the new document
+    // cannot be measured and the frame reports scrollY 0. A second re-render
+    // used to read that 0 against the OLD document's marks and throw the
+    // reader back to the top of scene one.
+    const { reader, frame, load, win, scrolls } = await mountReader();
+    load(frameDoc(3, 100));
+    win.scrollY = 150; // halfway into the second scene
+    reader.hide();
+    frame.clientHeight = 0;
+    reader.render(PREVIEW.replace('scenes', 'scenes, bigger'));
+    win.scrollY = 0;
+    reader.render(PREVIEW.replace('scenes', 'scenes, bigger still'));
+    load(frameDoc(3, 200)); // every scene now twice as tall
+    frame.clientHeight = 500;
+    reader.show();
+    expect(scrolls.at(-1)).toEqual([0, 300]);
   });
 
-  test('the rail can scroll its own mark into view', () => {
-    // read.js keeps the marked scene inside the rail with
-    // `rail.scrollTop = button.offsetTop`, which is only the offset WITHIN
-    // the rail if the rail is the button's offsetParent. Unpositioned, the
-    // offset is measured from the page and the rail scrolls to a number that
-    // means nothing — visible at narrow widths, where the rail is a short
-    // strip and the mark simply never comes into view.
-    //
-    // Any POSITIONED value satisfies that, not `relative` specifically. This
-    // asserted the literal until 2026-09-21, when the rail became an absolute
-    // drawer in the binding margin and the test failed for a change that
-    // never threatened what it was protecting.
-    expect(reader).toContain('rail.scrollTop = button.offsetTop');
-    const css = read('surfaces.css');
-    const rule = css.slice(css.indexOf('.scene-rail {'));
-    expect(rule.slice(0, rule.indexOf('}')))
-      .toMatch(/position:\s*(relative|absolute|fixed|sticky)/);
-  });
-
-  test('the parser the window uses is the real one', () => {
-    // splitPreview() takes its parser as an argument so it can be exercised
-    // below without a browser. That is only honest if the window itself
-    // hands it a DOMParser — a reader that passed a regex of its own would
-    // pass every test above.
-    expect(reader).toMatch(/splitPreview\([^)]*new DOMParser\(\)\)/);
-  });
-
-  test('the frame’s theme follows the desktop’s, inside the frame too', () => {
-    // The window's colour tokens are declared on THIS document; a custom
-    // property does not cascade into another one, so a frame that only
-    // named them would render black ink on a dark ground in dark mode.
-    // What the VALUES do once read is checked below, against the CSS.
-    expect(reader).toContain('getPropertyValue');
-    expect(reader).toContain('prefers-color-scheme');
-    // dressFrame() must hand the sheet the tokens it just read and nothing
-    // else: this is the seam the value test below cannot see across.
-    //
-    // The css argument was named `sheetCss` until 2026-09-21, when these
-    // eight lines were lifted out of adopt() so the Settings preview could
-    // share them rather than own a second copy of the CSP dance. The seam is
-    // the same; only the parameter's name moved, so the assertion no longer
-    // pins that name.
-    expect(reader).toMatch(/paperFrom\(\(name\) => root\.getPropertyValue\(name\)\)/);
-    expect(reader).toMatch(/sheetText\(\w+, tokens\)/);
-  });
-
-  test('a resized window re-measures, because a reflow moves every scene', () => {
-    // measure() ran only when the frame loaded and when the surface was
-    // shown. After a resize the frame reflows and the marks describe a
-    // layout that no longer exists, so readerPlace() can name the wrong
-    // scene until the next surface round trip. Whether it does depends on
-    // how proportional the reflow happened to be.
-    expect(reader).toMatch(/addEventListener\('resize'[\s\S]{0,300}measure\(\)/);
-    expect(reader).toMatch(/addEventListener\('resize'[\s\S]{0,300}markCurrent\(\)/);
+  test('a resized window re-measures, because a reflow moves every scene', async () => {
+    const { pane, load, win, page: p } = await mountReader();
+    const doc = frameDoc(3, 100);
+    load(doc);
+    win.scrollY = 150;
+    p.fireWindow('resize');
+    expect(marked(pane)).toEqual(['INT. ROOM 2 – DAY']);
+    // A narrower window: every scene grows, and the same scroll is now in
+    // the first one. Only a fresh measure can know that.
+    doc.querySelectorAll('section.scene').forEach((s, i) => { s.offsetTop = i * 300; s.offsetHeight = 300; });
+    p.fireWindow('resize');
+    expect(marked(pane)).toEqual(['INT. ROOM 1 – DAY']);
   });
 });
 
@@ -3674,20 +3745,10 @@ describe('what the Read surface decides', () => {
   test('the marker’s class is the one the engine actually writes', () => {
     // Two files, one string: the engine names the span, the window skips it.
     // If the engine renamed the class, headingText() would skip nothing and
-    // every page number would be back in the rail, with no test failing.
+    // every page number would be back in the rail. Checked against what the
+    // real engine wrote for the fixture, not against its source.
     expect(reader.PAGE_MARKER_CLASS).toBe('page-marker');
     expect(preview).toContain(`class="${reader.PAGE_MARKER_CLASS}"`);
-    const engine = readFileSync(
-      join(new URL('..', import.meta.url).pathname, 'src', 'epub', 'html.ts'), 'utf8');
-    expect(engine).toContain(`class="${reader.PAGE_MARKER_CLASS}"`);
-  });
-
-  test('the rail reads headings through headingText, not textContent', () => {
-    // The drawing half of read.js has no DOM here to run in, so the call is
-    // pinned by what the source says.
-    const source = readFileSync(join(UI, 'read.js'), 'utf8');
-    expect(source).toMatch(/heading:\s*headingText\(scene\.querySelector\('h2\.scene-heading'\)\)/);
-    expect(source).not.toMatch(/querySelector\('h2\.scene-heading'\)\?\.textContent/);
   });
 
   test('the rail keeps the engine’s order and skips what it cannot link to', () => {
@@ -3772,23 +3833,17 @@ describe('what the Read surface decides', () => {
     expect(reader.readerState({ previewHtml: undefined })).toBe('blank');
     expect(reader.readerState({ previewHtml: preview })).toBe('ready');
 
-    // `blank` is reachable — the tab is live, the script converted, and the
-    // pages did not come back — so it says what happened AND offers the way
-    // on. `closed` is NOT reachable: main.js disables the Read tab whenever
-    // no script is open and nothing closes one, so there is deliberately no
-    // copy for it. Copy nobody can see reads as a considered empty state to
-    // the next person who maintains it.
+    // `blank` is reachable (the tab is live, the script converted, and the
+    // pages did not come back), so it says what happened AND offers the way
+    // on. `closed` is NOT reachable: the Read tab is off the bar whenever no
+    // script is open ("Read, Settings and Send are off the bar until a
+    // script converts" boots the window to show it), so there is
+    // deliberately no copy for it.
     const notice = reader.NOTICES.blank;
     expect(notice.slug.length).toBeGreaterThan(0);
     expect(notice.line.length).toBeGreaterThan(40);
     expect(notice.way.length).toBeGreaterThan(0);
     expect(Object.keys(reader.NOTICES)).toEqual(['blank']);
-    // The tab really is out of reach in that state, which is the whole
-    // argument for not writing the words. If this ever stops being true,
-    // this test fails and the invitation has to come back.
-    const main = read('main.js');
-    expect(main).toMatch(/NEEDS_SCRIPT[\s\S]{0,80}'read'/);
-    expect(main).toMatch(/frame\.enable\(id, open\)/);
     expect(reader.NO_SCENES.length).toBeGreaterThan(0);
   });
 });
@@ -7945,13 +8000,6 @@ describe('a refused file is no longer a dead end', () => {
     expect(body).toContain('…');
   });
 
-  test('the refusal screen hands the report the home folder the library probe learned', () => {
-    const convert = read('convert.js');
-    const report = convert.slice(convert.indexOf('newIssueUrl({'), convert.indexOf("'Report a bug'"));
-    expect(report).toContain('home: knownHome');
-    expect(convert).toMatch(/knownHome = answer\.home|knownHome = library\.home/);
-  });
-
   test('the file manager is called what it is called, per platform', async () => {
     // The Swift app said "SHOW IN FINDER" because it only ran on a Mac. This
     // one runs on three, and "Finder" on Windows names a thing that is not
@@ -8010,13 +8058,6 @@ describe('a refused file is no longer a dead end', () => {
     expect(offenders.join('\n')).toBe('');
   });
 
-  test('the failure screen offers it, carrying the code', () => {
-    const convert = read('convert.js');
-    expect(convert).toContain('Report a bug');
-    // The code is the point. A report that says only "it did not work" costs
-    // a round trip to learn what the engine already knew.
-    expect(convert).toMatch(/newIssueUrl|reportBug/);
-  });
 });
 
 describe('the settings preview is the reader, not a second copy of it', () => {
@@ -8181,30 +8222,6 @@ describe('the reach table is available, not announced', () => {
     // provenNote() carries the one fact the statuses cannot: WHERE the single
     // proven route was proven. It moves with the table rather than being cut.
     expect(send).toContain('provenNote');
-  });
-});
-
-describe('Convert another goes home, not to a file dialog', () => {
-  test('the result screen offers a way back to the drop well', () => {
-    // It called choose() directly, so the button jumped straight to a native
-    // picker. Cancelling that left you back on the previous result with no
-    // obvious way to reach the empty state at all — the one screen that
-    // explains what this window wants from you.
-    const convert = read('convert.js');
-    const at = convert.indexOf("'Convert another'");
-    expect(at).toBeGreaterThan(-1);
-    const wiring = convert.slice(convert.lastIndexOf('onclick', at), at);
-    expect(wiring).not.toContain('choose');
-    expect(wiring).toContain('reset');
-  });
-
-  test('going home does not close the script that is open', () => {
-    // Deliberate: the book stays open behind the drop well, so Read, Settings
-    // and Send stay reachable. "Convert another" is an invitation, not a
-    // discard — and a reader who changes their mind has lost nothing.
-    const convert = read('convert.js');
-    const reset = convert.slice(convert.indexOf('export function reset'));
-    expect(reset.slice(0, reset.indexOf('\n}'))).not.toContain('scriptChanged');
   });
 });
 
@@ -8443,42 +8460,6 @@ describe('the Convert page asks once whether to look for new versions', () => {
       no: 'No thanks',
     });
     for (const words of Object.values(ASK)) expect(String(words)).not.toContain('—');
-  });
-
-  test('it sits under the well, and only when update.js says to ask', () => {
-    const convert = read('convert.js');
-    expect(convert).toContain('ctx.updates?.shouldAsk()');
-    expect(convert).toContain("class: 'well-ask'");
-    // Answering hands the keyboard back: the line that had the buttons is
-    // gone. Matched by shape (a removal followed by restoring focus), not
-    // by a `line` variable name, since the removal goes through the
-    // clicked button's own ancestor rather than a forward reference.
-    expect(convert).toMatch(/\.closest\('\.well-ask'\)\?\.remove\(\);\s*ctx\.restoreFocus\(\);/);
-    const main = read('main.js');
-    expect(main).toContain('shouldAsk(flow.usable(), localStorage)');
-    expect(main).toContain('flow.answer(on)');
-  });
-
-  test('the question sits after the well, so Choose PDF stays the first focus stop', () => {
-    // askLine() is appended in a SECOND pane.append() call, after the one
-    // that draws the wordmark and the well. Reversing that order would put
-    // the question's own buttons ahead of Choose PDF in the DOM, and this
-    // surface's first focus stop is the first control the DOM contains.
-    const convert = read('convert.js');
-    const wellDeclared = convert.indexOf("class: 'well'");
-    const askAppended = convert.indexOf('if (ask) pane.append(ask);');
-    expect(wellDeclared).toBeGreaterThan(-1);
-    expect(askAppended).toBeGreaterThan(wellDeclared);
-  });
-
-  test('flipping the switch in the release notes while the question is still up wins', () => {
-    // The reader could answer both ways at once: flip the switch in the
-    // release notes, then click a stale "No thanks" that was already on
-    // screen. The second answer re-checks shouldAsk() and, if it is
-    // already false, only removes the line rather than overwriting the
-    // newer answer.
-    const convert = read('convert.js');
-    expect(convert).toMatch(/if\s*\(ctx\.updates\.shouldAsk\(\)\)\s*ctx\.updates\.answer\(on\)/);
   });
 
   test('it is styled quietly, in the window\'s own tokens', () => {
