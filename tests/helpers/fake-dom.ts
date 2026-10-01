@@ -536,6 +536,26 @@ export async function settle(times = 3) { for (let i = 0; i < times; i += 1) awa
 
 // ------------------------------------------------------------- a whole page
 
+/** Answers the two things read.js's splitPreview asks of a parsed preview:
+ *  its <style>, which can be removed, and the document's outer HTML. Regexes,
+ *  not a parser: it proves nothing about HTML, only that the window takes
+ *  the stylesheet out and passes the rest on. */
+export class FakeDOMParser {
+  parseFromString(html: string) {
+    let css: string | null = (String(html).match(/<style>([\s\S]*?)<\/style>/) ?? [])[1] ?? null;
+    return {
+      querySelector: (selector: string) => (selector === 'style' && css !== null
+        ? { textContent: css, remove: () => { css = null; } }
+        : null),
+      get documentElement() {
+        const body = String(html).replace(/<\?xml[^>]*\?>\s*/, '')
+          .replace(/<style>[\s\S]*?<\/style>/, css === null ? '' : `<style>${css}</style>`);
+        return { outerHTML: body };
+      },
+    };
+  }
+}
+
 export interface FakePage {
   doc: FakeDocument;
   tauri: FakeTauri;
@@ -586,6 +606,7 @@ export function fakePage(options: {
   globals.set('CSSStyleSheet', class { text = ''; replaceSync(t: string) { this.text = t; } });
   globals.set('getComputedStyle', () => ({ getPropertyValue: () => '' }));
   globals.set('requestAnimationFrame', () => 0);
+  globals.set('DOMParser', FakeDOMParser);
   return {
     doc,
     tauri,
