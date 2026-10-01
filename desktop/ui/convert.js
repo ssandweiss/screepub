@@ -366,6 +366,9 @@ export function showsMovedLine(action, previousPath, library) {
 
 // ------------------------------------------------------------------ drawing
 
+/** The home folder, as the library probe last reported it: a bug report
+ *  replaces it with ~ (feedback.js). Null until the probe has answered. */
+let knownHome = null;
 let ctx = null;
 let pane = null;
 let chooseButton = null;
@@ -569,6 +572,7 @@ async function probeLibrary(gen, slot) {
   if (gen !== libraryGeneration || pane.dataset.state !== 'idle') return;
   const library = libraryFrom(answer);
   if (library === null) return;
+  knownHome = library.home;
   slot.showLibrary(library);
 }
 
@@ -803,6 +807,8 @@ function drawFailure(error, path) {
       appVersion: RELEASE.version,
       osVersion: osLabel(navigator.userAgentData?.platform ?? navigator.platform),
       context: `${refusal.code}: ${refusal.message}`,
+      // feedback.js takes the home folder and file names out of the report.
+      home: knownHome,
     })),
   }, 'Report a bug'));
 

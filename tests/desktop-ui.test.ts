@@ -7779,6 +7779,50 @@ describe('a refused file is no longer a dead end', () => {
     expect(body).toContain('C++ crashed on page 3+4');
   });
 
+  test('the report carries no home folder and no file name, whatever the engine said', () => {
+    // The engine's sentence can quote a path, and a path names the person
+    // (their home folder) and the script (its file name). The report goes to
+    // a public URL, so both are taken out before it is built.
+    const bodyOf = (context: string, home?: string) => parse(feedback.newIssueUrl({
+      appVersion: '0.6.0', osVersion: 'x', context, home,
+    })).searchParams.get('body') ?? '';
+
+    const mac = bodyOf("internal: ENOENT: no such file or directory, open '/Users/jdoe/Scripts/Night Shift v2.pdf'");
+    expect(mac).not.toContain('jdoe');
+    expect(mac).not.toContain('Night Shift');
+    expect(mac).toContain("open '~/Scripts/<file>'");
+
+    const told = bodyOf('could not write /srv/people/jdoe/Library/Screepub/night/Night Shift.epub because the disk is full', '/srv/people/jdoe');
+    expect(told).toContain('could not write ~/Library/Screepub/night/<file> because the disk is full');
+
+    const linux = bodyOf('cannot read /home/jdoe/x.pdf.');
+    expect(linux).toContain('cannot read ~/<file>.');
+
+    const windows = bodyOf('cannot read C:\\Users\\jdoe\\Desktop\\Night Shift.pdf');
+    expect(windows).not.toContain('jdoe');
+    expect(windows).toContain('cannot read ~\\Desktop\\<file>');
+
+    // Prose with a slash in it is not a path, and a link is not mangled.
+    const prose = bodyOf('scanned and/or locked; see https://example.com/help');
+    expect(prose).toContain('scanned and/or locked; see https://example.com/help');
+  });
+
+  test('a long report is capped at about 2000 characters, footer kept', () => {
+    const body = parse(feedback.newIssueUrl({
+      appVersion: '0.6.0', osVersion: 'macOS 15.0', context: 'x'.repeat(10000),
+    })).searchParams.get('body') ?? '';
+    expect(body.length).toBeLessThanOrEqual(2000);
+    expect(body).toContain('Screepub 0.6.0');
+    expect(body).toContain('…');
+  });
+
+  test('the refusal screen hands the report the home folder the library probe learned', () => {
+    const convert = read('convert.js');
+    const report = convert.slice(convert.indexOf('newIssueUrl({'), convert.indexOf("'Report a bug'"));
+    expect(report).toContain('home: knownHome');
+    expect(convert).toMatch(/knownHome = answer\.home|knownHome = library\.home/);
+  });
+
   test('the file manager is called what it is called, per platform', async () => {
     // The Swift app said "SHOW IN FINDER" because it only ran on a Mac. This
     // one runs on three, and "Finder" on Windows names a thing that is not
