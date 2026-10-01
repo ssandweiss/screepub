@@ -295,7 +295,10 @@ test('a Calibre run that outlives its timeout is stopped, children and all, with
   if (platform === 'win32') return; // the fake tool is a /bin/sh script
   const { tool, childPid } = hangingTool();
   const started = Date.now();
-  const run = runCalibre(tool, [], process.env, 300);
+  // Two seconds, not 300ms: the fake tool must get as far as writing its
+  // child's pid before the stop lands, and under a loaded full suite 300ms
+  // was sometimes not enough (child.pid missing, 2026-10-01).
+  const run = runCalibre(tool, [], process.env, 2_000);
   await expect(run).rejects.toThrow(CalibreTimedOutError);
   await expect(run).rejects.toThrow(CalibreFailedError);
   await expect(run).rejects.toThrow('still running after');
