@@ -303,7 +303,10 @@ test('a Calibre run that outlives its timeout is stopped, children and all, with
   // The grandchild is what actually hangs in real life (Kindle Previewer
   // under Calibre's plugin), so it must not outlive the stop either.
   const pid = Number(readFileSync(childPid, 'utf8').trim());
-  await Bun.sleep(50);
+  // Polled rather than one fixed pause: a SIGKILLed process can take more
+  // than 50ms to disappear when the whole suite is loading the machine,
+  // which made a single check flaky (2026-10-01).
+  for (let waited = 0; alive(pid) && waited < 2_000; waited += 25) await Bun.sleep(25);
   expect(alive(pid)).toBe(false);
 });
 
