@@ -6,8 +6,8 @@ body:
     attributes:
       value: |
         **Please don't attach a confidential script.** Conversion bugs are
-        almost always about where text sat on the page, not what it said —
-        a description usually gets us there, and `tools/make-fixture.py`
+        almost always about where text sat on the page, not what it said.
+        A description usually gets us there, and `tools/make-fixture.py`
         builds a small invented script that reproduces a given shape.
   - type: textarea
     id: what-went-wrong
@@ -39,10 +39,31 @@ body:
     attributes:
       label: Which e-reader?
       placeholder: Kindle Paperwhite 11th gen, firmware 5.19.2
-  - type: textarea
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Which computer?
+      options:
+        - Mac
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: dropdown
+    id: app
+    attributes:
+      label: Which Screepub?
+      options:
+        - The Mac app (Screepub)
+        - The window (Screepub Desktop on a Mac, or Screepub on Windows and Linux)
+        - The command line (screepub)
+    validations:
+      required: true
+  - type: input
     id: versions
     attributes:
-      label: Screepub and macOS versions
-      placeholder: Screepub 0.1.0 (Screepub → About), macOS 14.6
+      label: Screepub and system versions
+      description: The window shows its version at the foot of the page; the Mac app under Screepub > About; the command line with `screepub --version`.
+      placeholder: Screepub 0.7.4, macOS 15.6
     validations:
       required: true
