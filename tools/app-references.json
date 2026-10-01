@@ -19,7 +19,7 @@
     ".github/workflows/weekly-toolchain.yml": {
       "refs": 5,
       "category": "build",
-      "breaks": "The ENTIRE workflow is `swift run -c release kit-check` with working-directory: app, on macos-15 with Calibre. It has no non-Swift job, so F3 deletes the file outright. It is reachable only through `working-directory: app`, which a grep for \"app/\" does not see."
+      "breaks": "The kit-check job is `swift run -c release kit-check` with working-directory: app, on macos-15 with Calibre. F3 deletes that job only: the same file now holds the engine-calibre job, which runs the engine's Calibre tests from the repo root and never touches app/. The kit-check job is reachable only through `working-directory: app`, which a grep for \"app/\" does not see."
     },
     ".gitignore": {
       "refs": 3,

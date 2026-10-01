@@ -715,8 +715,7 @@ produced by this project at all.
    opened an **empty window**.
 
    `bundle.fileAssociations` is therefore gone from `tauri.conf.json`, and
-   both `tests/desktop-shell.test.ts` and `tests/app-bundle-e2e.test.ts`
-   now assert its **absence**. Appearing in a menu and then doing nothing is
+   `tests/desktop-shell.test.ts` now asserts its **absence**. Appearing in a menu and then doing nothing is
    worse than not appearing: the user has already chosen Screepub by the
    time they learn it cannot help.
 
