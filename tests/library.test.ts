@@ -4,7 +4,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, win32 } from 'node:path';
-import { adoptSidecar, libraryOutput, libraryRoot } from '../src/library';
+import { adoptSidecar, envLibraryOverride, libraryOutput, libraryRoot } from '../src/library';
 import { writeAppSettings } from '../src/settings/app';
 import { TEST_SETTINGS_GUARD } from './isolate-app-settings';
 
@@ -125,6 +125,16 @@ describe('where the library is', () => {
   test('SCREEPUB_LIBRARY wins on every platform, and that is the test seam', () => {
     for (const platform of ['darwin', 'win32', 'linux'] as NodeJS.Platform[]) {
       expect(guardedRoot(platform, { HOME, SCREEPUB_LIBRARY: '/tmp/lib' })).toBe('/tmp/lib');
+    }
+  });
+
+  test('a relative override is not a library: it would resolve against the engine\'s working folder', () => {
+    // Launched from Finder that folder is `/`, so `Screepub` used to mean a
+    // library at the root of the disk. Same rule as a stored libraryPath.
+    for (const relative of ['lib', './lib', '../lib', '.']) {
+      expect(guardedRoot('linux', { HOME, SCREEPUB_LIBRARY: relative }))
+        .toBe('/home/ada/Documents/Screepub');
+      expect(envLibraryOverride({ SCREEPUB_LIBRARY: relative })).toBeNull();
     }
   });
 

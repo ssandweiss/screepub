@@ -10,7 +10,7 @@
 // itself live inside the thing it locates.
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
+import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from 'node:path';
 
 type Env = Record<string, string | undefined>;
 
@@ -30,7 +30,22 @@ export function homeFolder(env: Env): string {
   return env.HOME || env.USERPROFILE || homedir();
 }
 
-/** Folder + 'settings.json'. SCREEPUB_CONFIG_DIR wins everywhere.
+/** An environment variable naming a folder, as an absolute path, or `null`
+ * when it is unset, blank or relative. A relative value would resolve
+ * against the engine's working folder, which is `/` when the app was
+ * launched from Finder, so it is treated as unset rather than honoured
+ * halfway: the same rule a stored libraryPath gets (library.ts's
+ * resolvedIfAbsolute). The HOST's path rules, not a platform parameter's:
+ * the value comes from this process's own environment. The one copy of
+ * that rule, for SCREEPUB_CONFIG_DIR here and SCREEPUB_LIBRARY in
+ * library.ts. */
+export function absoluteEnvFolder(raw: string | undefined): string | null {
+  const value = (raw ?? '').trim();
+  return value !== '' && isAbsolute(value) ? resolve(value) : null;
+}
+
+/** Folder + 'settings.json'. SCREEPUB_CONFIG_DIR wins everywhere, when it
+ * is an absolute path (see absoluteEnvFolder).
  *
  * Platform and env are parameters, not read from the host, for the same
  * reason `src/library.ts`'s `libraryRoot` takes them: it is the only way a
@@ -40,8 +55,8 @@ export function appSettingsPath(
   platform: NodeJS.Platform = process.platform,
   env: Env = process.env,
 ): string {
-  const override = (env.SCREEPUB_CONFIG_DIR ?? '').trim();
-  if (override !== '') return join(resolve(override), 'settings.json');
+  const override = absoluteEnvFolder(env.SCREEPUB_CONFIG_DIR);
+  if (override !== null) return join(override, 'settings.json');
 
   // The PLATFORM's own path rules, not the host's, same as libraryRoot: a
   // path computed for win32 while running on posix (or back) has to use

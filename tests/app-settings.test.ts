@@ -79,6 +79,22 @@ describe('where the app settings file is', () => {
       '/home/ada/.config/screepub/settings.json',
     );
   });
+
+  test('a relative SCREEPUB_CONFIG_DIR is ignored, not resolved against wherever the engine started', () => {
+    // Launched from Finder the engine's working folder is `/`, so a relative
+    // value used to mean a settings folder at the root of the disk.
+    for (const relative of ['config', './config', '../config', '.']) {
+      expect(appSettingsPath('linux', { HOME, SCREEPUB_CONFIG_DIR: relative })).toBe(
+        '/home/ada/.config/screepub/settings.json',
+      );
+    }
+  });
+
+  test('an empty SCREEPUB_CONFIG_DIR is ignored', () => {
+    expect(appSettingsPath('linux', { HOME, SCREEPUB_CONFIG_DIR: '' })).toBe(
+      '/home/ada/.config/screepub/settings.json',
+    );
+  });
 });
 
 describe('reading app settings never throws', () => {
@@ -221,6 +237,45 @@ describe('the test-run guard: no test can reach the real settings file', () => {
     // test would wrongly pass. Checked independently against the real path.
     expect(stdout.trim()).not.toBe(REAL_SETTINGS_PATH);
     expect(stdout.trim()).toBe(appSettingsPath());
+  });
+
+  // The preload exactly as bunfig.toml loads it. (`bun -e "require(...)"`
+  // is no stand-in: on bun 1.3.14 a throw inside the required module exits
+  // 0 with no output at all.)
+  const PRELOAD_ONLY = [
+    'bun', '--preload', './tests/isolate-app-settings.ts', '-e', 'console.log(process.env.SCREEPUB_CONFIG_DIR)',
+  ];
+
+  test('the preload refuses a blank or relative value instead of running half guarded', async () => {
+    // The engine ignores both and reads the REAL settings file, and a set
+    // variable is never replaced by .env.test, so every bare spawn in the
+    // suite would inherit it. The preload has to stop the run.
+    for (const value of ['', '   ', 'relative/config']) {
+      const proc = Bun.spawn(
+        PRELOAD_ONLY,
+        { cwd: ROOT, stdout: 'pipe', stderr: 'pipe', env: { ...process.env, SCREEPUB_CONFIG_DIR: value } },
+      );
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      expect(exitCode).not.toBe(0);
+      expect(stdout).toBe('');
+      expect(stderr).toContain('SCREEPUB_CONFIG_DIR is set to');
+    }
+  });
+
+  test('the preload installs the guard when the variable is not set at all', async () => {
+    const env: Record<string, string | undefined> = { ...process.env };
+    delete env.SCREEPUB_CONFIG_DIR;
+    const proc = Bun.spawn(
+      PRELOAD_ONLY,
+      { cwd: ROOT, stdout: 'pipe', stderr: 'pipe', env },
+    );
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    expect(exitCode).toBe(0);
+    expect(stdout.trim()).toBe(TEST_SETTINGS_GUARD);
   });
 
   test('.env.test and the preload agree on the guard path', () => {
