@@ -278,6 +278,25 @@ function hangingTool(): { tool: string; childPid: string } {
   return { tool, childPid };
 }
 
+/** The pid hangingTool's script records for its child, read WITHOUT giving
+ * the thread back. That is the point: runWithTimeout's stop is a setTimeout
+ * on this same thread, so while this loop holds the thread the stop cannot
+ * land, however long /bin/sh takes to start the child (about 160ms on an
+ * idle Mac, more under a full suite). Waited for asynchronously, the stop
+ * could kill the script before it wrote the file at all (child.pid missing,
+ * 2026-10-01). */
+function recordedChildPid(childPid: string, boundMs = 5_000): number {
+  const deadline = Date.now() + boundMs;
+  for (;;) {
+    // The shell creates the file before it writes the pid into it, so an
+    // empty read means "not yet", not "no pid".
+    const text = existsSync(childPid) ? readFileSync(childPid, 'utf8') : '';
+    if (text.endsWith('\n')) return Number(text.trim());
+    if (Date.now() >= deadline) throw new Error(`the fake tool recorded no child within ${boundMs}ms`);
+    Bun.sleepSync(5);
+  }
+}
+
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -295,23 +314,25 @@ test('a Calibre run that outlives its timeout is stopped, children and all, with
   if (platform === 'win32') return; // the fake tool is a /bin/sh script
   const { tool, childPid } = hangingTool();
   const started = Date.now();
-  // Two seconds, not 300ms: the fake tool must get as far as writing its
-  // child's pid before the stop lands, and under a loaded full suite 300ms
-  // was sometimes not enough (child.pid missing, 2026-10-01).
-  const run = runCalibre(tool, [], process.env, 2_000);
+  // A timeout far shorter than the fake tool takes to start its child, held
+  // off by recordedChildPid until the child exists: the stop always lands on
+  // a tool with a child to kill, and the hold is exercised on every run, not
+  // only on a loaded machine. Remove the hold and this fails every time.
+  const run = runCalibre(tool, [], process.env, 1);
+  const pid = recordedChildPid(childPid);
+  expect(alive(pid)).toBe(true);
   await expect(run).rejects.toThrow(CalibreTimedOutError);
   await expect(run).rejects.toThrow(CalibreFailedError);
   await expect(run).rejects.toThrow('still running after');
   expect(Date.now() - started).toBeLessThan(10_000);
   // The grandchild is what actually hangs in real life (Kindle Previewer
   // under Calibre's plugin), so it must not outlive the stop either.
-  const pid = Number(readFileSync(childPid, 'utf8').trim());
   // Polled rather than one fixed pause: a SIGKILLed process can take more
   // than 50ms to disappear when the whole suite is loading the machine,
   // which made a single check flaky (2026-10-01).
   for (let waited = 0; alive(pid) && waited < 2_000; waited += 25) await Bun.sleep(25);
   expect(alive(pid)).toBe(false);
-});
+}, 15_000);
 
 test('toAzw3 that times out leaves no scratch behind and keeps the .azw3 already there', async () => {
   if (platform === 'win32') return;
