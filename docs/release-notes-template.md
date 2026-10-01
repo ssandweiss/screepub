@@ -345,6 +345,10 @@ this, not that table. What survives is the audience change: it used to
 work in one place, now it works in more. "Dual dialogue" becomes the
 sentence a person would say out loud.
 
+This pair is an example of wording, not of fact: Apple Books does not keep a
+character name with its dialogue (registry #8b has the device test), so a
+note today would not say it does.
+
 ### Pair 3: a change with no visible cause
 
 **Source**

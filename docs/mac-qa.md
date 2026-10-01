@@ -349,7 +349,7 @@ Work top to bottom. Kindle unplugged until the Send section says so.
 
 #### Reading
 
-- [ ] **[hands] The scene list has room at the top** (recheck on the rebuild with the 2026-09-28 fixes)
+- [x] **[hands] The scene list has room at the top** (passed on the rebuild; the owner approved the candidate)
   - Do: open Read and show the scene list, scrolled to the top.
   - See: the count ("11 SCENES" for Field Station) sits clear of the
     list's top edge, with the same room as below the last scene.
@@ -442,7 +442,7 @@ Field Station open, Kindle still unplugged.
     address it to your Kindle's email address. Switch the default back
     afterwards.
   - Fail: a message with no attachment, or the row stays dimmed.
-- [ ] **[hands] The Send page opens at once** (recheck on the rebuild with the 2026-09-28 fixes)
+- [x] **[hands] The Send page opens at once** (passed on the rebuild; the owner approved the candidate)
   - Do: open Send.
   - See: every row is there straight away, in well under a second. The
     reMarkable row says "checking whether one is docked…" for a moment,
@@ -452,7 +452,7 @@ Field Station open, Kindle still unplugged.
     plain.
   - Fail: a blank page for a second or more, or a Kindle button that names
     no type on this Mac.
-- [ ] **[hands] The Kindle file builds by itself, and says so** (recheck on the rebuild)
+- [x] **[hands] The Kindle file builds by itself, and says so** (passed on the rebuild; the owner approved the candidate)
   - Do: in Settings move one knob and wait for "Saved.", then open Send.
     (It builds ahead only when Kindle is likely: your last way out was a
     Kindle or Save a Kindle file, or a Kindle is plugged in. Yours is.)
@@ -463,14 +463,14 @@ Field Station open, Kindle still unplugged.
     `field-station.kfx`.
   - Fail: nothing shows while it builds, Save the EPUB waits for the build,
     or the Save box offers AZW3 or MOBI on this Mac.
-- [ ] **[hands] A knob moved during a build waits its turn** (recheck on the rebuild)
+- [x] **[hands] A knob moved during a build waits its turn** (passed on the rebuild; the owner approved the candidate)
   - Do: move a knob and wait for "Saved.", open Send, and while the bar
     moves go to Settings and move another knob.
   - See: "Waiting for the Kindle file to finish building…", then "Saved."
     once the bar is gone.
   - Fail: the knob change is lost, or it saves while the bar is still
     moving.
-- [ ] **[hands] Pressing during a build waits for it** (recheck on the rebuild)
+- [x] **[hands] Pressing during a build waits for it** (passed on the rebuild; the owner approved the candidate)
   - Do: start a build as above and, while the bar moves, press Save a
     Kindle file (.kfx)….
   - See: the building line stays up until the build ends, then the Save
@@ -573,7 +573,13 @@ again. It holds nothing else the window uses.
 
 ---
 
-### Part 3: the update from 0.7.2 (last)
+### Part 3: the update from 0.7.2 (superseded)
+
+**Superseded by 0.7.4.** 0.7.3 and then 0.7.4 shipped; the update from 0.7.2
+to 0.7.3 went through the window's updater on the owner's Mac (see
+[the verification ledger](verification-ledger.md)). The boxes below are left
+as written and are not a to-do. The last item, the automatic restart, is
+the one still worth seeing on the next update.
 
 Only once 0.7.3 is published. 0.7.2 cannot restart itself, so this update
 still ends with you quitting and reopening once.
