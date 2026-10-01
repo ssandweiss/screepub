@@ -106,9 +106,12 @@ export const BUNDLE_KINDS: readonly BundleKind[] = [
     releasedName: (_v, arch) => `Screepub-linux-${arch === 'x64' ? 'x86_64' : 'aarch64'}.rpm`,
   },
   {
-    // "Desktop" in the name, and NOT Screepub-macOS.dmg: app/release.sh
-    // uploads that one to the same release page and tools/bump-tap.sh
-    // hardcodes it. Two Mac downloads is confusing enough without a clash.
+    // The universal image takes the Swift app's old name ON PURPOSE, from
+    // the identifier release on (owner, 2026-10-01): every page and outside
+    // link already points at releases/latest/download/Screepub-macOS.dmg,
+    // and the Swift job no longer publishes an image of its own, so this is
+    // the one .dmg the frozen Swift updater can find. Per-arch images are
+    // local builds and say their arch.
     id: 'dmg',
     os: 'macos',
     dir: 'dmg',
@@ -116,7 +119,7 @@ export const BUNDLE_KINDS: readonly BundleKind[] = [
     magic: KOLY_MAGIC,
     magicAt: 'udif-trailer',
     floorBytes: FLOOR,
-    releasedName: (_v, arch) => `Screepub-Desktop-macOS-${arch}.dmg`,
+    releasedName: (_v, arch) => (arch === 'universal' ? 'Screepub-macOS.dmg' : `Screepub-macOS-${arch}.dmg`),
   },
   {
     // Only x86-64 ships, so the arch is not in the name; an arm64 Windows
@@ -184,10 +187,12 @@ export const UPDATER_KINDS: readonly UpdaterKind[] = [
     magic: GZIP_MAGIC,
     magicAt: 'head',
     floorBytes: FLOOR,
-    releasedName: (_v, arch) => `Screepub-Desktop-macOS-${arch}.app.tar.gz`,
+    // Named like the image beside it: plain when universal, arch otherwise.
+    releasedName: (_v, arch) =>
+      arch === 'universal' ? 'Screepub-macOS.app.tar.gz' : `Screepub-macOS-${arch}.app.tar.gz`,
     archOf: (name) => {
-      const m = /^Screepub-Desktop-macOS-(universal|arm64|x64)\.app\.tar\.gz$/.exec(name);
-      return m ? (m[1] as BundleArch) : undefined;
+      const m = /^Screepub-macOS(?:-(arm64|x64))?\.app\.tar\.gz$/.exec(name);
+      return m ? ((m[1] ?? 'universal') as BundleArch) : undefined;
     },
     platformKeys: (arch) =>
       arch === 'universal'

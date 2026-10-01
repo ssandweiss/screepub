@@ -773,17 +773,17 @@ describe('the app downloads are described where a reader meets them', () => {
     // make them all vacuously true. Four is what app-upload's own line-count
     // check demands: one .deb, one .rpm, ONE .dmg, one .exe.
     expect([...published.keys()].sort()).toEqual([
-      'Screepub-Desktop-macOS-universal.dmg',
       'Screepub-linux-amd64.deb',
       'Screepub-linux-x86_64.rpm',
+      'Screepub-macOS.dmg',
       'Screepub-windows-x64-setup.exe',
     ]);
     // And the ones no leg builds, which no page may offer.
     expect([...unpublished].sort()).toEqual([
-      'Screepub-Desktop-macOS-arm64.dmg',
-      'Screepub-Desktop-macOS-x64.dmg',
       'Screepub-linux-aarch64.rpm',
       'Screepub-linux-arm64.deb',
+      'Screepub-macOS-arm64.dmg',
+      'Screepub-macOS-x64.dmg',
     ]);
   });
 

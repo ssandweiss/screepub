@@ -213,19 +213,19 @@ describe("release.yml's notarization step, executed as bash", () => {
     // defect this step exists to prevent, so the result is asserted
     // rather than trusted. app/release.sh does the same three, plus the
     // spctl, and it is the reference.
-    const { dir, lines } = withDmgs('one', ['Screepub-Desktop-macOS-universal.dmg']);
+    const { dir, lines } = withDmgs('one', ['Screepub-macOS.dmg']);
     const r = runStep(NOTARIZE_STEP, dir, env);
     expect(r.status).toBe(0);
     expect(lines('xcrun')).toEqual([
-      'notarytool\tsubmit\tbundles/Screepub-Desktop-macOS-universal.dmg\t--key\t/tmp/ac.p8' +
+      'notarytool\tsubmit\tbundles/Screepub-macOS.dmg\t--key\t/tmp/ac.p8' +
         '\t--key-id\tKEYID\t--issuer\tISSUER\t--wait',
-      'stapler\tstaple\tbundles/Screepub-Desktop-macOS-universal.dmg',
-      'stapler\tvalidate\tbundles/Screepub-Desktop-macOS-universal.dmg',
+      'stapler\tstaple\tbundles/Screepub-macOS.dmg',
+      'stapler\tvalidate\tbundles/Screepub-macOS.dmg',
     ]);
     // And Gatekeeper's own opinion, which is the thing a person meets.
     expect(lines('spctl')).toEqual([
       '-a\t-t\topen\t--context\tcontext:primary-signature\t-v\t' +
-        'bundles/Screepub-Desktop-macOS-universal.dmg',
+        'bundles/Screepub-macOS.dmg',
     ]);
   });
 
@@ -241,7 +241,7 @@ describe("release.yml's notarization step, executed as bash", () => {
   });
 
   test('a failing notarytool stops the step instead of stapling nothing', () => {
-    const { dir } = withDmgs('submitfail', ['Screepub-Desktop-macOS-universal.dmg']);
+    const { dir } = withDmgs('submitfail', ['Screepub-macOS.dmg']);
     writeFileSync(join(dir, 'xcrun'), '#!/bin/sh\nexit 1\n');
     chmodSync(join(dir, 'xcrun'), 0o755);
     const r = runStep(NOTARIZE_STEP, dir, env);
@@ -252,7 +252,7 @@ describe("release.yml's notarization step, executed as bash", () => {
     // The case that matters most: submit and staple both "worked" and
     // the image still has no ticket. Exactly what shipped in v0.6.0,
     // arriving one step earlier.
-    const { dir } = withDmgs('validatefail', ['Screepub-Desktop-macOS-universal.dmg']);
+    const { dir } = withDmgs('validatefail', ['Screepub-macOS.dmg']);
     writeFileSync(
       join(dir, 'xcrun'),
       '#!/bin/sh\ncase "$2" in validate) exit 1 ;; *) exit 0 ;; esac\n',
@@ -303,11 +303,11 @@ describe("release.yml's smoke step, executed as bash", () => {
     // was an Intel binary the arm64 runner could not execute. A universal
     // DMG has a slice this runner CAN execute, so the bundle that ships is
     // now one the release has actually opened and run.
-    const { dir, lines } = withBundles('universal', ['Screepub-Desktop-macOS-universal.dmg']);
+    const { dir, lines } = withBundles('universal', ['Screepub-macOS.dmg']);
     const r = runStep(SMOKE_STEP, dir, { TAG: 'v0.6.0', ARCH: 'universal' });
     expect(r.status).toBe(0);
     expect(lines('bun')).toEqual([
-      'tools/smoke-bundle.ts\t--bundle\tbundles/Screepub-Desktop-macOS-universal.dmg' +
+      'tools/smoke-bundle.ts\t--bundle\tbundles/Screepub-macOS.dmg' +
         '\t--expect-version\t0.6.0',
     ]);
     expect(r.stdout).toContain('1 bundle(s)');
@@ -318,7 +318,7 @@ describe("release.yml's smoke step, executed as bash", () => {
     // green tick must not imply otherwise. The notice names the slice that
     // RAN, read off the runner, so it stays true whichever architecture
     // GitHub's macos image is.
-    const { dir } = withBundles('universal-notice', ['Screepub-Desktop-macOS-universal.dmg']);
+    const { dir } = withBundles('universal-notice', ['Screepub-macOS.dmg']);
     const r = runStep(SMOKE_STEP, dir, { TAG: 'v0.6.0', ARCH: 'universal' });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('::notice::');
@@ -360,7 +360,7 @@ describe("release.yml's checksum step, executed as bash", () => {
   const FOUR = [
     'Screepub_0.6.0_amd64.deb',
     'Screepub-0.6.0-1.x86_64.rpm',
-    'Screepub-Desktop-macOS-universal.dmg',
+    'Screepub-macOS.dmg',
     'Screepub-0.6.0-setup.exe',
   ];
 
@@ -397,7 +397,7 @@ describe("release.yml's checksum step, executed as bash", () => {
     // a release and has no way to choose. Two DMGs on one release page is
     // the ambiguity this whole handover exists to remove, so it must not
     // be able to reach the page.
-    const dir = withArrivals('twodmg', [...FOUR, 'Screepub-Desktop-macOS-x64.dmg']);
+    const dir = withArrivals('twodmg', [...FOUR, 'Screepub-macOS-x64.dmg']);
     const r = runStep(SUMS_STEP, dir, {});
     expect(r.status).not.toBe(0);
     expect(r.stdout + r.stderr).toContain('expected 4 app bundles');

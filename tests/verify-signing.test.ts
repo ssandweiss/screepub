@@ -187,7 +187,7 @@ describe('reading notarization back off spctl', () => {
     'origin=Developer ID Application: Clockwork Post Production, LLC (XSRB3D643J)',
   ].join('\n');
   const UNNOTARIZED = [
-    '/tmp/Screepub-Desktop-macOS-universal.dmg: rejected',
+    '/tmp/Screepub-macOS.dmg: rejected',
     'source=Unnotarized Developer ID',
   ].join('\n');
 
@@ -244,7 +244,7 @@ describe('the verdict: what the frozen updater would do with this artifact', () 
       }
       if (argv[1] === '-dv') {
         return opts.appSigned || isDmg
-          ? ok('', `Identifier=${isDmg ? 'Screepub-Desktop-macOS-universal' : opts.identifier}\n`)
+          ? ok('', `Identifier=${isDmg ? 'Screepub-macOS' : opts.identifier}\n`)
           : bad();
       }
       const requirement = argv[5]!;
@@ -259,14 +259,14 @@ describe('the verdict: what the frozen updater would do with this artifact', () 
 
   const v060 = () =>
     judgeSigning(
-      '/tmp/Screepub-Desktop-macOS-universal.dmg',
+      '/tmp/Screepub-macOS.dmg',
       '/V/Screepub.app',
       artifact({ dmgSigned: true, appSigned: true, identifier: 'com.darkwell.screepub.desktop' }),
     );
 
   const v061 = () =>
     judgeSigning(
-      '/tmp/Screepub-Desktop-macOS-universal.dmg',
+      '/tmp/Screepub-macOS.dmg',
       '/V/Screepub.app',
       artifact({ dmgSigned: true, appSigned: true, identifier: SWIFT_BUNDLE_ID }),
     );
@@ -311,7 +311,7 @@ describe('the verdict: what the frozen updater would do with this artifact', () 
     // updater and wrong for a person who downloads it in a browser.
     // Those are two different questions and the verdict answers both.
     const v = judgeSigning(
-      '/tmp/Screepub-Desktop-macOS-universal.dmg',
+      '/tmp/Screepub-macOS.dmg',
       '/V/Screepub.app',
       artifact({
         dmgSigned: true,

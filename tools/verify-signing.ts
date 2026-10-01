@@ -1,10 +1,12 @@
 // Verify a PUBLISHED macOS DMG against the requirements the frozen Swift
 // updater actually pins.
 //
-//   bun tools/verify-signing.ts --dmg Screepub-Desktop-macOS-universal.dmg \
-//     --expect coexist     # v0.6.0: signed, and the old app must REFUSE it
-//   bun tools/verify-signing.ts --dmg <path> --expect handover
-//                            # v0.6.1: signed, and the old app must TAKE it
+//   bun tools/verify-signing.ts --dmg <path> --expect coexist
+//                            # v0.6.0 to 0.7.x: signed, and the old app must
+//                            # REFUSE it (then named Screepub-Desktop-...)
+//   bun tools/verify-signing.ts --dmg Screepub-macOS.dmg --expect handover
+//                            # the identifier release: signed, and the old
+//                            # app must TAKE it
 //
 // Step 3 of docs/superpowers/plans/2026-09-20-swift-to-tauri-handover.md.
 // Signing has never executed: those secrets only reach a tagged release
@@ -96,7 +98,8 @@ export function codesignDisplayArgv(target: string): string[] {
 // chain and the team, not notarization, which is exactly why this got
 // through. A PERSON cares, because a browser download carries the
 // quarantine attribute and Gatekeeper assesses the image when they
-// double-click it. Measured on the published v0.6.0 artifacts:
+// double-click it. Measured on the published v0.6.0 artifacts, when
+// Screepub-macOS.dmg was still the Swift app's image:
 //
 //   Screepub-macOS.dmg                     accepted, Notarized Developer ID
 //   Screepub-Desktop-macOS-universal.dmg   rejected, Unnotarized Developer ID

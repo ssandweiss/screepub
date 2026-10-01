@@ -139,9 +139,9 @@ describe('"Every download" links version-free names, each with a status', () => 
   test('the derivation found the four window bundles the release uploads', () => {
     // Guards the loops below against a matrix this parse misread.
     expect([...bundles.keys()].sort()).toEqual([
-      'Screepub-Desktop-macOS-universal.dmg',
       'Screepub-linux-amd64.deb',
       'Screepub-linux-x86_64.rpm',
+      'Screepub-macOS.dmg',
       'Screepub-windows-x64-setup.exe',
     ]);
     // And that the names really carry no version: the same file at two

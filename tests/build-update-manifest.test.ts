@@ -33,7 +33,7 @@ const ROOT = new URL('..', import.meta.url).pathname;
 const OUT = mkdtempSync(join(tmpdir(), 'screepub-manifest-'));
 afterAll(() => rmSync(OUT, { recursive: true, force: true }));
 
-const TAR = 'Screepub-Desktop-macOS-universal.app.tar.gz';
+const TAR = 'Screepub-macOS.app.tar.gz';
 
 /** A directory shaped like app-upload's `arrivals` after download-artifact:
  *  every installer, the checksums file, and (when signed) the archive and
@@ -44,7 +44,7 @@ function arrivals(tag: string, opts: { sig?: boolean | string; tar?: boolean; ex
   for (const n of [
     'Screepub_0.6.0_amd64.deb',
     'Screepub-0.6.0-1.x86_64.rpm',
-    'Screepub-Desktop-macOS-universal.dmg',
+    'Screepub-macOS.dmg',
     'Screepub-0.6.0-setup.exe',
     'SHA256SUMS-app',
   ]) {
@@ -174,8 +174,8 @@ describe('rendering the manifest', () => {
   });
 
   test('a per-arch pair yields one key each, and a repeated key is an error', () => {
-    const arm: SignedArtifact = { name: 'Screepub-Desktop-macOS-arm64.app.tar.gz', signature: 'a', platforms: ['darwin-aarch64'] };
-    const x64: SignedArtifact = { name: 'Screepub-Desktop-macOS-x64.app.tar.gz', signature: 'b', platforms: ['darwin-x86_64'] };
+    const arm: SignedArtifact = { name: 'Screepub-macOS-arm64.app.tar.gz', signature: 'a', platforms: ['darwin-aarch64'] };
+    const x64: SignedArtifact = { name: 'Screepub-macOS-x64.app.tar.gz', signature: 'b', platforms: ['darwin-x86_64'] };
     const m = renderManifest('0.6.1', [arm, x64], { now: when });
     expect(m.platforms['darwin-aarch64']!.url).toContain('arm64');
     expect(m.platforms['darwin-x86_64']!.url).toContain('x64');

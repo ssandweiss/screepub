@@ -36,11 +36,6 @@
       "category": "doc",
       "breaks": "The contributor build commands: app/build-app.sh and `swift run kit-check`, plus the description of CI's app job."
     },
-    "README.md": {
-      "refs": 12,
-      "category": "doc",
-      "breaks": "The DMG download button, \"the macOS app in app/ remains the supported Mac app\", the build commands, and the source-tree map. User-facing: it must not point at a directory that is gone."
-    },
     "SECURITY.md": {
       "refs": 1,
       "category": "doc",
@@ -111,11 +106,6 @@
       "category": "note",
       "breaks": "The decision record for the 171 kit-check assertions that have no bun test counterpart. It cites Swift sources and kit-check sections by name throughout, because naming what is lost is its whole job. The 52nd reference, added 2026-09-14, is UpdateInstall.swift in the note recording that the owner chose a FULL ported self-update: that moved self-update-installer's 26 checks from accept-loss to port, so the file now names the Swift source those checks have to be reproduced FROM rather than merely mourned. The 53rd and 54th, added 2026-09-20, are in the kfx-install-plugin row: it now names app/Packages/KFXKit's vendored zip and its PROVENANCE.md in order to say that we STOPPED shipping them, which is a reference that exists to record a removal. It OUTLIVES app/: at F3 its rows stop describing code that exists and start describing what was given up, which is the record a later maintainer needs. Do not delete it with the directory."
     },
-    "site/index.html": {
-      "refs": 6,
-      "category": "artifact",
-      "breaks": "Three DOWNLOAD FOR MACOS buttons pointing at Screepub-macOS.dmg plus the supported-download paragraph. The count of three buttons is itself pinned by tests/release-artifacts.test.ts. The 5th and 6th, added 2026-09-29, are the Mac row of the Every download table: its link and its file name. At the identifier release the buttons and that row move to the window's DMG together."
-    },
     "src/cli-devices.ts": {
       "refs": 1,
       "category": "note",
@@ -165,11 +155,6 @@
       "refs": 10,
       "category": "test",
       "breaks": "Guarded, not broken: the Theme.swift comparison runs inside test.skipIf(!themeSwiftExists) and every other test in the file reads only tokens.json, tokens.css and the component previews. Once app/Sources/ScreepubApp/Theme.swift is gone the one guarded test skips instead of failing; F3 criterion 12 is already satisfied."
-    },
-    "tests/build-app-bundle.test.ts": {
-      "refs": 3,
-      "category": "test",
-      "breaks": "Asserts the Tauri DMG is NOT named Screepub-macOS.dmg. The assertion loses its subject when the Swift DMG stops being published (F2), and the F2 rename of the Desktop infix rewrites it."
     },
     "tests/build-cli.test.ts": {
       "refs": 1,
@@ -251,11 +236,6 @@
       "category": "note",
       "breaks": "A comment saying the assertion was ported verbatim from kit-check."
     },
-    "tests/site.test.ts": {
-      "refs": 1,
-      "category": "test",
-      "breaks": "Expects the site's Every download table to offer Screepub-macOS.dmg, with a status, beside the window's bundles. At the identifier release that row and the buttons move to the window's DMG, and this expectation moves with them."
-    },
     "tests/theme-colors.ts": {
       "refs": 5,
       "category": "test",
@@ -285,16 +265,6 @@
       "refs": 1,
       "category": "note",
       "breaks": "A comment drawing the line between this tool's job and app/release.sh's."
-    },
-    "tools/bump-tap.sh": {
-      "refs": 2,
-      "category": "artifact",
-      "breaks": "Hardcodes Screepub-macOS.dmg for the cask digest. TAP MACHINERY — belongs to gate 3 and must not be edited before F2 answers the per-arch question. Listed here so the blast radius is known, not so it is touched."
-    },
-    "tools/check-tap.sh": {
-      "refs": 1,
-      "category": "artifact",
-      "breaks": "Verifies the published cask still serves Screepub-macOS.dmg. TAP MACHINERY, gate 3. It is run weekly by .github/workflows/tap-freshness.yml, which carries no textual reference of its own and is therefore INVISIBLE to this sweep — the second-order reference this row exists to record."
     },
     "tools/frozen-app-manifest.json": {
       "refs": 67,

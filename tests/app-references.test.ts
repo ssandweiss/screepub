@@ -116,11 +116,11 @@ const PATTERNS: { name: string; re: RegExp; what: string }[] = [
   { name: 'swift-symbol', re: /ScreepubKit|ScreepubApp|KitCheck|kit-check|KFXKit/g, what: 'a Swift module or the kit-check executable' },
   { name: 'swift-file', re: /\b[A-Za-z][A-Za-z0-9-]*\.swift\b/g, what: 'a Swift source file that lives in app/' },
   { name: 'swift-build', re: /swift (?:build|run)|build-app\.sh|build-lib\.sh/g, what: 'a command that builds the Swift app' },
-  // `Screepub.app` left this pattern at the identifier release: with the
-  // transition overlay gone, the window's own bundle is Screepub.app, so the
-  // name no longer says "the Swift app". Paths into app/dist/ still do, and
-  // the path pattern above catches those.
-  { name: 'swift-artifact', re: /Screepub-macOS/g, what: 'a release artifact only the Swift app produces' },
+  // There was a fifth rule here, `swift-artifact`, matching Screepub.app and
+  // Screepub-macOS. At the identifier release the window took both names
+  // (its bundle is Screepub.app, its image Screepub-macOS.dmg), so neither
+  // says "the Swift app" any more. The Swift app's own artifacts live under
+  // app/dist/, which the path rule above still catches.
 ];
 
 type Row = { refs: number; category: string; breaks: string };
@@ -291,8 +291,17 @@ describe('the sweep is not vacuous', () => {
     // the pattern list, asserted directly.
     expect(countIn('      - run: swift run -c release kit-check\n        working-directory: app\n')).toBeGreaterThanOrEqual(3);
     expect(countIn('Mirrors EbookConvert.swift exactly')).toBe(1);
-    expect(countIn('download/Screepub-macOS.dmg')).toBe(1);
     expect(countIn('see `app/release.sh`')).toBe(1);
+    // The Swift app's own artifacts are still caught where they live.
+    expect(countIn('app/dist/Screepub-macOS.dmg')).toBe(1);
+  });
+
+  test('the names the window took over at the identifier release are not references', () => {
+    // Screepub.app is the window's bundle and Screepub-macOS.dmg its image
+    // since the handover. Counting them would tell people to delete the
+    // window's own download links.
+    expect(countIn('download/Screepub-macOS.dmg')).toBe(0);
+    expect(countIn('/Applications/Screepub.app')).toBe(0);
   });
 
   test('the patterns do not match the Tauri staging directory', () => {
@@ -317,8 +326,9 @@ describe('the sweep is not vacuous', () => {
     expect(f['.github/workflows/weekly-toolchain.yml']?.category).toBe('build');
     // A license document with two live paths inside app/Packages/KFXKit.
     expect(f['THIRD-PARTY-NOTICES.md']?.category).toBe('doc');
-    // User-facing download buttons.
-    expect(f['site/index.html']?.category).toBe('artifact');
+    // (A fifth anchor, site/index.html's download buttons, left at the
+    // identifier release: the buttons point at Screepub-macOS.dmg, which is
+    // the window's image from then on, not a coupling to app/.)
     expect(Object.keys(f).length).toBeGreaterThan(40);
   });
 

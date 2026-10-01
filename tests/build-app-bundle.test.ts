@@ -118,17 +118,18 @@ describe('the bundle matrix', () => {
     expect(kind('rpm').releasedName('0.6.0', 'x64')).toBe('Screepub-linux-x86_64.rpm');
     expect(kind('rpm').releasedName('0.6.0', 'arm64')).toBe('Screepub-linux-aarch64.rpm');
     expect(kind('nsis').releasedName('0.6.0', 'x64')).toBe('Screepub-windows-x64-setup.exe');
-    // The two Mac names must not collide with the SwiftUI app's
-    // Screepub-macOS.dmg, which app/release.sh uploads to the same release
-    // page and tools/bump-tap.sh hardcodes.
-    expect(kind('dmg').releasedName('0.6.0', 'arm64')).toBe('Screepub-Desktop-macOS-arm64.dmg');
-    expect(kind('dmg').releasedName('0.6.0', 'x64')).toBe('Screepub-Desktop-macOS-x64.dmg');
-    // The one a release should actually ship. The frozen Swift updater takes
-    // the first .dmg on a release and has no architecture logic, so per-arch
-    // Mac bundles are what make an automatic migration impossible (ADR
-    // 2026-09-14). This name is how the release stops being per-arch.
-    expect(kind('dmg').releasedName('0.6.0', 'universal'))
-      .toBe('Screepub-Desktop-macOS-universal.dmg');
+    // The one a release ships, under the Swift app's old name ON PURPOSE
+    // (owner, 2026-10-01; plan 2026-10-01-f2-handover-amendment.md): every
+    // site button, README link and outside link already points at
+    // releases/latest/download/Screepub-macOS.dmg, so from the identifier
+    // release on they all serve the window with no edit. It is universal
+    // because the frozen Swift updater takes the first .dmg on a release and
+    // has no architecture logic (ADR 2026-09-14).
+    expect(kind('dmg').releasedName('0.6.0', 'universal')).toBe('Screepub-macOS.dmg');
+    // Per-arch images are local builds only, and carry the arch so a thin
+    // image can never be mistaken for the one the updater may install.
+    expect(kind('dmg').releasedName('0.6.0', 'arm64')).toBe('Screepub-macOS-arm64.dmg');
+    expect(kind('dmg').releasedName('0.6.0', 'x64')).toBe('Screepub-macOS-x64.dmg');
     for (const arch of ['x64', 'arm64'] as const) {
       expect(kind('dmg').releasedName('0.6.0', arch)).not.toBe('Screepub-macOS.dmg');
     }
@@ -783,9 +784,13 @@ describe('a whole run, against a fake cargo', () => {
     expect(k.floorBytes).toBe(kind('dmg').floorBytes);
   });
 
-  test('the published name carries the arch, and the platform keys follow from it', () => {
+  test('the published name follows the image\'s, and the platform keys follow from the arch', () => {
     const k = appTar();
-    expect(k.releasedName('0.6.0', 'universal')).toBe('Screepub-Desktop-macOS-universal.app.tar.gz');
+    // Same rule as the image: the universal one is plain, a per-arch one
+    // carries its arch.
+    expect(k.releasedName('0.6.0', 'universal')).toBe('Screepub-macOS.app.tar.gz');
+    expect(k.releasedName('0.6.0', 'arm64')).toBe('Screepub-macOS-arm64.app.tar.gz');
+    expect(k.releasedName('0.6.0', 'x64')).toBe('Screepub-macOS-x64.app.tar.gz');
     // A universal archive serves BOTH darwin platforms: the plugin asks for
     // darwin-<arch of the running binary>, and a fat binary runs as either.
     expect(k.platformKeys('universal')).toEqual(['darwin-x86_64', 'darwin-aarch64']);
@@ -798,9 +803,13 @@ describe('a whole run, against a fake cargo', () => {
     for (const arch of ['universal', 'arm64', 'x64'] as const) {
       expect(k.archOf(k.releasedName('0.6.0', arch))).toBe(arch);
     }
-    expect(k.archOf('Screepub-Desktop-macOS-universal.dmg')).toBeUndefined();
-    expect(k.archOf('Screepub-Desktop-macOS-universal.app.tar.gz.sig')).toBeUndefined();
-    expect(k.archOf('Screepub-Desktop-macOS-riscv.app.tar.gz')).toBeUndefined();
+    expect(k.archOf('Screepub-macOS.dmg')).toBeUndefined();
+    expect(k.archOf('Screepub-macOS.app.tar.gz.sig')).toBeUndefined();
+    expect(k.archOf('Screepub-macOS-riscv.app.tar.gz')).toBeUndefined();
+    expect(k.archOf('Screepub-macOS-universal.app.tar.gz')).toBeUndefined();
+    // The pre-F2 name is not this kind any more: a manifest built from an
+    // old release's leftovers must not quietly pick it up.
+    expect(k.archOf('Screepub-Desktop-macOS-universal.app.tar.gz')).toBeUndefined();
   });
 
   test('the verifier accepts a plausible archive and rejects a non-gzip one', () => {
@@ -820,22 +829,22 @@ describe('a whole run, against a fake cargo', () => {
     const made = await buildBundles(macRun(out, true), spawn, repo, withKey);
     const names = made.map((p) => p.replace(/^.*[/\\]/, '')).sort();
     expect(names).toEqual([
-      'Screepub-Desktop-macOS-universal.app.tar.gz',
-      'Screepub-Desktop-macOS-universal.app.tar.gz.sig',
-      'Screepub-Desktop-macOS-universal.dmg',
+      'Screepub-macOS.app.tar.gz',
+      'Screepub-macOS.app.tar.gz.sig',
+      'Screepub-macOS.dmg',
     ]);
     expect(calls[0]).toContain(UPDATER_OVERLAY);
     // The signature is the plugin's whole basis for trusting the download,
     // and latest.json carries its CONTENT. A copy that changed one byte
     // would make every install fail with "signature could not be decoded".
-    expect(readFileSync(join(out, 'Screepub-Desktop-macOS-universal.app.tar.gz.sig'), 'utf8')).toBe(
+    expect(readFileSync(join(out, 'Screepub-macOS.app.tar.gz.sig'), 'utf8')).toBe(
       fakeSignatureBox('Screepub.app.tar.gz'),
     );
     // SHA256SUMS-app keeps naming installers only: the archive is proven by
     // its signature, and app-upload rebuilds the checksums file over
     // exactly the four installers anyway.
     const sums = parseChecksums(readFileSync(join(out, 'SHA256SUMS-app'), 'utf8'));
-    expect([...sums.keys()]).toEqual(['Screepub-Desktop-macOS-universal.dmg']);
+    expect([...sums.keys()]).toEqual(['Screepub-macOS.dmg']);
   });
 
   test('without --updater a macOS run ignores an archive that happens to be there', async () => {
@@ -845,7 +854,7 @@ describe('a whole run, against a fake cargo', () => {
     const { calls, spawn } = fakeMacCargo(repo.desktopDir);
     const out = join(OUT, 'run-no-updater');
     const made = await buildBundles(macRun(out, false), spawn, repo, {});
-    expect(made.map((p) => p.replace(/^.*[/\\]/, ''))).toEqual(['Screepub-Desktop-macOS-universal.dmg']);
+    expect(made.map((p) => p.replace(/^.*[/\\]/, ''))).toEqual(['Screepub-macOS.dmg']);
     expect(calls[0]).not.toContain(UPDATER_OVERLAY);
   });
 
@@ -898,7 +907,7 @@ describe('a whole run, against a fake cargo', () => {
     await expect(buildBundles(macRun(out, true), spawn, repo, withKey)).rejects.toThrow(
       /signature|base64|untrusted comment/i,
     );
-    expect(() => readFileSync(join(out, 'Screepub-Desktop-macOS-universal.app.tar.gz'))).toThrow();
+    expect(() => readFileSync(join(out, 'Screepub-macOS.app.tar.gz'))).toThrow();
   });
 
   test('the macOS run passes the target triple and the overlay through', async () => {
@@ -922,7 +931,7 @@ describe('a whole run, against a fake cargo', () => {
     expect(calls[0]).toContain('tauri.transition.conf.json');
     // And it looked under the triple: nothing was written to the untargeted
     // directory, so finding an artifact at all proves the path.
-    expect(made.map((p) => p.replace(/^.*[/\\]/, ''))).toEqual(['Screepub-Desktop-macOS-x64.dmg']);
+    expect(made.map((p) => p.replace(/^.*[/\\]/, ''))).toEqual(['Screepub-macOS-x64.dmg']);
   });
 });
 

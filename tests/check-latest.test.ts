@@ -15,12 +15,12 @@ import { checkLatest, judgeManifest, type Fetcher, type Release } from '../tools
 import { FAKE_KEY_ID, fakePublicKeyBox, fakeSignatureBox } from './signature-box';
 
 const REPO = 'ssandweiss/screepub';
-const TAR = 'Screepub-Desktop-macOS-universal.app.tar.gz';
+const TAR = 'Screepub-macOS.app.tar.gz';
 const url = (v: string, name: string) => `https://github.com/${REPO}/releases/download/v${v}/${name}`;
 const SIG = fakeSignatureBox('Screepub.app.tar.gz');
 const PUBKEY = fakePublicKeyBox();
 
-const release = (v: string, assets: string[] = [TAR, `${TAR}.sig`, 'latest.json', 'Screepub-Desktop-macOS-universal.dmg']): Release => ({
+const release = (v: string, assets: string[] = [TAR, `${TAR}.sig`, 'latest.json', 'Screepub-macOS.dmg']): Release => ({
   tagName: `v${v}`,
   assets: assets.map((name) => ({ name, url: url(v, name) })),
 });
@@ -145,7 +145,7 @@ describe('checking the live endpoint, with the network stubbed', () => {
   const api = (v: string) =>
     JSON.stringify({
       tag_name: `v${v}`,
-      assets: [TAR, `${TAR}.sig`, 'latest.json', 'Screepub-Desktop-macOS-universal.dmg'].map((name) => ({
+      assets: [TAR, `${TAR}.sig`, 'latest.json', 'Screepub-macOS.dmg'].map((name) => ({
         name,
         browser_download_url: url(v, name),
       })),
