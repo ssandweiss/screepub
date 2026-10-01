@@ -27,6 +27,9 @@ import { CHROME } from '../tools/capture/cdp';
 import { type EngineResult, makeHandler } from '../tools/capture/server';
 import { type LayoutPage, launchLayoutPage } from './helpers/layout-chrome';
 
+const SCRATCH = mkdtempSync(join(tmpdir(), 'screepub-desktop-layout-measured-'));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+
 const REPO = join(import.meta.dir, '..');
 const DEMO_PDF = join(REPO, 'tests', 'fixtures', 'field-station.pdf');
 const HAVE_CHROME = existsSync(CHROME);
@@ -110,7 +113,7 @@ describe.skipIf(!HAVE_CHROME)(HAVE_CHROME ? TITLE : `${TITLE} (skipped: no Chrom
   }, 30_000);
 
   beforeAll(async () => {
-    library = realpathSync(mkdtempSync(join(tmpdir(), 'screepub-layout-library-')));
+    library = realpathSync(mkdtempSync(join(SCRATCH, 'library-')));
     const runEngine = async (args: string[]): Promise<EngineResult> => {
       const proc = Bun.spawn([process.execPath, join(REPO, 'src', 'cli.ts'), ...args], {
         cwd: REPO,
