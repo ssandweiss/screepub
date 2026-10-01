@@ -9,6 +9,13 @@ half is `tools/bump-version.ts` and `tools/review-screens.ts`; the skill
 text that calls them lives outside git, as this spec says it must. Part 1
 waits for the identifier release.
 
+2026-10-01: part 1 built ahead of the identifier release, adapted to it not
+having happened. The README's Download button still gives the SwiftUI DMG
+and the Install section says which Mac download to pick; the platform badge
+names all three platforms; "who has verified what" moved to
+`docs/verification-ledger.md`, and the developer material to
+`docs/developers.md`.
+
 ## The problem
 
 - **The README does two jobs badly at once.** About 3,100 words: a third is

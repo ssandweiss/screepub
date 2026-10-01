@@ -1,5 +1,5 @@
 name: Bug report
-description: The app or CLI misbehaved — a crash, a failed transfer, a broken control
+description: Screepub misbehaved, such as a crash, a failed transfer or a broken control
 labels: [bug]
 body:
   - type: textarea
@@ -9,11 +9,32 @@ body:
       description: What you did, what happened, and what you expected instead.
     validations:
       required: true
-  - type: textarea
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Which computer?
+      options:
+        - Mac
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: dropdown
+    id: app
+    attributes:
+      label: Which Screepub?
+      options:
+        - The Mac app (Screepub)
+        - The window (Screepub Desktop on a Mac, or Screepub on Windows and Linux)
+        - The command line (screepub)
+    validations:
+      required: true
+  - type: input
     id: versions
     attributes:
-      label: Screepub and macOS versions
-      placeholder: Screepub 0.1.0 (Screepub → About), macOS 14.6, Apple Silicon
+      label: Screepub and system versions
+      description: The window shows its version at the foot of the page; the Mac app under Screepub > About; the command line with `screepub --version`.
+      placeholder: Screepub 0.7.4, macOS 15.6, Apple Silicon
     validations:
       required: true
   - type: input
@@ -26,6 +47,6 @@ body:
     attributes:
       label: Anything else
       description: |
-        If the CLI was involved, the output of the same conversion with
-        `--json` is useful. Please redact anything confidential first.
+        If the command line was involved, the output of the same conversion
+        with `--json` is useful. Please redact anything confidential first.
       render: shell

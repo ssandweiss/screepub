@@ -32,10 +32,11 @@ is Gate 2's actual requirement, and which this file does not satisfy on its
 own.
 
 The useful question for each row is not "is the test replaced?" It is: **is
-this feature coming back, or is it gone?** Most of these sections cover
-things the Tauri app does not have at all — there is no updater, no Apple
-Books route, no Send-to-Kindle route, no email-to-Kindle route, no "save a
-copy", no Cancel. So each section below answers four questions that make
+this feature coming back, or is it gone?** When these sections were
+written, the window had none of these features: no updater, no Apple Books
+route, no Send-to-Kindle route, no email-to-Kindle route, no "save a copy",
+no Cancel. The `Built?` column below says which it has now. Each section
+answers four questions that make
 deciding cheap: what the feature is, what the Swift tests actually assert
 about it, what it would cost to port, and what a user loses if it does not
 come back.
@@ -45,11 +46,12 @@ Where a decision is `port`, the ADR's rule holds: **the port lands in
 
 ## The decisions
 
-**AS BUILT, 2026-09-21: none of the `port` rows below have been built.**
-A parity audit against the code found every one of them at zero lines in
-the Tauri app, and no test covering any of them. `Decision` is what was
-SETTLED on 2026-09-14; `Built` is what exists. They were being read as the
-same thing for a week. See [the parity audit](parity-audit.md), which also
+**AS BUILT, 2026-10-01.** `Decision` is what was SETTLED on 2026-09-14;
+`Built?` is what exists in `src/` and the window, with its tests. On
+2026-09-21 a parity audit found every `port` row at zero lines; the send
+routes, Apple Books and the feedback link have been built since.
+`update-error-descriptions` is still marked **no** here; whether the
+window's update messages now cover it has not been re-audited. See [the parity audit](https://github.com/ssandweiss/screepub/blob/7eb40e5/docs/parity-audit.md) (since emptied and deleted), which also
 names four features this table does not: the feedback and Report-a-Bug
 links, Show in Finder, the KFX plugin installer, and the gear's three
 settings. The installer was written but unreachable until 2026-09-23, when
@@ -57,9 +59,9 @@ piece D gave it a CLI verb and a button (see its row below).
 
 | Section | Checks | Decision (SETTLED 2026-09-14) | Built? | In one line |
 | --- | --- | --- | --- | --- |
-| `send-menu` | 45 | `port` | **no** | The ordering, the remembered choice and the catalog are pure logic and the largest single block of unreplaced coverage. |
-| `mail-and-books` | 5 | `port` | **no** | Apple Books is the product's only route to an iPhone; it is one `open`. |
-| `feedback-url` | 5 | `port` | **no** | ~20 lines of pure URL building, and the only bug-report path the product has. |
+| `send-menu` | 45 | `port` | **yes**, 2026-09-23 | `src/export/routes.ts` (order, remembered choice, catalog of unavailable routes), drawn by `desktop/ui/send.js`; `tests/routes.test.ts`, `tests/cli-routes.test.ts`, `tests/send-routes-ui.test.ts`. |
+| `mail-and-books` | 5 | `port` | **yes**, 2026-09-23 | `screepub route apple-books` and `email-to-kindle`, Mac only, in the same route catalog and tests. |
+| `feedback-url` | 5 | `port` | **yes**, 2026-09-21 | `desktop/ui/feedback.js`, tested in `tests/desktop-ui.test.ts`. |
 | `engine-cancellation` | 10 (part) | **`out`**, owner, 2026-09-21 | n/a | Was `port`. Put back to the owner after gate 2, with desktop/README.md's note that a kill handle means a third Rust command; the answer was no. Not open. |
 | `updater-version-compare` | 17 | `port` | **yes**, 2026-09-21 | `src/update/compare.ts` and its generated twin in `desktop/ui/update-compare.js`; the downgrade defence found the hard way is `isDescribeSuffix`. |
 | `update-selection` | 17 | **`replaced`** (was `port`), 2026-09-21 | n/a | The plugin selects: one manifest, one platform key. Which release and which asset is decided at PUBLISH time by `tools/build-update-manifest.ts` and re-checked by `tools/check-latest.ts`, both tested. |
@@ -87,7 +89,7 @@ signed and notarized either way. What is lost is the check that it is
 OURS *at the moment of installing*. Recovering it would mean verifying
 between `download()` and `install()`, and the plugin does not expose the
 downloaded path to JavaScript, so that check would have to be Rust, which
-means a command, which [the doors ADR](../adr/2026-09-21-doors-not-commands.md)
+means a command, which [the doors ADR](adr/2026-09-21-doors-not-commands.md)
 refused. The remaining alternative is a bespoke updater maintained on
 three platforms, which is the largest and least differentiated item in
 the whole retirement.

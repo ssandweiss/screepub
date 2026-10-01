@@ -8,47 +8,61 @@ Report it privately through GitHub:
 [**Report a vulnerability**](https://github.com/ssandweiss/screepub/security/advisories/new).
 That opens a draft advisory only you and the maintainer can see.
 
-Please include the macOS version, the Screepub version (Screepub → About,
-or `screepub --version`), and — if a specific file triggers it — how to
-build a PDF that reproduces the problem. **Don't attach a confidential
-script.** If a real one is the only reproducer, say so and we'll work out
-a way to narrow it down without you sending it.
+Please include your operating system and its version (macOS, Windows or
+Linux), which app (the Mac app, the window, or the command line), the
+Screepub version (the version stamp at the foot of the window, Screepub >
+About in the Mac app, or `screepub --version`), and, if a specific file
+triggers it, how to build a PDF that reproduces the problem. **Don't attach a
+confidential script.** If a real one is the only reproducer, say so and we'll
+work out a way to narrow it down without you sending it.
 
 Expect an acknowledgement within a week. Fixes ship in a normal tagged
-release, and you'll be credited in the release notes unless you'd rather
-not be.
+release, and you'll be credited in the release notes unless you'd rather not
+be.
 
 ## What's in scope
 
-The interesting attack surface is **the PDF parser**, because that's the
-one place Screepub handles a file it didn't create. A screenplay arrives
-from a producer, an agency, or a stranger, and Screepub opens it.
+The interesting attack surface is **the PDF parser**, because that's the one
+place Screepub handles a file it didn't create. A screenplay arrives from a
+producer, an agency, or a stranger, and Screepub opens it.
 
-- **Malicious PDF → code execution, or reading/writing files outside the
-  output path.** This is the one that matters most.
-- **Malicious PDF → the engine hanging or exhausting memory** on a file a
+- **Malicious PDF leading to code execution, or reading or writing files
+  outside the output path.** This is the one that matters most.
+- **Malicious PDF making the engine hang or exhaust memory** on a file a
   reasonable person would call small.
-- **Anything that causes a script to leave the machine.** The engine makes
-  no network requests at all; a way to make it do so is a real finding.
-- **Sandbox or entitlement weaknesses.** The engine sidecar is signed with
-  JIT entitlements because Bun needs them
-  (`app/screepub-engine.entitlements`). If those are exploitable beyond
-  what Bun requires, we want to know.
+- **Anything that causes a script to leave the machine without you asking.**
+  Converting makes no network requests. Screepub reaches the network only
+  when you ask it to: uploading to a docked reMarkable over USB, opening a
+  page in your browser, installing the KFX plugin from Calibre's plugin
+  index, and checking for or installing an update if you switched that on.
+  The [README](README.md#your-script-stays-on-your-machine) lists each one.
+  A way to make it do anything else is a real finding.
+- **The update path.** The window installs an update only after checking its
+  signature against a key built into the app; the Mac app checks the Apple
+  Developer ID signature and the version before it replaces itself. A way to
+  get either to install something else is a real finding.
+- **Signing and entitlement weaknesses.** In the Mac app, the engine is
+  signed with JIT entitlements because Bun needs them
+  (`app/screepub-engine.entitlements`). If those are exploitable beyond what
+  Bun requires, we want to know.
 
 ## What's out of scope
 
-- Bugs in [Calibre](https://calibre-ebook.com), which is optional, and
-  which Screepub invokes only if you installed it yourself. Report those
-  upstream.
-- What Amazon does with a document after you email it to your `@kindle.com`
-  address. That's between you and Amazon.
+- Bugs in [Calibre](https://calibre-ebook.com) or Amazon's Kindle Previewer,
+  which are optional and which Screepub runs only if you installed them
+  yourself. Report those upstream.
+- What Amazon does with a document after you send it to your Kindle by email
+  or through Send to Kindle. That's between you and Amazon.
+- The Windows downloads being unsigned. That is known and stated on the
+  download pages.
 - Vulnerabilities in a dependency with no path to exploitation through
-  Screepub — though if you're unsure whether a path exists, ask.
+  Screepub, though if you're unsure whether a path exists, ask.
 - A PDF that converts badly, produces garbled output, or crashes on
   malformed-but-harmless input. Those are ordinary bugs; please
   [open an issue](https://github.com/ssandweiss/screepub/issues/new/choose).
 
 ## Supported versions
 
-The latest tagged release, only. Screepub is a small project maintained by
-one person — there are no long-term support branches.
+The latest tagged release, only, on macOS, Windows and Linux. Screepub is a
+small project maintained by one person; there are no long-term support
+branches.
