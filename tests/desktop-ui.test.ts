@@ -8983,14 +8983,12 @@ describe('no screen prints a stray "null"', () => {
   });
 });
 
-// Last in the file on purpose: main.js hangs its focus handler on app.js
-// (onDialogClosed) and its label on the shared update flow, and neither
-// can be taken off again. Booted earlier, those handlers would outlive
-// their page and complain into every later test's dialog.
 describe('the window, booted whole', () => {
   // main.js imported the way index.html loads it, on the fake page: the real
   // frame, the four surfaces mounted in it, the window's own shortcut and the
   // drop. What used to be read off main.js's text is driven here instead.
+  // Each boot runs its own copy of the scripts (tests/helpers/boot-window.ts),
+  // because main.js's handlers on app.js cannot be taken off again.
   let w: BootedWindow | null = null;
   afterEach(async () => { await w?.close(); w = null; });
 
@@ -9022,8 +9020,8 @@ describe('the window, booted whole', () => {
   }
 
   test('the four surfaces are mounted as the bar’s panels, and the release notes as a sheet off the stamp', async () => {
-    w = await bootWindow({ respond: engine });
-    const { RELEASE } = await import(join(UI, 'notes.js'));
+    w = await bootWindow(SCRATCH, { respond: engine });
+    const { RELEASE } = await import(join(w.ui, 'notes.js'));
     for (const id of ['convert', 'read', 'tune', 'send']) {
       const pane = w.surface(id);
       expect(pane.getAttribute('role')).toBe('tabpanel');
@@ -9045,7 +9043,7 @@ describe('the window, booted whole', () => {
   });
 
   test('Read, Settings and Send are off the bar until a script converts', async () => {
-    w = await bootWindow({ respond: engine });
+    w = await bootWindow(SCRATCH, { respond: engine });
     const onBar = () => ['convert', 'read', 'tune', 'send'].filter((id) => !w!.tab(id).hidden);
     expect(onBar()).toEqual(['convert']);
     await open(w, '/s/Field Station.pdf');
@@ -9053,7 +9051,7 @@ describe('the window, booted whole', () => {
   });
 
   test('Ctrl or Cmd O asks for a file from any surface, and a cancel leaves the reader where they were', async () => {
-    w = await bootWindow({ respond: engine, platform: 'Win32' });
+    w = await bootWindow(SCRATCH, { respond: engine, platform: 'Win32' });
     expect(w.press('o').defaultPrevented).toBe(false);
     expect(w.tauri.dialogs).toEqual([]);
     await open(w, '/s/Field Station.pdf');
@@ -9076,7 +9074,7 @@ describe('the window, booted whole', () => {
   });
 
   test('cancelling a file dialog over a result hands the keyboard to the result, not to nobody', async () => {
-    w = await bootWindow({ respond: engine });
+    w = await bootWindow(SCRATCH, { respond: engine });
     // Over the idle well: Choose PDF.
     w.press('o', { metaKey: true });
     await settle();
@@ -9095,7 +9093,7 @@ describe('the window, booted whole', () => {
   });
 
   test('a file dragged over the window marks the well, and a drop converts the first real path, from any surface', async () => {
-    w = await bootWindow({ respond: engine });
+    w = await bootWindow(SCRATCH, { respond: engine });
     const well = w.surface('convert').querySelector('.well')!;
     w.tauri.emit('tauri://drag-enter', { paths: ['/s/A.pdf'], position: { x: 1, y: 1 } });
     expect(well.classList.contains('well-targeted')).toBe(true);
@@ -9113,7 +9111,7 @@ describe('the window, booted whole', () => {
   });
 
   test('"Convert it again" on Read converts the open script’s own source and shows it on Convert', async () => {
-    w = await bootWindow({ respond: engine });
+    w = await bootWindow(SCRATCH, { respond: engine });
     await open(w, '/s/Field Station.pdf');
     w.tab('read').click();
     w.surface('read').button('Convert it again').click();
